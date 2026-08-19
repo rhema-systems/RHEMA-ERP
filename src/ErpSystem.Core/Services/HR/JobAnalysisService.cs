@@ -30,6 +30,8 @@ public class JobDescriptionService : IJobDescriptionService
     private readonly IJobResponsibilityKpiRepository _kpiRepository;
     private readonly ISalaryGradeRepository _salaryGradeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobDescriptionService> _logger;
 
@@ -49,6 +51,8 @@ public class JobDescriptionService : IJobDescriptionService
         IJobResponsibilityKpiRepository kpiRepository,
         ISalaryGradeRepository salaryGradeRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegration,
+        IWorkflowStatusAdapterRegistry workflowAdapters,
         IUnitOfWork unitOfWork,
         ILogger<JobDescriptionService> logger)
     {
@@ -67,6 +71,8 @@ public class JobDescriptionService : IJobDescriptionService
         _kpiRepository = kpiRepository;
         _salaryGradeRepository = salaryGradeRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegration = workflowIntegration;
+        _workflowAdapters = workflowAdapters;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -397,15 +403,127 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await GetOwnedJobDescriptionAsync(submitDto.JobDescriptionId);
 
-        if (entity.Status != JobDescriptionStatus.Draft)
+        if (entity.Status != JobDescriptionStatus.Draft && entity.Status != JobDescriptionStatus.UnderRevision)
             throw JobArchitectureException.InvalidState("Only draft job descriptions can be submitted for review.");
 
-        entity.Status = JobDescriptionStatus.PendingReview;
+        // On the engine when the tenant has published a definition; the direct path otherwise. Asked
+        // rather than assumed so one build serves a tenant that has configured its approval chain
+        // and one that has not — the same conditional the probation confirmation uses.
+        if (await IsApprovalWorkflowConfiguredAsync(cancellationToken))
+        {
+            var submitResult = await _workflowIntegration.SubmitAsync(WorkflowEntityType, entity.Id);
+            if (!submitResult.ExecutionResult.Success)
+                throw JobArchitectureException.InvalidState(
+                    submitResult.ExecutionResult.Message ?? "Failed to start the job description approval workflow.");
+
+            _workflowAdapters.GetAdapter(WorkflowEntityType)
+                .ApplySubmitOutcome(entity, submitResult.Outcome, _currentUserProvider.UserId);
+        }
+        else
+        {
+            entity.Status = JobDescriptionStatus.PendingReview;
+        }
 
         await _jobDescriptionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job description submitted for review: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return true;
+    }
+
+    // ── Approval on the workflow engine (slice 3) ─────────────────────────────
+
+    private const string WorkflowEntityType = "JobDescription";
+
+    /// <summary>
+    /// Whether this tenant has published a job-description approval workflow.
+    /// </summary>
+    /// <remarks>
+    /// Treated as "not configured" if the engine cannot answer: refusing to approve a job
+    /// description because a workflow lookup failed would be worse than allowing the direct path.
+    /// </remarks>
+    private async Task<bool> IsApprovalWorkflowConfiguredAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _unitOfWork.Repository<Entities.Workflow.WorkflowDefinition>().GetQueryable()
+                .AnyAsync(d => d.TenantId == GetTenantId()
+                            && !d.IsDeleted
+                            && d.IsActive
+                            && d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                            && d.EntityType != null
+                            && d.EntityType.Code == "JOB_DESCRIPTION",
+                    cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not determine whether a job description approval workflow is published; allowing the direct path.");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ApproveViaWorkflowAsync(Guid jobDescriptionId, Guid approvedById, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await _workflowIntegration.ProcessApprovalAsync(WorkflowEntityType, jobDescriptionId, userId, "Approve");
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the job description approval.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+
+        // ⚠ The consequences, which the adapter cannot apply because it sees only this one entity.
+        // Superseding matters beyond tidiness: OfferLetterService selects a position's job
+        // description by SupersededByVersionId == null, so two unsuperseded approved versions make
+        // an offer letter ambiguous. Only run when the engine actually approved — an intermediate
+        // step returns Pending, and a mid-chain approval must not retire anything.
+        if (result.Outcome == WorkflowOutcome.Approved)
+            await ApplyApprovalConsequencesAsync(entity, approvedById, cancellationToken);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description {Number} approval step processed: {Outcome}",
+            entity.JobDescriptionNumber, result.Outcome);
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RejectViaWorkflowAsync(Guid jobDescriptionId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var result = await _workflowIntegration.ProcessApprovalAsync(
+            WorkflowEntityType, jobDescriptionId, userId, "Reject", rejectionText);
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the job description rejection.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description {Number} rejected on the workflow: {Reason}",
+            entity.JobDescriptionNumber, rejectionText);
 
         return true;
     }
@@ -437,12 +555,46 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity.Status != JobDescriptionStatus.PendingReview)
             throw JobArchitectureException.InvalidState("Only job descriptions pending review can be approved.");
 
-        entity.ApprovedById = approvedById;
-        entity.ApprovalDate = DateTime.UtcNow;
+        // ⚠ Once a tenant publishes an approval workflow, the direct route closes. Leaving both open
+        // would mean an Admin permission could quietly bypass the chain the tenant configured, which
+        // defeats the point of configuring it — the same gate the probation confirmation applies.
+        if (await IsApprovalWorkflowConfiguredAsync(cancellationToken))
+            throw JobArchitectureException.InvalidState(
+                "This tenant approves job descriptions through the workflow engine. "
+                + "Approve it from the workflow queue instead.");
+
         entity.Status = JobDescriptionStatus.Approved;
+        entity.ApprovalDate = DateTime.UtcNow;
+        await ApplyApprovalConsequencesAsync(entity, approvedById, cancellationToken);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description approved: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return true;
+    }
+
+    /// <summary>
+    /// What approving a job description means beyond its own status: it becomes the version in
+    /// force for its position, which retires the one it replaces.
+    /// </summary>
+    /// <remarks>
+    /// Extracted in slice 3 so the workflow route and the direct route apply identical
+    /// consequences. An <c>IWorkflowStatusAdapter</c> is synchronous and sees only the entity it is
+    /// handed, so it cannot supersede siblings — and superseding is not cosmetic here:
+    /// <c>OfferLetterService</c> selects a position's job description by
+    /// <c>SupersededByVersionId == null</c>, so two unsuperseded approved versions make an offer
+    /// letter ambiguous rather than merely untidy.
+    /// </remarks>
+    private async Task ApplyApprovalConsequencesAsync(
+        JobDescription entity, Guid approvedById, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        entity.ApprovedById = approvedById;
         entity.NextReviewDate = DateTime.Today.AddMonths(entity.ReviewCycleMonths);
 
-        // Expire any existing approved versions for this position
         var existingApproved = await _jobDescriptionRepository.GetQueryable()
             .Where(jd => jd.TenantId == tenantId &&
                         jd.PositionId == entity.PositionId &&
@@ -457,13 +609,6 @@ public class JobDescriptionService : IJobDescriptionService
             existing.ExpiryDate = DateTime.Today;
             await _jobDescriptionRepository.UpdateAsync(existing);
         }
-
-        await _jobDescriptionRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Job description approved: {JobDescriptionNumber}", entity.JobDescriptionNumber);
-
-        return true;
     }
 
     public async Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default)

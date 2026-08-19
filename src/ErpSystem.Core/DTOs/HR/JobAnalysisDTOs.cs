@@ -331,6 +331,12 @@ public class ReviewJobDescriptionDto
 /// <summary>
 /// DTO for approving a job description
 /// </summary>
+/// <summary>Why a job description was sent back to its author on the workflow route.</summary>
+public class RejectJobDescriptionDto
+{
+    public string? Reason { get; set; }
+}
+
 public class ApproveJobDescriptionDto
 {
     [Required]

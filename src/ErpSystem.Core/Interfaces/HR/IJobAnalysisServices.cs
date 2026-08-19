@@ -23,6 +23,22 @@ public interface IJobDescriptionService
     Task<bool> SubmitForReviewAsync(SubmitJobDescriptionForReviewDto submitDto, CancellationToken cancellationToken = default);
     Task<bool> ReviewAsync(ReviewJobDescriptionDto reviewDto, Guid reviewedById, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveJobDescriptionDto approveDto, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the current workflow step for a job description, and — when that step completes the
+    /// chain — applies the consequences of approval (area 17 slice 3, FR-HR-134).
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ApproveAsync"/> because the two answer to different authorities:
+    /// the direct route asks whether the caller holds <c>HR.JobArchitecture.Admin</c>, this one asks
+    /// the engine whether the caller is the assigned approver for the step in front of them. Once a
+    /// tenant publishes a definition the direct route refuses, so the configured chain cannot be
+    /// bypassed by a permission.
+    /// </remarks>
+    Task<bool> ApproveViaWorkflowAsync(Guid jobDescriptionId, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>Rejects the current workflow step, returning the job description to its author.</summary>
+    Task<bool> RejectViaWorkflowAsync(Guid jobDescriptionId, string? reason, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default);
     /// <summary>Deep-copies a job description (and all its child sections) into a new Draft.</summary>
     Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default);

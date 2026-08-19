@@ -122,6 +122,44 @@ public class JobAnalysisController : ControllerBase
         return Ok(new { message = "Review recorded" });
     }
 
+    /// <summary>Approves the current workflow step for a job description (area 17 slice 3).</summary>
+    /// <remarks>
+    /// <para>⚠ <b>Plain <c>[Authorize]</c>, and that is the whole point of the slice.</b> The
+    /// approver is whoever the tenant named in the workflow definition — a job-family owner, a
+    /// department head — and they may hold no HR permission at all. This was first written gated on
+    /// <c>HR.JobArchitecture.Write</c>, which made the action reachable by <b>nobody</b>: the people
+    /// with the permission are refused by the engine because they are not the assigned approver,
+    /// and the assigned approver is refused by the permission. The harness caught it because it
+    /// mints an approver holding role <c>Employee</c> and nothing else.</para>
+    ///
+    /// <para>What guards this is not weaker than a permission, it is stronger and more specific:
+    /// <c>CanUserApproveAsync</c> asks whether <i>this caller</i> is the assigned approver of the
+    /// step in front of <i>this record</i>. Trap 3 in <c>hr-area-authz-pattern</c>: a permission
+    /// gate is the wrong tool when the actor is defined by the record.</para>
+    /// </remarks>
+    [Authorize]
+    [HttpPost("descriptions/{id:guid}/workflow/approve")]
+    public async Task<IActionResult> ApproveJobDescriptionOnWorkflow(Guid id)
+    {
+        var approvedById = GetCurrentEmployeeId();
+        if (approvedById == null)
+            return BadRequest("Your user account is not linked to an employee record.");
+        await _jobDescriptionService.ApproveViaWorkflowAsync(id, approvedById.Value);
+        return Ok(new { message = "Job description approval step processed" });
+    }
+
+    /// <summary>
+    /// Rejects the current workflow step, returning the job description to its author. Plain
+    /// <c>[Authorize]</c> for the same reason as the approval above.
+    /// </summary>
+    [Authorize]
+    [HttpPost("descriptions/{id:guid}/workflow/reject")]
+    public async Task<IActionResult> RejectJobDescriptionOnWorkflow(Guid id, [FromBody] RejectJobDescriptionDto dto)
+    {
+        await _jobDescriptionService.RejectViaWorkflowAsync(id, dto?.Reason);
+        return Ok(new { message = "Job description returned for revision" });
+    }
+
     [Authorize(Policy = HrPermissions.JobArchitectureAdminPolicy)]
     [HttpPost("descriptions/{id:guid}/approve")]
     public async Task<IActionResult> ApproveJobDescription(Guid id, [FromBody] ApproveJobDescriptionDto dto)

@@ -250,6 +250,25 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("JobDescription") || key == Normalize("JOB_DESCRIPTION") || key == Normalize("Job Description"))
+            {
+                var jobDescription = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.JobDescription>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var jobPosition = jobDescription == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeePosition>()
+                        .FirstOrDefaultAsync(p => p.Id == jobDescription.PositionId);
+                info.EntityType = "JobDescription";
+                info.EntityNumber = jobDescription?.JobDescriptionNumber;
+                // The position and the version are what an approver needs before opening it: the
+                // same job title arrives every year, and "v1" and "v4" are different decisions.
+                info.EntityName = jobDescription == null
+                    ? null
+                    : $"{jobDescription.JobTitle} — {jobPosition?.Title ?? "position"} (v{jobDescription.VersionNumber})";
+                info.ActionUrl = $"/hr/job-descriptions/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("StaffMovement") || key == Normalize("STAFF_MOVEMENT") || key == Normalize("Staff Movement"))
             {
                 var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()

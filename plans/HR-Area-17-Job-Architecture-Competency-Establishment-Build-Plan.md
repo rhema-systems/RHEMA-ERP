@@ -507,8 +507,69 @@ successor.
 family. It did not — it faithfully copied `null`, because defect 2 meant the source was never
 classified in the first place. A symptom two steps downstream of its cause.
 
+### Slice 3 — approval on the workflow engine, and FR-HR-134 (2026-08-19) — `run-slice3.mjs`, 36 assertions
+
+Green twice; slices 0-2 re-run green afterwards, which is also the proof that the definition
+retires cleanly. **344 assertions in the area.**
+
+**Application 7 of the workflow recipe**, all five steps: catalog entry, adapter, a
+`BuildEntityContextAsync` case, a display resolver, and `entityTypeMapping.ts`. The routing context
+exposes job family, sub-family, level, staff level, criticality, intrinsic value, benchmark salary,
+bargaining-unit flag and whether this is a first version — because "who approves a job description"
+differs by family and by level, and a first issue is a different decision from an annual re-issue.
+
+**Why it belongs on the engine.** Before this slice, approving a job description asked one
+question: does the caller hold `HR.JobArchitecture.Admin`? But an approved job description fixes
+what a role is accountable for and carries the valuation and suggested salary grade a pay decision
+later rests on. Who signs that off is a tenant's decision, not a permission.
+
+**Three design calls, and the reasoning:**
+
+1. **The adapter sets the decision; the service applies the consequences.** Approving must also
+   supersede the version it replaces, and an adapter is synchronous and sees only the entity handed
+   to it. That is not tidiness: `OfferLetterService` selects a position's job description by
+   `SupersededByVersionId == null`, so two unsuperseded approved versions make an offer letter
+   ambiguous. `ApplyApprovalConsequencesAsync` is now shared by both routes, and runs only when the
+   engine's outcome is actually `Approved` — a mid-chain step returns `Pending` and must retire
+   nothing.
+2. **Publishing a definition closes the direct route.** Leaving both open would let an Admin
+   permission bypass the chain the tenant configured. An Admin now gets a 409 naming the workflow
+   queue.
+3. **`ApprovedById` is left alone by the adapter.** The engine hands back the approving *user*;
+   `ApprovedById` is an Employee FK. The service resolves and stamps the employee — asserted, so a
+   user id written into an employee column would fail rather than merely look odd.
+
+⚠ **The slice's own defect, and it is Trap 3 for the third area running.** I gated the two workflow
+endpoints on `HR.JobArchitecture.Write`, reasoning that relaxing from Admin was enough. It made the
+action reachable by **nobody**: the holders of the permission are refused by the engine for not
+being the assigned approver, and the assigned approver is refused by the permission. The harness
+caught it because it mints an approver holding role `Employee` and nothing else — which is what a
+job-family owner or department head actually looks like. Both endpoints now carry a plain
+`[Authorize]`, with `CanUserApproveAsync` doing the work: it asks whether *this caller* is the
+assigned approver of the step in front of *this record*, which is stricter than a permission, not
+looser. **Restated for the next area: if the actor is named by the record or by a definition, a
+permission gate can only get in the way.**
+
+⚠ **And the name-versus-source trap, fourth instance in four slices.** I wrote
+`GET /api/Workflow/instances/entity/{type}/{id}` from what it ought to be called; it 404s. The
+endpoint the UI actually uses is `entity-summary`, with the type and id as **query** parameters
+(`frontend/src/hooks/useWorkflowRecord.ts`). It also has to be read *while an approval is
+outstanding* — once the chain completes there is no active instance and the fields the button
+depends on are legitimately null. The assertion now covers `canCurrentUserApprove` from both sides,
+because that flag decides whether the approve button renders: true for HR would mean the screen
+offers an action the API then refuses, which reads to a user as a broken backend.
+
+**FR-HR-134 asserted end to end on the direct route**, before any definition exists: approving a
+second job description moves the position's `current` to it, retires the first to `Superseded` with
+an expiry date, names its successor, and leaves **exactly one** approved version standing for the
+position.
+
+**Fixed in passing, in a file this slice already touched:** `ProbationPeriod` was registered in the
+backend catalog by area 15b but never added to `entityTypeMapping.ts`, so its workflow tab never
+appeared under the HR module filter.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-2 of 13 landed 2026-08-19. **308 assertions.**
+**IN PROGRESS** — slices 0-3 of 13 landed 2026-08-19. **344 assertions.**

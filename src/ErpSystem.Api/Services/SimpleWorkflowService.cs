@@ -1523,6 +1523,44 @@ public class SimpleWorkflowService : IWorkflowService
             return context;
         }
 
+        if (IsEntityType(entityTypeRecord, "JOB_DESCRIPTION", "JobDescription", "Job Description"))
+        {
+            var jobDescription = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.JobDescription>()
+                .FirstOrDefaultAsync(jd => jd.Id == entityId)
+                ?? throw new InvalidOperationException("Job description not found");
+
+            // What a routing rule could reasonably branch on. The job family and level are the two
+            // that matter: a tenant that approves technical roles in one line and management roles
+            // in another is expressing exactly that, and neither is derivable from the position.
+            // The valuation is here because a role priced above a threshold is a pay decision as
+            // much as a job-content one, and a first version is a different conversation from an
+            // annual re-issue — hence the version number.
+            context["jobDescriptionNumber"] = jobDescription.JobDescriptionNumber;
+            context["positionId"] = jobDescription.PositionId;
+            context["jobFamilyId"] = jobDescription.JobFamilyId;
+            context["jobSubFamilyId"] = jobDescription.JobSubFamilyId;
+            context["jobLevelId"] = jobDescription.JobLevelId;
+            context["staffLevelId"] = jobDescription.StaffLevelId;
+            context["versionNumber"] = jobDescription.VersionNumber;
+            context["isFirstVersion"] = jobDescription.VersionNumber <= 1;
+            context["roleCriticality"] = jobDescription.RoleCriticality?.ToString();
+            context["roleIntrinsicValue"] = jobDescription.RoleIntrinsicValue;
+            context["industryBenchmarkSalary"] = jobDescription.IndustryBenchmarkSalary;
+            context["isBargainingUnitRole"] = jobDescription.IsBargainingUnitRole;
+            context["status"] = jobDescription.Status.ToString();
+
+            var jobPosition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeePosition>()
+                .FirstOrDefaultAsync(p => p.Id == jobDescription.PositionId);
+            if (jobPosition != null)
+            {
+                context["organizationUnitId"] = jobPosition.OrganizationUnitId;
+                context["organizationLevelId"] = jobPosition.OrganizationLevelId;
+                context["positionTitle"] = jobPosition.Title;
+            }
+
+            return context;
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_MOVEMENT", "StaffMovement", "Staff Movement"))
         {
             var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()
