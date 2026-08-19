@@ -617,7 +617,9 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
         if (existing != null && existing.TenantId == tenantId)
             throw JobArchitectureException.Conflict("An assessment record already exists for this employee–competency pair. Use the update operation to record a re-assessment.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        // createdByUserId is the caller's EMPLOYEE id (the controller resolves it from the token),
+        // which is exactly the right default for the assessor.
+        var entity = createDto.ToEntity(tenantId, createdByUserId, createdByUserId);
 
         await _employeeCompetencyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

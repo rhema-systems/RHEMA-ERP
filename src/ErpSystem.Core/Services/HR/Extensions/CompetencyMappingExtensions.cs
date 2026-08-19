@@ -334,7 +334,7 @@ public static class CompetencyMappingExtensions
     }
 
     /// <summary>Maps a <see cref="CreateEmployeeCompetencyDto"/> to a new entity.</summary>
-    public static EmployeeCompetency ToEntity(this CreateEmployeeCompetencyDto dto, Guid tenantId, Guid userId)
+    public static EmployeeCompetency ToEntity(this CreateEmployeeCompetencyDto dto, Guid tenantId, Guid userId, Guid assessedByEmployeeId)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -345,7 +345,14 @@ public static class CompetencyMappingExtensions
             CompetencyId = dto.CompetencyId,
             CurrentProficiencyLevel = dto.CurrentProficiencyLevel,
             AssessmentDate = dto.AssessmentDate,
-            AssessedById = dto.AssessedById,
+            // ⚠ Defaults to the caller. Assessing someone is an act performed at the moment of the
+            // call, so the actor comes from the token unless the caller deliberately names another
+            // — which is a real case here, unlike an approver: HR keying in a line manager's
+            // assessment from a paper form is recording a fact about someone else, and that is the
+            // line the area-13 actor rule draws. What is NOT acceptable is the field being purely
+            // caller-declared, so an assessment could be attributed to anyone with nothing to fall
+            // back on. See hr-succession-area-survey for the rule in full.
+            AssessedById = dto.AssessedById ?? assessedByEmployeeId,
             AssessmentMethod = dto.AssessmentMethod,
             EvidenceNotes = dto.EvidenceNotes,
             CreatedBy = userId.ToString(),

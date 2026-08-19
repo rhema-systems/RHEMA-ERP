@@ -674,8 +674,49 @@ responses re-reading through it.
 it to the route id — so omitting it makes every update `"ID mismatch"`. Reading the DTO's own
 declaration shows two properties and no `Id`. **Read the base class too.**
 
+### Slice 6 — employee competency, gap analysis and the self tier (2026-08-19) — `run-slice6.mjs`, 57 assertions
+
+Green twice; slices 0-5 re-run green. **505 assertions in the area.**
+
+The gap analysis is the point of the competency half — the comparison between what a position
+requires and what an employee has been assessed at — and it computes correctly. The fixture is built
+so every status is an answer rather than a coincidence: four requirements, one met exactly, one
+exceeded, one short, one never assessed. ⚠ The sharpest assertion is that **the never-assessed one
+still appears**, with a null level and no status: a gap analysis that silently omits what has never
+been looked at is the most misleading version of that screen there is.
+
+**Two things built rather than exercised:**
+
+1. **The assessor.** `CreateEmployeeCompetencyDto.AssessedById` was purely caller-declared, so an
+   assessment could be attributed to anyone — and when omitted it simply stayed null, leaving an
+   assessment with nobody accountable for it. It now defaults to the caller's employee id from the
+   token. ⚠ Kept rather than stripped, unlike an approver: HR keying in a line manager's assessment
+   from a paper form is **recording a fact about someone else**, which is the line the area-13 actor
+   rule draws. `batch-assess` already stamped it from the token, so the two paths now agree.
+
+2. **The self tier**, which slice 0 deliberately left closed. `me/profile` and `me/gaps` take the
+   employee from the token, because the client `User` object carries no employee link — a browser
+   has no id to put in `employee/{employeeId}`, so this could never have arrived as a relaxed
+   permission. Probation's `reviews/to-conduct` precedent. Six assertions confirm it did not become
+   a way in: a colleague's profile, a colleague's gaps, their **own** by-employee route, the
+   assessment list, `qualified-for-position` and self-assessment are all still refused.
+
+   ⚠ **A judgement call, recorded because it diverges from succession:** an employee may read their
+   own gap analysis. Succession has no self tier at all because a readiness rating is an assessment
+   filed *about* someone. A competency gap is different in kind — it is the list of what their own
+   role requires and where they stand against it, which is the thing they need in order to close it.
+
+⚠ **The fixture defect, and it is a new shape worth naming: the harness configured one position and
+the code answered about another.** `GetGapsForEmployeeAsync` resolves the position **from the
+employee record**, and `mintPlainActor` hired every actor into `positions[0]` regardless of which
+position the slice configured — so the gap analysis correctly answered about eighteen requirements
+accumulated there by earlier slices, and "the position requires four" was testing a different
+position entirely. Fifteen assertions failed and every one of them was right to. **When a feature
+resolves an entity indirectly (employee → position), the fixture has to set up the indirection, not
+the endpoint's argument.** `mintActorWithRoles` now takes a position index.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-5 of 13 landed 2026-08-19. **448 assertions.**
+**IN PROGRESS** — slices 0-6 of 13 landed 2026-08-19. **505 assertions.**

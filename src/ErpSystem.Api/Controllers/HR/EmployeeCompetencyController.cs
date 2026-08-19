@@ -80,6 +80,48 @@ public class EmployeeCompetencyController : ControllerBase
         => Ok(await _service.GetEmployeeProfileAsync(employeeId));
 
     // =========================================================================
+    // SELF SERVICE
+    // =========================================================================
+    //
+    // ⚠ These exist because the browser cannot address the by-employee endpoints on the caller's
+    // own behalf: the client `User` object carries roles, tenants and permissions but NO employee
+    // link, so a screen has no id to put in `employee/{employeeId}`. That is the same gap that
+    // produced probation's `reviews/to-conduct`, and the reason slice 0 asserts an employee is
+    // refused on `employee/{theirOwnId}/profile` — the self tier could not arrive as a relaxed
+    // permission, it had to arrive as an endpoint that takes the employee from the token.
+    //
+    // Plain [Authorize]: there is no permission to hold here. The record is the caller's own, and
+    // the token is what says so.
+
+    /// <summary>The signed-in employee's own competency profile.</summary>
+    [Authorize]
+    [HttpGet("me/profile")]
+    public async Task<ActionResult<EmployeeCompetencyProfileDto>> GetMyProfile()
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+        return Ok(await _service.GetEmployeeProfileAsync(employeeId.Value));
+    }
+
+    /// <summary>
+    /// The signed-in employee's own gap analysis against the competencies their position requires.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately readable by the employee themselves. A competency gap is not a judgement filed
+    /// about someone the way a succession readiness rating is — it is the list of what their own
+    /// role asks for and where they currently stand against it, which is the thing they need in
+    /// order to close it.
+    /// </remarks>
+    [Authorize]
+    [HttpGet("me/gaps")]
+    public async Task<ActionResult<EmployeePositionCompetencyGapSummaryDto>> GetMyGaps()
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+        return Ok(await _service.GetGapsForEmployeeAsync(employeeId.Value));
+    }
+
+    // =========================================================================
     // CRUD
     // =========================================================================
 
