@@ -45,6 +45,18 @@ public static class JobArchitectureQueryExtensions
             .Include(pc => pc.Position)
             .Include(pc => pc.Competency);
 
+    /// <summary>The competency an indicator belongs to, and the skill it names.</summary>
+    /// <remarks>
+    /// Added in slice 5. The repository reads had drifted apart in the usual way: the by-competency
+    /// list included the skill but not the competency, the by-skill list the reverse, and the
+    /// service's by-id helper carried neither. Slice 1 missed it because the read probe's fixture
+    /// had no skill indicators in it - there were none in the database to have.
+    /// </remarks>
+    public static IQueryable<CompetencySkillIndicator> WithLookups(this IQueryable<CompetencySkillIndicator> query)
+        => query
+            .Include(i => i.Competency)
+            .Include(i => i.Skill);
+
     /// <summary>Who was assessed, on what, and by whom.</summary>
     public static IQueryable<EmployeeCompetency> WithLookups(this IQueryable<EmployeeCompetency> query)
         => query

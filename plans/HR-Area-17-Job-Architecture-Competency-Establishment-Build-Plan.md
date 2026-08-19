@@ -625,8 +625,57 @@ both and states them together.
 residue alongside the two real TDC grades (`M1 General Managers`, `M2 Heads of Department`). Same
 shape as the 43 residue job descriptions; both belong in the area-close cleanup.
 
+### Slice 5 — the competency framework (2026-08-19) — `run-slice5.mjs`, 44 assertions
+
+Green twice; slices 0-4 re-run green. **448 assertions in the area.**
+
+**Finding 7 closed, all three faces, by migration
+`20260819020000_FilterCompetencyUniqueIndexesOnIsDeleted`.** All three competency unique indexes
+were unfiltered, and `DeleteAsync` is a soft delete everywhere here, so a deleted row held its slot
+forever. Verified live afterwards: all three now read `([IsDeleted]=(0))`.
+
+The third face was the one that mattered most in practice, and it was not a rare path.
+`BulkReplaceForPositionAsync` soft-deletes the whole current set and inserts the new one in a
+**single `SaveChanges`** — which an unfiltered unique index rejects mid-transaction. So on
+`position/{id}/bulk-set`, the endpoint a "manage this position's competencies" screen calls on
+**every save**, keeping any competency across a save was a 500. The harness proves the fix by doing
+it rather than by reading the schema: save the same list twice; then keep one, drop one, add one;
+then bring the dropped one back.
+
+⚠ **The migration is described in three places and they must agree** — the migration SQL, the EF
+model in `ApplicationDbContext.HR.cs` (which is what `rebuild-db` builds from), and
+`ApplicationDbContextModelSnapshot.cs` (so a later `migrations add` does not try to re-add the
+filter). Updating only the first would have left `rebuild-db` recreating unfiltered indexes.
+
+**Two build-system rules learned here, and they will recur in slices 7-8:**
+
+1. ⚠ **A hand-written migration carries its `[DbContext]`/`[Migration]` attributes inline and must
+   NOT be listed in `FastBuildMigrationMetadata`.** The two are mutually exclusive: that file
+   supplies the attributes for migrations whose generated `.Designer.cs` is excluded from fast
+   builds, so declaring both merges the partial classes and duplicates the attributes. 99 of this
+   project's 285 migrations are hand-written this way and none appears in that file.
+2. ⚠ **`dotnet ef` cannot run against a fast Debug build** — it needs
+   `ApplicationDbContextModelSnapshot.cs`, which that build omits. The right switch is
+   **`TdcFocusedEfToolingBuild`**, set as an **environment variable** (`dotnet ef` spawns several
+   MSBuild invocations and `-p:` does not reach them all). It keeps the snapshot compiled while
+   still skipping the historical designers — over 350 MB of generated C# — so it is Release-grade
+   correctness at close to Debug speed. `--configuration Release` also works and is slower.
+
+**A fourth instance of the slice-1 read shape, which slice 1 could not have caught.** Skill
+indicators returned blank `competencyName` and `skillName`: the by-competency list included the
+skill but not the competency, the by-skill list did the reverse, and the service's by-id helper
+carried neither. Slice 1's probe missed it because there were no skills or indicators in the
+database to put in a fixture — *an empty table hides a read defect as effectively as a correct
+implementation does*. Now on a shared `WithLookups()` like the other four, with all three create
+responses re-reading through it.
+
+⚠ **And a DTO trap one level up from the usual one:** `UpdateCompetencySkillIndicatorDto` and
+`UpdatePositionCompetencyDto` both inherit `Id` from `UpdateDtoBase`, and both controllers compare
+it to the route id — so omitting it makes every update `"ID mismatch"`. Reading the DTO's own
+declaration shows two properties and no `Id`. **Read the base class too.**
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-4 of 13 landed 2026-08-19. **404 assertions.**
+**IN PROGRESS** — slices 0-5 of 13 landed 2026-08-19. **448 assertions.**

@@ -272,7 +272,11 @@ public class CompetencySkillIndicatorService : ICompetencySkillIndicatorService
 
     private async Task<CompetencySkillIndicator> GetOwnedIndicatorAsync(Guid id)
     {
-        var entity = await _indicatorRepository.GetByIdAsync(id);
+        // Without the chain this returned an indicator with a blank competency name and a blank
+        // skill name - the two fields that make it mean anything.
+        var entity = await _indicatorRepository.GetQueryable()
+            .WithLookups()
+            .FirstOrDefaultAsync(i => i.Id == id);
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound($"Competency skill indicator with ID '{id}' not found.");
         return entity;
@@ -320,7 +324,10 @@ public class CompetencySkillIndicatorService : ICompetencySkillIndicatorService
 
         _logger.LogInformation("Competency skill indicator created: CompetencyId={CompetencyId}, SkillId={SkillId}", entity.CompetencyId, entity.SkillId);
 
-        return entity.ToDto();
+        // Re-read through the shared chain: the entity above was built from the DTO, so its
+        // navigations are unloaded and every resolved name on this response would be blank while
+        // the same row read a moment later comes back complete.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<CompetencySkillIndicatorDto> UpdateAsync(UpdateCompetencySkillIndicatorDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -450,7 +457,10 @@ public class PositionCompetencyService : IPositionCompetencyService
 
         _logger.LogInformation("Position competency created: PositionId={PositionId}, CompetencyId={CompetencyId}", entity.PositionId, entity.CompetencyId);
 
-        return entity.ToDto();
+        // Re-read through the shared chain: the entity above was built from the DTO, so its
+        // navigations are unloaded and every resolved name on this response would be blank while
+        // the same row read a moment later comes back complete.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<PositionCompetencyDto> UpdateAsync(UpdatePositionCompetencyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -614,7 +624,10 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
 
         _logger.LogInformation("Employee competency assessment created: EmployeeId={EmployeeId}, CompetencyId={CompetencyId}", entity.EmployeeId, entity.CompetencyId);
 
-        return entity.ToDto();
+        // Re-read through the shared chain: the entity above was built from the DTO, so its
+        // navigations are unloaded and every resolved name on this response would be blank while
+        // the same row read a moment later comes back complete.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<EmployeeCompetencyDto> UpdateAsync(UpdateEmployeeCompetencyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)

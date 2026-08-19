@@ -27357,7 +27357,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("IX_Competency_Tenant_Code");
+                        .HasDatabaseName("IX_Competency_Tenant_Code")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "CompetencyCategory")
                         .HasDatabaseName("IX_Competency_Tenant_Category");
@@ -28681,7 +28682,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "EmployeeId", "CompetencyId")
                         .IsUnique()
-                        .HasDatabaseName("IX_EmployeeCompetency_Tenant_Employee_Competency");
+                        .HasDatabaseName("IX_EmployeeCompetency_Tenant_Employee_Competency")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("EmployeeCompetencies");
                 });
@@ -47286,7 +47288,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "PositionId", "CompetencyId")
                         .IsUnique()
-                        .HasDatabaseName("IX_PositionCompetency_Tenant_Position_Competency");
+                        .HasDatabaseName("IX_PositionCompetency_Tenant_Position_Competency")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("PositionCompetencies");
                 });

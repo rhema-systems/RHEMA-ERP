@@ -2013,8 +2013,12 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.Property(c => c.CompetencyCategory).HasConversion<int>();
 
+            // ⚠ Filtered on IsDeleted, and it must stay that way: DeleteAsync is a soft delete,
+            // so an unfiltered unique index means a deleted competency's code can never be used
+            // again. See migration 20260819020000_FilterCompetencyUniqueIndexesOnIsDeleted.
             entity.HasIndex(c => new { c.TenantId, c.Code })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_Competency_Tenant_Code");
 
             entity.HasIndex(c => new { c.TenantId, c.Name })
@@ -2060,8 +2064,12 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ============================================================================
         builder.Entity<PositionCompetency>(entity =>
         {
+            // ⚠ Filtered on IsDeleted. Beyond the general rule, BulkReplaceForPositionAsync
+            // soft-deletes the current set and inserts the new one in a single SaveChanges, which
+            // an unfiltered unique index rejects mid-transaction.
             entity.HasIndex(pc => new { pc.TenantId, pc.PositionId, pc.CompetencyId })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_PositionCompetency_Tenant_Position_Competency");
 
             entity.HasIndex(pc => pc.PositionId)
@@ -2086,8 +2094,11 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ============================================================================
         builder.Entity<EmployeeCompetency>(entity =>
         {
+            // ⚠ Filtered on IsDeleted: unfiltered, deleting an assessment meant that employee
+            // could never be re-assessed on that competency.
             entity.HasIndex(ec => new { ec.TenantId, ec.EmployeeId, ec.CompetencyId })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_EmployeeCompetency_Tenant_Employee_Competency");
 
             entity.HasIndex(ec => ec.EmployeeId)
