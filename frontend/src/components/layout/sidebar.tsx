@@ -639,6 +639,14 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // Area 18. FR-HR-135 names the chain: Department Head → HR → Managing Director. An approved
+        // budget is not only a plan — it sets the establishment (D-2), which then gates whether a
+        // vacancy may be opened at all (FR-HR-136).
+        title: 'Manpower Budgets',
+        href: '/hr/manpower-budgets',
+        icon: Banknote,
+      },
+      {
         // Area 17. The gap view is the operational screen: what positions require against what
         // people have been assessed at. "Below requirement" and "not assessed" stay separate all
         // the way to the tiles — an unknown is not a training need.
@@ -1583,6 +1591,9 @@ export const navigationItems: NavItem[] = [
           // Area 17 setup. A competency is what the organisation expects someone to be able to do;
           // a skill is the finer-grained thing an indicator points at, which is why both exist.
           { title: 'Competencies', href: '/administration/hr/competencies', icon: Layers },
+          // Area 17/18. The exception path: most positions should be established by an approved
+          // manpower budget, and this is the one place that chain can be bypassed.
+          { title: 'Establishment', href: '/administration/hr/establishment', icon: ShieldCheck },
           { title: 'Qualifications', href: '/administration/hr/qualifications', icon: GraduationCap },
           { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
           { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },

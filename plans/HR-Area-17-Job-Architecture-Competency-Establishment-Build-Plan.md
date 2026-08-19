@@ -939,8 +939,40 @@ and three assertions confirm the self tier did not become a way in.
 which is exactly the division of labour worth keeping — the type checker for what it can see, the
 payload probe for what it cannot.
 
+### Slice 12 — the manpower budget and establishment screens (2026-08-19) — `run-slice12-ui.mjs`, 41 assertions
+
+Green twice; all twelve earlier harnesses re-run green. **745 assertions in the area.** `tsc` at the
+19-error pre-existing baseline, lint clean. **Every screen in the area is now built.**
+
+Four screens: the budget register, the create form, the budget detail with FR-HR-135's chain
+visible, and the establishment admin screen.
+
+⚠ **The budget detail is the only screen in the module where the same button means something
+different to three people.** FR-HR-135's chain is Department Head → HR → Managing Director, so
+"Approve" must appear for exactly one of them at a time and the budget must stay `Submitted` until
+the last acts. That cannot be read off a permission, and the probe checks `canCurrentUserApprove`
+**from all four seats** — the three approvers and the submitter — at each stage of the chain. It is
+the clearest demonstration in the area of why the engine, not a role, answers that question.
+
+**What the screens refuse to show, and why each absence is deliberate:**
+
+- **No approver field on the create form.** The approval is stamped from the token of whoever
+  completes the chain. Until slice 7 this endpoint took `approvedById` as a **query parameter**.
+- **No `totalBudget` field** — the API computes it from the four component budgets; sending it would
+  be sending a number the server is about to overwrite. The form shows the running total as a
+  read-only figure instead.
+- **No variance figure anywhere.** `actualSpent` and `variance` have no writer; presenting a
+  permanent zero as a variance would be inventing news. The probe asserts both are zero so the
+  absence stays a decision.
+- **An unestablished position renders an em dash, not its headcount.** The number is the column
+  default and means nothing — the same reason a null proficiency renders as "—" in slice 11.
+
+The submit button is disabled until a budget has a line, so the API's refusal is explained before it
+happens rather than after. And the establishment screen sorts **over-strength posts first**: those
+are the ones refusing recruitment and movements right now, and a list sorted by name buries them.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-11 of 13 landed 2026-08-19. **704 assertions.** FR-HR-134, 135 and 136 delivered; backend complete; job-description and competency screens in. Slice 12 is the manpower budget and establishment screens, slice 13 the content audit.
+**IN PROGRESS** — slices 0-12 of 13 landed 2026-08-19. **745 assertions.** FR-HR-134, 135 and 136 delivered; backend and all screens complete. Slice 13 is the content audit.
