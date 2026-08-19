@@ -130,8 +130,10 @@ export const navigationItems: NavItem[] = [
           'Manager',
           'Accounts Officer',
           'Senior Accountant',
+          'Chief Accountant',
           'Finance Manager',
           'Financial Controller',
+          'Managing Director',
         ],
       },
       {
