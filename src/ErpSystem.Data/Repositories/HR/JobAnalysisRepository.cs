@@ -268,12 +268,25 @@ public class ManpowerBudgetRepository : GenericRepository<ManpowerBudget>, IManp
     {
         var currentYear = DateTime.Today.Year;
 
+        // ⚠ Ordered, because "current" has to be a single answer. This took FirstOrDefault with no
+        // ordering, so once a unit had two approved budgets for the same year — a revision approved
+        // mid-year, or simply two submissions — the endpoint returned an arbitrary one, and could
+        // return a different one on the next call. Found by running the content audit twice.
+        //
+        // Most recently approved wins, which makes the READ agree with what the WRITE already does:
+        // approving a budget overwrites ExpectedHeadcount for every position it names (decision
+        // D-2), so the latest approval is already the establishment in force. Anything else would
+        // report one budget while a different one governs recruitment.
         return await _dbSet
             .WithLookups()
             .Include(b => b.BudgetLines).ThenInclude(l => l.Position)
             .Where(b => b.OrganizationUnitId == organizationUnitId &&
                        b.FiscalYear == currentYear &&
-                       b.Status == ManpowerBudgetStatus.Approved)
+                       (b.Status == ManpowerBudgetStatus.Active ||
+                        b.Status == ManpowerBudgetStatus.Approved))
+            .OrderByDescending(b => b.Status == ManpowerBudgetStatus.Active)
+            .ThenByDescending(b => b.ApprovalDate)
+            .ThenByDescending(b => b.CreatedAt)
             .FirstOrDefaultAsync();
     }
 

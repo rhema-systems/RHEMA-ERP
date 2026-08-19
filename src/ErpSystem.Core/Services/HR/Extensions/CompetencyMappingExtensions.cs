@@ -364,14 +364,19 @@ public static class CompetencyMappingExtensions
     /// The caller is responsible for snapshotting the current values to
     /// <see cref="EmployeeCompetencyHistory"/> BEFORE calling this method.
     /// </summary>
-    public static void UpdateEntity(this EmployeeCompetency entity, UpdateEmployeeCompetencyDto dto, Guid userId)
+    public static void UpdateEntity(this EmployeeCompetency entity, UpdateEmployeeCompetencyDto dto, Guid userId, Guid? assessedByEmployeeId = null)
     {
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(dto);
 
         entity.CurrentProficiencyLevel = dto.CurrentProficiencyLevel;
         entity.AssessmentDate = dto.AssessmentDate;
-        entity.AssessedById = dto.AssessedById;
+        // ⚠ Defaults to the caller, exactly as the create path does. Assigning dto.AssessedById
+        // unconditionally meant a re-assessment with no assessor named WIPED the assessor already on
+        // the record: the level changed, the date changed, and nobody was accountable for either.
+        // Found by the content audit, after every slice harness had passed — the create defaulting
+        // (slice 6) was only half the fix, and the half that was missing is the one people use more.
+        entity.AssessedById = dto.AssessedById ?? assessedByEmployeeId ?? entity.AssessedById;
         entity.AssessmentMethod = dto.AssessmentMethod;
         entity.EvidenceNotes = dto.EvidenceNotes;
         entity.UpdatedAt = DateTime.UtcNow;

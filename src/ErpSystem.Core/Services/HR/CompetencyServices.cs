@@ -641,7 +641,9 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
         var snapshot = entity.ToHistorySnapshot(updateDto.ChangeReason, tenantId, updatedByUserId);
         await _historyRepository.AddAsync(snapshot);
 
-        entity.UpdateEntity(updateDto, updatedByUserId);
+        // updatedByUserId is the caller's EMPLOYEE id (the controller resolves it from the token),
+        // which is the right fallback assessor when the payload names none.
+        entity.UpdateEntity(updateDto, updatedByUserId, updatedByUserId);
 
         await _employeeCompetencyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

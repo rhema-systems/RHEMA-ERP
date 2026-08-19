@@ -147,6 +147,17 @@ clearest case in the whole register for the sweep to own**, rather than HR inven
   requisition. Decide once whether the manpower budget is the parent envelope that the others draw
   down from, or a parallel plan.
 
+### Cleanup owed at finalization (area 17/18, decision D-6)
+
+Harness residue that will appear in any register or report until it is removed, both created by
+**area 6**, not by area 17:
+
+- **43 job descriptions** titled `E2E RecB Engineer …` / `E2E RecD Engineer …`, all Draft, all
+  childless.
+- **Ten salary grades** named `E2E RecD Band 141309` and similar, sitting alongside the two real TDC
+  grades (`M1 General Managers`, `M2 Heads of Department`). ⚠ These are the more damaging of the
+  two: a salary grade appears in pay-related pickers.
+
 ### Areas not yet built ⏳
 
 14 awards · 16 assets · 19–23 · 25–27 portals · plus the deferred separation/exit

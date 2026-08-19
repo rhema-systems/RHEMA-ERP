@@ -971,8 +971,63 @@ The submit button is disabled until a budget has a line, so the API's refusal is
 happens rather than after. And the establishment screen sorts **over-strength posts first**: those
 are the ones refusing recruitment and movements right now, and a list sorted by name buries them.
 
+### Slice 13 — the content audit (2026-08-19) — `audit-content.mjs`, 364 assertions
+
+**78 of 78 GET endpoints exercised**, counted rather than claimed, each asserted by id against a
+fixture built to give it something real to return. Stable across three consecutive runs; all
+thirteen slice harnesses re-run green. **1,109 assertions in the area.**
+
+⚠ **The audit failed 20 assertions on its first run, after twelve green slices** — the pattern area
+11 recorded, confirmed again. Three of those were real, and none of them was a missing feature:
+
+1. ⚠⚠ **A re-assessment wiped the assessor.** `UpdateEntity` assigned `dto.AssessedById`
+   unconditionally, so re-assessing an employee without naming an assessor set it to **null** — the
+   level changed, the date changed, and nobody was accountable for either. Slice 6 defaulted the
+   assessor on **create** and I never looked at update, **which is the path people use more**. Five
+   endpoints reported `assessedByName` as null and every one was right to.
+2. ⚠ **`budgets/organization-unit/{id}/current` returned an arbitrary budget.** It filtered on unit
+   + current year + Approved and then took `FirstOrDefault` **with no ordering**, so a unit with two
+   approved budgets for one year answered differently on different calls. Now Active first, then
+   most recently approved — which makes the READ agree with what the WRITE already does, since
+   approving a budget overwrites `ExpectedHeadcount` (D-2) and the latest approval is therefore
+   already the establishment in force.
+3. ⚠ **`GET /api/competencies` is paged at 20**, and the audit asserted against it without a page
+   size. *An assertion against a paged endpoint with no page size is an assertion about how much
+   data the database happens to hold.*
+
+**Defects 2 and 3 were found by running the audit TWICE.** The first run passed both — the fixture
+happened to land on page one, and the unit happened to have one approved budget. **A single green
+run of an audit proves less than it appears to; the second run is where non-determinism surfaces.**
+
+⚠ **And the audit's own helper had to be fixed without becoming conditional.** Twelve failures came
+from passing no id, so `rows.find(r => r.id === undefined)` matched nothing while the list held a
+row. The obvious repair is `if (rows.length)` — which is exactly the trap area 13 named. What it
+does instead: when an id is given the row must be found **by it**; when none is, the fixture still
+guarantees a row, so a non-empty list is the assertion. Never an `if`.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-12 of 13 landed 2026-08-19. **745 assertions.** FR-HR-134, 135 and 136 delivered; backend and all screens complete. Slice 13 is the content audit.
+**AREA 17/18 COMPLETE — 2026-08-19.** 14 slices, **1,109 assertions**, content audit clean at
+**78/78 GET endpoints**, stable across three consecutive runs.
+
+**Delivered:** FR-HR-134 (approved job descriptions against positions), FR-HR-135 (the manpower
+requisition chain, Department Head → HR → Managing Director, on the workflow engine), FR-HR-136 (the
+approved establishment, with teeth) and FR-HR-004's planning link in the form that is actually
+actionable — coverage, the uncovered work list, and the organisation-wide competency gap. **Every
+Mandatory requirement in FRD §A1.1, the last Level-1 HR section that was still open.**
+
+**Screens:** `/hr/job-descriptions` (register, `new`, `[id]` with nine tabs, `gaps`),
+`/hr/competencies` (organisation gaps, `me`, `positions/[positionId]`), `/hr/manpower-budgets`
+(register, `new`, `[id]`), `/administration/hr/competencies`, `/administration/hr/establishment`.
+
+**What it cost elsewhere, and paid back:** area 6's requisition budget enforcement runs against real
+data for the first time (and no longer accepts a *draft* budget as authorisation); area 8's
+FR-HR-173 rule is promoted from advisory to a block wherever an establishment was actually
+authorised. Both were found by running **other areas' harnesses**, not this one's.
+
+**Still open, recorded not forgotten:** `ManpowerBudget` carries no currency and nothing writes
+`ActualSpent`/`Variance` — both registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the
+post-HR sweep, along with a three-way training double-count. D-6's cleanup (43 residue job
+descriptions and ten `E2E RecD Band` salary grades from area 6) is listed there too.
