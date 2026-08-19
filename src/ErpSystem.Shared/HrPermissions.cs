@@ -26,6 +26,9 @@ public static class HrPermissions
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
     public const string CategoryProbation = "HR - Probation & Confirmation";
+    public const string CategoryJobArchitecture = "HR - Job Architecture";
+    public const string CategoryCompetency = "HR - Competency";
+    public const string CategoryManpowerBudget = "HR - Manpower Budget & Establishment";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -61,6 +64,30 @@ public static class HrPermissions
     public const string ProbationReadPolicy = "HR.Policy.ProbationRead";
     public const string ProbationWritePolicy = "HR.Policy.ProbationWrite";
     public const string ProbationAdminPolicy = "HR.Policy.ProbationAdmin";
+
+    public const string ViewJobArchitecture = "HR.JobArchitecture.Read";
+    public const string MaintainJobArchitecture = "HR.JobArchitecture.Write";
+    public const string AdministerJobArchitecture = "HR.JobArchitecture.Admin";
+
+    public const string JobArchitectureReadPolicy = "HR.Policy.JobArchitectureRead";
+    public const string JobArchitectureWritePolicy = "HR.Policy.JobArchitectureWrite";
+    public const string JobArchitectureAdminPolicy = "HR.Policy.JobArchitectureAdmin";
+
+    public const string ViewCompetency = "HR.Competency.Read";
+    public const string MaintainCompetency = "HR.Competency.Write";
+    public const string AdministerCompetency = "HR.Competency.Admin";
+
+    public const string CompetencyReadPolicy = "HR.Policy.CompetencyRead";
+    public const string CompetencyWritePolicy = "HR.Policy.CompetencyWrite";
+    public const string CompetencyAdminPolicy = "HR.Policy.CompetencyAdmin";
+
+    public const string ViewManpowerBudget = "HR.ManpowerBudget.Read";
+    public const string MaintainManpowerBudget = "HR.ManpowerBudget.Write";
+    public const string AdministerManpowerBudget = "HR.ManpowerBudget.Admin";
+
+    public const string ManpowerBudgetReadPolicy = "HR.Policy.ManpowerBudgetRead";
+    public const string ManpowerBudgetWritePolicy = "HR.Policy.ManpowerBudgetWrite";
+    public const string ManpowerBudgetAdminPolicy = "HR.Policy.ManpowerBudgetAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
@@ -102,7 +129,37 @@ public static class HrPermissions
             CategoryProbation),
         new(AdministerProbation, "Administer Probation & Confirmation",
             "Decide the probation outcome — confirm, extend or terminate — and delete probation records.",
-            CategoryProbation)
+            CategoryProbation),
+
+        new(ViewJobArchitecture, "View Job Architecture",
+            "View job descriptions and their responsibilities, qualifications, competencies, working conditions and valuation, plus job families, sub-families and levels.",
+            CategoryJobArchitecture),
+        new(MaintainJobArchitecture, "Maintain Job Architecture",
+            "Author job descriptions and their content, raise new versions, submit and review them, and maintain the job family, sub-family and level taxonomy.",
+            CategoryJobArchitecture),
+        new(AdministerJobArchitecture, "Administer Job Architecture",
+            "Approve job descriptions against positions (FR-HR-134), set the job valuation and suggested salary grade, and delete job descriptions.",
+            CategoryJobArchitecture),
+
+        new(ViewCompetency, "View Competency",
+            "View the competency framework and skill indicators, position competency requirements, employee competency profiles and gap analysis.",
+            CategoryCompetency),
+        new(MaintainCompetency, "Maintain Competency",
+            "Define competencies and their skill indicators, set position competency requirements, and record employee competency assessments.",
+            CategoryCompetency),
+        new(AdministerCompetency, "Administer Competency",
+            "Delete competencies, position requirements and employee assessments, and administer the framework taxonomy.",
+            CategoryCompetency),
+
+        new(ViewManpowerBudget, "View Manpower Budget & Establishment",
+            "View manpower budgets, budget lines, critical positions, budget variance and the approved establishment.",
+            CategoryManpowerBudget),
+        new(MaintainManpowerBudget, "Maintain Manpower Budget & Establishment",
+            "Draft manpower budgets and their lines and submit them for approval.",
+            CategoryManpowerBudget),
+        new(AdministerManpowerBudget, "Administer Manpower Budget & Establishment",
+            "Approve or reject a manpower budget — which sets the approved establishment that gates vacancy approval (FR-HR-136) — and delete budgets.",
+            CategoryManpowerBudget)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -140,6 +197,26 @@ public static class HrPermissions
     /// three may relax to Write with the instance-level authority check doing the real work — do
     /// not relax them before it, or the outcome becomes reachable by anyone HR-shaped.</para>
     ///
+    /// <para>Area 17/18 adds three families at once, because one area spans three audiences.
+    /// <b>Job architecture</b> follows succession's line: HR authors job descriptions, adds their
+    /// responsibilities, qualifications and competencies, raises versions and submits them for
+    /// review (Write), but <b>approving</b> one is the act FR-HR-134 actually asks for — an
+    /// approved job description is what a position is measured against, and it carries the job
+    /// valuation and the suggested salary grade — so approval and deletion are Admin.
+    /// <b>Competency</b> keeps the framework, the position requirements and the assessments in
+    /// Write, because assessing is record-keeping, with deletion at Admin.
+    /// <b>Manpower budget</b> draws the sharpest line: drafting a budget and its lines is Write,
+    /// but <b>approving</b> one sets the approved establishment (decision D-2), and the
+    /// establishment is what gates whether a vacancy may be approved at all under FR-HR-136. An
+    /// approver there is authorising headcount, not filing a record, so approve, reject and
+    /// delete are Admin.</para>
+    ///
+    /// <para>⚠ Admin is again the <i>interim</i> home for the two approvals. Slices 3 and 7 of
+    /// <c>plans/HR-Area-17-Job-Architecture-Competency-Establishment-Build-Plan.md</c> move both
+    /// onto the workflow engine — the manpower budget onto FR-HR-135's named chain, Department
+    /// Head → HR → Managing Director. As with probation, they may relax to Write once the
+    /// instance-level check does the real work, and not before.</para>
+    ///
     /// <para>⚠ Note what is <b>absent</b>: no grant reaches the <c>Employee</c> role. Succession
     /// deliberately inverts the self-service rule the rest of HR follows. A candidate's readiness
     /// level, retention-risk flag and nine-box placement are assessments made about them, not
@@ -157,7 +234,10 @@ public static class HrPermissions
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,
-        ViewProbation, MaintainProbation
+        ViewProbation, MaintainProbation,
+        ViewJobArchitecture, MaintainJobArchitecture,
+        ViewCompetency, MaintainCompetency,
+        ViewManpowerBudget, MaintainManpowerBudget
     };
 
     /// <summary>

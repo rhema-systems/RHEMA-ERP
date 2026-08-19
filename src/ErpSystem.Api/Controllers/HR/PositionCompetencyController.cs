@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,18 +27,22 @@ public class PositionCompetencyController : ControllerBase
     // QUERIES
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.CompetencyReadPolicy)]
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<PositionCompetencyDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.CompetencyReadPolicy)]
     [HttpGet("position/{positionId:guid}")]
     public async Task<ActionResult<IEnumerable<PositionCompetencyDto>>> GetByPosition(Guid positionId)
         => Ok(await _service.GetByPositionIdAsync(positionId));
 
+    [Authorize(Policy = HrPermissions.CompetencyReadPolicy)]
     [HttpGet("competency/{competencyId:guid}")]
     public async Task<ActionResult<IEnumerable<PositionCompetencyDto>>> GetByCompetency(Guid competencyId)
         => Ok(await _service.GetByCompetencyIdAsync(competencyId));
 
+    [Authorize(Policy = HrPermissions.CompetencyReadPolicy)]
     [HttpGet("position/{positionId:guid}/competency/{competencyId:guid}")]
     public async Task<ActionResult<PositionCompetencyDto?>> GetByPair(Guid positionId, Guid competencyId)
         => Ok(await _service.GetByPositionAndCompetencyAsync(positionId, competencyId));
@@ -46,6 +51,7 @@ public class PositionCompetencyController : ControllerBase
     // CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.CompetencyWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<PositionCompetencyDto>> Create([FromBody] CreatePositionCompetencyDto dto)
     {
@@ -61,6 +67,7 @@ public class PositionCompetencyController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.CompetencyWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PositionCompetencyDto>> Update(Guid id, [FromBody] UpdatePositionCompetencyDto dto)
     {
@@ -73,6 +80,7 @@ public class PositionCompetencyController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.CompetencyAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -88,6 +96,7 @@ public class PositionCompetencyController : ControllerBase
     /// Atomically replaces the complete competency requirement set for a position.
     /// Any existing requirements not present in the payload are soft-deleted.
     /// </summary>
+    [Authorize(Policy = HrPermissions.CompetencyWritePolicy)]
     [HttpPut("position/{positionId:guid}/bulk-set")]
     public async Task<ActionResult<IEnumerable<PositionCompetencyDto>>> BulkSet(
         Guid positionId, [FromBody] BulkSetPositionCompetenciesDto dto)

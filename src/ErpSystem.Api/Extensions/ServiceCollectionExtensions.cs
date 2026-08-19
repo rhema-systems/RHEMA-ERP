@@ -1349,6 +1349,53 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerProbation)));
 
+            // HR job architecture, competency and manpower budget policies (area 17/18).
+            // Measured 2026-08-19: all five controllers — JobAnalysis, hr/job-architecture,
+            // competencies, employee-competencies, position-competencies — carried a bare
+            // [Authorize] across 149 endpoints. Any authenticated employee could read every
+            // colleague's competency assessment and gap analysis, rewrite an approved job
+            // description, and approve a manpower budget. Three families rather than one because
+            // the audiences differ: HR authors job descriptions, line managers assess
+            // competencies, and budget holders own the establishment. Same ladder throughout —
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.JobArchitectureReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewJobArchitecture,
+                        HrPermissions.MaintainJobArchitecture,
+                        HrPermissions.AdministerJobArchitecture)))
+                .AddPolicy(HrPermissions.JobArchitectureWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainJobArchitecture,
+                        HrPermissions.AdministerJobArchitecture)))
+                .AddPolicy(HrPermissions.JobArchitectureAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerJobArchitecture)))
+                .AddPolicy(HrPermissions.CompetencyReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewCompetency,
+                        HrPermissions.MaintainCompetency,
+                        HrPermissions.AdministerCompetency)))
+                .AddPolicy(HrPermissions.CompetencyWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainCompetency,
+                        HrPermissions.AdministerCompetency)))
+                .AddPolicy(HrPermissions.CompetencyAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerCompetency)))
+                .AddPolicy(HrPermissions.ManpowerBudgetReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewManpowerBudget,
+                        HrPermissions.MaintainManpowerBudget,
+                        HrPermissions.AdministerManpowerBudget)))
+                .AddPolicy(HrPermissions.ManpowerBudgetWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainManpowerBudget,
+                        HrPermissions.AdministerManpowerBudget)))
+                .AddPolicy(HrPermissions.ManpowerBudgetAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerManpowerBudget)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
