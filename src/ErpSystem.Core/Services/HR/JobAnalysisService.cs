@@ -364,7 +364,10 @@ public class JobDescriptionService : IJobDescriptionService
 
         _logger.LogInformation("Job description created: {JobDescriptionNumber}", entity.JobDescriptionNumber);
 
-        return entity.ToDto();
+        // Re-read through the shared chain: the entity above was built from the DTO, so its
+        // navigations are unloaded and every resolved name on the response would be blank while
+        // the same row read a moment later comes back complete.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<JobDescriptionDto> UpdateAsync(UpdateJobDescriptionDto updateDto, CancellationToken cancellationToken = default)
@@ -387,7 +390,7 @@ public class JobDescriptionService : IJobDescriptionService
 
         _logger.LogInformation("Job description updated: {JobDescriptionNumber}", entity.JobDescriptionNumber);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> SubmitForReviewAsync(SubmitJobDescriptionForReviewDto submitDto, CancellationToken cancellationToken = default)
@@ -491,7 +494,29 @@ public class JobDescriptionService : IJobDescriptionService
             ReviewCycleMonths = original.ReviewCycleMonths,
             PreparedById = preparedById,
             PreparedDate = DateTime.UtcNow,
-            Status = JobDescriptionStatus.Draft
+            Status = JobDescriptionStatus.Draft,
+            // ⚠ These were absent, so revising a job description silently emptied its
+            // classification, valuation and authority — while CloneAsync, the *less* important
+            // path, copied all of them. Versioning is the annual-review route: it is the one that
+            // must not lose the record.
+            RoleIntrinsicValue = original.RoleIntrinsicValue,
+            RoleCriticality = original.RoleCriticality,
+            IndustryBenchmarkSalary = original.IndustryBenchmarkSalary,
+            ValuationNotes = original.ValuationNotes,
+            AutonomyLevel = original.AutonomyLevel,
+            DecisionMakingScope = original.DecisionMakingScope,
+            FinancialAuthorityLimit = original.FinancialAuthorityLimit,
+            ApprovalAuthorityNotes = original.ApprovalAuthorityNotes,
+            StaffLevelId = original.StaffLevelId,
+            SuggestedSalaryGradeId = original.SuggestedSalaryGradeId,
+            IntendedEmploymentType = original.IntendedEmploymentType,
+            IsBargainingUnitRole = original.IsBargainingUnitRole,
+            UnionId = original.UnionId,
+            OccupationCode = original.OccupationCode,
+            EssentialFunctionsSummary = original.EssentialFunctionsSummary,
+            JobFamilyId = original.JobFamilyId,
+            JobSubFamilyId = original.JobSubFamilyId,
+            JobLevelId = original.JobLevelId
         };
 
         await _jobDescriptionRepository.AddAsync(newVersion);
@@ -1429,10 +1454,28 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var year = DateTime.UtcNow.Year;
         var tenantId = GetTenantId();
-        var count = await _jobDescriptionRepository.GetQueryable()
-            .CountAsync(jd => jd.TenantId == tenantId && jd.CreatedAt.Year == year, cancellationToken);
+        var prefix = $"JD-{year}-";
 
-        return $"JD-{year}-{(count + 1):D5}";
+        // ⚠ This counted live rows and returned count + 1, which repeats a number the moment any
+        // row is deleted — measured 2026-08-19: two job descriptions came back as JD-2026-00058.
+        // There is no unique index on JobDescriptionNumber, so the collision does not fail; it just
+        // produces two documents with one number, and the register shows them as duplicates.
+        //
+        // Take the highest number already issued instead of counting, and read through the soft
+        // delete: a deleted job description has still consumed its number, and a document number
+        // that gets reissued is worse than one with a gap. Same reasoning as the succession
+        // document-number fix (a soft delete does not release what a counter assumes it released).
+        var issued = await _jobDescriptionRepository.GetQueryableIncludingDeleted(
+                jd => jd.TenantId == tenantId && jd.JobDescriptionNumber.StartsWith(prefix))
+            .Select(jd => jd.JobDescriptionNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 
     #endregion

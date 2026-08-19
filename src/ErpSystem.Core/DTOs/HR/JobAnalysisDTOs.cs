@@ -190,6 +190,54 @@ public class CreateJobDescriptionDto : CreateDtoBase
     public List<CreateJobPhysicalDemandDto>? PhysicalDemands { get; set; }
     public List<CreateJobWorkingConditionDto>? WorkingConditions { get; set; }
     public List<CreateJobEquipmentToolDto>? EquipmentTools { get; set; }
+    // ── classification, valuation and authority ──────────────────────────────
+    // ⚠ These existed on the entity and on UpdateJobDescriptionDto but not here, so a job
+    // description could only be created bare and classified on a second call — a create form had
+    // to save twice, and anything that skipped the second save left the taxonomy tables with no
+    // consumer at all. Measured 2026-08-19 by run-slice2.mjs.
+
+    /// <summary>Job family this role belongs to. See <c>JobArchitectureController</c>.</summary>
+    public Guid? JobFamilyId { get; set; }
+
+    /// <summary>Sub-family within <see cref="JobFamilyId"/>.</summary>
+    public Guid? JobSubFamilyId { get; set; }
+
+    /// <summary>Job level (rank) this role sits at.</summary>
+    public Guid? JobLevelId { get; set; }
+
+    /// <summary>Staff level (MGT / SNR / JNR) the role is graded against.</summary>
+    public Guid? StaffLevelId { get; set; }
+
+    /// <summary>Payroll-owned salary grade suggested by the valuation. Read-only reference.</summary>
+    public Guid? SuggestedSalaryGradeId { get; set; }
+
+    /// <summary>Union the role falls under when <see cref="IsBargainingUnitRole"/> is set.</summary>
+    public Guid? UnionId { get; set; }
+
+    public bool IsBargainingUnitRole { get; set; }
+
+    public string? OccupationCode { get; set; }
+
+    public string? EssentialFunctionsSummary { get; set; }
+
+    public EmploymentType? IntendedEmploymentType { get; set; }
+
+    public RoleCriticalityLevel? RoleCriticality { get; set; }
+
+    public decimal? RoleIntrinsicValue { get; set; }
+
+    public decimal? IndustryBenchmarkSalary { get; set; }
+
+    public string? ValuationNotes { get; set; }
+
+    public DecisionAuthorityLevel? AutonomyLevel { get; set; }
+
+    public string? DecisionMakingScope { get; set; }
+
+    public decimal? FinancialAuthorityLimit { get; set; }
+
+    public string? ApprovalAuthorityNotes { get; set; }
+
     public List<CreateJobReportingRelationshipDto>? ReportingRelationships { get; set; }
 }
 

@@ -453,8 +453,62 @@ soft-deletes the existing set and inserts the new one in a single `SaveChanges`,
 unfiltered `IX_PositionCompetency_Tenant_Position_Competency`. That is finding 7's third face and
 it will 500 on the first bulk-set that re-includes a competency already present. Slice 5 owns it.
 
+### Slice 2 — the job-description spine (2026-08-19) — `run-slice2.mjs`, 85 assertions
+
+Green twice; slices 0 and 1 re-run green. **308 assertions in the area.**
+
+**The good news first: all 11 child collections work.** Responsibilities, qualifications,
+competencies, physical demands, working conditions, equipment/tools, equipment training, reporting
+relationships, duty items, PPE requirements, medical requirements and responsibility KPIs each pass
+create → read back → update → read the update. That is ~44 endpoints with no execution history,
+and none of them was broken. `descriptions/{id}/details` assembles all of it in one payload, with
+KPIs nested under their responsibility and training under its equipment item.
+
+The first run failed 12 assertions. **Three were the application; nine were the harness** — worth
+separating, because the harness ones each carry a lesson.
+
+**Defect 1 — the document number repeats after a delete. Confirmed empirically:** two job
+descriptions came back as `JD-2026-00058`. `CountAsync(live rows this year) + 1` reissues a number
+the moment any row is soft-deleted, and with **no unique index on `JobDescriptionNumber`** nothing
+catches it — it silently produces two documents with one number. Now takes the highest number
+already issued and reads **through** the soft delete via `GetQueryableIncludingDeleted`: a deleted
+job description has still consumed its number, and a reissued number is worse than a gap. This is
+finding 8, and the quieter sibling of the area-13 counter trap — same cause, no 500 to announce it.
+
+**Defect 2 — `CreateJobDescriptionDto` dropped 18 fields** that both the entity and
+`UpdateJobDescriptionDto` carry: the entire classification, valuation and authority block. A create
+form had to save and then immediately save again, and anything that skipped the second save left
+the job-family / sub-family / level tables with no consumer at all — which is part of why they hold
+zero rows. Added and mapped. Create and update responses now re-read through `WithLookups()` so a
+write response and a subsequent GET agree.
+
+**Defect 3, the sharp one — `CreateNewVersionAsync` silently emptied the classification.** It
+copied title, summary, effective date and review cycle, and dropped job family, sub-family, level,
+staff level, salary grade, union, occupation code and the whole valuation — while `CloneAsync`, the
+*less* important path, copied every one of them. Versioning is the annual-review route: it is the
+one that must not lose the record. Now copies the same block, asserted field by field on the
+successor.
+
+**The nine harness errors, and what each taught:**
+
+- ⚠ **`versionNumber === 1` is asserting the database, not the code.** It came back 49, correctly:
+  versions are per position (MAX + 1) and the fixture position already carried 48 job descriptions
+  from area 6's runs and slices 0–1. Assert the *increment*.
+- ⚠ **Superseding happens on approval of the successor, not on drafting it** — a draft must not
+  retire the document the organisation is currently working to. My assertion demanded it at the
+  wrong moment. The corrected harness drives the whole path, which had never once run: draft
+  successor leaves the original Approved and un-superseded; approving it moves the original to
+  `Superseded` with an expiry date and moves the position's `current` to the successor.
+- ⚠ **`details.jobWorkingConditions` is the entity's navigation name; the DTO calls it
+  `workingConditions`.** Third instance in three slices of the same trap — a name read off the
+  wrong artefact. Caught by the harness rather than by a blank panel in the UI.
+
+**And one thing that looked like a fourth defect and was not:** clone appeared to drop the job
+family. It did not — it faithfully copied `null`, because defect 2 meant the source was never
+classified in the first place. A symptom two steps downstream of its cause.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-1 of 13 landed 2026-08-19. **223 assertions.**
+**IN PROGRESS** — slices 0-2 of 13 landed 2026-08-19. **308 assertions.**
