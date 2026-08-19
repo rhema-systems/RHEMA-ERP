@@ -869,8 +869,48 @@ registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-HR sweep.
   actors are hired into the right post rather than moved afterwards. *Written from the wrong
   artefact*, again, this time in the harness.
 
+### Slice 10 — the job-description screens (2026-08-19) — `run-slice10-ui.mjs`, 43 assertions
+
+Green twice; all ten backend harnesses re-run green. **662 assertions in the area.** Frontend `tsc`
+clean (the 19 remaining errors are all pre-existing, in another developer's inventory module) and
+`next lint` clean.
+
+Four screens: the register with coverage tiles, the create form, the detail screen with nine tabs
+over the eleven child collections, and a coverage work list at `/hr/job-descriptions/gaps`.
+
+⚠ **That route is `/gaps` and not `/coverage` for a reason worth carrying forward:** the repository
+`.gitignore` has a bare `coverage/` rule for test-coverage output, so the page was **silently
+excluded from the commit** — added, type-checked, linted, and invisible to git without a word. Any
+route directory named `coverage`, `dist` or `build` vanishes the same way. Renaming beats carrying a
+`git add -f` that the next person will not know about. Plus `types/hr/job-architecture.ts`
+and `services/hr/job-architecture.service.ts`, both written **from the C# DTOs**.
+
+**Three decisions the screens encode, each of them a defect this area already paid for:**
+
+1. ⚠ **The approve button renders off `canCurrentUserApprove`, never off a permission.** Once a
+   tenant publishes a definition the approver is whoever it names — a job-family owner, a department
+   head — and they hold no HR permission at all, while the direct route 409s for everyone. A
+   permission check would hide the button from exactly the people who need it, and show it to people
+   the API then refuses, which reads to a user as a broken backend.
+2. ⚠ **Untouched optional pickers send `undefined`, not `''`.** The form maps `value || undefined`
+   because an empty string on a Guid is a 400, not a null. The probe asserts **both** directions —
+   that the bare form saves, and that the same call sending `''` would 400 — so the mapping is
+   pinned as load-bearing rather than looking like defensive tidiness.
+3. ⚠ **Changing the job family clears the sub-family.** Two independent dropdowns produce a
+   cross-family mismatch the first time someone changes one and not the other, and the API refuses
+   it (slice 4). The probe asserts the refusal, so the clearing behaviour has a reason on record.
+
+**And the create form carries the classification**, which is the visible payoff of slice 2: one
+save, not two. Before that fix a form had to save and immediately save again, and anything that
+skipped the second left the taxonomy with no consumer.
+
+The probe also pins two naming traps the screens would otherwise have shipped: the detail
+collection is `workingConditions` (the entity navigation `JobWorkingConditions` would render
+`(undefined)` in a tab count), and `statusName` carries the enum **name** — a screen comparing
+against the `[Description]` label "Pending Review" would silently never match.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-9 of 13 landed 2026-08-19. **619 assertions.** FR-HR-134, 135 and 136 all delivered; the backend is complete. Slices 10-12 are the screens, slice 13 the content audit.
+**IN PROGRESS** — slices 0-10 of 13 landed 2026-08-19. **662 assertions.** FR-HR-134, 135 and 136 delivered; backend complete; the job-description screens are in. Slices 11-12 are the remaining screens, slice 13 the content audit.

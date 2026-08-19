@@ -638,6 +638,19 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // Area 17. FR-HR-134: a position is measured against its APPROVED job description, and only
+        // one stands at a time — approving a new version retires the one before it. Coverage is its
+        // own entry because the useful question is not how many descriptions exist but how many
+        // positions still have none.
+        title: 'Job Descriptions',
+        href: '/hr/job-descriptions',
+        icon: FileText,
+        children: [
+          { title: 'Register', href: '/hr/job-descriptions', icon: FileText },
+          { title: 'Coverage Gaps', href: '/hr/job-descriptions/gaps', icon: ClipboardList },
+        ],
+      },
+      {
         // Area 15b. The probation is per EMPLOYMENT TERM, not per person: a rehire gets a new one,
         // and an employee may accumulate several over a career. Length comes from the staff
         // category (FR-HR-031, senior 6 / junior 3), not from whoever fills in the form.
