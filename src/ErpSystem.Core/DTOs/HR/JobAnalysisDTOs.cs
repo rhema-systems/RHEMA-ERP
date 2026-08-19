@@ -695,6 +695,9 @@ public class ManpowerBudgetDto : BaseDto
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovalDate { get; set; }
+
+    /// <summary>Why the budget was sent back, when it was. See the entity for why this exists.</summary>
+    public string? RejectionReason { get; set; }
 }
 
 /// <summary>
@@ -852,6 +855,12 @@ public class UpdateManpowerBudgetDto : UpdateDtoBase
 /// <summary>
 /// DTO for approving a manpower budget
 /// </summary>
+/// <summary>Why a manpower budget was refused.</summary>
+public class RejectManpowerBudgetDto
+{
+    public string? Reason { get; set; }
+}
+
 public class ApproveManpowerBudgetDto
 {
     [Required]

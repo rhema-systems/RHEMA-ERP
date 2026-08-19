@@ -721,20 +721,64 @@ public class JobAnalysisController : ControllerBase
     }
 
     [Authorize(Policy = HrPermissions.ManpowerBudgetAdminPolicy)]
+    /// <summary>Approves a manpower budget directly (only when no workflow is published).</summary>
+    /// <remarks>
+    /// ⚠ The approver used to arrive as <c>[FromQuery] Guid approvedById</c> — caller-declared, on
+    /// the endpoint that authorises headcount and the money behind it, and (decision D-2) sets the
+    /// establishment that gates vacancy approval. Anyone able to call it could record any employee
+    /// as having approved the budget. It now comes from the token, like every other act performed
+    /// by the caller at the moment of the call.
+    /// </remarks>
     [HttpPost("budgets/{id:guid}/approve")]
-    public async Task<IActionResult> ApproveBudget(Guid id, [FromBody] ApproveManpowerBudgetDto dto, [FromQuery] Guid approvedById)
+    public async Task<IActionResult> ApproveBudget(Guid id, [FromBody] ApproveManpowerBudgetDto dto)
     {
+        var approvedById = GetCurrentEmployeeId();
+        if (approvedById == null)
+            return BadRequest("Your user account is not linked to an employee record.");
         dto.BudgetId = id;
-        await _manpowerBudgetService.ApproveAsync(dto, approvedById);
+        await _manpowerBudgetService.ApproveAsync(dto, approvedById.Value);
         return Ok(new { message = "Budget approved" });
     }
 
     [Authorize(Policy = HrPermissions.ManpowerBudgetAdminPolicy)]
+    /// <summary>Rejects a manpower budget directly (only when no workflow is published).</summary>
+    /// <remarks>
+    /// ⚠ This took <c>[FromBody] string</c> — a bare JSON string, which means a form has to send
+    /// <c>"the reason"</c> quotes and all rather than an object, and no typed client would produce
+    /// it by accident. Taking a DTO makes it a normal payload, and the reason is now stored rather
+    /// than discarded (see <c>ManpowerBudget.RejectionReason</c>).
+    /// </remarks>
     [HttpPost("budgets/{id:guid}/reject")]
-    public async Task<IActionResult> RejectBudget(Guid id, [FromBody] string reason)
+    public async Task<IActionResult> RejectBudget(Guid id, [FromBody] RejectManpowerBudgetDto dto)
     {
-        await _manpowerBudgetService.RejectAsync(id, reason);
+        await _manpowerBudgetService.RejectAsync(id, dto?.Reason ?? string.Empty);
         return Ok(new { message = "Budget rejected" });
+    }
+
+    /// <summary>
+    /// Approves the current workflow step for a manpower budget (FR-HR-135). Plain
+    /// <c>[Authorize]</c>: the approver is whoever the tenant named — a department head, then HR,
+    /// then the Managing Director — and the engine's <c>CanUserApproveAsync</c> is the check. A
+    /// permission gate here would refuse exactly those people; see the job description equivalent.
+    /// </summary>
+    [Authorize]
+    [HttpPost("budgets/{id:guid}/workflow/approve")]
+    public async Task<IActionResult> ApproveBudgetOnWorkflow(Guid id)
+    {
+        var approvedById = GetCurrentEmployeeId();
+        if (approvedById == null)
+            return BadRequest("Your user account is not linked to an employee record.");
+        await _manpowerBudgetService.ApproveViaWorkflowAsync(id, approvedById.Value);
+        return Ok(new { message = "Manpower budget approval step processed" });
+    }
+
+    /// <summary>Rejects the current workflow step for a manpower budget, keeping the reason.</summary>
+    [Authorize]
+    [HttpPost("budgets/{id:guid}/workflow/reject")]
+    public async Task<IActionResult> RejectBudgetOnWorkflow(Guid id, [FromBody] RejectManpowerBudgetDto dto)
+    {
+        await _manpowerBudgetService.RejectViaWorkflowAsync(id, dto?.Reason);
+        return Ok(new { message = "Manpower budget rejected" });
     }
 
     [Authorize(Policy = HrPermissions.ManpowerBudgetAdminPolicy)]

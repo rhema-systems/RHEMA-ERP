@@ -93,3 +93,81 @@ public sealed class JobDescriptionWorkflowStatusAdapter : IWorkflowStatusAdapter
            ?? throw new InvalidOperationException(
                $"{nameof(JobDescriptionWorkflowStatusAdapter)} received {entity?.GetType().Name ?? "null"}.");
 }
+
+/// <summary>
+/// Workflow status adapter for <see cref="ManpowerBudget"/> approval (area 17/18 slice 7).
+/// </summary>
+/// <remarks>
+/// <para><b>FRD FR-HR-135 names the chain outright</b> — <i>Department Head → HR → Managing
+/// Director</i> — which is a three-step approval that no permission model can express. It is also
+/// the requirement that makes this the sharpest workflow integration in the area: what is being
+/// approved is <b>headcount and the money behind it</b>, and once approved the budget becomes the
+/// establishment that gates whether a vacancy may be opened at all (FR-HR-136, decision D-2).</para>
+///
+/// <para><b>Rejection keeps its reason.</b> <c>RejectAsync</c> previously took a reason, set the
+/// status, and discarded it — a budget holder could see their budget had been refused with no way
+/// to find out why. The adapter writes it to <c>RejectionReason</c>, and so does the direct route.</para>
+///
+/// <para><b>⚠ <c>ApprovedById</c> is left alone here</b>, as on the job description: the engine
+/// hands back the approving <i>user</i> and <c>ApprovedById</c> is an Employee FK. The service
+/// resolves and stamps the employee.</para>
+///
+/// <para><b>Rejection returns to <see cref="ManpowerBudgetStatus.Rejected"/>, which is terminal,
+/// and that is the right shape here.</b> Unlike a job description — a document that goes back for
+/// revision — a rejected budget for a fiscal year is a decision: the department is told no, and a
+/// different budget is a different submission. Recall returns to Draft, which is the route back for
+/// a submitter who wants to change their own numbers before anyone rules on them.</para>
+/// </remarks>
+public sealed class ManpowerBudgetWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ManpowerBudget",
+        "Manpower Budget",
+        "MANPOWER_BUDGET"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => Apply(Require(entity), outcome, null);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(Require(entity), outcome, rejectionReason);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => Apply(Require(entity), WorkflowOutcome.Recalled, reason);
+
+    private static void Apply(ManpowerBudget budget, WorkflowOutcome outcome, string? reason)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                // The decision only. The service stamps the approver and applies the establishment.
+                budget.Status = ManpowerBudgetStatus.Approved;
+                budget.ApprovalDate = DateTime.UtcNow;
+                budget.RejectionReason = null;
+                break;
+
+            case WorkflowOutcome.Rejected:
+                budget.Status = ManpowerBudgetStatus.Rejected;
+                budget.RejectionReason = string.IsNullOrWhiteSpace(reason)
+                    ? "Rejected without a stated reason."
+                    : reason.Trim();
+                break;
+
+            case WorkflowOutcome.Recalled:
+                budget.Status = ManpowerBudgetStatus.Draft;
+                budget.RejectionReason = null;
+                break;
+
+            case WorkflowOutcome.Pending:
+            default:
+                budget.Status = ManpowerBudgetStatus.Submitted;
+                break;
+        }
+    }
+
+    private static ManpowerBudget Require(object entity)
+        => entity as ManpowerBudget
+           ?? throw new InvalidOperationException(
+               $"{nameof(ManpowerBudgetWorkflowStatusAdapter)} received {entity?.GetType().Name ?? "null"}.");
+}

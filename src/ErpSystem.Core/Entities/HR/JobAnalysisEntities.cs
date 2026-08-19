@@ -597,6 +597,16 @@ public class ManpowerBudget : TenantEntity
 
     public DateTime? ApprovalDate { get; set; }
 
+    /// <summary>Why the budget was sent back, when it was.</summary>
+    /// <remarks>
+    /// ⚠ Added in area 17 slice 7. `RejectAsync(budgetId, reason)` took a reason, set the status to
+    /// Rejected, and <b>discarded the reason entirely</b> — it reached the log line and nothing
+    /// else. A budget holder opening a rejected budget could see that it had been refused and had
+    /// no way to find out why, which makes the rejection unactionable.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
     public virtual ICollection<ManpowerBudgetLine> BudgetLines { get; set; } = new List<ManpowerBudgetLine>();
 }
 

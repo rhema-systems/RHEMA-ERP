@@ -42,6 +42,7 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'SuccessionPlan',
     'ProbationPeriod',
     'JobDescription',
+    'ManpowerBudget',
   ],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],

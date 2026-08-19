@@ -1523,6 +1523,38 @@ public class SimpleWorkflowService : IWorkflowService
             return context;
         }
 
+        if (IsEntityType(entityTypeRecord, "MANPOWER_BUDGET", "ManpowerBudget", "Manpower Budget"))
+        {
+            var budget = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.ManpowerBudget>()
+                .FirstOrDefaultAsync(b => b.Id == entityId)
+                ?? throw new InvalidOperationException("Manpower budget not found");
+
+            // What a routing rule branches on here is money and headcount growth, not document
+            // type. FR-HR-135's chain is Department Head to HR to Managing Director for every
+            // budget, but a tenant that wants the MD step only above a threshold needs the total
+            // and the headcount delta to say so — and "how many NEW posts" is a different question
+            // from "how much does this cost", which is why both are here.
+            context["budgetNumber"] = budget.BudgetNumber;
+            context["fiscalYear"] = budget.FiscalYear;
+            context["organizationUnitId"] = budget.OrganizationUnitId;
+            context["organizationLevelId"] = budget.OrganizationLevelId;
+            context["currentHeadcount"] = budget.CurrentHeadcount;
+            context["plannedHeadcount"] = budget.PlannedHeadcount;
+            context["headcountIncrease"] = budget.PlannedHeadcount - budget.CurrentHeadcount;
+            context["plannedNewHires"] = budget.PlannedNewHires;
+            context["totalBudget"] = budget.TotalBudget;
+            context["salaryBudget"] = budget.SalaryBudget;
+            context["costIncrease"] = budget.PlannedSalaryCost - budget.CurrentSalaryCost;
+            context["status"] = budget.Status.ToString();
+
+            var lineCount = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.ManpowerBudgetLine>()
+                .GetQueryable()
+                .CountAsync(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted);
+            context["budgetLineCount"] = lineCount;
+
+            return context;
+        }
+
         if (IsEntityType(entityTypeRecord, "JOB_DESCRIPTION", "JobDescription", "Job Description"))
         {
             var jobDescription = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.JobDescription>()

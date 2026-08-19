@@ -31932,6 +31932,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("RecruitmentBudget")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<decimal>("SalaryBudget")
                         .HasColumnType("decimal(18,2)");
 

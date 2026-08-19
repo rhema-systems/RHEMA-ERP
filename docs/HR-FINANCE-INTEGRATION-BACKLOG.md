@@ -108,9 +108,48 @@ same spend area 7 already budgets through `TrainingBudget`. If a successor's cou
 both places it will be counted twice. Decide once whether succession development costs are their
 own budget line or a projection of the training budget.
 
+## Area 17/18 — Job architecture, competency & manpower budget
+
+The **manpower budget is the largest single money surface in the HR module**, and unlike most rows
+in this register it is not a payment — it is an *authorisation*. Approving one (FR-HR-135:
+Department Head → HR → Managing Director) authorises both headcount and the cost of it, and from
+slice 8 it also sets the establishment that gates whether a vacancy may be opened at all. That
+makes it the natural place for HR planning and the Finance budget to meet, and the place where a
+double-count would be least visible.
+
+| Money event | Where it lives | What it is |
+|---|---|---|
+| **Salary budget** | `ManpowerBudget.SalaryBudget` | Planned salary cost for the fiscal year, per organisation unit |
+| **Benefits budget** | `ManpowerBudget.BenefitsBudget` | Planned benefits cost |
+| **Recruitment budget** | `ManpowerBudget.RecruitmentBudget` | Planned cost of filling the posts the budget authorises |
+| **Training budget** | `ManpowerBudget.TrainingBudget` | ⚠ see the overlap below |
+| **Total budget** | `ManpowerBudget.TotalBudget` | Computed from the four above, not supplied |
+| **Actual spent / variance** | `ManpowerBudget.ActualSpent`, `.Variance` | ⚠ **no writer anywhere** — see below |
+| **Per-position planned cost** | `ManpowerBudgetLine.PlannedTotalCost`, `.PlannedAverageSalary` | The line-level build-up of the salary budget |
+| **Per-position current cost** | `ManpowerBudgetLine.CurrentTotalCost`, `.CurrentAverageSalary` | The baseline it is measured against |
+| **Job valuation** | `JobDescription.IndustryBenchmarkSalary`, `.EstimatedSalaryLow/High`, `.RoleIntrinsicValue` | Not a spend — a *pricing* input that suggests a salary grade |
+
+⚠ **No currency anywhere.** Unlike travel and succession, `ManpowerBudget` carries no
+`CurrencyCode`: every figure is an unqualified decimal. That was left as-is deliberately rather than
+guessed at — adding a currency to a budget is a Finance-shaped decision about what the reporting
+currency of an HR plan even is, and this register is the right place to raise it rather than a
+slice. **Settle it during the sweep**, and note that it interacts with the double-count below.
+
+⚠ **`ActualSpent` and `Variance` have no writer.** Both columns exist, both are surfaced on the
+DTO, and nothing in the codebase ever sets them — a budget's variance is permanently zero. They are
+the two fields that can only be filled from actuals, which means from Finance. **This is the single
+clearest case in the whole register for the sweep to own**, rather than HR inventing a number.
+
+⚠ **Two overlaps to settle, not one:**
+- `ManpowerBudget.TrainingBudget` and area 7's own training budget describe the same spend, and now
+  so does succession development (recorded under area 13). That is a **three-way** double-count.
+- `ManpowerBudget.RecruitmentBudget` overlaps whatever recruitment cost area 6 tracks per
+  requisition. Decide once whether the manpower budget is the parent envelope that the others draw
+  down from, or a parallel plan.
+
 ### Areas not yet built ⏳
 
-14 awards · 16 assets · 17 competency · 18–23 · 25–27 portals · plus the deferred separation/exit
+14 awards · 16 assets · 19–23 · 25–27 portals · plus the deferred separation/exit
 module, whose **final settlement** is unavoidably an accounting event.
 
 ---
@@ -118,7 +157,10 @@ module, whose **final settlement** is unavoidably an accounting event.
 ## Before the sweep starts
 
 - [ ] Back-fill the five closed areas above.
-- [ ] Settle the succession-development vs training-budget double-count named under area 13.
+- [ ] Settle the **three-way** training double-count: area 7's training budget, succession
+      development activities, and `ManpowerBudget.TrainingBudget`.
+- [ ] Decide who writes `ManpowerBudget.ActualSpent` and `.Variance` — nothing does today.
+- [ ] Decide whether a manpower budget carries a currency at all, and if so which.
 - [ ] Get TDC's answer on payroll-vs-direct-payment reimbursement.
 - [ ] Get TDC's answer on cost attribution (project / cost centre dimensions).
 - [ ] Confirm the Finance module's posting entry point and who owns it — Finance is not this

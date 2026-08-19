@@ -1680,6 +1680,8 @@ public class ManpowerBudgetService : IManpowerBudgetService
     private readonly IManpowerBudgetRepository _budgetRepository;
     private readonly IManpowerBudgetLineRepository _budgetLineRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ManpowerBudgetService> _logger;
 
@@ -1687,12 +1689,16 @@ public class ManpowerBudgetService : IManpowerBudgetService
         IManpowerBudgetRepository budgetRepository,
         IManpowerBudgetLineRepository budgetLineRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegration,
+        IWorkflowStatusAdapterRegistry workflowAdapters,
         IUnitOfWork unitOfWork,
         ILogger<ManpowerBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
         _budgetLineRepository = budgetLineRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegration = workflowIntegration;
+        _workflowAdapters = workflowAdapters;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -1888,12 +1894,124 @@ public class ManpowerBudgetService : IManpowerBudgetService
         if (entity.Status != ManpowerBudgetStatus.Draft)
             throw JobArchitectureException.InvalidState("Only draft budgets can be submitted for approval.");
 
-        entity.Status = ManpowerBudgetStatus.Submitted;
+        // ⚠ Refuse an empty budget before troubling anyone with it. A manpower budget with no lines
+        // authorises no posts, so sending one up FR-HR-135's three-step chain wastes three people's
+        // time and — because slice 8 derives the establishment from the lines — would approve an
+        // establishment of nothing.
+        var lineCount = await _budgetLineRepository.GetQueryable()
+            .CountAsync(l => l.ManpowerBudgetId == entity.Id && !l.IsDeleted, cancellationToken);
+        if (lineCount == 0)
+            throw JobArchitectureException.InvalidState(
+                "This budget has no lines, so it authorises no posts. Add at least one before submitting it.");
+
+        if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
+        {
+            var submitResult = await _workflowIntegration.SubmitAsync(BudgetWorkflowEntityType, entity.Id);
+            if (!submitResult.ExecutionResult.Success)
+                throw JobArchitectureException.InvalidState(
+                    submitResult.ExecutionResult.Message ?? "Failed to start the manpower budget approval workflow.");
+
+            _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
+                .ApplySubmitOutcome(entity, submitResult.Outcome, _currentUserProvider.UserId);
+        }
+        else
+        {
+            entity.Status = ManpowerBudgetStatus.Submitted;
+        }
+
+        entity.RejectionReason = null;
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Manpower budget submitted for approval: {BudgetNumber}", entity.BudgetNumber);
+
+        return true;
+    }
+
+    // ── Approval on the workflow engine (slice 7, FR-HR-135) ──────────────────
+
+    private const string BudgetWorkflowEntityType = "ManpowerBudget";
+
+    /// <summary>Whether this tenant has published a manpower-budget approval workflow.</summary>
+    private async Task<bool> IsBudgetWorkflowConfiguredAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _unitOfWork.Repository<Entities.Workflow.WorkflowDefinition>().GetQueryable()
+                .AnyAsync(d => d.TenantId == GetTenantId()
+                            && !d.IsDeleted
+                            && d.IsActive
+                            && d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                            && d.EntityType != null
+                            && d.EntityType.Code == "MANPOWER_BUDGET",
+                    cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not determine whether a manpower budget approval workflow is published; allowing the direct path.");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ApproveViaWorkflowAsync(Guid budgetId, Guid approvedById, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await _workflowIntegration.ProcessApprovalAsync(BudgetWorkflowEntityType, budgetId, userId, "Approve");
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the manpower budget approval.");
+
+        _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+
+        // ⚠ Only when the chain actually completes. FR-HR-135 has three steps, and a Department
+        // Head approving the first must not stamp the budget as approved — the engine returns
+        // Pending for a mid-chain step, and an approver is not the approver until the last one.
+        if (result.Outcome == WorkflowOutcome.Approved)
+            entity.ApprovedById = approvedById;
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget {Number} approval step processed: {Outcome}",
+            entity.BudgetNumber, result.Outcome);
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RejectViaWorkflowAsync(Guid budgetId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var result = await _workflowIntegration.ProcessApprovalAsync(
+            BudgetWorkflowEntityType, budgetId, userId, "Reject", rejectionText);
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the manpower budget rejection.");
+
+        _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget {Number} rejected on the workflow", entity.BudgetNumber);
 
         return true;
     }
@@ -1905,7 +2023,13 @@ public class ManpowerBudgetService : IManpowerBudgetService
         if (entity.Status != ManpowerBudgetStatus.Submitted && entity.Status != ManpowerBudgetStatus.UnderReview)
             throw JobArchitectureException.InvalidState("Only submitted budgets can be approved.");
 
+        if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
+            throw JobArchitectureException.InvalidState(
+                "This tenant approves manpower budgets through the workflow engine (FR-HR-135). "
+                + "Approve it from the workflow queue instead.");
+
         entity.ApprovedById = approvedById;
+        entity.RejectionReason = null;
         entity.ApprovalDate = DateTime.UtcNow;
         entity.Status = ManpowerBudgetStatus.Approved;
 
@@ -1921,7 +2045,17 @@ public class ManpowerBudgetService : IManpowerBudgetService
     {
         var entity = await GetOwnedBudgetAsync(budgetId);
 
+        if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
+            throw JobArchitectureException.InvalidState(
+                "This tenant approves manpower budgets through the workflow engine (FR-HR-135). "
+                + "Reject it from the workflow queue instead.");
+
         entity.Status = ManpowerBudgetStatus.Rejected;
+        // ⚠ This took a reason and threw it away — the budget holder could see it had been refused
+        // and had no way to find out why, which makes the rejection unactionable.
+        entity.RejectionReason = string.IsNullOrWhiteSpace(reason)
+            ? "Rejected without a stated reason."
+            : reason.Trim();
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

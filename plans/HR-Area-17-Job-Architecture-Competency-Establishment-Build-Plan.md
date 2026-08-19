@@ -715,8 +715,66 @@ position entirely. Fifteen assertions failed and every one of them was right to.
 resolves an entity indirectly (employee → position), the fixture has to set up the indirection, not
 the endpoint's argument.** `mintActorWithRoles` now takes a position index.
 
+### Slice 7 — the manpower budget, FR-HR-135, and area 6 coming alive (2026-08-19) — `run-slice7.mjs`, 49 assertions
+
+Green twice; all of slices 0-6 re-run green. **554 assertions in the area.**
+
+**Application 8 of the workflow recipe, and the first one in this module with a real chain.** FRD
+FR-HR-135 names three steps — Department Head → HR → Managing Director — so the fixture publishes
+three approval steps rather than one. That is what makes the assertion this slice exists for
+possible: **after the department head approves, the budget is NOT approved and NOBODY is stamped as
+the approver.** A single-step definition would have passed every assertion about who may approve
+and none about what a mid-chain approval must not do. Only the Managing Director's approval — the
+last in the chain — makes it real, and it is his employee id that lands in `ApprovedById`.
+
+**Three defects fixed, and the third is in another area:**
+
+1. `ApproveBudget` took **`[FromQuery] Guid approvedById`** — caller-declared, on the endpoint that
+   authorises headcount and the money behind it. Now from the token. (Finding 10, closed.)
+2. `RejectAsync` took a reason and **discarded it** — it reached a log line and nothing else, so a
+   budget holder could see their budget refused with no way to find out why. New `RejectionReason`
+   column (migration `20260819040000_AddManpowerBudgetRejectionReason`), written by both routes.
+   The endpoint also took `[FromBody] string` — a bare JSON string a form must send quotes and all;
+   it takes a DTO now. (Finding 11, closed.)
+3. ⚠⚠ **A DRAFT manpower budget was authorising headcount.** `BuildBudgetCheckAsync` in
+   `StaffRequisitionService` matched any `ManpowerBudgetLine` of the right position and fiscal year
+   and merely *sorted* approved ones first, so a department typing "50" into a draft would constrain
+   — or excuse — a requisition before anyone had ruled on it. That inverts the point of FR-HR-135's
+   chain. **Nobody could have found it before this area**: there were no `ManpowerBudgetLine` rows
+   in the database at all, so the branch had never once run with data. Only `Approved` or `Active`
+   counts now.
+
+**Area 6's enforcement is live for the first time**, and the harness follows one requisition all the
+way through: "no budget line" while the budget is a draft, still "no budget line" mid-chain, and
+only after full approval *"2 filled + 5 requested against an approved budget of 3"*. A one-post
+requisition against the same budget reads "within budget", so the check is not merely a red light.
+
+Also added: **an empty budget cannot be submitted.** It authorises no posts, so sending one up a
+three-step chain wastes three people's time — and slice 8 derives the establishment from the lines,
+so an empty one would approve an establishment of nothing.
+
+⚠ **Two fixture lessons, both the area-13 shape, both caught only by re-running:**
+
+- The empty-budget rule **broke slice 1**, which submitted a lineless budget. Correct rule, older
+  fixture.
+- Slice 7 was **not repeatable against itself**. The budget check matches on **position + fiscal
+  year**, so the second run found the first run's *approved* budget and "a draft authorises
+  nothing" failed — correctly. Varying the fiscal year is not a fix: `FiscalYear` is validated to
+  2000-2100, which is 70 usable values and therefore a collision waiting to happen, and an approved
+  budget cannot be deleted to clean up after itself. `mintPosition()` gives the run a position it
+  owns, removing the shared axis instead of making a clash less likely. **A harness is not
+  repeatable until it has been run twice in a row; "green" on a first run proves less than it
+  looks.**
+
+**Money events registered** in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, including two findings for
+the sweep rather than for a slice: `ManpowerBudget` carries **no currency at all**, and
+`ActualSpent`/`Variance` **have no writer anywhere** — they can only come from Finance actuals, and
+a budget's variance is permanently zero until the sweep decides who fills them. Also a **three-way**
+training double-count: area 7's training budget, succession development activities, and
+`ManpowerBudget.TrainingBudget`.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-6 of 13 landed 2026-08-19. **505 assertions.**
+**IN PROGRESS** — slices 0-7 of 13 landed 2026-08-19. **554 assertions.**

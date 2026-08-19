@@ -141,6 +141,15 @@ public interface IManpowerBudgetService
     Task<ManpowerBudgetDto> UpdateAsync(UpdateManpowerBudgetDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> SubmitForApprovalAsync(Guid budgetId, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveManpowerBudgetDto approveDto, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the current workflow step for a manpower budget (FR-HR-135: Department Head → HR →
+    /// Managing Director). Stamps the approver only when the step completes the chain.
+    /// </summary>
+    Task<bool> ApproveViaWorkflowAsync(Guid budgetId, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>Rejects the current workflow step for a manpower budget, keeping the reason.</summary>
+    Task<bool> RejectViaWorkflowAsync(Guid budgetId, string? reason, CancellationToken cancellationToken = default);
     Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 

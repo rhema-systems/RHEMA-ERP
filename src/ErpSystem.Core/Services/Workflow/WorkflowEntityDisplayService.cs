@@ -250,6 +250,26 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("ManpowerBudget") || key == Normalize("MANPOWER_BUDGET") || key == Normalize("Manpower Budget"))
+            {
+                var budget = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.ManpowerBudget>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var unit = budget?.OrganizationUnitId == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.OrganizationUnit>()
+                        .FirstOrDefaultAsync(u => u.Id == budget.OrganizationUnitId);
+                info.EntityType = "ManpowerBudget";
+                info.EntityNumber = budget?.BudgetNumber;
+                // The unit, the year and the headcount being asked for. An approver deciding a
+                // manpower budget is deciding how many people a department may have, so the number
+                // belongs in the notification rather than one click away.
+                info.EntityName = budget == null
+                    ? null
+                    : $"{unit?.Name ?? "Organisation"} {budget.FiscalYear} — {budget.PlannedHeadcount} post(s)";
+                info.ActionUrl = $"/hr/manpower-budgets/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("JobDescription") || key == Normalize("JOB_DESCRIPTION") || key == Normalize("Job Description"))
             {
                 var jobDescription = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.JobDescription>()

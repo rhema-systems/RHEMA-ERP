@@ -843,7 +843,15 @@ public class StaffRequisitionService : IStaffRequisitionService
             RequestedPositions = entity.NumberOfPositions,
         };
 
-        // Match the position's budget line for the fiscal year. Prefer an Active/Approved budget.
+        // Match the position's budget line for the fiscal year.
+        //
+        // ⚠ Only an APPROVED or ACTIVE budget counts. This previously matched any budget and merely
+        // ordered approved ones first, so a Draft budget line constrained — or authorised — a
+        // requisition. That inverts the point of FR-HR-135's chain: headcount is authorised by
+        // Department Head → HR → Managing Director, and until they have ruled, a department typing
+        // "50" into a draft has authorised nothing. Nobody could have noticed before area 17,
+        // because there were no ManpowerBudgetLine rows in the database at all (area-17 build plan
+        // §3.3), so this branch had never once been reached with data.
         var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable()
             .Include(l => l.ManpowerBudget)
             .Where(l => l.TenantId == entity.TenantId
@@ -851,9 +859,10 @@ public class StaffRequisitionService : IStaffRequisitionService
                      && !l.IsDeleted
                      && l.ManpowerBudget != null
                      && !l.ManpowerBudget.IsDeleted
-                     && l.ManpowerBudget.FiscalYear == fiscalYear)
+                     && l.ManpowerBudget.FiscalYear == fiscalYear
+                     && (l.ManpowerBudget.Status == ManpowerBudgetStatus.Approved
+                      || l.ManpowerBudget.Status == ManpowerBudgetStatus.Active))
             .OrderByDescending(l => l.ManpowerBudget.Status == ManpowerBudgetStatus.Active)
-            .ThenByDescending(l => l.ManpowerBudget.Status == ManpowerBudgetStatus.Approved)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (line is null)
@@ -863,7 +872,7 @@ public class StaffRequisitionService : IStaffRequisitionService
             result.ProjectedHeadcount = entity.NumberOfPositions;
             result.Message = mode == BudgetEnforcementMode.Off
                 ? "Budget enforcement is turned off."
-                : $"No manpower budget line exists for this position in {fiscalYear}; the requisition is not budget-constrained.";
+                : $"No approved manpower budget line exists for this position in {fiscalYear}; the requisition is not budget-constrained.";
             return result;
         }
 
