@@ -143,6 +143,28 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)probationStatus;
                 break;
 
+            // Job architecture, competency and manpower budget (areas 17/18). Same shape again —
+            // without this case, all 76 rules in those three services were flattened to one of two
+            // fixed strings. See JobArchitectureException.
+            case JobArchitectureException jobArchEx:
+                var jobArchStatus = jobArchEx.Reason switch
+                {
+                    JobArchitectureFailureReason.NotFound => HttpStatusCode.NotFound,
+                    JobArchitectureFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    JobArchitectureFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = jobArchStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)jobArchStatus;
+                response.Detail = jobArchEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)jobArchStatus;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Status = (int)HttpStatusCode.Conflict;

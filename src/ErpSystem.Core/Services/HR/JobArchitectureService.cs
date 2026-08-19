@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Extensions;
@@ -47,7 +48,7 @@ public class JobArchitectureService : IJobArchitectureService
     {
         var entity = await _familyRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Job family not found");
+            throw JobArchitectureException.NotFound("Job family not found");
         return entity;
     }
 
@@ -55,7 +56,7 @@ public class JobArchitectureService : IJobArchitectureService
     {
         var entity = await _subFamilyRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Sub-family not found");
+            throw JobArchitectureException.NotFound("Sub-family not found");
         return entity;
     }
 
@@ -63,7 +64,7 @@ public class JobArchitectureService : IJobArchitectureService
     {
         var entity = await _levelRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Job level not found");
+            throw JobArchitectureException.NotFound("Job level not found");
         return entity;
     }
 

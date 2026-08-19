@@ -2,9 +2,11 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -58,7 +60,7 @@ public class CompetencyService : ICompetencyService
     {
         var entity = await _competencyRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Competency with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Competency with ID '{id}' not found.");
         return entity;
     }
 
@@ -74,7 +76,7 @@ public class CompetencyService : ICompetencyService
         var entity = await _competencyRepository.GetWithFullDetailsAsync(id);
 
         if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException($"Competency with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Competency with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -173,7 +175,7 @@ public class CompetencyService : ICompetencyService
         var duplicate = await _competencyRepository.GetQueryable()
             .AnyAsync(c => c.TenantId == tenantId && c.Code.ToLower() == normalized, cancellationToken);
         if (duplicate)
-            throw new InvalidOperationException($"A competency with code '{createDto.Code}' already exists.");
+            throw JobArchitectureException.Conflict($"A competency with code '{createDto.Code}' already exists.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -196,7 +198,7 @@ public class CompetencyService : ICompetencyService
             var duplicate = await _competencyRepository.GetQueryable()
                 .AnyAsync(c => c.TenantId == tenantId && c.Id != entity.Id && c.Code.ToLower() == normalized, cancellationToken);
             if (duplicate)
-                throw new InvalidOperationException($"A competency with code '{updateDto.Code}' already exists.");
+                throw JobArchitectureException.Conflict($"A competency with code '{updateDto.Code}' already exists.");
         }
 
         entity.UpdateEntity(updateDto, updatedByUserId);
@@ -272,7 +274,7 @@ public class CompetencySkillIndicatorService : ICompetencySkillIndicatorService
     {
         var entity = await _indicatorRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Competency skill indicator with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Competency skill indicator with ID '{id}' not found.");
         return entity;
     }
 
@@ -309,7 +311,7 @@ public class CompetencySkillIndicatorService : ICompetencySkillIndicatorService
 
         var existing = await _indicatorRepository.GetByCompetencyAndSkillAsync(createDto.CompetencyId, createDto.SkillId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("A skill indicator for this competency–skill pairing already exists. Update the existing record instead.");
+            throw JobArchitectureException.Conflict("A skill indicator for this competency–skill pairing already exists. Update the existing record instead.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -396,9 +398,13 @@ public class PositionCompetencyService : IPositionCompetencyService
 
     private async Task<PositionCompetency> GetOwnedPositionCompetencyAsync(Guid id)
     {
-        var entity = await _positionCompetencyRepository.GetByIdAsync(id);
+        // The generic GetByIdAsync carries no navigations, so this read returned a row with a
+        // blank PositionTitle, CompetencyCode and CompetencyName — 200, and useless to a screen.
+        var entity = await _positionCompetencyRepository.GetQueryable()
+            .WithLookups()
+            .FirstOrDefaultAsync(pc => pc.Id == id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Position competency with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Position competency with ID '{id}' not found.");
         return entity;
     }
 
@@ -435,7 +441,7 @@ public class PositionCompetencyService : IPositionCompetencyService
 
         var existing = await _positionCompetencyRepository.GetByPositionAndCompetencyAsync(createDto.PositionId, createDto.CompetencyId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("This competency is already assigned to the position. Update the existing record instead.");
+            throw JobArchitectureException.Conflict("This competency is already assigned to the position. Update the existing record instead.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -545,9 +551,13 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
 
     private async Task<EmployeeCompetency> GetOwnedEmployeeCompetencyAsync(Guid id)
     {
-        var entity = await _employeeCompetencyRepository.GetByIdAsync(id);
+        // Same shape as the position requirement above: without the chain this returned an
+        // assessment with no employee name, no competency name and no assessor.
+        var entity = await _employeeCompetencyRepository.GetQueryable()
+            .WithLookups()
+            .FirstOrDefaultAsync(ec => ec.Id == id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Employee competency with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Employee competency with ID '{id}' not found.");
         return entity;
     }
 
@@ -563,7 +573,7 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
         var entity = await _employeeCompetencyRepository.GetWithHistoryAsync(id);
 
         if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException($"Employee competency with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Employee competency with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -595,7 +605,7 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
 
         var existing = await _employeeCompetencyRepository.GetByEmployeeAndCompetencyAsync(createDto.EmployeeId, createDto.CompetencyId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("An assessment record already exists for this employee–competency pair. Use the update operation to record a re-assessment.");
+            throw JobArchitectureException.Conflict("An assessment record already exists for this employee–competency pair. Use the update operation to record a re-assessment.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -645,7 +655,7 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
         // Load employee for display fields and current position
         var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
         if (employee == null || employee.TenantId != tenantId)
-            throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+            throw JobArchitectureException.NotFound($"Employee with ID '{employeeId}' not found.");
 
         // Load position for title
         var position = await _unitOfWork.Repository<EmployeePosition>().GetByIdAsync(employee.PositionId);
@@ -709,7 +719,7 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
 
         var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
         if (employee == null || employee.TenantId != tenantId)
-            throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+            throw JobArchitectureException.NotFound($"Employee with ID '{employeeId}' not found.");
 
         var position = await _unitOfWork.Repository<EmployeePosition>().GetByIdAsync(employee.PositionId);
         if (position != null && position.TenantId != tenantId)
@@ -792,7 +802,7 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
                 }
                 else
                 {
-                    throw new ArgumentException("Each update item must supply either EmployeeCompetencyId (re-assessment) or CompetencyId (first assessment).");
+                    throw JobArchitectureException.Invalid("Each update item must supply either EmployeeCompetencyId (re-assessment) or CompetencyId (first assessment).");
                 }
 
                 result.Succeeded++;
@@ -868,7 +878,7 @@ public class EmployeeCompetencyHistoryService : IEmployeeCompetencyHistoryServic
     {
         var entity = await _historyRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Competency history record with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Competency history record with ID '{id}' not found.");
         return entity;
     }
 

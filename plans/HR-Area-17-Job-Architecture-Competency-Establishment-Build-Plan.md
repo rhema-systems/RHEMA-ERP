@@ -399,8 +399,62 @@ a name rather than from the DTO:
 **Also confirmed:** the API binds enum names from JSON (`"Core"`, `"Technical"`, `"High"` all
 bound), so the harness and the eventual UI can send strings.
 
+### Slice 1 — the read and error contracts (2026-08-19) — `run-slice1.mjs`, 145 assertions
+
+Green twice; `probe-reads.mjs` now reports zero blanks.
+
+**The read contract.** The probe built one fully populated fixture — taxonomy, staff level, salary
+grade, a job description carried all the way to `Approved`, a competency, a position requirement,
+an employee assessment, a budget with a line — and then read it back through every endpoint. It
+found **12 reads returning a blank resolved name**. The `.Include` chains had drifted exactly as
+that failure mode predicts: the by-id reads carried all ten job-description lookups, the list,
+paged, by-position and by-status reads carried two. Same row, different content depending on which
+endpoint fetched it, every one a 200.
+
+Fixed with one chain per entity — `JobArchitectureQueryExtensions.WithLookups()` — called by
+**26 read paths**: 7 in `JobAnalysisService`, 12 in `JobAnalysisRepository`, 7 in
+`CompetencyRepositories`. Two of those were worse than a partial chain: the owned-read helpers for
+`PositionCompetency` and `EmployeeCompetency` used the generic `GetByIdAsync`, which carries **no
+navigations at all**, so `GET position-competencies/{id}` returned a requirement with no position
+title, no competency code and no competency name.
+
+⚠ The point of one shared chain rather than added includes: a `*Name` field with no matching
+`.Include` is a blank column waiting to ship, and per-method chains decay the next time a lookup
+FK is added. There are now 10 lookups on `JobDescription` and one place to add the eleventh.
+
+**The error contract.** `GlobalExceptionHandlingMiddleware` replaces the detail of **both**
+`ArgumentException` and `InvalidOperationException` with a fixed string, and these three services
+raised nothing else — **76 throws, all mute**, with "not found" indistinguishable from a malformed
+payload. `JobArchitectureException` classifies the refusal (NotFound → 404, InvalidState and
+Conflict → 409, Invalid → 400) and **68 throws converted**: 53 NotFound, 9 InvalidState,
+5 Conflict, 1 Invalid. The 8 left alone are all "No tenant is associated with the current user" —
+infrastructure, not a rule a caller can act on.
+
+Messages that now reach the user, none of which had ever been seen: *"Only draft job descriptions
+can be submitted for review"*, *"Cannot update an approved job description. Create a new version
+instead"*, *"Only submitted budgets can be approved"*, *"This competency is already assigned to
+the position"*, *"An assessment record already exists for this employee–competency pair. Use the
+update operation to record a re-assessment."* The harness asserts the message, not only the code.
+
+**Three things the probe reported that are NOT defects**, each now stated in the harness so nobody
+re-chases them:
+
+1. `descriptions/position/{id}` and `descriptions/status/{status}` return
+   `JobDescriptionSummaryDto` — a deliberate narrow projection. The register screen uses
+   `descriptions/paged`, which carries the full DTO.
+2. `employee-competencies/{id}/history` is empty after a create, correctly: the history snapshots
+   the values a **re-assessment** replaced. Slice 1 asserts both directions — 0 rows after the
+   create, 1 row after the update, holding the level it replaced.
+3. `CompetencySkillIndicatorController` has its own `api/competency-skill-indicators` route, so the
+   route-collision risk in §3.11 is cleared.
+
+**Recorded, not fixed here:** `PositionCompetencyRepository.BulkReplaceForPositionAsync`
+soft-deletes the existing set and inserts the new one in a single `SaveChanges`, straight into the
+unfiltered `IX_PositionCompetency_Tenant_Position_Competency`. That is finding 7's third face and
+it will 500 on the first bulk-set that re-includes a competency already present. Slice 5 owns it.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slice 0 of 13 landed 2026-08-19. **78 assertions.**
+**IN PROGRESS** — slices 0-1 of 13 landed 2026-08-19. **223 assertions.**
