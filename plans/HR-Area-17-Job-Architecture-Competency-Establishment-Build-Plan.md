@@ -909,8 +909,38 @@ collection is `workingConditions` (the entity navigation `JobWorkingConditions` 
 `(undefined)` in a tab count), and `statusName` carries the enum **name** — a screen comparing
 against the `[Description]` label "Pending Review" would silently never match.
 
+### Slice 11 — the competency screens (2026-08-19) — `run-slice11-ui.mjs`, 42 assertions
+
+Green twice; all eleven earlier harnesses re-run green. **704 assertions in the area.** Frontend
+`tsc` back to the 19-error pre-existing baseline, `next lint` clean.
+
+Four screens: the framework under Administration (setup), the organisation gap view, the position
+requirements editor, and an employee's own profile and gaps.
+
+**Three things the screens are careful about, each a defect this area already paid for:**
+
+1. ⚠ **"Below requirement" and "not assessed" stay separate all the way to the tiles.** They are
+   two counts, never summed. An unknown is not a training need, and the two call for different
+   actions — a course, or an assessment. The probe asserts them independently for the same reason.
+2. ⚠ **A null level renders as "—", never as 0.** Rendering an unassessed competency as zero would
+   tell someone they scored the lowest possible mark on something nobody has looked at.
+3. ⚠ **The requirements editor sends the whole set on every save**, because `bulk-set` replaces
+   rather than merges. That is also the endpoint that used to 500 whenever any competency survived
+   an edit, so the probe drives the sequence a person actually performs — change a level, drop one,
+   add one, save; then bring the dropped one back; then clear the lot — rather than one happy path.
+
+The assessment form has **no assessor picker**: the API defaults it to the caller, and a value the
+client cannot know is a value the client must not send. The self screen reads `me/profile` and
+`me/gaps` for the same reason as always — the client `User` object still carries no employee link —
+and three assertions confirm the self tier did not become a way in.
+
+⚠ **One error worth noting because `tsc` caught what review would not:** the sidebar used a
+`TrendingDown` icon that was never imported. It compiled in my head and failed in the compiler,
+which is exactly the division of labour worth keeping — the type checker for what it can see, the
+payload probe for what it cannot.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-10 of 13 landed 2026-08-19. **662 assertions.** FR-HR-134, 135 and 136 delivered; backend complete; the job-description screens are in. Slices 11-12 are the remaining screens, slice 13 the content audit.
+**IN PROGRESS** — slices 0-11 of 13 landed 2026-08-19. **704 assertions.** FR-HR-134, 135 and 136 delivered; backend complete; job-description and competency screens in. Slice 12 is the manpower budget and establishment screens, slice 13 the content audit.

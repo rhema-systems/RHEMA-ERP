@@ -28,6 +28,7 @@ import {
   Banknote,
   Globe,
   GraduationCap,
+  TrendingDown,
   IdCard,
   Stamp,
   ShieldAlert,
@@ -635,6 +636,20 @@ export const navigationItems: NavItem[] = [
           // "approved and unpaid" — which no single travel request can show.
           { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
           { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard },
+        ],
+      },
+      {
+        // Area 17. The gap view is the operational screen: what positions require against what
+        // people have been assessed at. "Below requirement" and "not assessed" stay separate all
+        // the way to the tiles — an unknown is not a training need.
+        title: 'Competencies',
+        href: '/hr/competencies',
+        icon: GraduationCap,
+        children: [
+          { title: 'Organisation Gaps', href: '/hr/competencies', icon: TrendingDown },
+          // The only screen in this area most employees will ever open. It reads `me/*`, because
+          // the client User object carries no employee link to address the by-employee routes with.
+          { title: 'My Competencies', href: '/hr/competencies/me', icon: UserCheck },
         ],
       },
       {
@@ -1565,6 +1580,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
           { title: 'Staff Levels', href: '/administration/hr/staff-levels', icon: ListTree },
           { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
+          // Area 17 setup. A competency is what the organisation expects someone to be able to do;
+          // a skill is the finer-grained thing an indicator points at, which is why both exist.
+          { title: 'Competencies', href: '/administration/hr/competencies', icon: Layers },
           { title: 'Qualifications', href: '/administration/hr/qualifications', icon: GraduationCap },
           { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
           { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
