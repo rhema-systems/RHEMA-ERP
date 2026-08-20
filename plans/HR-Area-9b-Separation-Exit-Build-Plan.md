@@ -638,6 +638,48 @@ it first.
 
 **Area regression after slice 6: 67 + 44 + 50 + 64 + 75 + 37 = 337 assertions, all green.**
 
+### Slice 7 — FR-HR-093, retirement at 60. 2026-08-20, 46/46. **No migration.**
+
+The projection computes entirely from data that already exists (date of birth + policy age), so
+nothing new is stored. `HrPolicyCalculations` had the maths right since long before this area;
+what was missing was anything that acted on it.
+
+⚠ **A comment I wrote in slice 1 was false for five commits.** `CreateEmployeeSeparationDto`'s
+`EffectiveDate` said *"for compulsory retirement the service computes it from the birthday and
+refuses a contradicting value (FR-HR-093)"* — and `CompulsoryRetirement` appeared **nowhere** in the
+service. Documentation written ahead of the code, describing behaviour that did not exist. Nothing
+depended on it so nothing broke, but **a comment describing a rule the code does not enforce is
+worse than no comment: the next reader stops checking.** It is true as of this slice.
+
+**Built:** the retirement queue (due within a horizon, default `RetirementCountdownLeadDays` = 365,
+plus those already past their date and still on strength — a backlog, not a projection), and a sweep
+that raises compulsory retirements for everyone due.
+
+- **The birthday is not a choice.** A supplied date that disagrees is **refused**, naming both, not
+  silently overwritten — somebody who typed a date deserves to know it was wrong. Voluntary
+  retirement keeps whatever date was agreed; it is elected, not applied.
+- **The sweep stamps no actor.** `IsSystemInitiated = true`, `InitiatedById = null` — a birthday
+  arriving is nobody's act, and naming whoever ran the sweep would be a lie the audit trail could
+  not tell from a real one. Those two fields have sat on the entity since slice 1 waiting for this.
+- **One missing date of birth does not stop the sweep** for everybody else; it is reported and
+  skipped.
+
+⚠ **The new rule broke three earlier harnesses, and that was the rule working.** Slices 1–3 each
+raised a `CompulsoryRetirement` carrying the shared fixture's `effectiveDate: '2026-08-31'`, which
+now contradicts the computed birthday (2050-01-01 for a 1990-born fixture) and is refused. **The
+harnesses were asserting behaviour FR-HR-093 says is wrong** — fixed by passing
+`effectiveDate: null`, which is the correct usage. Worth noticing that this only surfaced because
+every slice is re-run as regression; a defect that only bites old callers is invisible otherwise.
+
+**Every assertion runs against a purpose-built fixture, and that is the finding, not a shortcut.**
+Ages on live data run 34–48, so the queue answers with nothing and will until staff records are
+migrated. The harness asserts that emptiness deliberately — including that an employee in their
+thirties and one with no date of birth both stay out — so nobody later mistakes "no rows" for a
+broken query.
+
+**Area regression after slice 7: 67 + 44 + 50 + 64 + 75 + 37 + 46 = 383 assertions, all green,
+twice.**
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens

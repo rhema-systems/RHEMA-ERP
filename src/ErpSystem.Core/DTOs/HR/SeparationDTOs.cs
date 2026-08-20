@@ -610,3 +610,69 @@ public class ReviewSettlementDto
     [MaxLength(2000)]
     public string? Notes { get; set; }
 }
+
+// =============================================================================
+// RETIREMENT — FR-HR-093: age 60, effective on the birthday, with advance alerts
+// =============================================================================
+
+/// <summary>One employee approaching, or past, their retirement date.</summary>
+public class UpcomingRetirementDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public string? PositionTitle { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    public DateOnly? DateOfBirth { get; set; }
+    public int? CurrentAge { get; set; }
+
+    /// <summary>
+    /// The retirement age applied — the tenant's compulsory age, honouring a gender-specific
+    /// override where one is configured.
+    /// </summary>
+    public int RetirementAge { get; set; }
+
+    /// <summary>The birthday it takes effect on (FR-HR-093).</summary>
+    public DateOnly RetirementDate { get; set; }
+
+    /// <summary>Negative once the date has passed — see <see cref="IsOverdue"/>.</summary>
+    public int DaysUntilRetirement { get; set; }
+
+    /// <summary>
+    /// True where the retirement date has already passed and the employee is still on strength.
+    /// Not a projection but a backlog: somebody who should already have left.
+    /// </summary>
+    public bool IsOverdue { get; set; }
+
+    /// <summary>
+    /// True where the explicit <c>Employee.RetirementDate</c> was used rather than a date derived
+    /// from the birthday — an agreed extension, say.
+    /// </summary>
+    public bool IsExplicitDate { get; set; }
+
+    /// <summary>Set where a separation has already been raised, so the sweep skips them.</summary>
+    public Guid? ExistingSeparationId { get; set; }
+    public string? ExistingSeparationNumber { get; set; }
+    public string? ExistingSeparationStatus { get; set; }
+}
+
+/// <summary>What a retirement sweep did.</summary>
+public class RetirementSweepResultDto
+{
+    public int HorizonDays { get; set; }
+
+    /// <summary>Employees found due within the horizon.</summary>
+    public int DueCount { get; set; }
+
+    /// <summary>Separations the sweep raised.</summary>
+    public int RaisedCount { get; set; }
+
+    /// <summary>Already had a separation, so nothing was raised for them.</summary>
+    public int SkippedExistingCount { get; set; }
+
+    /// <summary>Could not be raised, with the reason — a missing date of birth, usually.</summary>
+    public List<string> Failures { get; set; } = new();
+
+    public List<EmployeeSeparationListDto> Raised { get; set; } = new();
+}

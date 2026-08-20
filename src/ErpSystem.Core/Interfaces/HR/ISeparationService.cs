@@ -82,6 +82,31 @@ public interface ISeparationService
 
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
+    // ── Retirement (FR-HR-093) ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Employees reaching the compulsory retirement age within the horizon, and those already past
+    /// it who are still on strength.
+    /// </summary>
+    /// <param name="withinDays">
+    /// Defaults to the tenant's <c>RetirementCountdownLeadDays</c> (365).
+    /// </param>
+    /// <remarks>
+    /// ⚠ Measured 2026-08-20: employee ages on the live tenant run <b>34 to 48</b>, so this
+    /// legitimately answers with nothing. An empty list is the correct answer to "who is retiring",
+    /// not a broken query.
+    /// </remarks>
+    Task<IEnumerable<UpcomingRetirementDto>> GetUpcomingRetirementsAsync(
+        int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Raises a compulsory-retirement separation for everyone due within the horizon who has not
+    /// got one already. System-initiated: no actor is stamped, because a birthday arriving is
+    /// nobody's act.
+    /// </summary>
+    Task<RetirementSweepResultDto> RunRetirementSweepAsync(
+        int? withinDays = null, CancellationToken cancellationToken = default);
+
     // ── Final settlement (FR-HR-184) ─────────────────────────────────────────
 
     /// <summary>

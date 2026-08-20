@@ -248,6 +248,59 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── Retirement (FR-HR-093) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Who is reaching the compulsory retirement age, and who is already past it and still on
+    /// strength (FR-HR-093).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ On the live tenant this answers with **nothing**, and that is correct: employee ages run
+    /// 34 to 48, so nobody is within twelve years of retiring. An empty list here is a fact about
+    /// the data, not a broken query — do not "fix" it.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("retirements/upcoming")]
+    [ProducesResponseType(typeof(IEnumerable<UpcomingRetirementDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<UpcomingRetirementDto>>> GetUpcomingRetirements(
+        [FromQuery] int? withinDays, [FromQuery] bool includeOverdue = true, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(await _service.GetUpcomingRetirementsAsync(withinDays, includeOverdue, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Raise a compulsory-retirement separation for everyone due within the horizon who does not
+    /// already have one.
+    /// </summary>
+    /// <remarks>
+    /// System-initiated: the separations it raises carry no initiator, because a birthday arriving
+    /// is nobody's act. One employee's missing date of birth is reported and skipped rather than
+    /// stopping the sweep for everybody else.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("retirements/sweep")]
+    [ProducesResponseType(typeof(RetirementSweepResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<RetirementSweepResultDto>> RunRetirementSweep(
+        [FromQuery] int? withinDays, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _service.RunRetirementSweepAsync(withinDays, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
 
     /// <summary>

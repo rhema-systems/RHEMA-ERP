@@ -221,6 +221,38 @@ public class SeparationService : ISeparationService
         if (noticeDays is < 0)
             throw new InvalidOperationException("Notice days cannot be negative.");
 
+        // FR-HR-093: compulsory retirement takes effect ON THE BIRTHDAY. The date is not a choice,
+        // so it is computed here and a contradicting one is refused rather than accepted and
+        // quietly overwritten — somebody who typed a date deserves to know it was wrong.
+        var effectiveDate = dto.EffectiveDate;
+        if (dto.SeparationType == EmployeeTerminationType.CompulsoryRetirement)
+        {
+            var due = HrPolicyCalculations.RetirementDate(settings, employee);
+
+            if (due is null)
+                throw new InvalidOperationException(
+                    $"{employee.FirstName} {employee.LastName} has no date of birth and no retirement "
+                    + "date on record, so the retirement date cannot be worked out. Record one before "
+                    + "raising a compulsory retirement.");
+
+            if (effectiveDate is { } supplied && supplied != due.Value)
+                throw new InvalidOperationException(
+                    $"A compulsory retirement takes effect on the employee's birthday — "
+                    + $"{due.Value:yyyy-MM-dd} for this employee (FR-HR-093). The date supplied was "
+                    + $"{supplied:yyyy-MM-dd}. Leave it blank to use the computed date, or raise a "
+                    + "voluntary retirement if the employee is leaving on a different date.");
+
+            effectiveDate = due.Value;
+
+            // Re-checked against the COMPUTED date, not the supplied one. The guard above ran
+            // before the birthday was worked out, so a last working day after the retirement date
+            // would otherwise slip through on exactly the route that computes its own end date.
+            if (dto.LastWorkingDay is { } lastDayOfService && lastDayOfService > effectiveDate)
+                throw new InvalidOperationException(
+                    $"The last working day ({lastDayOfService:yyyy-MM-dd}) falls after this employee's "
+                    + $"retirement date ({effectiveDate:yyyy-MM-dd}).");
+        }
+
         var entity = new EmployeeSeparation
         {
             // Set explicitly: the DbContext auto-stamp is dead in this codebase, and a missing
@@ -236,7 +268,7 @@ public class SeparationService : ISeparationService
             NoticeGivenOn = dto.NoticeGivenOn,
             NoticeDays = noticeDays,
             LastWorkingDay = dto.LastWorkingDay,
-            EffectiveDate = dto.EffectiveDate,
+            EffectiveDate = effectiveDate,
             InitiatedById = actorEmployeeId,
             IsSystemInitiated = actorEmployeeId is null,
             IsEligibleForRehire = dto.IsEligibleForRehire,
@@ -637,6 +669,166 @@ public class SeparationService : ISeparationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    // ── Retirement (FR-HR-093) ────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<UpcomingRetirementDto>> GetUpcomingRetirementsAsync(
+        int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var horizon = withinDays ?? settings.RetirementCountdownLeadDays;
+
+        if (horizon < 0)
+            throw new InvalidOperationException("The horizon cannot be negative.");
+
+        // Only people still on strength: chasing a retirement date for somebody who has already
+        // left is noise, and the whole point of the list is who is still to be dealt with.
+        var employees = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Include(e => e.Position)
+            .Include(e => e.OrganizationUnit)
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted && e.IsActive
+                        && e.StaffStatus != StaffStatus.Terminated
+                        && (e.DateOfBirth != null || e.RetirementDate != null))
+            .ToListAsync(cancellationToken);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var due = new List<(Employee Employee, DateOnly Date, bool Explicit)>();
+
+        foreach (var employee in employees)
+        {
+            var date = HrPolicyCalculations.RetirementDate(settings, employee);
+            if (date is not { } retirementDate) continue;
+
+            var days = retirementDate.DayNumber - today.DayNumber;
+
+            if (days > horizon) continue;                 // too far off to be anybody's problem yet
+            if (days < 0 && !includeOverdue) continue;    // already past, and not asked for
+
+            due.Add((employee, retirementDate, employee.RetirementDate.HasValue));
+        }
+
+        // One query for every separation these people already have, rather than one per employee.
+        var employeeIds = due.Select(d => d.Employee.Id).ToList();
+        var existing = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted
+                        && employeeIds.Contains(s.EmployeeId)
+                        && s.Status != SeparationStatus.Cancelled
+                        && s.Status != SeparationStatus.Rejected)
+            .Select(s => new { s.Id, s.EmployeeId, s.SeparationNumber, s.Status })
+            .ToListAsync(cancellationToken);
+
+        var byEmployee = existing
+            .GroupBy(s => s.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        return due
+            .OrderBy(d => d.Date)
+            .ThenBy(d => d.Employee.LastName)
+            .Select(d =>
+            {
+                byEmployee.TryGetValue(d.Employee.Id, out var already);
+                var days = d.Date.DayNumber - today.DayNumber;
+
+                return new UpcomingRetirementDto
+                {
+                    EmployeeId = d.Employee.Id,
+                    EmployeeName = FullName(d.Employee),
+                    EmployeeNumber = d.Employee.EmployeeNumber,
+                    PositionTitle = d.Employee.Position?.Title,
+                    OrganizationUnitName = d.Employee.OrganizationUnit?.Name,
+                    DateOfBirth = d.Employee.DateOfBirth,
+                    CurrentAge = HrPolicyCalculations.Age(d.Employee.DateOfBirth),
+                    RetirementAge = HrPolicyCalculations.EffectiveRetirementAge(settings, d.Employee.Gender),
+                    RetirementDate = d.Date,
+                    DaysUntilRetirement = days,
+                    IsOverdue = days < 0,
+                    IsExplicitDate = d.Explicit,
+                    ExistingSeparationId = already?.Id,
+                    ExistingSeparationNumber = already?.SeparationNumber,
+                    ExistingSeparationStatus = already?.Status.ToString(),
+                };
+            })
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<RetirementSweepResultDto> RunRetirementSweepAsync(
+        int? withinDays = null, CancellationToken cancellationToken = default)
+    {
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var horizon = withinDays ?? settings.RetirementCountdownLeadDays;
+
+        var upcoming = (await GetUpcomingRetirementsAsync(horizon, includeOverdue: true, cancellationToken)).ToList();
+
+        var result = new RetirementSweepResultDto
+        {
+            HorizonDays = horizon,
+            DueCount = upcoming.Count,
+            SkippedExistingCount = upcoming.Count(u => u.ExistingSeparationId is not null),
+        };
+
+        foreach (var candidate in upcoming.Where(u => u.ExistingSeparationId is null))
+        {
+            try
+            {
+                // ⚠ actorEmployeeId is null ON PURPOSE. A retirement date arriving is nobody's act,
+                // and stamping whoever happened to run the sweep as the initiator would be a lie the
+                // audit trail could not tell from a real one. The create marks it IsSystemInitiated.
+                var raised = await CreateAsync(new CreateEmployeeSeparationDto
+                {
+                    EmployeeId = candidate.EmployeeId,
+                    SeparationType = EmployeeTerminationType.CompulsoryRetirement,
+                    ReasonCategory = TerminationReason.Retirement,
+                    ReasonNotes =
+                        $"Raised automatically: reaches the retirement age of {candidate.RetirementAge} on "
+                        + $"{candidate.RetirementDate:yyyy-MM-dd} (FR-HR-093).",
+                    // Left blank deliberately — CreateAsync computes the birthday and would refuse
+                    // a date supplied here that disagreed with it.
+                    EffectiveDate = null,
+                }, actorEmployeeId: null, cancellationToken);
+
+                result.Raised.Add(ToListDtoFromDetail(raised));
+                result.RaisedCount++;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                // One employee's missing date of birth must not stop the sweep for everybody else.
+                result.Failures.Add($"{candidate.EmployeeName}: {ex.Message}");
+            }
+        }
+
+        _logger.LogInformation(
+            "Retirement sweep over {Horizon} days: {Due} due, {Raised} raised, {Skipped} already had one, {Failed} failed",
+            horizon, result.DueCount, result.RaisedCount, result.SkippedExistingCount, result.Failures.Count);
+
+        return result;
+    }
+
+    private static EmployeeSeparationListDto ToListDtoFromDetail(EmployeeSeparationDetailDto d) => new()
+    {
+        Id = d.Id,
+        SeparationNumber = d.SeparationNumber,
+        EmployeeId = d.EmployeeId,
+        EmployeeName = d.EmployeeName,
+        EmployeeNumber = d.EmployeeNumber,
+        PositionTitle = d.PositionTitle,
+        OrganizationUnitName = d.OrganizationUnitName,
+        SeparationType = d.SeparationType,
+        SeparationTypeName = d.SeparationTypeName,
+        Status = d.Status,
+        StatusName = d.StatusName,
+        InitiatedOn = d.InitiatedOn,
+        LastWorkingDay = d.LastWorkingDay,
+        EffectiveDate = d.EffectiveDate,
+        IsProcedural = d.IsProcedural,
+        IsSystemInitiated = d.IsSystemInitiated,
+        IsDisciplinary = d.IsDisciplinary,
+        EmployeeRecordUpdated = d.EmployeeRecordUpdated,
+    };
 
     // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
 
