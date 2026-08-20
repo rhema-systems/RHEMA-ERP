@@ -77,6 +77,7 @@ export interface ProcurementPlanDto {
   planDurationYears: number;
   status: string;
   totalEstimatedBudget: number;
+  budgetId?: string;
   approvedBudget: number;
   currency: string;
   preparedByName?: string;
@@ -119,6 +120,7 @@ export interface CreateProcurementPlanDto {
   planEndDate: string;
   planDurationYears?: number;
   totalEstimatedBudget?: number;
+  budgetId?: string;
   currency?: string;
   notes?: string;
   items?: CreateProcurementPlanItemDto[];
@@ -149,9 +151,9 @@ export interface ApproveProcurementPlanDto {
   approvedBudget?: number;
   comments?: string;
   autoGenerateSchedules?: boolean;
-  /** Optional: Specific budget ID to link. If null, system auto-matches by department + fiscal year */
+  /** Retained for backward-compatible API requests; plan budgets are selected during preparation. */
   budgetId?: string;
-  /** If true, automatically links to matching budget on approval */
+  /** Retained for backward-compatible API requests. */
   autoLinkBudget?: boolean;
 }
 
@@ -1333,12 +1335,22 @@ export const procurementBudgetService = {
     if (!response.ok) throw new Error('Failed to delete procurement budget');
   },
 
-  async approveBudget(id: string): Promise<ProcurementBudgetDetailDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/${id}/approve`, {
+  async submitBudget(id: string): Promise<ProcurementBudgetDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/${id}/submit`, {
       method: 'POST',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to approve budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to submit procurement budget for approval'));
+    return response.json();
+  },
+
+  async approveBudget(id: string, data: { isApproved: boolean; comments?: string }): Promise<ProcurementBudgetDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to process procurement budget workflow decision'));
     return response.json();
   },
 

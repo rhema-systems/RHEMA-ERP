@@ -168,19 +168,41 @@ public class ProcurementBudgetsController : ControllerBase
         }
     }
 
-    [HttpPost("{id}/approve")]
-    public async Task<ActionResult<ProcurementBudgetDetailDto>> ApproveBudget(Guid id)
+    [HttpPost("{id}/submit")]
+    public async Task<ActionResult<ProcurementBudgetDetailDto>> SubmitBudget(Guid id)
     {
         try
         {
-            var budget = await _budgetService.ApproveAsync(id);
+            var budget = await _budgetService.SubmitForApprovalAsync(id);
             return Ok(budget);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error approving budget {BudgetId}", id);
-            return StatusCode(500, "An error occurred while approving the budget");
+            _logger.LogError(ex, "Error submitting budget {BudgetId}", id);
+            return StatusCode(500, "An error occurred while submitting the budget for approval");
+        }
+    }
+
+    [HttpPost("{id}/approve")]
+    public async Task<ActionResult<ProcurementBudgetDetailDto>> ApproveBudget(
+        Guid id,
+        [FromBody] ApproveProcurementBudgetDto? dto)
+    {
+        try
+        {
+            var budget = await _budgetService.ApproveAsync(id, dto ?? new ApproveProcurementBudgetDto());
+            return Ok(budget);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing budget workflow decision {BudgetId}", id);
+            return StatusCode(500, "An error occurred while processing the budget workflow decision");
         }
     }
 

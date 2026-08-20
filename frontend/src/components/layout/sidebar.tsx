@@ -1490,6 +1490,13 @@ export const navigationItems: NavItem[] = [
             icon: Package,
           },
           {
+            title: 'Supplier Returns',
+            href: '/inventory/supplier-returns',
+            icon: RotateCcw,
+            permissions: ['procurement.inventory.issue', 'procurement.inventory.adjust.approve'],
+            accessMode: 'any',
+          },
+          {
             title: 'Bin Stock',
             href: '/inventory/bin-stock',
             icon: FolderTree,
