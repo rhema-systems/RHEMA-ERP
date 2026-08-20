@@ -2878,8 +2878,92 @@ public enum EmployeeTerminationType
     [Description("Summary Dismissal")]
     SummaryDismissal = 9,
 
+    /// <summary>
+    /// Retirement on reaching the compulsory age — 60 at TDC, effective on the birthday
+    /// (FR-HR-093). Distinct from <see cref="VoluntaryRetirement"/>, which the employee elects
+    /// from the voluntary age (55 by default): one is the organisation applying a rule, the other
+    /// is a person exercising a choice, and they differ in notice, approval and entitlement.
+    /// </summary>
+    /// <remarks>
+    /// Appended as 10 for area 9b. FR-HR-182 requires compulsory and medical retirement as
+    /// separate separation types and neither existed — the enum offered only VoluntaryRetirement,
+    /// so a compulsory retirement had to be recorded as something it was not. Appended, never
+    /// renumbered, per the note on <see cref="SummaryDismissal"/>.
+    /// </remarks>
+    [Description("Compulsory Retirement")]
+    CompulsoryRetirement = 10,
+
+    /// <summary>
+    /// Retirement on medical grounds — the employee is permanently unfit to continue, evidenced by
+    /// a medical report, before either retirement age is reached (FR-HR-182).
+    /// </summary>
+    /// <remarks>
+    /// Appended as 11 for area 9b; see <see cref="CompulsoryRetirement"/>. This is the separation
+    /// type that reads across to the SHE/medical surveillance and return-to-work records rather
+    /// than replacing them — the boundary is unchanged.
+    /// </remarks>
+    [Description("Medical Retirement")]
+    MedicalRetirement = 11,
+
     [Description("Other")]
     Other = 99
+}
+
+/// <summary>
+/// Where a separation has reached (area 9b). The order is the FRD's own sequence, and it matters:
+/// FR-HR-091 requires a completed clearance form <b>before</b> the separation, and <i>then</i>
+/// entitlements are computed — so clearance precedes settlement, never the reverse. FR-HR-185 then
+/// puts Internal Audit between a prepared settlement and a paid one.
+/// </summary>
+/// <remarks>
+/// <c>Approved</c> means the FR-HR-092 signature is in — the MD's, or HR's own where the
+/// separation is procedural. Nothing that computes money may run before <c>ClearanceCompleted</c>,
+/// and nothing may pay before <c>SettlementApproved</c>.
+/// </remarks>
+public enum SeparationStatus
+{
+    /// <summary>Raised and still editable; no approval sought.</summary>
+    [Description("Draft")]
+    Draft = 1,
+
+    /// <summary>Submitted; awaiting the MD's signature, or HR's where procedural (FR-HR-092).</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    /// <summary>The FR-HR-183 clearance run is open; items are being signed off.</summary>
+    [Description("Clearance In Progress")]
+    ClearanceInProgress = 4,
+
+    /// <summary>Every required clearance item is signed off — the FR-HR-091 gate is now open.</summary>
+    [Description("Clearance Completed")]
+    ClearanceCompleted = 5,
+
+    /// <summary>The FR-HR-184 settlement statement is being prepared.</summary>
+    [Description("Settlement Pending")]
+    SettlementPending = 6,
+
+    /// <summary>Statement prepared; with Internal Audit for review (FR-HR-185).</summary>
+    [Description("Settlement Under Review")]
+    SettlementUnderReview = 7,
+
+    /// <summary>Internal Audit has reviewed it; payment may be released.</summary>
+    [Description("Settlement Approved")]
+    SettlementApproved = 8,
+
+    /// <summary>Paid, and applied to the employee's master record.</summary>
+    [Description("Completed")]
+    Completed = 9,
+
+    /// <summary>Withdrawn before completion — a resignation retracted, a retirement deferred.</summary>
+    [Description("Cancelled")]
+    Cancelled = 10,
+
+    /// <summary>Refused at approval.</summary>
+    [Description("Rejected")]
+    Rejected = 11
 }
 
 #endregion Disciplinary Actions

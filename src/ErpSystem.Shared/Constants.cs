@@ -26,6 +26,36 @@ public static class Constants
         /// <summary>The pre-rename name, kept only so the migration and fallbacks can find it.</summary>
         public const string LegacyHrUser = "HR User";
 
+        /// <summary>
+        /// The Managing Director, who signs every non-procedural termination (FR-HR-092) and sits
+        /// at the top of the grievance ladder (FR-HR-181).
+        ///
+        /// ⚠ This role exists under <b>two</b> names in the reference database (checked
+        /// 2026-08-20): "Managing Director", seeded with the general roles, and
+        /// "TDC_MANAGING_DIRECTOR", seeded by the procurement work. That is the
+        /// <c>HR</c> / <c>HR User</c> trap again — an attribute naming only one of them silently
+        /// excludes half the people entitled to act. Authorize on <see cref="ManagingDirectorAny"/>
+        /// rather than either literal until the two are reconciled.
+        /// </summary>
+        public const string ManagingDirector = "Managing Director";
+
+        /// <summary>The procurement-seeded spelling of <see cref="ManagingDirector"/>.</summary>
+        public const string TdcManagingDirector = "TDC_MANAGING_DIRECTOR";
+
+        /// <summary>
+        /// Both spellings of the Managing Director role, ready for
+        /// <c>[Authorize(Roles = Constants.Roles.ManagingDirectorAny)]</c>. Roles in an
+        /// <c>[Authorize]</c> list are ORed, so this admits a holder of either.
+        /// </summary>
+        public const string ManagingDirectorAny = ManagingDirector + "," + TdcManagingDirector;
+
+        /// <summary>
+        /// Internal Audit, which reviews the final settlement before payment is released
+        /// (FR-HR-185) and is the mandatory review point before a payroll release. Only the
+        /// TDC_ spelling exists (checked 2026-08-20).
+        /// </summary>
+        public const string InternalAudit = "TDC_INTERNAL_AUDIT";
+
         // External users (customer/vendor/partner/citizen portal accounts)
         public const string ExternalUser = "ExternalUser";
 

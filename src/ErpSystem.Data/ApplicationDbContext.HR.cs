@@ -305,6 +305,11 @@ public partial class ApplicationDbContext
     public DbSet<OnboardingTask> OnboardingTasks { get; set; } = null!;
     public DbSet<OnboardingTaskComment> OnboardingTaskComments { get; set; } = null!;
     public DbSet<OnboardingAsset> OnboardingAssets { get; set; } = null!;
+    /// <summary>
+    /// The exit register (area 9b) — one row per employee leaving, by any route. See
+    /// <see cref="EmployeeSeparation"/> for why the disciplinary route writes here too.
+    /// </summary>
+    public DbSet<EmployeeSeparation> EmployeeSeparations { get; set; } = null!;
     public DbSet<ProbationPeriod> ProbationPeriods { get; set; } = null!;
     public DbSet<ProbationReview> ProbationReviews { get; set; } = null!;
     public DbSet<ProbationExtension> ProbationExtensions { get; set; } = null!;
@@ -7899,6 +7904,54 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.ExtendedBy)
                 .WithMany()
                 .HasForeignKey(x => x.ExtendedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // =====================================================
+        // HR SEPARATION, CLEARANCE & EXIT CONFIGURATION (area 9b)
+        // =====================================================
+
+        builder.Entity<EmployeeSeparation>(entity =>
+        {
+            // The number is unique per tenant, and the filter is not optional: DeleteAsync here is
+            // a soft delete, and a soft-deleted row still occupies an unfiltered unique index — the
+            // area-13 lesson, which cost five faces there before it was understood.
+            entity.HasIndex(x => new { x.TenantId, x.SeparationNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EmployeeSeparation_Tenant_Number");
+
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_EmployeeSeparation_EmployeeId");
+            entity.HasIndex(x => x.Status).HasDatabaseName("IX_EmployeeSeparation_Status");
+            entity.HasIndex(x => x.SeparationType).HasDatabaseName("IX_EmployeeSeparation_Type");
+            entity.HasIndex(x => x.EffectiveDate).HasDatabaseName("IX_EmployeeSeparation_EffectiveDate");
+            entity.HasIndex(x => x.DisciplinaryActionId).HasDatabaseName("IX_EmployeeSeparation_DisciplinaryActionId");
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.SeparationType).HasConversion<int>();
+            entity.Property(x => x.ReasonCategory).HasConversion<int>();
+
+            // All four employee navigations are configured explicitly. An unpaired navigation left
+            // to convention mints a duplicate shadow FK column (EmployeeId1, EmployeeId2, …) —
+            // see the HR sweep that removed a batch of those in 2026-08.
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.InitiatedBy)
+                .WithMany()
+                .HasForeignKey(x => x.InitiatedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.CancelledBy)
+                .WithMany()
+                .HasForeignKey(x => x.CancelledById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -25867,9 +25867,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanyHrPolicySettings", b =>
                 {
-                    b.Property<int>("EstablishmentEnforcementMode")
-                        .HasColumnType("int");
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -25911,6 +25908,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("EstablishmentEnforcementMode")
+                        .HasColumnType("int");
 
                     b.Property<int?>("FemaleRetirementAge")
                         .HasColumnType("int");
@@ -25993,7 +25993,6 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("b2c3d4e5-0000-0000-0000-000000000001"),
                             BudgetEnforcementMode = 2,
-                            EstablishmentEnforcementMode = 3,
                             CompulsoryRetirementAge = 60,
                             ContractExpiryLeadDays = 60,
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
@@ -26002,6 +26001,7 @@ namespace ErpSystem.Data.Migrations
                             DefaultProbationMonths = 6,
                             DefaultResignationNoticeDays = 30,
                             DefaultTerminationNoticeDays = 30,
+                            EstablishmentEnforcementMode = 3,
                             FiscalYearStartMonth = 1,
                             FitWeightCompetency = 30,
                             FitWeightPerformance = 35,
@@ -29693,12 +29693,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeePosition", b =>
                 {
-                    b.Property<DateTime?>("EstablishmentApprovedOn")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("EstablishmentSourceBudgetId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -29729,6 +29723,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("EstablishmentApprovedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("EstablishmentSourceBudgetId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("ExpectedHeadcount")
                         .HasColumnType("int");
@@ -30258,6 +30258,157 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("EmployeeSalaryAssignments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApprovalNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("CancelledById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CancelledOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DisciplinaryActionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("EffectiveDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EligibleForRehireDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("EmployeeRecordUpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("InitiatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("InitiatedOn")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEligibleForRehire")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsProcedural")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystemInitiated")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("LastWorkingDay")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("NoticeDays")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly?>("NoticeGivenOn")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("ReasonCategory")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReasonNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("RehireRestrictions")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("SeparationNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("SeparationType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedById");
+
+                    b.HasIndex("CancelledById");
+
+                    b.HasIndex("DisciplinaryActionId")
+                        .HasDatabaseName("IX_EmployeeSeparation_DisciplinaryActionId");
+
+                    b.HasIndex("EffectiveDate")
+                        .HasDatabaseName("IX_EmployeeSeparation_EffectiveDate");
+
+                    b.HasIndex("EmployeeId")
+                        .HasDatabaseName("IX_EmployeeSeparation_EmployeeId");
+
+                    b.HasIndex("InitiatedById");
+
+                    b.HasIndex("SeparationType")
+                        .HasDatabaseName("IX_EmployeeSeparation_Type");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_EmployeeSeparation_Status");
+
+                    b.HasIndex("TenantId", "SeparationNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EmployeeSeparation_Tenant_Number")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("EmployeeSeparations");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSkill", b =>
@@ -150063,6 +150214,46 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Level");
 
                     b.Navigation("Notch");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparation", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CancelledBy")
+                        .WithMany()
+                        .HasForeignKey("CancelledById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "InitiatedBy")
+                        .WithMany()
+                        .HasForeignKey("InitiatedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedBy");
+
+                    b.Navigation("CancelledBy");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("InitiatedBy");
 
                     b.Navigation("Tenant");
                 });

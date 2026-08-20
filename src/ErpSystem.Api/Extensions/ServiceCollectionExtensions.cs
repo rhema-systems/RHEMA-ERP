@@ -1396,6 +1396,30 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerManpowerBudget)));
 
+            // HR separation, clearance & exit policies (area 9b). Registered ahead of the
+            // controllers so the seed lands before any gate goes on — permissions resolve from the
+            // database, so gating first would 403 every endpoint for all but SuperAdmin.
+            //
+            // Same ladder — Administer implies Write implies Read — but note what is deliberately
+            // NOT here. FR-HR-092 (the MD signs every non-procedural termination) and FR-HR-185
+            // (Internal Audit reviews the settlement before payment) are anchored on
+            // Constants.Roles.ManagingDirectorAny and Constants.Roles.InternalAudit and read off
+            // the record, not off this family: HR holds Read and Write, and must never be able to
+            // sign off its own terminations or release its own payments.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.SeparationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewSeparation,
+                        HrPermissions.MaintainSeparation,
+                        HrPermissions.AdministerSeparation)))
+                .AddPolicy(HrPermissions.SeparationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainSeparation,
+                        HrPermissions.AdministerSeparation)))
+                .AddPolicy(HrPermissions.SeparationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerSeparation)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

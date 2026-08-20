@@ -611,6 +611,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
         services.AddScoped<IProbationConfirmingAuthorityService, ProbationConfirmingAuthorityService>();
         services.AddScoped<IEmployeeOathOfSecrecyService, EmployeeOathOfSecrecyService>();
+        // The exit register (area 9b) — one separation record per employee leaving, by any route.
+        services.AddScoped<ISeparationService, SeparationService>();
         services.AddScoped<IProbationReminderService, ProbationReminderService>();
         services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
         // Travel's read-only window onto Finance's currency and exchange-rate masters —

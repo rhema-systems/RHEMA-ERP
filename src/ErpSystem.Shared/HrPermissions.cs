@@ -29,6 +29,7 @@ public static class HrPermissions
     public const string CategoryJobArchitecture = "HR - Job Architecture";
     public const string CategoryCompetency = "HR - Competency";
     public const string CategoryManpowerBudget = "HR - Manpower Budget & Establishment";
+    public const string CategorySeparation = "HR - Separation, Clearance & Exit";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -88,6 +89,14 @@ public static class HrPermissions
     public const string ManpowerBudgetReadPolicy = "HR.Policy.ManpowerBudgetRead";
     public const string ManpowerBudgetWritePolicy = "HR.Policy.ManpowerBudgetWrite";
     public const string ManpowerBudgetAdminPolicy = "HR.Policy.ManpowerBudgetAdmin";
+
+    public const string ViewSeparation = "HR.Separation.Read";
+    public const string MaintainSeparation = "HR.Separation.Write";
+    public const string AdministerSeparation = "HR.Separation.Admin";
+
+    public const string SeparationReadPolicy = "HR.Policy.SeparationRead";
+    public const string SeparationWritePolicy = "HR.Policy.SeparationWrite";
+    public const string SeparationAdminPolicy = "HR.Policy.SeparationAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
@@ -159,7 +168,17 @@ public static class HrPermissions
             CategoryManpowerBudget),
         new(AdministerManpowerBudget, "Administer Manpower Budget & Establishment",
             "Approve or reject a manpower budget — which sets the approved establishment that gates vacancy approval (FR-HR-136) — and delete budgets.",
-            CategoryManpowerBudget)
+            CategoryManpowerBudget),
+
+        new(ViewSeparation, "View Separation, Clearance & Exit",
+            "View the exit register, separation records of every type, clearance progress, exit interviews and final settlement statements.",
+            CategorySeparation),
+        new(MaintainSeparation, "Maintain Separation, Clearance & Exit",
+            "Raise separations of any type, record resignations and notice, run the clearance checklist, conduct exit interviews and prepare final settlement statements.",
+            CategorySeparation),
+        new(AdministerSeparation, "Administer Separation, Clearance & Exit",
+            "Delete separation records and administer the clearance-item catalogue and separation authorities. Signing a termination (FR-HR-092) and reviewing a settlement (FR-HR-185) are NOT this permission — those are read off the record, see the remarks on RoleGrants.",
+            CategorySeparation)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -237,7 +256,8 @@ public static class HrPermissions
         ViewProbation, MaintainProbation,
         ViewJobArchitecture, MaintainJobArchitecture,
         ViewCompetency, MaintainCompetency,
-        ViewManpowerBudget, MaintainManpowerBudget
+        ViewManpowerBudget, MaintainManpowerBudget,
+        ViewSeparation, MaintainSeparation
     };
 
     /// <summary>
@@ -265,6 +285,16 @@ public static class HrPermissions
     /// exists in the reference database (checked 2026-08-17). It is retained because removing it
     /// would silently revoke medical access in any environment that does have one. Confirm whether
     /// any environment uses it, then either promote it to a constant or delete it.</para>
+    ///
+    /// <para>Separation (area 9b) follows the same ladder, and deliberately stops short of two
+    /// things this map cannot express. FR-HR-092 puts the <b>MD's signature</b> on every
+    /// non-procedural termination and FR-HR-185 puts <b>Internal Audit's review</b> before the
+    /// settlement is paid. Neither is an HR permission: the entitled party is named on the record
+    /// and anchored on the <c>Managing Director</c> / <c>TDC_MANAGING_DIRECTOR</c> and
+    /// <c>TDC_INTERNAL_AUDIT</c> roles, so granting <c>HR.Separation.Admin</c> must never confer
+    /// them. Gating those two actions on a permission family HR holds would let HR sign off its
+    /// own terminations and release its own payments — and gating them on a permission nobody
+    /// holds would make them reachable by nobody, the area-15b mistake.</para>
     ///
     /// <para>When extending this to other HR areas (the W3 permission sweep), add the area's
     /// permissions here per role rather than widening the match — the whole point of this map is
