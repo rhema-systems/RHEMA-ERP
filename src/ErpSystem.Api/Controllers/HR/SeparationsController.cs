@@ -281,6 +281,39 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Find disciplinary terminations that never produced an exit, and raise the missing
+    /// separations.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>The repair for the defect this area was opened on.</b> Measured 2026-08-20: 29
+    /// disciplinary terminations whose employees were all still <c>StaffStatus = Active</c>, because
+    /// area 9 recorded the decision and nothing carried it into an exit.</para>
+    ///
+    /// <para><b>It raises separations; it does not terminate anybody.</b> Each of those exits still
+    /// goes through clearance, the MD's signature and the settlement review like any other — a
+    /// repair that skipped the controls would be a worse defect than the gap it closed.</para>
+    ///
+    /// <para>Run it with <c>dryRun=true</c> first: it reports who would be affected and writes
+    /// nothing. Administration, because it writes across other people's records in bulk.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationAdminPolicy)]
+    [HttpPost("repair/disciplinary-orphans")]
+    [ProducesResponseType(typeof(DisciplinaryOrphanRepairDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<DisciplinaryOrphanRepairDto>> RepairDisciplinaryOrphans(
+        [FromQuery] bool dryRun = true, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(await _service.RepairDisciplinaryOrphansAsync(dryRun, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Retirement (FR-HR-093) ────────────────────────────────────────────────
 
     /// <summary>

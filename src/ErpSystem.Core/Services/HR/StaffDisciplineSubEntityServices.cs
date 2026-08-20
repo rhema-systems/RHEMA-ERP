@@ -1316,6 +1316,8 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    // Area 9b: the disciplinary route raises the same exit record every other route does (D1).
+    private readonly ISeparationService _separationService;
     private readonly ILogger<StaffDisciplineTerminationService> _logger;
 
     public StaffDisciplineTerminationService(
@@ -1325,6 +1327,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        ISeparationService separationService,
         ILogger<StaffDisciplineTerminationService> logger)
     {
         _terminationRepository = terminationRepository;
@@ -1333,6 +1336,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _separationService = separationService;
         _logger = logger;
     }
 
@@ -1505,6 +1509,23 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Termination recorded for case {CaseId}, Type: {Type}", dto.CaseId, dto.Type);
+
+        // ⚠ Area 9b, decision D1: the disciplinary route does NOT keep a parallel exit store — it
+        // raises the same EmployeeSeparation every other route does. Before this, a termination was
+        // recorded here and nothing carried it any further: measured 2026-08-20, 29 disciplinary
+        // terminations whose employees were ALL still StaffStatus = Active. Area 9 still owns the
+        // decision and the hearing; the exit itself now lives in one register.
+        //
+        // Deliberately after SaveChangesAsync and deliberately not fatal. The decision has been
+        // recorded and must not be rolled back because the exit could not be opened — the service
+        // returns null in that case and the orphan repair picks it up.
+        await _separationService.CreateFromDisciplinaryOutcomeAsync(
+            disciplinaryCase.Id,
+            disciplinaryCase.EmployeeId,
+            dto.Type,
+            dto.SeparationNotes,
+            actorEmployeeId: null,
+            cancellationToken);
 
         return entity.ToDto();
     }

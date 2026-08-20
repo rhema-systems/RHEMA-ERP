@@ -83,6 +83,34 @@ public interface ISeparationService
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Raises the exit that a disciplinary termination implies (decision D1: one pipeline, not two).
+    /// </summary>
+    /// <remarks>
+    /// Returns the separation already linked to this action where one exists, and <c>null</c> where
+    /// one could not be raised — an employee with a separation already in flight, typically. The
+    /// caller must not treat null as a failure of the disciplinary decision, which stands either way.
+    /// </remarks>
+    Task<EmployeeSeparationDetailDto?> CreateFromDisciplinaryOutcomeAsync(
+        Guid disciplinaryActionId,
+        Guid employeeId,
+        EmployeeTerminationType type,
+        string? notes,
+        Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finds disciplinary terminations that never produced an exit, and raises the missing
+    /// separations. Pass <paramref name="dryRun"/> to report without writing.
+    /// </summary>
+    /// <remarks>
+    /// The repair for the defect this area was opened on. It raises separations; it does
+    /// <b>not</b> terminate anybody — each of those exits still goes through clearance, signature
+    /// and settlement like any other.
+    /// </remarks>
+    Task<DisciplinaryOrphanRepairDto> RepairDisciplinaryOrphansAsync(
+        bool dryRun, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Completes the separation and applies it to the employee's master record — staff status,
     /// termination date and reason, active contracts and the open position-history row.
     /// </summary>

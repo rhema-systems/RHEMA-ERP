@@ -715,3 +715,37 @@ public class ContractExpirySweepResultDto
     public List<string> Failures { get; set; } = new();
     public List<EmployeeSeparationListDto> Raised { get; set; } = new();
 }
+
+/// <summary>
+/// What the disciplinary-orphan repair found, and what it did about it.
+/// </summary>
+/// <remarks>
+/// The defect this area was opened on: measured 2026-08-20, <b>29 disciplinary terminations whose
+/// employees were all still <c>StaffStatus = Active</c></b>, because area 9 recorded the decision
+/// and nothing carried it into an exit. This repair raises the separation that should have existed;
+/// it does <b>not</b> terminate anybody, because each of those exits still has to go through
+/// clearance, signature and settlement like any other.
+/// </remarks>
+public class DisciplinaryOrphanRepairDto
+{
+    /// <summary>True when nothing was written — the report only.</summary>
+    public bool DryRun { get; set; }
+
+    /// <summary>Disciplinary terminations with no separation against them.</summary>
+    public int FoundCount { get; set; }
+
+    /// <summary>Separations actually raised. Zero on a dry run.</summary>
+    public int RaisedCount { get; set; }
+
+    /// <summary>
+    /// Found, but the employee is already off strength by some other route — nothing to repair.
+    /// </summary>
+    public int AlreadyTerminatedCount { get; set; }
+
+    /// <summary>On a dry run: who would get a separation, and of what type.</summary>
+    public List<string> WouldRaise { get; set; } = new();
+
+    public List<string> Failures { get; set; } = new();
+
+    public List<EmployeeSeparationListDto> Raised { get; set; } = new();
+}

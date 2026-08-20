@@ -97,6 +97,15 @@ settlement** — initiator HR, *"Internal Audit reviews → payment released"*.
 **(a) The disciplinary termination never reaches the employee.** 29 `StaffDisciplineTerminations`
 rows exist on DEFAULT. Every one of their employees is still `StaffStatus = Active`:
 
+> ⚠ **CORRECTION, 2026-08-20 (slice 9b).** All 29 of those rows are **area-9 harness fixtures** —
+> `A9V…` employee numbers, `A9Ver Actor…` names — and **zero are real employees**. The *defect* is
+> real and the missing code was real: `RecordAsync` recorded a termination and nothing carried it
+> into an exit. But the "29 dismissed people still on strength" framing used throughout this plan,
+> and in several commit messages, implies production impact that does not exist. The check that
+> settles it is one `WHERE EmployeeNumber NOT LIKE 'A9V%'` and it should have been run at survey
+> time. **A join count is evidence about rows, not about people.** Read the paragraphs below with
+> that correction applied.
+
 ```
 emp_status_behind_disc_termination | 1 (Active) | 29
 ```
@@ -766,9 +775,55 @@ caller reading `.message`, and that endpoint is not this area's contract to chan
 **Area regression after slice 9: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 = 466 assertions, green
 twice.**
 
-➡ **Slice 9b, next:** wire discipline into this pipeline (decision D1) and repair the **29 orphans**.
-Split from slice 9 on purpose — a data repair should run against a mechanism already proven, not
-alongside one being built.
+➡ **Slice 9b:** wire discipline into this pipeline (decision D1) and repair the orphans. Split from
+slice 9 on purpose — a data repair should run against a mechanism already proven, not alongside one
+being built.
+
+### Slice 9b — the disciplinary route joins the pipeline, and the orphan repair
+
+⚠ **The 29 orphans are all test data.** The dry run named them: every one is an area-9 harness
+fixture (`A9Ver Actor…`, `A9V…`), and a follow-up query confirmed **0 real employees** among them.
+The missing propagation was genuine and is now built; the *impact* was not what this plan claimed
+for eight slices. Recorded at §3.2(a) as a correction rather than quietly edited away, because the
+mistake is more instructive than the number: **a join count tells you about rows; it takes one more
+predicate to learn whether they are about people.**
+
+**Built:** `StaffDisciplineTerminationService.RecordAsync` now raises the same `EmployeeSeparation`
+every other route creates, and `POST /repair/disciplinary-orphans` (Admin, `dryRun=true` by
+default) finds decisions that never produced an exit.
+
+Three deliberate choices in the wiring:
+
+- **After the save, and not fatal.** The disciplinary decision is recorded and must not roll back
+  because the exit could not be opened. The service returns `null`, logs, and the repair picks it
+  up. The only place in this area that swallows an exception, and the code says why.
+- **No effective date is invented.** The disciplinary record carries no termination date field;
+  fabricating one would put a made-up last day on somebody's employment record.
+- **The repair raises exits; it does not terminate anybody.** Every one is a Draft that still goes
+  through clearance, the MD's signature and the settlement review. A repair that skipped the
+  controls would be a worse defect than the gap it closed.
+
+⚠ **The harness caught the dry run lying, which is the finding of this slice.** It promised 29
+raises and delivered 21: the area-9 fixtures reuse subjects, so two decisions against one person can
+only ever produce one exit, and the dry run did not model the "already has an exit in flight" rule
+the real run enforces. Both modes now count identically, including exits raised earlier in the same
+run. **A dry run that misreports what will happen is worse than none, because it is believed** —
+and being believed is the entire reason the endpoint defaults to `dryRun=true`.
+
+⚠ **Verified through area 9's harness, not a reimplementation of it.** Reaching a recordable
+termination means walking the natural-justice ladder — written query, acknowledgement, proposal,
+and a decision confirmed by a **workflow-engine-assigned** approver. Four attempts at rebuilding
+that here each fixed a different invented payload before I stopped. Running `hr-discipline`'s own
+`run-slice4.mjs` instead: disciplinary terminations 29 → 30, separations from discipline 21 → 22,
+newest row Draft / SummaryDismissal / no effective date. **When another area already has a green
+harness that drives its ladder, use it as the driver rather than writing a worse one.**
+
+⚠ **A vacuous green to be aware of.** With the 29 now repaired, `raisedCount === wouldRaise.length`
+is `0 === 0` on this database. The meaningful run was the first one. Anyone re-verifying the raise
+path needs fresh orphans — run area 9's harness against employees who already have an exit in
+flight.
+
+**Area regression after slice 9b: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 13 = 479 assertions.**
 
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1

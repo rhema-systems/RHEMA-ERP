@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
@@ -698,6 +699,161 @@ public class SeparationService : ISeparationService
         await _unitOfWork.Repository<EmployeeSeparationDocument>().DeleteAsync(documentId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    // ── The disciplinary route joins this pipeline (decision D1) ──────────────
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto?> CreateFromDisciplinaryOutcomeAsync(
+        Guid disciplinaryActionId,
+        Guid employeeId,
+        EmployeeTerminationType type,
+        string? notes,
+        Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        // Already linked — a second call must not mint a second exit for the same decision.
+        var linked = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted
+                                      && s.DisciplinaryActionId == disciplinaryActionId, cancellationToken);
+        if (linked is not null)
+            return ToDetailDto(await ReloadAsync(tenantId, linked.Id, cancellationToken));
+
+        try
+        {
+            return await CreateAsync(new CreateEmployeeSeparationDto
+            {
+                EmployeeId = employeeId,
+                SeparationType = type,
+                ReasonCategory = type == EmployeeTerminationType.InvoluntaryRedundancy
+                    ? TerminationReason.Redundancy
+                    : TerminationReason.Dismissal,
+                ReasonNotes = string.IsNullOrWhiteSpace(notes)
+                    ? "Raised from a disciplinary outcome."
+                    : $"Raised from a disciplinary outcome. {notes.Trim()}",
+                // ⚠ No effective date. The disciplinary record carries none — there is no date-of-
+                // termination field on it — and inventing one would put a fabricated last day on
+                // somebody's employment record. HR sets it before submitting.
+                EffectiveDate = null,
+                DisciplinaryActionId = disciplinaryActionId,
+            }, actorEmployeeId, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // ⚠ Swallowed on purpose, and this is the one place in the area that swallows anything.
+            // The disciplinary decision has already been recorded and must not be rolled back
+            // because the exit could not be opened — an employee who already has a separation in
+            // flight is the ordinary cause. The disciplinary outcome stands; the exit is picked up
+            // by the orphan repair.
+            _logger.LogWarning(
+                "Disciplinary action {ActionId}: separation not raised — {Reason}",
+                disciplinaryActionId, ex.Message);
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<DisciplinaryOrphanRepairDto> RepairDisciplinaryOrphansAsync(
+        bool dryRun, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        // Every disciplinary termination that never produced an exit.
+        var orphans = await _unitOfWork.Repository<StaffDisciplineTermination>().GetQueryable()
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted)
+            .Join(_unitOfWork.Repository<StaffDisciplinaryAction>().GetQueryable().Where(a => !a.IsDeleted),
+                  t => t.DisciplinaryActionId, a => a.Id,
+                  (t, a) => new { Termination = t, Action = a })
+            .Where(x => !_unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+                .Any(s => s.TenantId == tenantId && !s.IsDeleted
+                          && s.DisciplinaryActionId == x.Action.Id))
+            .ToListAsync(cancellationToken);
+
+        var result = new DisciplinaryOrphanRepairDto
+        {
+            DryRun = dryRun,
+            FoundCount = orphans.Count,
+        };
+
+        // ⚠ Employees who already have an exit in flight cannot be given a second one, so the
+        // repair will skip them — and the DRY RUN HAS TO KNOW THAT TOO. Without this it promised 29
+        // and delivered 21, because the disciplinary fixtures reuse subjects: two terminations
+        // against one person can only ever produce one exit. **A dry run that misreports what will
+        // happen is worse than none, because it is believed.**
+        var alreadyInFlight = (await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+                .AsNoTracking()
+                .Where(s => s.TenantId == tenantId && !s.IsDeleted
+                            && s.Status != SeparationStatus.Cancelled
+                            && s.Status != SeparationStatus.Rejected
+                            && s.Status != SeparationStatus.Completed)
+                .Select(s => s.EmployeeId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        foreach (var orphan in orphans)
+        {
+            var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(e => e.Id == orphan.Action.EmployeeId && e.TenantId == tenantId, cancellationToken);
+
+            var label = employee is null
+                ? orphan.Action.EmployeeId.ToString()
+                : $"{employee.FirstName} {employee.LastName} ({employee.EmployeeNumber})";
+
+            if (employee is null)
+            {
+                result.Failures.Add($"{label}: employee not found.");
+                continue;
+            }
+
+            if (employee.StaffStatus == StaffStatus.Terminated)
+            {
+                // Already off strength by some other route: nothing to repair, and raising an exit
+                // for somebody who has already left would be worse than the gap.
+                result.AlreadyTerminatedCount++;
+                continue;
+            }
+
+            // Counted the same way in both modes — including exits this very run has just raised,
+            // so two orphaned decisions against one person report as one raise and one skip rather
+            // than two raises.
+            if (alreadyInFlight.Contains(employee.Id))
+            {
+                result.Failures.Add($"{label}: a separation is already in progress for this employee.");
+                continue;
+            }
+
+            if (dryRun)
+            {
+                result.WouldRaise.Add($"{label}: {orphan.Termination.Type}");
+                alreadyInFlight.Add(employee.Id);
+                continue;
+            }
+
+            var raised = await CreateFromDisciplinaryOutcomeAsync(
+                orphan.Action.Id, employee.Id, orphan.Termination.Type,
+                orphan.Termination.SeparationNotes, actorEmployeeId, cancellationToken);
+
+            if (raised is null)
+                result.Failures.Add($"{label}: a separation is already in progress for this employee.");
+            else
+            {
+                result.RaisedCount++;
+                result.Raised.Add(ToListDtoFromDetail(raised));
+                alreadyInFlight.Add(employee.Id);
+            }
+        }
+
+        _logger.LogInformation(
+            "Disciplinary orphan repair ({Mode}): {Found} found, {Raised} raised, {Already} already terminated, {Failed} failed",
+            dryRun ? "dry run" : "applied", result.FoundCount, result.RaisedCount,
+            result.AlreadyTerminatedCount, result.Failures.Count);
+
+        return result;
     }
 
     // ── Completion: the exit reaches the employee record ──────────────────────
