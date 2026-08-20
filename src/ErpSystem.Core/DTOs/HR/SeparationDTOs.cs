@@ -539,6 +539,22 @@ public class SeparationSettlementDto
 
     /// <summary>Why not, when it cannot.</summary>
     public string? BlockedReason { get; set; }
+
+    // ── FR-HR-185: Internal Audit's review ─────────────────────────────────
+
+    public SettlementReviewOutcome ReviewOutcome { get; set; }
+    public string ReviewOutcomeName { get; set; } = string.Empty;
+
+    public Guid? ReviewedById { get; set; }
+    public string? ReviewedByName { get; set; }
+    public DateTime? ReviewedOn { get; set; }
+    public string? ReviewNotes { get; set; }
+
+    /// <summary>How many times Internal Audit has sent this statement back.</summary>
+    public int ReturnCount { get; set; }
+
+    /// <summary>True once Internal Audit has passed it and payment may be released.</summary>
+    public bool IsClearedForPayment { get; set; }
 }
 
 /// <summary>Add a line by hand — the FR-HR-184 items the system cannot work out for itself.</summary>
@@ -580,6 +596,16 @@ public class UpdateSettlementLineDto
 
 /// <summary>Close the statement for Internal Audit's review.</summary>
 public class FinaliseSettlementDto
+{
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Internal Audit's verdict on a settlement (FR-HR-185). Notes are optional on approval and
+/// required on a return — a control that refuses without saying why cannot be acted on.
+/// </summary>
+public class ReviewSettlementDto
 {
     [MaxLength(2000)]
     public string? Notes { get; set; }

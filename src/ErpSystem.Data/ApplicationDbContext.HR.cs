@@ -8015,6 +8015,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.FinalisedById)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.Property(x => x.ReviewOutcome).HasConversion<int>();
+
+            entity.HasOne(x => x.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ReviewedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasMany(x => x.Lines)
                 .WithOne(x => x.Settlement)
                 .HasForeignKey(x => x.SettlementId)

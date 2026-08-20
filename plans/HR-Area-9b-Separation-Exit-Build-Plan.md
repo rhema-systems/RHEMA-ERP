@@ -603,6 +603,41 @@ the flat `Entities.HR` the file paths suggest; and `CurrencyDto` exposes `Curren
 — written from the entity's shape rather than the DTO's. The cheap version of the area-12 lesson:
 the compiler caught all three before a harness run.
 
+### Slice 6 — FR-HR-185, Internal Audit's review. 2026-08-20, 37/37
+
+Migration `20260820124713_AddSettlementAuditReview`: `ReviewOutcome`, `ReviewedById`, `ReviewedOn`,
+`ReviewNotes`, `ReturnCount`. Approve → `SettlementApproved`; return → `SettlementPending` with
+findings required.
+
+⚠ **The scaffold's enum default was wrong again, in a new way.** `defaultValue: 0` for
+`ReviewOutcome` — but `SettlementReviewOutcome` starts at `NotReviewed = 1`, so **0 is not a member
+of the enum at all**. Corrected to `DEFAULT (1)`, and verified in SQL afterwards: all six existing
+settlements carry 1, none carry 0. Second enum-default correction in this area after
+`ProceduralAbsenceDays`. **Read what a scaffold chose for every non-nullable column, and check
+enums that do not start at zero.**
+
+**The control is in different hands from the approval, deliberately, and the harness proves it:**
+HR, the **Managing Director** and a tenant administrator all get 403 on the review. The MD signed
+the separation and still cannot pass the money — a control the approver can also clear is not a
+control.
+
+**A return refuses the figures, not the exit.** The separation's approval stands untouched
+(asserted); only the statement reopens. `ReturnCount` survives re-finalisation because `FinalisedOn`
+is overwritten each round trip, and "how many times was this queried before it was paid" is what an
+auditor asks later.
+
+**Refactor that came with it:** settlement editability is now keyed on the **separation's status**,
+not on `FinalisedOn`. Unlocking a returned statement by clearing that timestamp would have erased
+the fact it had ever been finalised. Slice 5 re-run: still 75/75.
+
+⚠ **The role has no holders.** `TDC_INTERNAL_AUDIT` has zero members on the live tenant, so this
+harness mints the only holder that has ever existed. **A green run proves the code, not the
+deployment** — until the role is granted, every settlement finalises and then sits unpaid. The
+control holding rather than failing open is correct, and will read as a stuck queue to whoever meets
+it first.
+
+**Area regression after slice 6: 67 + 44 + 50 + 64 + 75 + 37 = 337 assertions, all green.**
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens

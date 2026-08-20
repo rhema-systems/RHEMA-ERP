@@ -518,6 +518,33 @@ public class SeparationSettlement : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    // ── FR-HR-185: Internal Audit's review, before payment is released ───────
+
+    [Required]
+    public SettlementReviewOutcome ReviewOutcome { get; set; } = SettlementReviewOutcome.NotReviewed;
+
+    public Guid? ReviewedById { get; set; }
+
+    [ForeignKey(nameof(ReviewedById))]
+    public virtual Employee? ReviewedBy { get; set; }
+
+    public DateTime? ReviewedOn { get; set; }
+
+    /// <summary>
+    /// Internal Audit's findings. Required when a statement is returned — a control that can refuse
+    /// without saying why leaves HR guessing at what to correct, and the statement would come back
+    /// unchanged.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? ReviewNotes { get; set; }
+
+    /// <summary>
+    /// How many times this statement has been returned by Internal Audit. Kept because
+    /// <see cref="FinalisedOn"/> is overwritten on each re-finalisation, and "this was queried
+    /// three times before it was paid" is exactly what an auditor asks later.
+    /// </summary>
+    public int ReturnCount { get; set; }
+
     public virtual ICollection<SeparationSettlementLine> Lines { get; set; }
         = new List<SeparationSettlementLine>();
 }

@@ -191,3 +191,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820102312_AddSeparationApprovalDecision")] partial class AddSeparationApprovalDecision { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820111206_AddSeparationClearance")] partial class AddSeparationClearance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820115812_AddSeparationSettlement")] partial class AddSeparationSettlement { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260820124713_AddSettlementAuditReview")] partial class AddSettlementAuditReview { }

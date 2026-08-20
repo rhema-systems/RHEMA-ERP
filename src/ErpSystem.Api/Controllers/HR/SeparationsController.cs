@@ -390,6 +390,71 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── FR-HR-185: Internal Audit's review ────────────────────────────────────
+
+    /// <summary>
+    /// Internal Audit passes the settlement. Payment may be released after this, and not before.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>A role gate, not a permission, and not the record.</b> Unlike the MD's signature —
+    /// where who may sign depends on whether the separation is procedural — Internal Audit reviews
+    /// <i>every</i> settlement. The entitled party is a job title, so it is stated as a role.
+    /// SuperAdmin and TenantAdmin are excluded on the same reasoning as the MD: a technical
+    /// superuser passing a financial control is exactly what the control exists to prevent.</para>
+    ///
+    /// <para>⚠ <b>Nobody holds this role on the live tenant</b> (measured 2026-08-20). Until it is
+    /// granted, every settlement will sit unreviewed and unpaid — the control holding rather than
+    /// failing open, which is correct but will look like a stuck queue. Raised with TDC as an
+    /// operational prerequisite.</para>
+    /// </remarks>
+    [Authorize(Roles = Constants.Roles.InternalAudit)]
+    [HttpPost("{id:guid}/settlement/review/approve")]
+    [ProducesResponseType(typeof(SeparationSettlementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementDto>> ApproveSettlementReview(
+        Guid id, [FromBody] ReviewSettlementDto? dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.ApproveSettlementReviewAsync(
+                id, dto ?? new ReviewSettlementDto(), ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Internal Audit returns the settlement with findings. It becomes editable again and must be
+    /// corrected and re-finalised.
+    /// </summary>
+    [Authorize(Roles = Constants.Roles.InternalAudit)]
+    [HttpPost("{id:guid}/settlement/review/return")]
+    [ProducesResponseType(typeof(SeparationSettlementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementDto>> ReturnSettlement(
+        Guid id, [FromBody] ReviewSettlementDto dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+        if (dto == null) return BadRequest(new { message = "Findings are required when returning a settlement." });
+
+        try
+        {
+            return Ok(await _service.ReturnSettlementAsync(id, dto, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Clearance: the tenant's form ──────────────────────────────────────────
 
     /// <summary>The clearance form — the catalogue every separation's checklist is built from.</summary>

@@ -109,6 +109,19 @@ public interface ISeparationService
     Task<SeparationSettlementDto> FinaliseSettlementAsync(
         Guid separationId, FinaliseSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Internal Audit passes the settlement; payment may be released (FR-HR-185).
+    /// </summary>
+    Task<SeparationSettlementDto> ApproveSettlementReviewAsync(
+        Guid separationId, ReviewSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Internal Audit sends the settlement back with findings. The statement becomes editable again
+    /// and must be corrected and re-finalised — a return refuses the figures, not the separation.
+    /// </summary>
+    Task<SeparationSettlementDto> ReturnSettlementAsync(
+        Guid separationId, ReviewSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
     // ── Clearance (FR-HR-091 / FR-HR-183) ────────────────────────────────────
 
     Task<IEnumerable<SeparationClearanceTemplateDto>> GetClearanceTemplatesAsync(

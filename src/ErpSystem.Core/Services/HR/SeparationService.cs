@@ -937,6 +937,7 @@ public class SeparationService : ISeparationService
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .Include(s => s.PreparedBy)
             .Include(s => s.FinalisedBy)
+            .Include(s => s.ReviewedBy)
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SeparationId == separationId,
                 cancellationToken)
@@ -983,6 +984,15 @@ public class SeparationService : ISeparationService
             Notes = settlement.Notes,
             CanFinalise = canFinalise,
             BlockedReason = SettlementBlockedReason(settlement, separation, lines, uncomputed),
+            ReviewOutcome = settlement.ReviewOutcome,
+            ReviewOutcomeName = settlement.ReviewOutcome.ToString(),
+            ReviewedById = settlement.ReviewedById,
+            ReviewedByName = settlement.ReviewedBy == null ? null : FullName(settlement.ReviewedBy),
+            ReviewedOn = settlement.ReviewedOn,
+            ReviewNotes = settlement.ReviewNotes,
+            ReturnCount = settlement.ReturnCount,
+            IsClearedForPayment = settlement.ReviewOutcome == SettlementReviewOutcome.Approved
+                                  && separation.Status == SeparationStatus.SettlementApproved,
         };
     }
 
@@ -1012,7 +1022,7 @@ public class SeparationService : ISeparationService
     {
         ArgumentNullException.ThrowIfNull(dto);
         var tenantId = GetTenantId();
-        var settlement = await RequireDraftSettlementAsync(tenantId, separationId, cancellationToken);
+        var settlement = await RequireEditableSettlementAsync(tenantId, separationId, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(dto.Description))
             throw new InvalidOperationException("Describe what the line is for.");
@@ -1069,7 +1079,7 @@ public class SeparationService : ISeparationService
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
             ?? throw new ArgumentException("The settlement this line belongs to was not found.");
 
-        RequireDraft(settlement);
+        RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
 
         if (dto.Description is not null)
         {
@@ -1118,7 +1128,7 @@ public class SeparationService : ISeparationService
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
             ?? throw new ArgumentException("The settlement this line belongs to was not found.");
 
-        RequireDraft(settlement);
+        RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
 
         await _unitOfWork.Repository<SeparationSettlementLine>().DeleteAsync(lineId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1131,7 +1141,7 @@ public class SeparationService : ISeparationService
     {
         var tenantId = GetTenantId();
         var separation = await RequireAsync(tenantId, separationId, cancellationToken);
-        var settlement = await RequireDraftSettlementAsync(tenantId, separationId, cancellationToken);
+        var settlement = await RequireEditableSettlementAsync(tenantId, separationId, cancellationToken);
 
         if (separation.Status != SeparationStatus.SettlementPending)
             throw new InvalidOperationException(
@@ -1178,23 +1188,120 @@ public class SeparationService : ISeparationService
         return await GetSettlementAsync(separationId, cancellationToken);
     }
 
-    private static void RequireDraft(SeparationSettlement settlement)
+    /// <summary>
+    /// A settlement may be edited only while its separation is awaiting one.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Keyed on the <b>separation's status</b>, not on <c>FinalisedOn</c>. When Internal Audit
+    /// returns a statement it becomes editable again, but <c>FinalisedOn</c> is deliberately kept —
+    /// it records that the statement was finalised once, and clearing it to unlock editing would
+    /// erase that. The status is the live question; the timestamp is history.
+    /// </remarks>
+    private static void RequireEditable(EmployeeSeparation separation)
     {
-        if (settlement.FinalisedOn.HasValue)
+        if (separation.Status == SeparationStatus.SettlementUnderReview)
             throw new InvalidOperationException(
-                "This settlement has been finalised and is with Internal Audit. Its lines can no longer be changed.");
+                "This settlement has been finalised and is with Internal Audit. Its lines can no "
+                + "longer be changed unless Internal Audit returns it.");
+
+        if (separation.Status != SeparationStatus.SettlementPending)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}; its settlement can only be changed while "
+                + "it is awaiting one.");
     }
 
-    private async Task<SeparationSettlement> RequireDraftSettlementAsync(
+    private async Task<SeparationSettlement> RequireEditableSettlementAsync(
         Guid tenantId, Guid separationId, CancellationToken cancellationToken)
     {
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+        RequireEditable(separation);
+
+        return await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+                   .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SeparationId == separationId,
+                       cancellationToken)
+               ?? throw new ArgumentException("No settlement has been prepared for this separation.");
+    }
+
+    // ── FR-HR-185: Internal Audit's review, before payment is released ────────
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementDto> ApproveSettlementReviewAsync(
+        Guid separationId, ReviewSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var (separation, settlement) = await RequireSettlementUnderReviewAsync(tenantId, separationId, cancellationToken);
+
+        settlement.ReviewOutcome = SettlementReviewOutcome.Approved;
+        settlement.ReviewedById = actorEmployeeId;
+        settlement.ReviewedOn = DateTime.UtcNow;
+        settlement.ReviewNotes = string.IsNullOrWhiteSpace(dto?.Notes) ? null : dto!.Notes.Trim();
+
+        separation.Status = SeparationStatus.SettlementApproved;
+
+        await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Settlement for separation {Number} reviewed and approved by Internal Audit; payment may be released",
+            separation.SeparationNumber);
+
+        return await GetSettlementAsync(separationId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementDto> ReturnSettlementAsync(
+        Guid separationId, ReviewSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        // A control that can refuse without saying why leaves HR guessing at what to correct, and
+        // the statement comes back unchanged.
+        if (string.IsNullOrWhiteSpace(dto.Notes))
+            throw new InvalidOperationException(
+                "Set out the findings when returning a settlement — what is wrong with it, so it can be corrected.");
+
+        var tenantId = GetTenantId();
+        var (separation, settlement) = await RequireSettlementUnderReviewAsync(tenantId, separationId, cancellationToken);
+
+        settlement.ReviewOutcome = SettlementReviewOutcome.Returned;
+        settlement.ReviewedById = actorEmployeeId;
+        settlement.ReviewedOn = DateTime.UtcNow;
+        settlement.ReviewNotes = dto.Notes.Trim();
+        settlement.ReturnCount += 1;
+
+        // Back to HR, editable again. FinalisedOn is kept: it says the statement was finalised once,
+        // and ReturnCount says how often Internal Audit sent it back — the question an auditor asks
+        // later is "how many times was this queried before it was paid".
+        separation.Status = SeparationStatus.SettlementPending;
+
+        await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Settlement for separation {Number} returned by Internal Audit (return #{Count})",
+            separation.SeparationNumber, settlement.ReturnCount);
+
+        return await GetSettlementAsync(separationId, cancellationToken);
+    }
+
+    private async Task<(EmployeeSeparation Separation, SeparationSettlement Settlement)>
+        RequireSettlementUnderReviewAsync(Guid tenantId, Guid separationId, CancellationToken cancellationToken)
+    {
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        if (separation.Status != SeparationStatus.SettlementUnderReview)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}. Internal Audit reviews a settlement once HR "
+                + "has finalised it.");
+
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SeparationId == separationId,
                 cancellationToken)
             ?? throw new ArgumentException("No settlement has been prepared for this separation.");
 
-        RequireDraft(settlement);
-        return settlement;
+        return (separation, settlement);
     }
 
     private static SeparationSettlementLineDto ToSettlementLineDto(SeparationSettlementLine l) => new()

@@ -2967,6 +2967,35 @@ public enum SeparationStatus
 }
 
 /// <summary>
+/// Internal Audit's verdict on a final settlement (FR-HR-185: <i>"require Internal Audit review of
+/// the final settlement before payment is released"</i>).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Nobody holds <c>TDC_INTERNAL_AUDIT</c> on the live tenant</b> (measured 2026-08-20, zero
+/// members). The control is built as specified and will therefore hold every settlement at
+/// <see cref="NotReviewed"/> until somebody is granted the role — correct behaviour, and it will
+/// look like a stuck queue to whoever meets it first. Raised with TDC as an operational
+/// prerequisite, not a development gap.
+/// </remarks>
+public enum SettlementReviewOutcome
+{
+    /// <summary>Not yet seen by Internal Audit.</summary>
+    [Description("Not Reviewed")]
+    NotReviewed = 1,
+
+    /// <summary>Reviewed and passed. Payment may be released.</summary>
+    [Description("Approved")]
+    Approved = 2,
+
+    /// <summary>
+    /// Sent back to HR with findings. The statement becomes editable again and must be corrected
+    /// and re-finalised — a return is not a refusal of the separation, only of the figures.
+    /// </summary>
+    [Description("Returned")]
+    Returned = 3
+}
+
+/// <summary>
 /// What a line of the final settlement is (FR-HR-184: <i>"unpaid salary, notice pay, leave
 /// encashment, benefits, deductions, recoveries, loans and pension-related payments"</i>).
 /// </summary>
