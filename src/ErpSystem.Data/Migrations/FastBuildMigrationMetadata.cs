@@ -193,3 +193,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820115812_AddSeparationSettlement")] partial class AddSeparationSettlement { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820124713_AddSettlementAuditReview")] partial class AddSettlementAuditReview { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820163509_AddSeparationReminderEngine")] partial class AddSeparationReminderEngine { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260820175026_AddSeparationExitInterview")] partial class AddSeparationExitInterview { }

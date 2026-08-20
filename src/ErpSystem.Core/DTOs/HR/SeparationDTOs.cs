@@ -806,3 +806,209 @@ public class SeparationReminderRunResultDto
 
     public List<SeparationReminderItemDto> Raised { get; set; } = new();
 }
+
+// =============================================================================
+// EXIT ANALYTICS (slice 12)
+//
+// ⚠ What is NOT here: exit-interview themes. That appeared in this area's own slice plan and is
+// NOT an FRD requirement — "exit interview" does not occur anywhere in the specification, and area
+// 9b models no structured exit interview, only a document category for attaching the record.
+// Inventing an entity to report on would be inventing scope, which this area declined to do for
+// redundancy in slice 8 and declines again here.
+// =============================================================================
+
+/// <summary>One row of a breakdown — a route out, a reason, a stage.</summary>
+public class SeparationBreakdownRowDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int Count { get; set; }
+
+    /// <summary>Share of the total, to one decimal. Zero where the total is zero.</summary>
+    public decimal Percentage { get; set; }
+}
+
+/// <summary>A stage of the pipeline, and how long the oldest thing has been sitting in it.</summary>
+public class SeparationPipelineStageDto
+{
+    public string Status { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int Count { get; set; }
+
+    /// <summary>Days since the oldest separation at this stage was raised. Null when none.</summary>
+    public int? OldestDays { get; set; }
+}
+
+/// <summary>Exits, why they happened, and where the ones in flight are stuck.</summary>
+public class SeparationAnalyticsDto
+{
+    public DateOnly FromDate { get; set; }
+    public DateOnly ToDate { get; set; }
+
+    /// <summary>Separations completed in the window.</summary>
+    public int CompletedInPeriod { get; set; }
+
+    /// <summary>Raised in the window, whatever became of them.</summary>
+    public int RaisedInPeriod { get; set; }
+
+    /// <summary>Everything not yet completed, cancelled or refused.</summary>
+    public int InFlight { get; set; }
+
+    /// <summary>Active employees right now — the denominator below.</summary>
+    public int ActiveHeadcount { get; set; }
+
+    /// <summary>
+    /// Completed exits as a percentage of current active headcount.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Against headcount <b>today</b>, not an average over the window, and the label must say so.
+    /// A true turnover rate uses average headcount across the period; this system holds no headcount
+    /// history to average. Stating the simpler figure and naming it is honest; calling it "turnover"
+    /// without qualification would not be.
+    /// </remarks>
+    public decimal ExitRatePercent { get; set; }
+
+    public List<SeparationBreakdownRowDto> ByRoute { get; set; } = new();
+    public List<SeparationBreakdownRowDto> ByReason { get; set; } = new();
+    public List<SeparationPipelineStageDto> Pipeline { get; set; } = new();
+
+    /// <summary>Money owed to leavers on settlements that have been passed for payment.</summary>
+    public decimal SettledEarnings { get; set; }
+
+    /// <summary>Money recovered from them on the same settlements.</summary>
+    public decimal SettledRecoveries { get; set; }
+
+    public decimal SettledNetPayable { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Settlements that could not be fully valued — lines still reading "cannot compute" — across
+    /// everything in flight. A count of statements nobody can finalise yet.
+    /// </summary>
+    public int SettlementsWithUnvaluedLines { get; set; }
+
+    /// <summary>
+    /// ⚠ Completed separations whose employee record was never updated. The defect this area was
+    /// built to close, as a number on the dashboard rather than something found years later.
+    /// </summary>
+    public int CompletedButNotApplied { get; set; }
+}
+
+// =============================================================================
+// THE EXIT INTERVIEW
+// =============================================================================
+
+/// <summary>What the leaver said on the way out.</summary>
+public class SeparationExitInterviewDto
+{
+    public Guid Id { get; set; }
+    public Guid SeparationId { get; set; }
+    public string SeparationNumber { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+
+    public bool WasDeclined { get; set; }
+    public string? DeclinedReason { get; set; }
+
+    public DateOnly? ConductedOn { get; set; }
+    public Guid? ConductedById { get; set; }
+    public string? ConductedByName { get; set; }
+
+    public ExitInterviewReason? PrimaryReason { get; set; }
+    public string? PrimaryReasonName { get; set; }
+    public string? PrimaryReasonDetail { get; set; }
+
+    /// <summary>1–5, or null where the question was not asked. Never zero.</summary>
+    public int? OverallExperienceRating { get; set; }
+    public int? ManagementRating { get; set; }
+    public int? PayAndBenefitsRating { get; set; }
+    public int? CareerDevelopmentRating { get; set; }
+
+    public bool? WouldRecommendEmployer { get; set; }
+    public bool? WouldConsiderReturning { get; set; }
+
+    public string? WhatWorkedWell { get; set; }
+    public string? WhatShouldChange { get; set; }
+    public string? AdditionalComments { get; set; }
+
+    public Guid? RecordedById { get; set; }
+    public string? RecordedByName { get; set; }
+    public DateTime RecordedOn { get; set; }
+}
+
+/// <summary>
+/// Record or amend the interview. One payload for both — an interview is taken once and corrected,
+/// not created twice, so a separate update shape would only invite the two to drift.
+/// </summary>
+public class RecordExitInterviewDto
+{
+    /// <summary>True where the employee was offered one and declined, or could not be reached.</summary>
+    public bool WasDeclined { get; set; }
+
+    [MaxLength(500)]
+    public string? DeclinedReason { get; set; }
+
+    public DateOnly? ConductedOn { get; set; }
+    public Guid? ConductedById { get; set; }
+
+    [MaxLength(200)]
+    public string? ConductedByName { get; set; }
+
+    public ExitInterviewReason? PrimaryReason { get; set; }
+
+    [MaxLength(2000)]
+    public string? PrimaryReasonDetail { get; set; }
+
+    [Range(1, 5)] public int? OverallExperienceRating { get; set; }
+    [Range(1, 5)] public int? ManagementRating { get; set; }
+    [Range(1, 5)] public int? PayAndBenefitsRating { get; set; }
+    [Range(1, 5)] public int? CareerDevelopmentRating { get; set; }
+
+    public bool? WouldRecommendEmployer { get; set; }
+    public bool? WouldConsiderReturning { get; set; }
+
+    [MaxLength(2000)] public string? WhatWorkedWell { get; set; }
+    [MaxLength(2000)] public string? WhatShouldChange { get; set; }
+    [MaxLength(2000)] public string? AdditionalComments { get; set; }
+}
+
+/// <summary>What the exit interviews say, across a period.</summary>
+public class ExitInterviewThemesDto
+{
+    /// <summary>Completed separations in the window — the population that should have been asked.</summary>
+    public int SeparationsInPeriod { get; set; }
+
+    /// <summary>How many have an interview record of any kind, declined included.</summary>
+    public int InterviewsRecorded { get; set; }
+
+    /// <summary>Interviews actually conducted.</summary>
+    public int InterviewsConducted { get; set; }
+
+    public int InterviewsDeclined { get; set; }
+
+    /// <summary>Records held as a share of separations. Low coverage makes every figure below thin.</summary>
+    public decimal CoveragePercent { get; set; }
+
+    /// <summary>
+    /// Declines as a share of records held.
+    /// </summary>
+    /// <remarks>
+    /// Worth reading before any of the themes: a programme most people decline is telling you
+    /// something about how the exits are being handled, before a single answer is read.
+    /// </remarks>
+    public decimal DeclineRatePercent { get; set; }
+
+    /// <summary>Why people said they left, most common first. Conducted interviews only.</summary>
+    public List<SeparationBreakdownRowDto> ByPrimaryReason { get; set; } = new();
+
+    /// <summary>Mean of each 1–5 rating, over the answers actually given. Null where none were.</summary>
+    public decimal? AverageOverallExperience { get; set; }
+    public decimal? AverageManagement { get; set; }
+    public decimal? AveragePayAndBenefits { get; set; }
+    public decimal? AverageCareerDevelopment { get; set; }
+
+    /// <summary>Share who would recommend the employer, of those asked. Null where none were.</summary>
+    public decimal? WouldRecommendPercent { get; set; }
+
+    /// <summary>Share who would consider returning, of those asked.</summary>
+    public decimal? WouldReturnPercent { get; set; }
+}

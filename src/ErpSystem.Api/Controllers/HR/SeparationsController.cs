@@ -417,6 +417,105 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── The exit interview ────────────────────────────────────────────────────
+
+    /// <summary>The exit interview for this separation, or 204 where none has been recorded.</summary>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("{id:guid}/exit-interview")]
+    [ProducesResponseType(typeof(SeparationExitInterviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationExitInterviewDto>> GetExitInterview(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            var interview = await _service.GetExitInterviewAsync(id, cancellationToken);
+            // 204, not 404: the separation exists and simply has no interview yet. A 404 here would
+            // say the separation was missing, which is a different and more alarming thing.
+            return interview is null ? NoContent() : Ok(interview);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Record or amend the exit interview.
+    /// </summary>
+    /// <remarks>
+    /// One endpoint for both: an interview is taken once and corrected, not created twice.
+    /// ⚠ Marking it declined clears every answer, so a part-filled form cannot leave ratings behind
+    /// to be averaged later as though a real interview had produced them.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPut("{id:guid}/exit-interview")]
+    [ProducesResponseType(typeof(SeparationExitInterviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationExitInterviewDto>> RecordExitInterview(
+        Guid id, [FromBody] RecordExitInterviewDto dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+        if (dto == null) return BadRequest(new { message = "An exit interview payload is required." });
+
+        try
+        {
+            return Ok(await _service.RecordExitInterviewAsync(id, dto, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    // ── Exit analytics ────────────────────────────────────────────────────────
+
+    /// <summary>Exits, why they happened, and where the ones in flight are stuck.</summary>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("analytics")]
+    [ProducesResponseType(typeof(SeparationAnalyticsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SeparationAnalyticsDto>> GetAnalytics(
+        [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _service.GetAnalyticsAsync(from, to, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// What the exit interviews say — coverage, decline rate, the reasons people gave, and the
+    /// average ratings.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Read the coverage and decline rate before the themes. Averages over a handful of interviews
+    /// out of many exits describe those few people, not the organisation — and a programme most
+    /// leavers decline is telling you something before a single answer is read.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("analytics/exit-interviews")]
+    [ProducesResponseType(typeof(ExitInterviewThemesDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ExitInterviewThemesDto>> GetExitInterviewThemes(
+        [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _service.GetExitInterviewThemesAsync(from, to, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Contract expiry ───────────────────────────────────────────────────────
 
     /// <summary>

@@ -607,3 +607,110 @@ public class SeparationSettlementLine : TenantEntity
 
     public int SortOrder { get; set; }
 }
+
+// =============================================================================
+// THE EXIT INTERVIEW (slice 12)
+//
+// ⚠ Not an FRD requirement — "exit interview" appears nowhere in the specification. Added at the
+// user's explicit request, and it is a real part of an exit process regardless: without it the
+// only record of why somebody left is the reason the ORGANISATION wrote down.
+// =============================================================================
+
+/// <summary>
+/// What the leaver said on the way out. One per separation.
+/// </summary>
+/// <remarks>
+/// <para><b>Declining is a first-class outcome.</b> People leave angry, or in a hurry, or under
+/// notice they did not want — plenty never sit down for this. A record that can only express a
+/// completed interview forces whoever is keeping it either to invent one or to leave the file
+/// blank, and both are worse than "they were asked and said no".</para>
+///
+/// <para><b>The interviewer may not be an ERP user.</b> A departmental head or an external HR
+/// consultant often conducts these, so the name is free text alongside the optional employee link —
+/// the same shape the clearance form uses for its signatories, and for the same reason.</para>
+///
+/// <para><b>Ratings are 1–5 and nullable.</b> Null means not asked; zero would mean "the worst
+/// possible answer", and a half-finished form must not read as a damning one.</para>
+/// </remarks>
+public class SeparationExitInterview : TenantEntity
+{
+    [Required]
+    public Guid SeparationId { get; set; }
+
+    [ForeignKey(nameof(SeparationId))]
+    public virtual EmployeeSeparation Separation { get; set; } = null!;
+
+    /// <summary>
+    /// True where the employee was offered an interview and declined, or could not be reached. The
+    /// rest of the record is then empty by design rather than by omission.
+    /// </summary>
+    public bool WasDeclined { get; set; }
+
+    [MaxLength(500)]
+    public string? DeclinedReason { get; set; }
+
+    public DateOnly? ConductedOn { get; set; }
+
+    /// <summary>The interviewer, where they are an employee of this organisation.</summary>
+    public Guid? ConductedById { get; set; }
+
+    [ForeignKey(nameof(ConductedById))]
+    public virtual Employee? ConductedBy { get; set; }
+
+    /// <summary>Who conducted it, as written on the form. Free text — see the remarks.</summary>
+    [MaxLength(200)]
+    public string? ConductedByName { get; set; }
+
+    /// <summary>
+    /// What the LEAVER says was behind it — which is not the same as the termination reason the
+    /// organisation recorded. That difference is the point of asking.
+    /// </summary>
+    public ExitInterviewReason? PrimaryReason { get; set; }
+
+    [MaxLength(2000)]
+    public string? PrimaryReasonDetail { get; set; }
+
+    // ── Ratings, 1–5. Null means not asked, never "nought out of five". ──────
+
+    /// <summary>Their experience of working here overall.</summary>
+    [Range(1, 5)]
+    public int? OverallExperienceRating { get; set; }
+
+    /// <summary>How they were managed and supervised.</summary>
+    [Range(1, 5)]
+    public int? ManagementRating { get; set; }
+
+    /// <summary>Pay and benefits against what the work asked of them.</summary>
+    [Range(1, 5)]
+    public int? PayAndBenefitsRating { get; set; }
+
+    /// <summary>Whether the job gave them somewhere to go.</summary>
+    [Range(1, 5)]
+    public int? CareerDevelopmentRating { get; set; }
+
+    /// <summary>Would they recommend this employer to somebody else. Null where not asked.</summary>
+    public bool? WouldRecommendEmployer { get; set; }
+
+    /// <summary>
+    /// Would they consider coming back. Deliberately distinct from
+    /// <c>EmployeeSeparation.IsEligibleForRehire</c>: that is whether the ORGANISATION would have
+    /// them, this is whether THEY would return, and a record that conflates the two answers neither.
+    /// </summary>
+    public bool? WouldConsiderReturning { get; set; }
+
+    [MaxLength(2000)]
+    public string? WhatWorkedWell { get; set; }
+
+    [MaxLength(2000)]
+    public string? WhatShouldChange { get; set; }
+
+    [MaxLength(2000)]
+    public string? AdditionalComments { get; set; }
+
+    public Guid? RecordedById { get; set; }
+
+    [ForeignKey(nameof(RecordedById))]
+    public virtual Employee? RecordedBy { get; set; }
+
+    public DateTime RecordedOn { get; set; }
+}

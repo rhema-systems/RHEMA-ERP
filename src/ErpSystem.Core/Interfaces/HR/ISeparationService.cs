@@ -147,6 +147,34 @@ public interface ISeparationService
     Task<RetirementSweepResultDto> RunRetirementSweepAsync(
         int? withinDays = null, CancellationToken cancellationToken = default);
 
+    // ── The exit interview ───────────────────────────────────────────────────
+
+    /// <summary>The interview for this separation, or null where none has been recorded.</summary>
+    Task<SeparationExitInterviewDto?> GetExitInterviewAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Record or amend the interview. Refused before the separation is approved — an interview
+    /// about an exit that may not happen puts words in the mouth of somebody who is not leaving.
+    /// </summary>
+    /// <remarks>
+    /// Marking it declined <b>clears every answer</b>: a part-filled form later marked declined must
+    /// not leave ratings behind to be averaged as though a real interview had produced them.
+    /// </remarks>
+    Task<SeparationExitInterviewDto> RecordExitInterviewAsync(
+        Guid separationId, RecordExitInterviewDto dto, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>What the interviews say across a period — coverage, decline rate, reasons, ratings.</summary>
+    Task<ExitInterviewThemesDto> GetExitInterviewThemesAsync(
+        DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default);
+
+    // ── Exit analytics ───────────────────────────────────────────────────────
+
+    /// <summary>Exits, why they happened, and where the ones in flight are stuck.</summary>
+    Task<SeparationAnalyticsDto> GetAnalyticsAsync(
+        DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default);
+
     // ── Contract expiry ──────────────────────────────────────────────────────
 
     /// <summary>

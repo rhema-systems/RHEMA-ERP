@@ -868,3 +868,86 @@ service because the engine cannot express the procedural split. That is fine for
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens
 land in slice 11, giving the MD one inbox rather than a separate place to sign exits. Recorded here
 so it is not discovered at UI time.
+
+---
+
+## Slice 12 — exit analytics, and the exit interview
+
+**⚠ The exit interview is not an FRD requirement.** "Exit interview" appears nowhere in the
+specification, and this area deliberately declined to invent it. It was added at the client's
+explicit request during this slice. It is recorded here so that nobody later reads it as a
+requirement traced to a paragraph that does not exist.
+
+It is also what makes the "themes" half of the analytics possible. Without it, the only record of
+why somebody left is the reason **the organisation** wrote down. `ExitInterviewReason` is therefore
+a separate enum from `TerminationReason` on purpose: the organisation records "resignation", the
+employee says whether it was the pay or the manager. Same exit, two different facts, and only the
+second one tells anybody what to fix.
+
+### Three shapes in the entity that the numbers depend on
+
+- **Every rating is nullable and runs 1–5.** Null means the question was not asked; zero would mean
+  the worst possible answer. A half-finished form must not read as a damning one.
+- **`WasDeclined` is a first-class outcome.** People leave angry or at short notice. A record that
+  can only express a completed interview forces either an invented one or a blank file.
+- **Marking an interview declined clears every answer,** server-side and deliberately. A part-filled
+  form later marked declined must not leave ratings behind to be averaged as though a real
+  interview had produced them.
+
+### The vacuous green this slice nearly shipped
+
+⚠ **Worth keeping, because it is the failure mode the double audit exists to catch.** The first
+version of `run-slice12.mjs` built its interview fixtures at **Approved** and guarded the average
+assertions behind `if (average != null)`. The themes query counts only **Completed** separations,
+dated by effective date — and the standard fixture body exits on 2026-08-31, which is in the
+future. So every number came back zero, every average came back null, and the two assertions that
+mattered most **never ran at all**. 42 of 42 passed and proved nothing about the averages.
+
+The rebuilt fixtures are carried the whole way to Completed, pinned to a past effective date, and
+the window is narrowed to that date. The shape is chosen so that **running the file twice leaves
+every expected number unchanged** — duplicating identical data does not move a mean, a coverage
+ratio, or a decline rate — which makes the repeat run a real test rather than a formality.
+
+The sharp assertion: of two conducted interviews, only **one** is asked about management, and the
+answer is **5**. If an unasked question were counted as zero the mean reads 2.50; as a 1, it reads
+3.00. Only **5.00** means the average ran over the answers actually given. The same trick on the
+yes/no answers — `wouldReturnPercent` must read 100, not 50.
+
+**A consequence worth stating:** the pinned window must belong to this file alone. A first revision
+of the payload probe leaked a fourth fixture onto the shared date, which would have broken the
+whole-sets arithmetic and moved the averages on the next run. The probe now has its own date, and
+the file says: if the fixture shape changes again, **move the date rather than patch the
+arithmetic**.
+
+### Two editorial decisions on the dashboard
+
+- **Coverage before averages.** An average over four interviews out of ninety exits describes those
+  four people. The panel leads with how many exits were actually interviewed, and hides the averages
+  entirely when none were conducted.
+- **Unvalued is not zero.** Settlements carrying lines nobody could value are counted *beside* the
+  money, not folded into it: the total is then an understatement of a known size rather than a fact.
+
+`CompletedButNotApplied` — this area's founding defect — is on the dashboard as a number and as a
+red banner when it is non-zero.
+
+### One frontend defect found and fixed in this slice
+
+`apiService` returns `response.text()` when there is no JSON content-type, so a **204 arrives as an
+empty string**, and `result ?? null` does not catch it — `''` is not nullish. `getExitInterview`
+would have handed the screen `''` and rendered an interview that does not exist. The service now
+tests for an object.
+
+### Delivered
+
+- `SeparationExitInterview` entity, `ExitInterviewReason` enum, migration
+  `20260820175026_AddSeparationExitInterview` (guarded, listed), filtered unique index on
+  `SeparationId`
+- `GET`/`PUT {id}/exit-interview` — the GET answers **204, not 404**, when none exists: a 404 would
+  say the separation was missing, which is a different and more alarming thing
+- `GET analytics`, `GET analytics/exit-interviews`
+- `/hr/separations/analytics` screen; exit-interview tab on the detail page, gated on Approved
+- `run-slice12.mjs` — **62 assertions**, green on two consecutive runs
+
+**Area regression after slice 12: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 13 + 37 + 62 = 578
+assertions**, all green. (Slice 11 was the screens slice and has no harness of its own — its
+endpoints are covered by the slices that built them, and by the content audit in slice 13.)

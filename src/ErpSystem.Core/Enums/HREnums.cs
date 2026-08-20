@@ -2996,6 +2996,59 @@ public enum SettlementReviewOutcome
 }
 
 /// <summary>
+/// The main reason a leaver gives at their exit interview.
+/// </summary>
+/// <remarks>
+/// <para>Separate from <c>TerminationReason</c> on purpose, and the distinction is the whole value
+/// of an exit interview: <c>TerminationReason</c> is what the <b>organisation</b> records — a
+/// resignation — while this is what the <b>employee</b> says was behind it. "Resignation, because
+/// the pay was uncompetitive" and "resignation, because of their manager" are the same termination
+/// reason and completely different facts, and only the second one tells anybody what to fix.</para>
+///
+/// <para>Kept to a short list on purpose. A long taxonomy nobody can hold in their head gets
+/// answered with "Other", and then the analytics say nothing.</para>
+/// </remarks>
+public enum ExitInterviewReason
+{
+    [Description("Pay And Benefits")]
+    PayAndBenefits = 1,
+
+    [Description("Career Progression")]
+    CareerProgression = 2,
+
+    [Description("Management Or Supervision")]
+    ManagementOrSupervision = 3,
+
+    [Description("Workload Or Stress")]
+    WorkloadOrStress = 4,
+
+    [Description("Work-Life Balance")]
+    WorkLifeBalance = 5,
+
+    [Description("Working Conditions")]
+    WorkingConditions = 6,
+
+    [Description("Relationship With Colleagues")]
+    RelationshipWithColleagues = 7,
+
+    [Description("Job Security")]
+    JobSecurity = 8,
+
+    [Description("Relocation")]
+    Relocation = 9,
+
+    [Description("Health Or Personal")]
+    HealthOrPersonal = 10,
+
+    /// <summary>Retirement, contract expiry, death — an exit nobody chose for a reason.</summary>
+    [Description("Not Applicable — End Of Service")]
+    EndOfService = 11,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>
 /// What a line of the final settlement is (FR-HR-184: <i>"unpaid salary, notice pay, leave
 /// encashment, benefits, deductions, recoveries, loans and pension-related payments"</i>).
 /// </summary>

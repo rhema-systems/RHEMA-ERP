@@ -320,6 +320,9 @@ public partial class ApplicationDbContext
     /// <summary>One line of one employee's clearance form.</summary>
     public DbSet<SeparationClearanceItem> SeparationClearanceItems { get; set; } = null!;
 
+    /// <summary>What the leaver said on the way out. One per separation.</summary>
+    public DbSet<SeparationExitInterview> SeparationExitInterviews { get; set; } = null!;
+
     /// <summary>One pass of the separation reminder sweep (FR-HR-111).</summary>
     public DbSet<SeparationReminderRun> SeparationReminderRuns { get; set; } = null!;
 
@@ -7992,6 +7995,34 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Documents)
                 .WithOne(x => x.Separation)
                 .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationExitInterview>(entity =>
+        {
+            // One interview per separation. Filtered so a soft-deleted record does not block a
+            // replacement being taken.
+            entity.HasIndex(x => x.SeparationId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SeparationExitInterview_SeparationId");
+
+            entity.HasIndex(x => x.PrimaryReason).HasDatabaseName("IX_SeparationExitInterview_PrimaryReason");
+            entity.Property(x => x.PrimaryReason).HasConversion<int>();
+
+            entity.HasOne(x => x.Separation)
+                .WithMany()
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConductedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ConductedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

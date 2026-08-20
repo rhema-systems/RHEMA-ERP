@@ -1065,6 +1065,392 @@ public class SeparationService : ISeparationService
         EmployeeRecordUpdated = d.EmployeeRecordUpdated,
     };
 
+    // ── The exit interview ────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<SeparationExitInterviewDto?> GetExitInterviewAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await RequireAsync(tenantId, separationId, cancellationToken);
+
+        var interview = await LoadInterviewAsync(tenantId, separationId, cancellationToken);
+        return interview is null ? null : ToInterviewDto(interview);
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationExitInterviewDto> RecordExitInterviewAsync(
+        Guid separationId, RecordExitInterviewDto dto, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        // An interview is about an exit that is actually happening. Taking one against a draft or a
+        // refused separation would put words in the mouth of somebody who is not leaving.
+        if (separation.Status is SeparationStatus.Draft
+            or SeparationStatus.PendingApproval
+            or SeparationStatus.Cancelled
+            or SeparationStatus.Rejected)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}. An exit interview is recorded once the "
+                + "separation has been approved.");
+
+        if (dto.WasDeclined)
+        {
+            if (string.IsNullOrWhiteSpace(dto.DeclinedReason))
+                throw new InvalidOperationException(
+                    "Say why the interview was not held — declined, could not be reached, or left before it could be arranged.");
+        }
+        else if (dto.ConductedOn is null)
+        {
+            throw new InvalidOperationException(
+                "Record the date the interview was held, or mark it as declined.");
+        }
+
+        if (dto.ConductedOn is { } held && held > DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new InvalidOperationException("An exit interview cannot be recorded as held in the future.");
+
+        if (dto.ConductedById is { } interviewerId && interviewerId != Guid.Empty)
+        {
+            var exists = await _unitOfWork.Repository<Employee>().GetQueryable()
+                .AnyAsync(e => e.Id == interviewerId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken);
+            if (!exists)
+                throw new ArgumentException($"Employee with ID '{interviewerId}' not found.");
+        }
+
+        var interview = await _unitOfWork.Repository<SeparationExitInterview>().GetQueryable()
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId,
+                cancellationToken);
+
+        var isNew = interview is null;
+        interview ??= new SeparationExitInterview
+        {
+            TenantId = tenantId,
+            SeparationId = separationId,
+        };
+
+        // ⚠ A declined interview keeps NO answers. Somebody who marks an interview declined after
+        // part-filling it must not leave half a set of ratings behind to be averaged later as if a
+        // real interview had produced them.
+        interview.WasDeclined = dto.WasDeclined;
+        interview.DeclinedReason = dto.WasDeclined ? dto.DeclinedReason!.Trim() : null;
+        interview.ConductedOn = dto.WasDeclined ? null : dto.ConductedOn;
+        interview.ConductedById = dto.WasDeclined ? null : dto.ConductedById;
+        interview.ConductedByName = dto.WasDeclined || string.IsNullOrWhiteSpace(dto.ConductedByName)
+            ? null : dto.ConductedByName.Trim();
+        interview.PrimaryReason = dto.WasDeclined ? null : dto.PrimaryReason;
+        interview.PrimaryReasonDetail = dto.WasDeclined || string.IsNullOrWhiteSpace(dto.PrimaryReasonDetail)
+            ? null : dto.PrimaryReasonDetail.Trim();
+        interview.OverallExperienceRating = dto.WasDeclined ? null : dto.OverallExperienceRating;
+        interview.ManagementRating = dto.WasDeclined ? null : dto.ManagementRating;
+        interview.PayAndBenefitsRating = dto.WasDeclined ? null : dto.PayAndBenefitsRating;
+        interview.CareerDevelopmentRating = dto.WasDeclined ? null : dto.CareerDevelopmentRating;
+        interview.WouldRecommendEmployer = dto.WasDeclined ? null : dto.WouldRecommendEmployer;
+        interview.WouldConsiderReturning = dto.WasDeclined ? null : dto.WouldConsiderReturning;
+        interview.WhatWorkedWell = dto.WasDeclined ? null : Trimmed(dto.WhatWorkedWell);
+        interview.WhatShouldChange = dto.WasDeclined ? null : Trimmed(dto.WhatShouldChange);
+        interview.AdditionalComments = dto.WasDeclined ? null : Trimmed(dto.AdditionalComments);
+        interview.RecordedById = actorEmployeeId;
+        interview.RecordedOn = DateTime.UtcNow;
+
+        if (isNew)
+            await _unitOfWork.Repository<SeparationExitInterview>().AddAsync(interview);
+        else
+            await _unitOfWork.Repository<SeparationExitInterview>().UpdateAsync(interview);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Exit interview {Action} for separation {Number} ({Outcome})",
+            isNew ? "recorded" : "amended", separation.SeparationNumber,
+            dto.WasDeclined ? "declined" : "conducted");
+
+        var saved = await LoadInterviewAsync(tenantId, separationId, cancellationToken)
+            ?? throw new InvalidOperationException("Exit interview saved but could not be reloaded.");
+
+        return ToInterviewDto(saved);
+
+        static string? Trimmed(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+    }
+
+    private async Task<SeparationExitInterview?> LoadInterviewAsync(
+        Guid tenantId, Guid separationId, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<SeparationExitInterview>().GetQueryable()
+            .Include(i => i.Separation).ThenInclude(s => s.Employee)
+            .Include(i => i.ConductedBy)
+            .Include(i => i.RecordedBy)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId,
+                cancellationToken);
+
+    private static SeparationExitInterviewDto ToInterviewDto(SeparationExitInterview i) => new()
+    {
+        Id = i.Id,
+        SeparationId = i.SeparationId,
+        SeparationNumber = i.Separation?.SeparationNumber ?? string.Empty,
+        EmployeeName = FullName(i.Separation?.Employee),
+        WasDeclined = i.WasDeclined,
+        DeclinedReason = i.DeclinedReason,
+        ConductedOn = i.ConductedOn,
+        ConductedById = i.ConductedById,
+        // The employee link when there is one, the written name when there is not — an interviewer
+        // is often not an ERP user.
+        ConductedByName = i.ConductedBy != null ? FullName(i.ConductedBy) : i.ConductedByName,
+        PrimaryReason = i.PrimaryReason,
+        PrimaryReasonName = i.PrimaryReason?.ToString(),
+        PrimaryReasonDetail = i.PrimaryReasonDetail,
+        OverallExperienceRating = i.OverallExperienceRating,
+        ManagementRating = i.ManagementRating,
+        PayAndBenefitsRating = i.PayAndBenefitsRating,
+        CareerDevelopmentRating = i.CareerDevelopmentRating,
+        WouldRecommendEmployer = i.WouldRecommendEmployer,
+        WouldConsiderReturning = i.WouldConsiderReturning,
+        WhatWorkedWell = i.WhatWorkedWell,
+        WhatShouldChange = i.WhatShouldChange,
+        AdditionalComments = i.AdditionalComments,
+        RecordedById = i.RecordedById,
+        RecordedByName = i.RecordedBy == null ? null : FullName(i.RecordedBy),
+        RecordedOn = i.RecordedOn,
+    };
+
+    /// <inheritdoc />
+    public async Task<ExitInterviewThemesDto> GetExitInterviewThemesAsync(
+        DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var toDate = to ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var fromDate = from ?? toDate.AddYears(-1);
+
+        if (fromDate > toDate)
+            throw new InvalidOperationException("The start of the period falls after its end.");
+
+        var separations = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted && s.Status == SeparationStatus.Completed)
+            .Select(s => new { s.Id, s.InitiatedOn, s.EffectiveDate })
+            .ToListAsync(cancellationToken);
+
+        var inWindow = separations
+            .Where(s => (s.EffectiveDate ?? s.InitiatedOn) >= fromDate
+                        && (s.EffectiveDate ?? s.InitiatedOn) <= toDate)
+            .Select(s => s.Id)
+            .ToList();
+
+        var interviews = await _unitOfWork.Repository<SeparationExitInterview>().GetQueryable()
+            .AsNoTracking()
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted && inWindow.Contains(i.SeparationId))
+            .ToListAsync(cancellationToken);
+
+        var conducted = interviews.Where(i => !i.WasDeclined).ToList();
+        var declined = interviews.Count(i => i.WasDeclined);
+
+        // ⚠ Averaged over the answers ACTUALLY GIVEN, not over all interviews. A null rating means
+        // the question was not asked, and counting it as anything would move the mean.
+        static decimal? Mean(IEnumerable<int?> values)
+        {
+            var given = values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            return given.Count == 0 ? null : Math.Round(given.Average(v => (decimal)v), 2);
+        }
+
+        static decimal? Share(IEnumerable<bool?> values)
+        {
+            var asked = values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            return asked.Count == 0 ? null : Math.Round(asked.Count(v => v) * 100m / asked.Count, 1);
+        }
+
+        var byReason = conducted
+            .Where(i => i.PrimaryReason.HasValue)
+            .GroupBy(i => i.PrimaryReason!.Value)
+            .Select(g => new SeparationBreakdownRowDto
+            {
+                Key = g.Key.ToString(),
+                Label = g.Key.ToString(),
+                Count = g.Count(),
+            })
+            .OrderByDescending(r => r.Count)
+            .ThenBy(r => r.Label)
+            .ToList();
+
+        var reasonTotal = byReason.Sum(r => r.Count);
+        foreach (var row in byReason)
+            row.Percentage = reasonTotal == 0 ? 0m : Math.Round(row.Count * 100m / reasonTotal, 1);
+
+        return new ExitInterviewThemesDto
+        {
+            SeparationsInPeriod = inWindow.Count,
+            InterviewsRecorded = interviews.Count,
+            InterviewsConducted = conducted.Count,
+            InterviewsDeclined = declined,
+            CoveragePercent = inWindow.Count == 0
+                ? 0m
+                : Math.Round(interviews.Count * 100m / inWindow.Count, 1),
+            DeclineRatePercent = interviews.Count == 0
+                ? 0m
+                : Math.Round(declined * 100m / interviews.Count, 1),
+            ByPrimaryReason = byReason,
+            AverageOverallExperience = Mean(conducted.Select(i => i.OverallExperienceRating)),
+            AverageManagement = Mean(conducted.Select(i => i.ManagementRating)),
+            AveragePayAndBenefits = Mean(conducted.Select(i => i.PayAndBenefitsRating)),
+            AverageCareerDevelopment = Mean(conducted.Select(i => i.CareerDevelopmentRating)),
+            WouldRecommendPercent = Share(conducted.Select(i => i.WouldRecommendEmployer)),
+            WouldReturnPercent = Share(conducted.Select(i => i.WouldConsiderReturning)),
+        };
+    }
+
+    // ── Exit analytics (slice 12) ─────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<SeparationAnalyticsDto> GetAnalyticsAsync(
+        DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var toDate = to ?? today;
+        var fromDate = from ?? toDate.AddYears(-1);
+
+        if (fromDate > toDate)
+            throw new InvalidOperationException("The start of the period falls after its end.");
+
+        var all = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted)
+            .Select(s => new
+            {
+                s.Id, s.Status, s.SeparationType, s.ReasonCategory,
+                s.InitiatedOn, s.EffectiveDate, s.EmployeeRecordUpdatedOn,
+            })
+            .ToListAsync(cancellationToken);
+
+        // Completion is dated by the exit itself where there is one, falling back to when it was
+        // raised — a completed separation with no effective date should still be counted, not lost.
+        bool InWindow(DateOnly? effective, DateOnly initiated)
+        {
+            var when = effective ?? initiated;
+            return when >= fromDate && when <= toDate;
+        }
+
+        var completed = all
+            .Where(s => s.Status == SeparationStatus.Completed && InWindow(s.EffectiveDate, s.InitiatedOn))
+            .ToList();
+
+        var raised = all.Count(s => s.InitiatedOn >= fromDate && s.InitiatedOn <= toDate);
+
+        var inFlight = all
+            .Where(s => s.Status != SeparationStatus.Completed
+                        && s.Status != SeparationStatus.Cancelled
+                        && s.Status != SeparationStatus.Rejected)
+            .ToList();
+
+        var activeHeadcount = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .CountAsync(e => e.TenantId == tenantId && !e.IsDeleted && e.IsActive
+                             && e.StaffStatus != StaffStatus.Terminated, cancellationToken);
+
+        static List<SeparationBreakdownRowDto> Breakdown<T>(
+            IEnumerable<T> source, Func<T, string> key, Func<T, string> label)
+        {
+            var rows = source
+                .GroupBy(key)
+                .Select(g => new SeparationBreakdownRowDto
+                {
+                    Key = g.Key,
+                    Label = label(g.First()),
+                    Count = g.Count(),
+                })
+                .OrderByDescending(r => r.Count)
+                .ThenBy(r => r.Label)
+                .ToList();
+
+            var total = rows.Sum(r => r.Count);
+            foreach (var row in rows)
+                row.Percentage = total == 0 ? 0m : Math.Round(row.Count * 100m / total, 1);
+
+            return rows;
+        }
+
+        // The pipeline reads over everything IN FLIGHT, not the window: a separation stuck since
+        // last year is precisely what a stage view is for, and a date filter would hide it.
+        var pipeline = new[]
+            {
+                SeparationStatus.Draft, SeparationStatus.PendingApproval, SeparationStatus.Approved,
+                SeparationStatus.ClearanceInProgress, SeparationStatus.ClearanceCompleted,
+                SeparationStatus.SettlementPending, SeparationStatus.SettlementUnderReview,
+                SeparationStatus.SettlementApproved,
+            }
+            .Select(status =>
+            {
+                var atStage = inFlight.Where(s => s.Status == status).ToList();
+                return new SeparationPipelineStageDto
+                {
+                    Status = status.ToString(),
+                    Label = status.ToString(),
+                    Count = atStage.Count,
+                    OldestDays = atStage.Count == 0
+                        ? null
+                        : atStage.Max(s => today.DayNumber - s.InitiatedOn.DayNumber),
+                };
+            })
+            .ToList();
+
+        // Money only from settlements Internal Audit has passed — anything earlier is a draft
+        // figure, and reporting drafts as settled money would overstate what has been committed.
+        var settled = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                        && x.ReviewOutcome == SettlementReviewOutcome.Approved)
+            .Select(x => new { x.Id, x.CurrencyCode })
+            .ToListAsync(cancellationToken);
+
+        var settledIds = settled.Select(x => x.Id).ToList();
+
+        var settledLines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && settledIds.Contains(l.SettlementId))
+            .Select(l => new { l.IsDeduction, l.Amount })
+            .ToListAsync(cancellationToken);
+
+        var earnings = settledLines.Where(l => !l.IsDeduction).Sum(l => l.Amount ?? 0m);
+        var recoveries = settledLines.Where(l => l.IsDeduction).Sum(l => l.Amount ?? 0m);
+
+        var unvalued = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted
+                        && l.Computation == SettlementLineComputation.CannotCompute)
+            .Select(l => l.SettlementId)
+            .Distinct()
+            .CountAsync(cancellationToken);
+
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+
+        return new SeparationAnalyticsDto
+        {
+            FromDate = fromDate,
+            ToDate = toDate,
+            CompletedInPeriod = completed.Count,
+            RaisedInPeriod = raised,
+            InFlight = inFlight.Count,
+            ActiveHeadcount = activeHeadcount,
+            ExitRatePercent = activeHeadcount == 0
+                ? 0m
+                : Math.Round(completed.Count * 100m / activeHeadcount, 2),
+            ByRoute = Breakdown(completed, s => s.SeparationType.ToString(), s => s.SeparationType.ToString()),
+            ByReason = Breakdown(
+                completed.Where(s => s.ReasonCategory != null),
+                s => s.ReasonCategory!.Value.ToString(),
+                s => s.ReasonCategory!.Value.ToString()),
+            Pipeline = pipeline,
+            SettledEarnings = earnings,
+            SettledRecoveries = recoveries,
+            SettledNetPayable = earnings - recoveries,
+            CurrencyCode = settled.FirstOrDefault()?.CurrencyCode ?? settings.DefaultCurrencyCode ?? string.Empty,
+            SettlementsWithUnvaluedLines = unvalued,
+            CompletedButNotApplied = all.Count(s => s.Status == SeparationStatus.Completed
+                                                    && s.EmployeeRecordUpdatedOn == null),
+        };
+    }
+
     // ── Contract expiry ───────────────────────────────────────────────────────
 
     /// <inheritdoc />

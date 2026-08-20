@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 import {
   AlarmClock,
   Building2,
+  DoorOpen,
+  Plus,
   FireExtinguisher,
   Siren,
   LayoutDashboard,
@@ -689,6 +691,19 @@ export const navigationItems: NavItem[] = [
           // FR-HR-030. Not probation, but the same FRD section (onboarding), and it is the only
           // other place an oath would sensibly live.
           { title: 'Oaths of Secrecy', href: '/hr/probation/oaths', icon: ScrollText },
+        ],
+      },
+      {
+        // Area 9b. ONE exit register for every route out — resignation, retirement, contract
+        // expiry, redundancy, dismissal, death. Before it, the only way to leave was a disciplinary
+        // case, so the other routes had enum members and nothing that could reach them. The
+        // disciplinary route writes here too: area 9 keeps the decision, the exit lives here.
+        title: 'Separations & Exit',
+        href: '/hr/separations',
+        icon: DoorOpen,
+        children: [
+          { title: 'Register', href: '/hr/separations', icon: DoorOpen },
+          { title: 'Raise a separation', href: '/hr/separations/new', icon: Plus },
         ],
       },
       {
