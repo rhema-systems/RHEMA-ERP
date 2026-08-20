@@ -117,6 +117,17 @@ public class EmployeeSeparation : TenantEntity
     /// <summary>True when the system raised this — the retirement or contract-expiry sweep.</summary>
     public bool IsSystemInitiated { get; set; }
 
+    /// <summary>
+    /// When the separation left Draft and entered the approval queue. Null while it is still being
+    /// prepared, and the point from which its notice facts stop being editable.
+    /// </summary>
+    public DateTime? SubmittedOn { get; set; }
+
+    public Guid? SubmittedById { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee? SubmittedBy { get; set; }
+
     // ── FR-HR-092: who signs ─────────────────────────────────────────────────
 
     /// <summary>
@@ -186,4 +197,61 @@ public class EmployeeSeparation : TenantEntity
 
     [MaxLength(1000)]
     public string? CancellationReason { get; set; }
+
+    public virtual ICollection<EmployeeSeparationDocument> Documents { get; set; }
+        = new List<EmployeeSeparationDocument>();
+}
+
+/// <summary>
+/// A file attached to a separation — the resignation letter, the signed clearance form, the
+/// settlement statement, a medical report, a death certificate.
+/// </summary>
+/// <remarks>
+/// <para>One table for the whole lifecycle rather than a column per stage. The alternative —
+/// adding <c>ResignationLetterPath</c> in one slice and <c>ClearanceFormPath</c> in the next — ends
+/// with a wide row of nullable paths that cannot hold two versions of anything and cannot say who
+/// attached what.</para>
+///
+/// <para>Every file arrives through the controlled-upload gate
+/// (<c>ControlledFileUploadCategories.HrSeparationDocuments</c>), which scans it and optionally
+/// registers it in the central DMS. The three id columns below are that registration; a row here
+/// without a <see cref="FileUploadRecordId"/> would be a path nobody scanned.</para>
+/// </remarks>
+public class EmployeeSeparationDocument : TenantEntity
+{
+    [Required]
+    public Guid SeparationId { get; set; }
+
+    [ForeignKey(nameof(SeparationId))]
+    public virtual EmployeeSeparation Separation { get; set; } = null!;
+
+    [Required]
+    public SeparationDocumentCategory Category { get; set; } = SeparationDocumentCategory.Other;
+
+    [Required]
+    [MaxLength(500)]
+    public string FileName { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(1000)]
+    public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>The scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public DateTime UploadedOn { get; set; }
+
+    public Guid? UploadedById { get; set; }
+
+    [ForeignKey(nameof(UploadedById))]
+    public virtual Employee? UploadedBy { get; set; }
 }

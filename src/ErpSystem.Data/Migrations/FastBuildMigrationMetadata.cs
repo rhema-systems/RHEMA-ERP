@@ -187,3 +187,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260818204655_AddProbationReminderEngine")] partial class AddProbationReminderEngine { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260818211230_AddProbationConfirmingAuthority")] partial class AddProbationConfirmingAuthority { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260818224407_AddEmployeeOathOfSecrecy")] partial class AddEmployeeOathOfSecrecy { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260820100000_AddSeparationSubmissionAndDocuments")] partial class AddSeparationSubmissionAndDocuments { }

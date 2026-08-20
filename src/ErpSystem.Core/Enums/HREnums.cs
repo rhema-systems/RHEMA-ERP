@@ -2966,6 +2966,45 @@ public enum SeparationStatus
     Rejected = 11
 }
 
+/// <summary>
+/// What a document attached to a separation is (area 9b). The category is what makes the file
+/// findable years later, when the question is "show me the clearance form" rather than "show me
+/// the attachments".
+/// </summary>
+public enum SeparationDocumentCategory
+{
+    /// <summary>The employee's own letter. The origin of a resignation, and its date of record.</summary>
+    [Description("Resignation Letter")]
+    ResignationLetter = 1,
+
+    /// <summary>The organisation's reply accepting the resignation, or its notice of termination.</summary>
+    [Description("Acceptance Or Notice Letter")]
+    AcceptanceOrNoticeLetter = 2,
+
+    /// <summary>The signed clearance form FR-HR-091 requires before entitlements are computed.</summary>
+    [Description("Clearance Form")]
+    ClearanceForm = 3,
+
+    /// <summary>The FR-HR-184 final settlement statement, and the FR-HR-185 review of it.</summary>
+    [Description("Settlement Statement")]
+    SettlementStatement = 4,
+
+    [Description("Exit Interview Record")]
+    ExitInterviewRecord = 5,
+
+    /// <summary>Supports a medical retirement — the evidence that the employee is permanently unfit.</summary>
+    [Description("Medical Report")]
+    MedicalReport = 6,
+
+    /// <summary>Supports a separation by death, and the entitlement paid to the estate.</summary>
+    [Description("Death Certificate")]
+    DeathCertificate = 7,
+
+    /// <summary>A handover note, a certificate of service, correspondence.</summary>
+    [Description("Other")]
+    Other = 99
+}
+
 #endregion Disciplinary Actions
 
 #region Training Management

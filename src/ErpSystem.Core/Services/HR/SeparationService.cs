@@ -67,6 +67,7 @@ public class SeparationService : ISeparationService
             .Include(s => s.InitiatedBy)
             .Include(s => s.ApprovedBy)
             .Include(s => s.CancelledBy)
+            .Include(s => s.SubmittedBy)
             .Where(s => s.TenantId == tenantId && !s.IsDeleted);
 
     // ── Reads ─────────────────────────────────────────────────────────────────
@@ -331,6 +332,160 @@ public class SeparationService : ISeparationService
         return true;
     }
 
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto> SubmitAsync(
+        Guid id, SubmitEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var entity = await RequireAsync(tenantId, id, cancellationToken);
+
+        if (entity.Status != SeparationStatus.Draft)
+            throw new InvalidOperationException(
+                $"This separation is {entity.Status}; only a draft can be submitted.");
+
+        // A resignation IS its letter, and its date is where the notice clock starts. Without it
+        // there is no way to tell notice served from notice owed, and FR-HR-184's notice pay is
+        // computed from exactly that difference. Other routes carry no notice date by nature —
+        // nobody serves notice on a bereavement — so this is asked of resignation alone.
+        if (entity.SeparationType == EmployeeTerminationType.VoluntaryResignation && entity.NoticeGivenOn is null)
+            throw new InvalidOperationException(
+                "Record the date notice was given before submitting a resignation — the notice "
+                + "period, and any shortfall to be paid, are both counted from it.");
+
+        // Derive what follows rather than demanding it twice. The last working day is the day
+        // notice runs out unless someone says otherwise.
+        if (entity.LastWorkingDay is null && entity.NoticeGivenOn is { } given && entity.NoticeDays is { } days)
+            entity.LastWorkingDay = given.AddDays(days);
+
+        entity.EffectiveDate ??= entity.LastWorkingDay;
+
+        if (entity.EffectiveDate is null)
+            throw new InvalidOperationException(
+                "This separation has no end date and none can be worked out from the notice given. "
+                + "Set the effective date, or the notice date and period, before submitting.");
+
+        if (entity.LastWorkingDay is { } lwd && entity.EffectiveDate is { } eff && lwd > eff)
+            throw new InvalidOperationException("The last working day cannot fall after the date employment ends.");
+
+        entity.Status = SeparationStatus.PendingApproval;
+        entity.SubmittedOn = DateTime.UtcNow;
+        entity.SubmittedById = actorEmployeeId;
+
+        if (!string.IsNullOrWhiteSpace(dto.Notes))
+        {
+            entity.ReasonNotes = string.IsNullOrWhiteSpace(entity.ReasonNotes)
+                ? dto.Notes.Trim()
+                : $"{entity.ReasonNotes}\n\n{dto.Notes.Trim()}";
+        }
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Separation {Number} submitted for approval (effective {Effective:yyyy-MM-dd})",
+            entity.SeparationNumber, entity.EffectiveDate);
+
+        return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    // ── Documents ─────────────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<EmployeeSeparationDocumentDto>> GetDocumentsAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await RequireAsync(tenantId, separationId, cancellationToken);
+
+        var documents = await _unitOfWork.Repository<EmployeeSeparationDocument>().GetQueryable()
+            .Include(d => d.UploadedBy)
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted && d.SeparationId == separationId)
+            .OrderByDescending(d => d.UploadedOn)
+            .ThenBy(d => d.FileName)
+            .ToListAsync(cancellationToken);
+
+        return documents.Select(ToDocumentDto).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDocumentDto> AttachDocumentAsync(
+        Guid separationId,
+        SeparationDocumentCategory category,
+        string fileName,
+        string filePath,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId,
+        string? description,
+        Guid? uploadedByEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await RequireAsync(tenantId, separationId, cancellationToken);
+
+        var document = new EmployeeSeparationDocument
+        {
+            TenantId = tenantId,
+            SeparationId = separationId,
+            Category = category,
+            FileName = fileName,
+            FilePath = filePath,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+            UploadedOn = DateTime.UtcNow,
+            UploadedById = uploadedByEmployeeId,
+        };
+
+        await _unitOfWork.Repository<EmployeeSeparationDocument>().AddAsync(document);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var saved = await _unitOfWork.Repository<EmployeeSeparationDocument>().GetQueryable()
+            .Include(d => d.UploadedBy)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == document.Id, cancellationToken)
+            ?? throw new InvalidOperationException("Document saved but could not be reloaded.");
+
+        return ToDocumentDto(saved);
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDocument?> GetDocumentEntityAsync(
+        Guid documentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<EmployeeSeparationDocument>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.TenantId == tenantId && !d.IsDeleted, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var document = await _unitOfWork.Repository<EmployeeSeparationDocument>().GetQueryable()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.TenantId == tenantId && !d.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Separation document with ID '{documentId}' not found.");
+
+        var separation = await RequireAsync(tenantId, document.SeparationId, cancellationToken);
+
+        // A mis-uploaded file can be taken back while the separation is still being prepared. Once
+        // it has been submitted the attachments are part of what was approved and what the
+        // settlement was computed against, so removing one silently rewrites the record. Deleting
+        // the whole separation stays available to an administrator.
+        if (separation.Status != SeparationStatus.Draft)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}. Its documents are part of the record and "
+                + "can no longer be removed.");
+
+        await _unitOfWork.Repository<EmployeeSeparationDocument>().DeleteAsync(documentId);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private async Task<EmployeeSeparation> RequireAsync(Guid tenantId, Guid id, CancellationToken cancellationToken)
@@ -390,6 +545,41 @@ public class SeparationService : ISeparationService
     private static string FullName(Employee? e)
         => e == null ? string.Empty : $"{e.FirstName} {e.LastName}".Trim();
 
+    /// <summary>
+    /// Notice required, served and short — derived, never stored.
+    /// </summary>
+    /// <remarks>
+    /// Served notice is counted from the day notice was given to the last working day. The
+    /// shortfall floors at zero: working more notice than was owed is not negative notice pay, it
+    /// is just a longer handover.
+    /// </remarks>
+    private static (int Required, int? Served, int? Shortfall) Notice(EmployeeSeparation s)
+    {
+        var required = s.NoticeDays ?? 0;
+
+        if (s.NoticeGivenOn is not { } given || s.LastWorkingDay is not { } last)
+            return (required, null, null);
+
+        var served = last.DayNumber - given.DayNumber;
+        if (served < 0) served = 0;
+
+        return (required, served, Math.Max(0, required - served));
+    }
+
+    private static EmployeeSeparationDocumentDto ToDocumentDto(EmployeeSeparationDocument d) => new()
+    {
+        Id = d.Id,
+        SeparationId = d.SeparationId,
+        Category = d.Category,
+        CategoryName = d.Category.ToString(),
+        FileName = d.FileName,
+        Description = d.Description,
+        UploadedOn = d.UploadedOn,
+        UploadedById = d.UploadedById,
+        UploadedByName = d.UploadedBy == null ? null : FullName(d.UploadedBy),
+        IsRegisteredInDms = d.DocumentRecordId != null,
+    };
+
     private static EmployeeSeparationListDto ToListDto(EmployeeSeparation s) => new()
     {
         Id = s.Id,
@@ -438,6 +628,12 @@ public class SeparationService : ISeparationService
         ReasonNotes = s.ReasonNotes,
         NoticeGivenOn = s.NoticeGivenOn,
         NoticeDays = s.NoticeDays,
+        NoticeRequiredDays = Notice(s).Required,
+        NoticeServedDays = Notice(s).Served,
+        NoticeShortfallDays = Notice(s).Shortfall,
+        SubmittedOn = s.SubmittedOn,
+        SubmittedById = s.SubmittedById,
+        SubmittedByName = s.SubmittedBy == null ? null : FullName(s.SubmittedBy),
         InitiatedById = s.InitiatedById,
         InitiatedByName = s.InitiatedBy == null ? null : FullName(s.InitiatedBy),
         ApprovedById = s.ApprovedById,

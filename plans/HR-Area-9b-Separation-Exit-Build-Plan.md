@@ -372,3 +372,43 @@ has three homes; verifying two of them is not verifying it.**
 
 (Incidental: `sqlcmd` needs `-I`. Any `CREATE INDEX` on a table that already carries a filtered
 index requires `QUOTED_IDENTIFIER ON`, which sqlcmd defaults off and EF defaults on.)
+
+### Slice 2 — submission, notice arithmetic, the separation file. 2026-08-20, 43/43
+
+Migration `20260820100000_AddSeparationSubmissionAndDocuments` — **scaffolded by the user**, body
+rewritten here to guarded SQL, listed in `FastBuildMigrationMetadata`. `SubmittedOn` /
+`SubmittedById` on the separation, and the `EmployeeSeparationDocuments` table.
+
+- **`POST /{id}/submit`** takes Draft → PendingApproval and *derives* what follows: given a notice
+  date and period it works out the last working day, and the effective date follows that. It
+  refuses a resignation with no notice date, because a resignation is its letter and the notice
+  clock starts there. Other routes carry no notice date by nature.
+- **Notice required / served / short — derived on read, never stored.** The shortfall floors at
+  zero: serving more notice than owed is a longer handover, not negative notice pay. This is the
+  figure slice 5 turns into FR-HR-184 notice pay.
+- **Submission decides nothing about who signs.** `IsProcedural` stays false and nothing is
+  approved; FR-HR-092 is slice 4's, and the harness asserts submission does not pre-empt it.
+- **One document table for the whole lifecycle**, through the controlled-upload gate under a new
+  `hr-separation-documents` category in the always-scan set. Entitlement is checked *before*
+  storage. `FilePath` is deliberately absent from the DTO.
+- **A document can be removed only while the separation is a draft.** After submission the
+  attachments are part of what was approved and what the settlement is computed against, so
+  removing one would silently rewrite the record. Deleting the whole separation stays with an
+  administrator.
+
+⚠ **Moved out of this slice deliberately: the notice waiver and payment in lieu.** Both are
+decisions taken at acceptance, and FR-HR-092 makes acceptance the MD's. Adding their columns here
+would have left fields with no writer until slice 4 — the dormant-field trap that made
+`ExpectedHeadcount` and `DateEmployed` worthless. **Slice 4 owns them.**
+
+⚠ **The scaffold caught an ordering fault in slice 1.** The hand-written slice-1 migration was
+given an *invented* timestamp, `20260820090000` (09:00); the real scaffold ran at 01:16, so
+`20260820011658` sorted **before** it. EF applies in id order, so on any database holding neither,
+slice 2 would have run first and altered `EmployeeSeparations` before it existed. Renamed slice 2
+forward to `20260820100000` — it was unapplied, so no `__EFMigrationsHistory` surgery. **A
+scaffolded timestamp is real; an invented one is a guess that can sort into the past.** The second
+argument for the user's workflow, and a sharper one than the snapshot.
+
+⚠ **A harness lesson: do not probe "not found" with `Guid.Empty`.** The controller rejects an
+all-zeros id with a 400 argument guard before any entitlement check, so that assertion passed
+against the wrong code path. Use a real-looking id that simply is not ours.

@@ -52,6 +52,32 @@ public class EmployeeSeparationDetailDto : EmployeeSeparationListDto
     public DateOnly? NoticeGivenOn { get; set; }
     public int? NoticeDays { get; set; }
 
+    /// <summary>
+    /// Notice the separation type calls for — the value on the record, which was defaulted from
+    /// tenant policy when it was raised.
+    /// </summary>
+    public int NoticeRequiredDays { get; set; }
+
+    /// <summary>
+    /// Notice actually served: <c>NoticeGivenOn</c> to <c>LastWorkingDay</c>. Null while either
+    /// date is unknown.
+    /// </summary>
+    public int? NoticeServedDays { get; set; }
+
+    /// <summary>
+    /// How much notice was not served — what FR-HR-184's notice pay is computed from in slice 5.
+    /// </summary>
+    /// <remarks>
+    /// Derived on read, never stored. Its three inputs are all persisted and stop being editable
+    /// once the separation leaves Draft, so storing the answer as well would only create something
+    /// that can drift from them.
+    /// </remarks>
+    public int? NoticeShortfallDays { get; set; }
+
+    public DateTime? SubmittedOn { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public string? SubmittedByName { get; set; }
+
     public Guid? InitiatedById { get; set; }
     public string? InitiatedByName { get; set; }
 
@@ -163,6 +189,43 @@ public class CancelEmployeeSeparationDto
     /// </remarks>
     [MaxLength(1000)]
     public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Submit a draft separation into the approval queue. Carries no dates: everything it needs is
+/// already on the record, and a payload that could restate them would be a second way to set the
+/// facts the settlement is computed from.
+/// </summary>
+public class SubmitEmployeeSeparationDto
+{
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>A file attached to a separation.</summary>
+public class EmployeeSeparationDocumentDto
+{
+    public Guid Id { get; set; }
+    public Guid SeparationId { get; set; }
+
+    public SeparationDocumentCategory Category { get; set; }
+    public string CategoryName { get; set; } = string.Empty;
+
+    public string FileName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+
+    public DateTime UploadedOn { get; set; }
+    public Guid? UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
+
+    /// <summary>True once the file is registered in the central document repository.</summary>
+    public bool IsRegisteredInDms { get; set; }
+
+    // Deliberately absent: FilePath. The stored location is not something a client needs, and not
+    // something an exit register should hand out — the file is served by the download endpoint,
+    // which re-checks entitlement. Size and content type are absent too: they live on the
+    // FileUploadRecord the gate created, and duplicating them here would need a migration to say
+    // what a join already knows.
 }
 
 /// <summary>Filters for the exit register.</summary>

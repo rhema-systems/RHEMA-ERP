@@ -44,6 +44,19 @@ public static class ControlledFileUploadCategories
     public const string HrOathOfSecrecyDocuments = "hr-oath-of-secrecy-documents";
 
     /// <summary>
+    /// Paperwork attached to a separation — the resignation letter, the acceptance, the signed
+    /// clearance form, the settlement statement, a medical report supporting a medical retirement,
+    /// a death certificate.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than part of the HR pile, for the same reason as the oath: these
+    /// are the evidence that someone's employment ended and that what they were owed was paid.
+    /// They outlive the employment and are the first things asked for in a dispute, so retention
+    /// and access rules for them should be stateable on their own.
+    /// </remarks>
+    public const string HrSeparationDocuments = "hr-separation-documents";
+
+    /// <summary>
     /// Recruitment paperwork attached to a requisition, vacancy or advert — org charts, budget
     /// approvals, signed job descriptions, agency terms. Kept apart from
     /// <see cref="HrCandidateDocuments"/>: that is a named person's file, this is a role's, and the
@@ -103,6 +116,9 @@ public static class ControlledFileUploadCategories
                 // one of those unscanned.
                 HrStaffTravelAttachments,
                 HrOathOfSecrecyDocuments,
+                // A separation file holds a resignation letter, a medical report or a death
+                // certificate. No tenant policy should be able to let one of those in unscanned.
+                HrSeparationDocuments,
                 HrRecruitmentAttachments,
                 HrPreEmploymentDocuments,
                 HrSheControlledDocuments

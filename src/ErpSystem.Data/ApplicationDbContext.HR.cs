@@ -310,6 +310,9 @@ public partial class ApplicationDbContext
     /// <see cref="EmployeeSeparation"/> for why the disciplinary route writes here too.
     /// </summary>
     public DbSet<EmployeeSeparation> EmployeeSeparations { get; set; } = null!;
+
+    /// <summary>Files attached to a separation, all through the controlled-upload gate.</summary>
+    public DbSet<EmployeeSeparationDocument> EmployeeSeparationDocuments { get; set; } = null!;
     public DbSet<ProbationPeriod> ProbationPeriods { get; set; } = null!;
     public DbSet<ProbationReview> ProbationReviews { get; set; } = null!;
     public DbSet<ProbationExtension> ProbationExtensions { get; set; } = null!;
@@ -7952,6 +7955,34 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.CancelledBy)
                 .WithMany()
                 .HasForeignKey(x => x.CancelledById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.SubmittedBy)
+                .WithMany()
+                .HasForeignKey(x => x.SubmittedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Documents)
+                .WithOne(x => x.Separation)
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeSeparationDocument>(entity =>
+        {
+            entity.HasIndex(x => x.SeparationId).HasDatabaseName("IX_EmployeeSeparationDocument_SeparationId");
+            entity.HasIndex(x => x.Category).HasDatabaseName("IX_EmployeeSeparationDocument_Category");
+
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            entity.HasOne(x => x.Separation)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
