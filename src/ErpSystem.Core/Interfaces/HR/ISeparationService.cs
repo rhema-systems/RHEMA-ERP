@@ -82,6 +82,18 @@ public interface ISeparationService
 
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Completes the separation and applies it to the employee's master record — staff status,
+    /// termination date and reason, active contracts and the open position-history row.
+    /// </summary>
+    /// <remarks>
+    /// Only from <c>SettlementApproved</c>: the employee record follows the payment, and payment
+    /// follows Internal Audit's review (FR-HR-185). This is the step whose absence left 29
+    /// disciplinary terminations sitting against employees who were all still Active.
+    /// </remarks>
+    Task<EmployeeSeparationDetailDto> CompleteSeparationAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
+
     // ── Retirement (FR-HR-093) ───────────────────────────────────────────────
 
     /// <summary>

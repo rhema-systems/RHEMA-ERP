@@ -212,6 +212,23 @@ public interface IEmployeeService
     Task<bool> IsEligibleForExpatriateAssignmentAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<bool> CanTerminateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Applies a completed separation (area 9b) to the employee's master record: staff status,
+    /// termination date and reason, active contracts, and the open position-history row.
+    /// </summary>
+    /// <remarks>
+    /// The step that did not exist before area 9b, and whose absence left 29 disciplinary
+    /// terminations sitting against employees who were all still Active. Distinct from
+    /// <c>TerminateEmployeeAsync</c>, which now refuses while a separation is in flight.
+    /// </remarks>
+    Task<EmployeeDetailDto> ApplySeparationOutcomeAsync(
+        Guid employeeId,
+        Guid separationId,
+        DateTime effectiveDate,
+        TerminationReason? reason,
+        string? notes,
+        CancellationToken cancellationToken = default);
+
     #endregion
 
     #region Legacy / Backward compatibility (keep controllers compiling)

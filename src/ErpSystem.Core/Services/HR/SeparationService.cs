@@ -35,6 +35,7 @@ public class SeparationService : ISeparationService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrencyService _currencies;
+    private readonly IEmployeeService _employeeService;
     private readonly ILogger<SeparationService> _logger;
 
     public SeparationService(
@@ -42,12 +43,14 @@ public class SeparationService : ISeparationService
         ICurrentUserProvider currentUserProvider,
         ICompanyHrPolicyProvider policyProvider,
         ICurrencyService currencies,
+        IEmployeeService employeeService,
         ILogger<SeparationService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _policyProvider = policyProvider;
         _currencies = currencies;
+        _employeeService = employeeService;
         _logger = logger;
     }
 
@@ -695,6 +698,55 @@ public class SeparationService : ISeparationService
         await _unitOfWork.Repository<EmployeeSeparationDocument>().DeleteAsync(documentId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    // ── Completion: the exit reaches the employee record ──────────────────────
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto> CompleteSeparationAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        // Payment is released only after Internal Audit has passed the settlement (FR-HR-185), and
+        // the employee record follows the payment, not the other way round.
+        if (separation.Status != SeparationStatus.SettlementApproved)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}. It is completed once Internal Audit has "
+                + "passed the settlement and payment can be released.");
+
+        if (separation.EffectiveDate is not { } effective)
+            throw new InvalidOperationException(
+                "This separation has no effective date, so there is no date to record against the "
+                + "employee. Set it before completing.");
+
+        var reasonNote =
+            $"Separation {separation.SeparationNumber} ({separation.SeparationType}), effective "
+            + $"{effective:yyyy-MM-dd}."
+            + (string.IsNullOrWhiteSpace(separation.ReasonNotes) ? string.Empty : $" {separation.ReasonNotes}");
+
+        // ⚠ The whole point of this slice. Recording an exit and applying it are two different acts,
+        // and until now only the first existed — which is why 29 dismissed people were still Active.
+        await _employeeService.ApplySeparationOutcomeAsync(
+            separation.EmployeeId,
+            separation.Id,
+            effective.ToDateTime(TimeOnly.MinValue),
+            separation.ReasonCategory,
+            reasonNote,
+            cancellationToken);
+
+        separation.Status = SeparationStatus.Completed;
+        separation.EmployeeRecordUpdatedOn = DateTime.UtcNow;
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Separation {Number} completed and applied to employee {EmployeeId}",
+            separation.SeparationNumber, separation.EmployeeId);
+
+        return ToDetailDto(await ReloadAsync(tenantId, separationId, cancellationToken));
     }
 
     // ── Retirement (FR-HR-093) ────────────────────────────────────────────────

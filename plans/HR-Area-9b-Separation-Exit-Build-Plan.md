@@ -721,6 +721,55 @@ belongs in the closing audit. Now 7 more assertions; every FR-HR-182 type is exe
 twice.** The slice-7 prediction held — slice 1 raises a `ContractExpiry` with a fixed date and still
 passes, because those fixtures have no contract for the rule to bite on.
 
+### Slice 9 — the exit reaches the employee record. 2026-08-20, 36/36. **No migration.**
+
+**The slice the area exists for.** `POST /{id}/complete`, from `SettlementApproved` only, applies
+the exit to the employee master: status, termination date and reason, active contracts closed, the
+open position-history row closed, and `EmployeeRecordUpdatedOn` stamped — the column that has sat on
+the entity since slice 1 waiting for something to set it. **Recording an exit and applying it are
+two different acts, and only the first had ever been built.**
+
+`EmployeeService.ApplySeparationOutcomeAsync` is deliberately separate from
+`TerminateEmployeeAsync`: the latter now *refuses* while a separation is in flight, so the former is
+the one legitimate way through.
+
+**The four slice-1 defects, fixed.** Two are behaviour changes for callers outside this area — only
+three callers exist, all HR controllers:
+
+1. **An unparseable `TerminationReason` now 400s** instead of writing NULL on a 200. The likeliest
+   to affect an existing caller, and the reason knowing why somebody left is FR-HR-090's point.
+2. **The direct terminate path refuses while a separation is in flight**, naming the separation and
+   its status — using it would bypass clearance, the MD's signature and the settlement review.
+   Cancelling the separation releases it again (asserted).
+3. **Reinstatement no longer erases history**: the prior termination date, reason and notes are
+   written into the notes before the fields are cleared.
+4. **`CanTerminateEmployeeAsync` answers its own question** rather than returning `true` under a
+   comment describing a check nobody wrote.
+
+⚠ **Left deliberately, and documented in the code so it does not read as an oversight:**
+reinstatement does **not** reopen the contracts termination closed. A reinstated employee needs a
+new contract with its own start date; reviving the old one would make the record claim continuous
+employment across a gap.
+
+⚠ **A harness lesson worth more than the fix: 13 assertions failed reading `undefined`, and the
+product was correct throughout.** `GET /api/hr/Employees/{id}` returns the **summary** DTO —
+`staffStatus` and `isActive`, no termination fields at all — while `GET /{id}/details` carries them.
+I read the wrong endpoint and briefly believed I had found a defect in my own slice. **Probe the
+live response before diagnosing from source**; one curl settled what several minutes of reading
+had not.
+
+⚠ **Recorded, not changed:** `terminate` and `reinstate` answer `{ message: "Employee terminated" }`
+and **discard the full DTO the service builds**, so a UI must make a second call to see what it just
+did. A real wart of the "discarded DTO" family, but changing the response shape would break any
+caller reading `.message`, and that endpoint is not this area's contract to change.
+
+**Area regression after slice 9: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 = 466 assertions, green
+twice.**
+
+➡ **Slice 9b, next:** wire discipline into this pipeline (decision D1) and repair the **29 orphans**.
+Split from slice 9 on purpose — a data repair should run against a mechanism already proven, not
+alongside one being built.
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens

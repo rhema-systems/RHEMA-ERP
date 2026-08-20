@@ -398,11 +398,45 @@ public class EmployeeService : IEmployeeService
         if (!await CanTerminateEmployeeAsync(employeeId, cancellationToken))
             throw new InvalidOperationException("Employee cannot be terminated due to active dependencies/constraints.");
 
+        // ⚠ This is the DIRECT path, and area 9b made it the exception rather than the rule. Where a
+        // separation is in flight for this employee, terminating them here would walk straight past
+        // the FR-HR-091 clearance gate, the FR-HR-092 signature and the FR-HR-185 settlement review
+        // — every control the exit process exists to apply. Refused, with the way in named.
+        var openSeparation = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .Where(s => s.EmployeeId == employeeId && s.TenantId == employee.TenantId && !s.IsDeleted
+                        && s.Status != SeparationStatus.Cancelled
+                        && s.Status != SeparationStatus.Rejected
+                        && s.Status != SeparationStatus.Completed)
+            .Select(s => new { s.SeparationNumber, s.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openSeparation is not null)
+            throw new InvalidOperationException(
+                $"Separation {openSeparation.SeparationNumber} is in progress for this employee "
+                + $"({openSeparation.Status}). Complete it through the separation process — terminating "
+                + "the employee directly would bypass clearance, approval and the settlement review.");
+
         employee.StaffStatus = StaffStatus.Terminated;
         employee.IsActive = false;
         employee.TerminationDate = dto.TerminationDate;
-        employee.TerminationReason = Enum.TryParse<TerminationReason>(dto.TerminationReason, out var tr) ? tr : null;
         employee.TerminationNotes = dto.TerminationNotes;
+
+        // ⚠ Was: TryParse ? value : null — an unknown or misspelled reason wrote NULL and the caller
+        // still got a 200. Knowing why somebody left is the whole point of FR-HR-090, and a silently
+        // discarded reason is unrecoverable once the person has gone.
+        if (!string.IsNullOrWhiteSpace(dto.TerminationReason))
+        {
+            if (!Enum.TryParse<TerminationReason>(dto.TerminationReason, ignoreCase: true, out var parsedReason))
+                throw new InvalidOperationException(
+                    $"'{dto.TerminationReason}' is not a termination reason. Use one of: "
+                    + string.Join(", ", Enum.GetNames<TerminationReason>()) + ".");
+
+            employee.TerminationReason = parsedReason;
+        }
+        else
+        {
+            employee.TerminationReason = null;
+        }
 
         // Terminate active contracts
         var contractRepo = _unitOfWork.Repository<EmployeeContractDetail>();
@@ -445,11 +479,33 @@ public class EmployeeService : IEmployeeService
         if (employee.StaffStatus != StaffStatus.Terminated)
             throw new InvalidOperationException("Only terminated employees can be reinstated.");
 
+        // ⚠ Was: all three termination fields nulled and the notes overwritten, so the fact that
+        // somebody had been terminated and reinstated became unrecoverable. Reinstatement is an
+        // event in an employment history, not an eraser. The dates and reason are cleared because
+        // the person is employed again — but what they were is written into the notes first.
+        var priorTermination = employee.TerminationDate is { } was
+            ? $"[Reinstated {DateTime.UtcNow:yyyy-MM-dd}] Previously terminated {was:yyyy-MM-dd}"
+              + (employee.TerminationReason is { } reason ? $" ({reason})" : string.Empty)
+              + (string.IsNullOrWhiteSpace(employee.TerminationNotes) ? "." : $": {employee.TerminationNotes}")
+            : null;
+
+        var reinstatementNote = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+
         employee.StaffStatus = StaffStatus.Active;
         employee.IsActive = true;
         employee.TerminationDate = null;
         employee.TerminationReason = null;
-        employee.TerminationNotes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        employee.TerminationNotes = string.Join(
+            "\n\n",
+            new[] { priorTermination, reinstatementNote }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+        if (string.IsNullOrWhiteSpace(employee.TerminationNotes))
+            employee.TerminationNotes = null;
+
+        // ⚠ Contracts and position history closed by the termination are NOT reopened, deliberately.
+        // A reinstated employee needs a new contract with its own start date — silently reviving a
+        // contract that was terminated would make the record say they were employed throughout a
+        // period when they were not. Stated here because the asymmetry looks like an oversight.
 
         await _employeeRepository.UpdateAsync(employee);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2329,14 +2385,101 @@ public class EmployeeService : IEmployeeService
         return employee.IsActive && employee.StaffStatus != StaffStatus.Terminated;
     }
 
+    /// <summary>
+    /// Whether this employee could be terminated at all — not whether a particular caller may do it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This used to return <c>true</c> after re-checking only "already terminated", under a
+    /// comment reading <i>"no active guarantor verification pending? (simplified)"</i> — a check
+    /// that had never been written. It now answers the question it is named for. The gate that
+    /// matters most, FR-HR-091's clearance, lives in <c>TerminateEmployeeAsync</c> as a refusal
+    /// naming the separation in flight, because a bare false here could not say why.
+    /// </remarks>
     public async Task<bool> CanTerminateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
         if (employee == null) return false;
         if (employee.StaffStatus == StaffStatus.Terminated) return false;
+        if (employee.IsDeleted) return false;
 
-        // Termination is allowed, but we enforce: no active guarantor verification pending? (simplified)
         return true;
+    }
+
+    /// <summary>
+    /// Applies a completed separation to the employee's master record — the step that was missing
+    /// entirely before area 9b.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This exists because of a measured defect.</b> On 2026-08-20 the live tenant held
+    /// <b>29 disciplinary terminations whose employees were all still <c>StaffStatus = Active</c></b>:
+    /// the outcome was recorded somewhere nobody read, so dismissed people stayed in headcount, in
+    /// establishment counts and on every roster. Recording an exit and applying it are two different
+    /// acts, and only one of them had ever been built.</para>
+    ///
+    /// <para>Separate from <see cref="TerminateEmployeeAsync"/> on purpose. That path now refuses
+    /// when a separation is in flight, because using it would bypass clearance, approval and the
+    /// settlement review. This one <i>is</i> the separation completing, so it carries the
+    /// separation's id and skips that check — the one legitimate way through.</para>
+    /// </remarks>
+    public async Task<EmployeeDetailDto> ApplySeparationOutcomeAsync(
+        Guid employeeId,
+        Guid separationId,
+        DateTime effectiveDate,
+        TerminationReason? reason,
+        string? notes,
+        CancellationToken cancellationToken = default)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        if (employee.StaffStatus == StaffStatus.Terminated)
+            throw new InvalidOperationException(
+                $"{employee.FirstName} {employee.LastName} is already recorded as terminated.");
+
+        employee.StaffStatus = StaffStatus.Terminated;
+        employee.IsActive = false;
+        employee.TerminationDate = effectiveDate;
+        employee.TerminationReason = reason;
+        employee.TerminationNotes = notes;
+
+        // Close every active contract, as the direct path does.
+        var contractRepo = _unitOfWork.Repository<EmployeeContractDetail>();
+        var activeContracts = await contractRepo.FindAsync(
+            c => c.EmployeeId == employeeId && c.IsActive && !c.IsDeleted);
+
+        foreach (var contract in activeContracts)
+        {
+            contract.IsActive = false;
+            contract.ContractStatus = ContractStatus.Terminated;
+            contract.TerminationDate = DateOnly.FromDateTime(effectiveDate);
+            contract.TerminationReason = reason?.ToString();
+            contract.EndDate ??= DateOnly.FromDateTime(effectiveDate);
+            await contractRepo.UpdateAsync(contract);
+        }
+
+        // Close the open position-history row, so the establishment counts area 17/18 made
+        // load-bearing stop counting somebody who has left.
+        var posHistoryRepo = _unitOfWork.Repository<EmployeePositionHistory>();
+        var current = await posHistoryRepo.FirstOrDefaultAsync(
+            ph => ph.EmployeeId == employeeId && (ph.EndDate == null || ph.EndDate > effectiveDate));
+
+        if (current != null)
+        {
+            current.EndDate = effectiveDate;
+            current.ChangeReason = PositionChangeReason.Termination;
+            await posHistoryRepo.UpdateAsync(current);
+        }
+
+        await _employeeRepository.UpdateAsync(employee);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Separation {SeparationId} applied to employee {EmployeeId}: terminated {Date:yyyy-MM-dd}",
+            separationId, employeeId, effectiveDate);
+
+        var updated = await _employeeRepository.GetByIdWithDetailsAsync(employeeId)
+            ?? throw new InvalidOperationException("Employee updated but could not be reloaded.");
+        return updated.ToDetailDto();
     }
 
     #endregion

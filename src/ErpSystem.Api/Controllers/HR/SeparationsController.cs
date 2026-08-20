@@ -248,6 +248,39 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Complete the separation and apply it to the employee's master record.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The step whose absence is the reason this area exists. Measured 2026-08-20: <b>29
+    /// disciplinary terminations whose employees were all still <c>StaffStatus = Active</c></b> —
+    /// the outcome was recorded somewhere nobody read, so dismissed people stayed in headcount, in
+    /// the establishment counts area 17/18 made load-bearing, and on every roster. Recording an exit
+    /// and applying it are two different acts, and only one of them had ever been built.
+    ///
+    /// <para>Available only from <c>SettlementApproved</c>: the employee record follows the payment,
+    /// and payment follows Internal Audit's review.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/complete")]
+    [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSeparationDetailDto>> CompleteSeparation(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.CompleteSeparationAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Retirement (FR-HR-093) ────────────────────────────────────────────────
 
     /// <summary>
