@@ -632,6 +632,475 @@ public class SeparationService : ISeparationService
         return true;
     }
 
+    // ── Clearance: the catalogue ──────────────────────────────────────────────
+
+    /// <summary>The kinds that can carry money, and therefore feed the FR-HR-184 settlement.</summary>
+    /// <remarks>
+    /// Nobody owes a quantity of duty-post keys. Recording an amount against a kind that cannot
+    /// carry one is refused rather than stored and ignored — a number the settlement will never
+    /// read is worse than no number, because somebody will believe it.
+    /// </remarks>
+    private static bool CarriesAmount(ClearanceItemKind kind)
+        => kind is ClearanceItemKind.OutstandingLoan
+                or ClearanceItemKind.SalaryAdvance
+                or ClearanceItemKind.PayrollRecovery;
+
+    /// <summary>FR-HR-183's list, as a starting catalogue for a tenant that has none.</summary>
+    private static readonly (string Name, ClearanceItemKind Kind, string Description)[] DefaultTemplates =
+    {
+        ("Outstanding loans", ClearanceItemKind.OutstandingLoan,
+            "Any staff loan not yet repaid in full. The balance is recovered from the final settlement."),
+        ("Salary advances", ClearanceItemKind.SalaryAdvance,
+            "Advances drawn against salary and not yet recovered."),
+        ("Company property", ClearanceItemKind.CompanyProperty,
+            "Vehicles, phones, tools, protective equipment and anything else issued to the employee."),
+        ("Office equipment", ClearanceItemKind.OfficeEquipment,
+            "Computers, peripherals and office equipment assigned to the employee or their desk."),
+        ("Duty-post keys", ClearanceItemKind.DutyPostKeys,
+            "Keys, access cards and passes for offices, stores, gates and vehicles."),
+        ("Documents and records", ClearanceItemKind.DocumentsAndRecords,
+            "Files, drawings, contracts and records held by the employee, and the handover of work in progress."),
+        ("Payroll recoveries", ClearanceItemKind.PayrollRecovery,
+            "Any other amount due back to the organisation through payroll."),
+    };
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<SeparationClearanceTemplateDto>> GetClearanceTemplatesAsync(
+        bool includeInactive = false, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var query = _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .Include(t => t.OwningOrganizationUnit)
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted);
+
+        if (!includeInactive)
+            query = query.Where(t => t.IsActive);
+
+        var templates = await query
+            .OrderBy(t => t.SortOrder)
+            .ThenBy(t => t.Name)
+            .ToListAsync(cancellationToken);
+
+        return templates.Select(ToTemplateDto).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationClearanceTemplateDto> CreateClearanceTemplateAsync(
+        CreateSeparationClearanceTemplateDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            throw new InvalidOperationException("Give the clearance line a name.");
+
+        var name = dto.Name.Trim();
+
+        var clash = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.Name == name, cancellationToken);
+        if (clash)
+            throw new InvalidOperationException($"A clearance line named '{name}' already exists.");
+
+        await RequireOrganizationUnitAsync(tenantId, dto.OwningOrganizationUnitId, cancellationToken);
+
+        var template = new SeparationClearanceTemplate
+        {
+            TenantId = tenantId,
+            Name = name,
+            Kind = dto.Kind,
+            Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim(),
+            OwningOrganizationUnitId = dto.OwningOrganizationUnitId,
+            IsMandatory = dto.IsMandatory,
+            IsActive = dto.IsActive,
+            SortOrder = dto.SortOrder,
+        };
+
+        await _unitOfWork.Repository<SeparationClearanceTemplate>().AddAsync(template);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ToTemplateDto(await ReloadTemplateAsync(tenantId, template.Id, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationClearanceTemplateDto> UpdateClearanceTemplateAsync(
+        Guid id, UpdateSeparationClearanceTemplateDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        var template = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId && !t.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Clearance line with ID '{id}' not found.");
+
+        if (dto.Name is not null)
+        {
+            var name = dto.Name.Trim();
+            if (name.Length == 0)
+                throw new InvalidOperationException("Give the clearance line a name.");
+
+            var clash = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+                .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.Name == name && t.Id != id, cancellationToken);
+            if (clash)
+                throw new InvalidOperationException($"A clearance line named '{name}' already exists.");
+
+            template.Name = name;
+        }
+
+        if (dto.Kind is { } kind) template.Kind = kind;
+        if (dto.Description is not null)
+            template.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+        if (dto.OwningOrganizationUnitId is { } unitId)
+        {
+            await RequireOrganizationUnitAsync(tenantId, unitId, cancellationToken);
+            template.OwningOrganizationUnitId = unitId;
+        }
+        if (dto.IsMandatory is { } mandatory) template.IsMandatory = mandatory;
+        if (dto.IsActive is { } active) template.IsActive = active;
+        if (dto.SortOrder is { } order) template.SortOrder = order;
+
+        await _unitOfWork.Repository<SeparationClearanceTemplate>().UpdateAsync(template);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ToTemplateDto(await ReloadTemplateAsync(tenantId, template.Id, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteClearanceTemplateAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var template = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId && !t.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Clearance line with ID '{id}' not found.");
+
+        // Items snapshot their template and hold no foreign key to it, so deleting a catalogue line
+        // cannot orphan a signed form — which is exactly why deleting is allowed at all. Retiring
+        // it (IsActive = false) is usually the better move and keeps it out of future forms only.
+        await _unitOfWork.Repository<SeparationClearanceTemplate>().DeleteAsync(template.Id);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<SeparationClearanceTemplateDto>> SeedDefaultClearanceTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var existing = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted)
+            .Select(t => t.Name)
+            .ToListAsync(cancellationToken);
+        var have = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var order = 0;
+        foreach (var (name, kind, description) in DefaultTemplates)
+        {
+            order += 10;
+            if (have.Contains(name)) continue;
+
+            await _unitOfWork.Repository<SeparationClearanceTemplate>().AddAsync(new SeparationClearanceTemplate
+            {
+                TenantId = tenantId,
+                Name = name,
+                Kind = kind,
+                Description = description,
+                IsMandatory = true,
+                IsActive = true,
+                SortOrder = order,
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return await GetClearanceTemplatesAsync(includeInactive: true, cancellationToken);
+    }
+
+    // ── Clearance: the run ────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<SeparationClearanceDto> StartClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        // ⚠ Asked BEFORE the status check, not after. A separation whose clearance has begun is no
+        // longer Approved — it is ClearanceInProgress — so a status-first check answers a restart
+        // with "clearance begins once the separation has been approved", which is both confusing
+        // and wrong: it *is* approved. Order the questions so the more specific one answers first.
+        var alreadyStarted = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .AnyAsync(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId, cancellationToken);
+        if (alreadyStarted)
+            throw new InvalidOperationException("Clearance has already been started for this separation.");
+
+        if (separation.Status != SeparationStatus.Approved)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}. Clearance begins once the separation has "
+                + "been approved.");
+
+        var templates = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive)
+            .OrderBy(t => t.SortOrder)
+            .ThenBy(t => t.Name)
+            .ToListAsync(cancellationToken);
+
+        // ⚠ Refused rather than started empty. A clearance form with no lines would complete the
+        // instant it began — every mandatory item satisfied because there are none — and FR-HR-091's
+        // gate would report "cleared" having checked nothing. An empty catalogue is a configuration
+        // gap, and it must look like one.
+        if (templates.Count == 0)
+            throw new InvalidOperationException(
+                "No clearance lines are configured, so there is nothing to clear. Set up the "
+                + "clearance form first — the FR-HR-183 defaults can be seeded in one step.");
+
+        foreach (var template in templates)
+        {
+            await _unitOfWork.Repository<SeparationClearanceItem>().AddAsync(new SeparationClearanceItem
+            {
+                TenantId = tenantId,
+                SeparationId = separationId,
+                TemplateId = template.Id,
+                // Snapshotted, not read through the template: editing the catalogue afterwards must
+                // not rewrite a form somebody has already signed.
+                Name = template.Name,
+                Kind = template.Kind,
+                OwningOrganizationUnitId = template.OwningOrganizationUnitId,
+                IsMandatory = template.IsMandatory,
+                SortOrder = template.SortOrder,
+                Status = ClearanceItemStatus.Pending,
+            });
+        }
+
+        separation.Status = SeparationStatus.ClearanceInProgress;
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Clearance started for separation {Number} with {Count} lines",
+            separation.SeparationNumber, templates.Count);
+
+        return await GetClearanceAsync(separationId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationClearanceDto> GetClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await Scoped(tenantId).AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == separationId, cancellationToken)
+            ?? throw new ArgumentException($"Separation with ID '{separationId}' not found.");
+
+        var items = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .Include(i => i.OwningOrganizationUnit)
+            .Include(i => i.RecordedBy)
+            .AsNoTracking()
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId)
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Name)
+            .ToListAsync(cancellationToken);
+
+        var mandatoryOutstanding = items.Count(i => i.IsMandatory && !IsSettled(i.Status));
+
+        return new SeparationClearanceDto
+        {
+            SeparationId = separation.Id,
+            SeparationNumber = separation.SeparationNumber,
+            EmployeeName = FullName(separation.Employee),
+            SeparationStatus = separation.Status,
+            SeparationStatusName = separation.Status.ToString(),
+            Items = items.Select(ToClearanceItemDto).ToList(),
+            TotalItems = items.Count,
+            PendingItems = items.Count(i => i.Status == ClearanceItemStatus.Pending),
+            ClearedItems = items.Count(i => i.Status == ClearanceItemStatus.Cleared),
+            BlockedItems = items.Count(i => i.Status == ClearanceItemStatus.Blocked),
+            WaivedItems = items.Count(i => i.Status == ClearanceItemStatus.Waived),
+            NotApplicableItems = items.Count(i => i.Status == ClearanceItemStatus.NotApplicable),
+            MandatoryOutstanding = mandatoryOutstanding,
+            TotalOutstandingAmount = items.Sum(i => i.OutstandingAmount ?? 0m),
+            CanComplete = items.Count > 0
+                          && mandatoryOutstanding == 0
+                          && separation.Status == SeparationStatus.ClearanceInProgress,
+            BlockedReason = ClearanceBlockedReason(separation, items, mandatoryOutstanding),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationClearanceItemDto> RecordClearanceItemAsync(
+        Guid itemId, RecordClearanceItemDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        var item = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .FirstOrDefaultAsync(i => i.Id == itemId && i.TenantId == tenantId && !i.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Clearance item with ID '{itemId}' not found.");
+
+        var separation = await RequireAsync(tenantId, item.SeparationId, cancellationToken);
+
+        if (separation.Status != SeparationStatus.ClearanceInProgress)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}; clearance lines can only be answered while "
+                + "clearance is in progress.");
+
+        // Both of these are answers that need explaining: "still outstanding" and "set aside" are
+        // the two that stop a clearance form being a record of nothing.
+        if (item.IsMandatory && dto.Status == ClearanceItemStatus.Waived && string.IsNullOrWhiteSpace(dto.Notes))
+            throw new InvalidOperationException("Give a reason for waiving a mandatory clearance line.");
+
+        if (dto.Status == ClearanceItemStatus.Blocked && string.IsNullOrWhiteSpace(dto.Notes))
+            throw new InvalidOperationException("Say what is outstanding when marking a clearance line blocked.");
+
+        if (dto.OutstandingAmount is { } amount)
+        {
+            if (amount < 0)
+                throw new InvalidOperationException("An outstanding amount cannot be negative.");
+
+            if (!CarriesAmount(item.Kind))
+                throw new InvalidOperationException(
+                    $"A '{item.Kind}' clearance line does not carry an amount. Record what is "
+                    + "outstanding in the notes instead.");
+        }
+
+        item.Status = dto.Status;
+        item.SignedOffBy = string.IsNullOrWhiteSpace(dto.SignedOffBy) ? null : dto.SignedOffBy.Trim();
+        item.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        item.OutstandingAmount = dto.OutstandingAmount;
+        item.RecordedById = actorEmployeeId;
+        item.RecordedOn = DateTime.UtcNow;
+
+        await _unitOfWork.Repository<SeparationClearanceItem>().UpdateAsync(item);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var saved = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .Include(i => i.OwningOrganizationUnit)
+            .Include(i => i.RecordedBy)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken)
+            ?? throw new InvalidOperationException("Clearance line saved but could not be reloaded.");
+
+        return ToClearanceItemDto(saved);
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto> CompleteClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        if (separation.Status != SeparationStatus.ClearanceInProgress)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}; only a clearance in progress can be completed.");
+
+        var items = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .AsNoTracking()
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId)
+            .ToListAsync(cancellationToken);
+
+        var outstanding = items.Where(i => i.IsMandatory && !IsSettled(i.Status)).ToList();
+
+        // FR-HR-091, enforced. This is the gate the whole area turns on: entitlements are computed
+        // only after the clearance form is complete, so anything still owed is still recoverable.
+        if (outstanding.Count > 0)
+        {
+            var names = string.Join(", ", outstanding.Take(5).Select(i => i.Name));
+            var more = outstanding.Count > 5 ? $" and {outstanding.Count - 5} more" : string.Empty;
+            throw new InvalidOperationException(
+                $"Clearance is not complete: {outstanding.Count} mandatory line(s) are still "
+                + $"outstanding or blocked — {names}{more}.");
+        }
+
+        separation.Status = SeparationStatus.ClearanceCompleted;
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Clearance completed for separation {Number}; {Amount} outstanding carried to settlement",
+            separation.SeparationNumber, items.Sum(i => i.OutstandingAmount ?? 0m));
+
+        return ToDetailDto(await ReloadAsync(tenantId, separationId, cancellationToken));
+    }
+
+    /// <summary>A clearance line with a terminal answer that does not block the gate.</summary>
+    private static bool IsSettled(ClearanceItemStatus status)
+        => status is ClearanceItemStatus.Cleared
+                  or ClearanceItemStatus.Waived
+                  or ClearanceItemStatus.NotApplicable;
+
+    private static string? ClearanceBlockedReason(
+        EmployeeSeparation separation, List<SeparationClearanceItem> items, int mandatoryOutstanding)
+    {
+        if (items.Count == 0)
+            return "Clearance has not been started for this separation.";
+
+        if (separation.Status != SeparationStatus.ClearanceInProgress)
+            return $"This separation is {separation.Status}; clearance can only be completed while it is in progress.";
+
+        if (mandatoryOutstanding > 0)
+            return $"{mandatoryOutstanding} mandatory clearance line(s) are still outstanding or blocked.";
+
+        return null;
+    }
+
+    private async Task RequireOrganizationUnitAsync(Guid tenantId, Guid? unitId, CancellationToken cancellationToken)
+    {
+        if (unitId is not { } id || id == Guid.Empty) return;
+
+        var exists = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+            .AnyAsync(u => u.Id == id && u.TenantId == tenantId && !u.IsDeleted, cancellationToken);
+
+        if (!exists)
+            throw new ArgumentException($"Organisation unit with ID '{id}' not found.");
+    }
+
+    private async Task<SeparationClearanceTemplate> ReloadTemplateAsync(
+        Guid tenantId, Guid id, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+               .Include(t => t.OwningOrganizationUnit)
+               .AsNoTracking()
+               .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId, cancellationToken)
+           ?? throw new InvalidOperationException("Clearance line saved but could not be reloaded.");
+
+    private static SeparationClearanceTemplateDto ToTemplateDto(SeparationClearanceTemplate t) => new()
+    {
+        Id = t.Id,
+        Name = t.Name,
+        Kind = t.Kind,
+        KindName = t.Kind.ToString(),
+        Description = t.Description,
+        OwningOrganizationUnitId = t.OwningOrganizationUnitId,
+        OwningOrganizationUnitName = t.OwningOrganizationUnit?.Name,
+        IsMandatory = t.IsMandatory,
+        IsActive = t.IsActive,
+        SortOrder = t.SortOrder,
+        CarriesAmount = CarriesAmount(t.Kind),
+    };
+
+    private static SeparationClearanceItemDto ToClearanceItemDto(SeparationClearanceItem i) => new()
+    {
+        Id = i.Id,
+        SeparationId = i.SeparationId,
+        TemplateId = i.TemplateId,
+        Name = i.Name,
+        Kind = i.Kind,
+        KindName = i.Kind.ToString(),
+        OwningOrganizationUnitId = i.OwningOrganizationUnitId,
+        OwningOrganizationUnitName = i.OwningOrganizationUnit?.Name,
+        IsMandatory = i.IsMandatory,
+        SortOrder = i.SortOrder,
+        Status = i.Status,
+        StatusName = i.Status.ToString(),
+        OutstandingAmount = i.OutstandingAmount,
+        CarriesAmount = CarriesAmount(i.Kind),
+        Notes = i.Notes,
+        SignedOffBy = i.SignedOffBy,
+        RecordedById = i.RecordedById,
+        RecordedByName = i.RecordedBy == null ? null : FullName(i.RecordedBy),
+        RecordedOn = i.RecordedOn,
+    };
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private async Task<EmployeeSeparation> RequireAsync(Guid tenantId, Guid id, CancellationToken cancellationToken)

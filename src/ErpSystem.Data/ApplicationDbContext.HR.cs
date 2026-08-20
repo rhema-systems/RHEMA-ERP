@@ -313,6 +313,12 @@ public partial class ApplicationDbContext
 
     /// <summary>Files attached to a separation, all through the controlled-upload gate.</summary>
     public DbSet<EmployeeSeparationDocument> EmployeeSeparationDocuments { get; set; } = null!;
+
+    /// <summary>The tenant's clearance form — the catalogue every checklist is built from (FR-HR-183).</summary>
+    public DbSet<SeparationClearanceTemplate> SeparationClearanceTemplates { get; set; } = null!;
+
+    /// <summary>One line of one employee's clearance form.</summary>
+    public DbSet<SeparationClearanceItem> SeparationClearanceItems { get; set; } = null!;
     public DbSet<ProbationPeriod> ProbationPeriods { get; set; } = null!;
     public DbSet<ProbationReview> ProbationReviews { get; set; } = null!;
     public DbSet<ProbationExtension> ProbationExtensions { get; set; } = null!;
@@ -7974,6 +7980,51 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Documents)
                 .WithOne(x => x.Separation)
                 .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationClearanceTemplate>(entity =>
+        {
+            // One catalogue line per name per tenant. Filtered, because a soft-deleted row still
+            // occupies an unfiltered unique index.
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SeparationClearanceTemplate_Tenant_Name");
+
+            entity.HasIndex(x => x.Kind).HasDatabaseName("IX_SeparationClearanceTemplate_Kind");
+            entity.HasIndex(x => x.IsActive).HasDatabaseName("IX_SeparationClearanceTemplate_IsActive");
+
+            entity.Property(x => x.Kind).HasConversion<int>();
+
+            entity.HasOne(x => x.OwningOrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OwningOrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationClearanceItem>(entity =>
+        {
+            entity.HasIndex(x => x.SeparationId).HasDatabaseName("IX_SeparationClearanceItem_SeparationId");
+            entity.HasIndex(x => x.Status).HasDatabaseName("IX_SeparationClearanceItem_Status");
+            entity.HasIndex(x => x.TemplateId).HasDatabaseName("IX_SeparationClearanceItem_TemplateId");
+
+            entity.Property(x => x.Kind).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.Separation)
+                .WithMany(x => x.ClearanceItems)
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OwningOrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OwningOrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

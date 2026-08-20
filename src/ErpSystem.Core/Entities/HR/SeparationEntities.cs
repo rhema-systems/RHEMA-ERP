@@ -242,6 +242,9 @@ public class EmployeeSeparation : TenantEntity
 
     public virtual ICollection<EmployeeSeparationDocument> Documents { get; set; }
         = new List<EmployeeSeparationDocument>();
+
+    public virtual ICollection<SeparationClearanceItem> ClearanceItems { get; set; }
+        = new List<SeparationClearanceItem>();
 }
 
 /// <summary>
@@ -296,4 +299,133 @@ public class EmployeeSeparationDocument : TenantEntity
 
     [ForeignKey(nameof(UploadedById))]
     public virtual Employee? UploadedBy { get; set; }
+}
+
+// =============================================================================
+// CLEARANCE — FR-HR-091 (a completed clearance form before separation, and only
+// then are entitlements computed) and FR-HR-183 (what the clearance runs across).
+// =============================================================================
+
+/// <summary>
+/// One line of the tenant's clearance form — the catalogue every separation's checklist is built
+/// from.
+/// </summary>
+/// <remarks>
+/// <para>A catalogue rather than a fixed list in code, because what an organisation clears varies
+/// and FR-HR-183 names categories, not items: "company property" is one line at one employer and
+/// six at another.</para>
+///
+/// <para>⚠ <b><see cref="OwningOrganizationUnitId"/> is advisory, not an authority.</b> Measured on
+/// the live tenant 2026-08-20: <b>41 organisation units, 0 of them with a head</b>
+/// (<c>HeadEmployeeId</c> is null throughout). Deriving "who signs this item" from the unit head
+/// would resolve to nobody for every line of every form. So the unit here routes and labels; the
+/// signing is done by HR walking the form round, recording each unit's answer and who gave it.
+/// That is also what actually happens on paper.</para>
+/// </remarks>
+public class SeparationClearanceTemplate : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public ClearanceItemKind Kind { get; set; } = ClearanceItemKind.Other;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// Which organisation unit answers this line. Advisory — see the remarks on this class.
+    /// </summary>
+    /// <remarks>
+    /// <c>OrganizationUnit</c>, not <c>Department</c>: the organisation unit is the HR module's
+    /// placement entity, and it is also the one the data supports — 3,810 of 3,834 employees carry
+    /// an <c>OrganizationUnitId</c> against 3,320 with a <c>DepartmentId</c>, and the seven
+    /// departments on this tenant belong to the estate and procurement modules rather than to HR.
+    /// </remarks>
+    public Guid? OwningOrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OwningOrganizationUnitId))]
+    public virtual OrganizationUnit? OwningOrganizationUnit { get; set; }
+
+    /// <summary>
+    /// A mandatory item must be Cleared, Waived or Not Applicable before the FR-HR-091 gate opens.
+    /// A non-mandatory one is recorded but never blocks.
+    /// </summary>
+    public bool IsMandatory { get; set; } = true;
+
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>Order the line appears on the form.</summary>
+    public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// One line of one employee's clearance form.
+/// </summary>
+/// <remarks>
+/// The name, kind, organisation unit and mandatory flag are <b>snapshotted</b> from the template
+/// rather than read through it. A clearance form is evidence about a particular exit; editing the
+/// catalogue afterwards must not rewrite what somebody signed.
+/// </remarks>
+public class SeparationClearanceItem : TenantEntity
+{
+    [Required]
+    public Guid SeparationId { get; set; }
+
+    [ForeignKey(nameof(SeparationId))]
+    public virtual EmployeeSeparation Separation { get; set; } = null!;
+
+    /// <summary>The catalogue line this came from, where it came from one at all.</summary>
+    public Guid? TemplateId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public ClearanceItemKind Kind { get; set; } = ClearanceItemKind.Other;
+
+    public Guid? OwningOrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OwningOrganizationUnitId))]
+    public virtual OrganizationUnit? OwningOrganizationUnit { get; set; }
+
+    public bool IsMandatory { get; set; } = true;
+
+    public int SortOrder { get; set; }
+
+    [Required]
+    public ClearanceItemStatus Status { get; set; } = ClearanceItemStatus.Pending;
+
+    /// <summary>
+    /// What is still owed or unreturned, in money, where the item is the kind that carries an
+    /// amount — a loan, an advance, a payroll recovery.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This is an <b>input to the FR-HR-184 settlement</b>, not decoration: an amount recorded
+    /// here against a Blocked or Waived item is what the settlement deducts. It stays null for
+    /// items that cannot carry money — nobody owes a quantity of duty-post keys.
+    /// </remarks>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? OutstandingAmount { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Who in the owning unit actually gave the answer, as recorded on the form. Free text on
+    /// purpose: the person signing a clearance line is often not an ERP user at all, and a nullable
+    /// FK to <c>Employee</c> would quietly lose them.
+    /// </summary>
+    [MaxLength(200)]
+    public string? SignedOffBy { get; set; }
+
+    /// <summary>The HR user who recorded the answer. Not the same person as the signatory.</summary>
+    public Guid? RecordedById { get; set; }
+
+    [ForeignKey(nameof(RecordedById))]
+    public virtual Employee? RecordedBy { get; set; }
+
+    public DateTime? RecordedOn { get; set; }
 }

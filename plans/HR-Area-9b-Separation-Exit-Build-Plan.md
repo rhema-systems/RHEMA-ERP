@@ -491,6 +491,48 @@ actor's employee number, and a `setToken` placed *before* `mintSubject` — whic
 subject it creates and leaves the harness holding a plain Employee token. Neither was a product
 defect; both cost a run.
 
+### Slice 4 log — exit clearance, 2026-08-20, 64/64
+
+Migration `20260820111206_AddSeparationClearance` — scaffolded, rewritten guarded, listed. Two
+tables: `SeparationClearanceTemplates` (the tenant's form) and `SeparationClearanceItems` (one
+filled-in copy per separation), plus `ClearanceItemKind` / `ClearanceItemStatus`.
+
+**The owning unit is `OrganizationUnit`, not `Department`** — corrected by the user mid-slice, and
+the data agrees twice over: it is the HR module's placement entity, **3,810 of 3,834** employees
+carry one against 3,320 with a department, and this tenant's seven departments belong to the estate
+and procurement modules. Caught before scaffolding, so no migration was wasted. I had generalised
+from `departmentId` appearing in my own employee-create payload instead of checking which entity HR
+actually places staff in.
+
+**41 organisation units, 0 with a `HeadEmployeeId`** — so the owning unit routes and labels, it
+does not authorise. HR walks the form round; each line records both the unit's signatory
+(`SignedOffBy`, free text, because that person is often not an ERP user) and the HR user who
+entered it.
+
+Three rules the harness pins down:
+
+1. **An empty catalogue is refused.** A form with no lines completes the instant it begins — every
+   mandatory item satisfied because there are none — and reports "cleared" having checked nothing.
+   A configuration gap must look like one.
+2. **Items snapshot their catalogue line, with no FK back to it.** The harness renames a template
+   after the form is signed and asserts the signed line keeps its original name. A clearance form is
+   evidence about one person's exit.
+3. **An amount is refused on kinds that cannot carry money.** `OutstandingAmount` feeds FR-HR-184;
+   a number the settlement will never read is worse than none, because somebody will believe it.
+   Note that a **waived** loan still counts in `TotalOutstandingAmount` — waived here means *carried
+   into the settlement*, not *forgiven*.
+
+⚠ **One real defect, found by the harness's "says why" convention.** Restarting a clearance answered
+*"This separation is ClearanceInProgress. Clearance begins once the separation has been approved"* —
+self-contradictory, because it **is** approved. The status check ran before the already-started
+check, and a separation in clearance is no longer `Approved`. **Order the questions so the most
+specific one answers first.** A rule that cannot explain itself is a defect even when it refuses
+correctly.
+
+✅ **The slice-3 seed/fallback drift is closed and verified in SQL:** `Managing Director`,
+`TDC_MANAGING_DIRECTOR` and `TDC_INTERNAL_AUDIT` each hold a real `HR.Separation.Read` row in
+`RolePermissions`.
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens

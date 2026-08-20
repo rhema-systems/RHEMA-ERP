@@ -248,6 +248,182 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── Clearance: the tenant's form ──────────────────────────────────────────
+
+    /// <summary>The clearance form — the catalogue every separation's checklist is built from.</summary>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("clearance-templates")]
+    [ProducesResponseType(typeof(IEnumerable<SeparationClearanceTemplateDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<SeparationClearanceTemplateDto>>> GetClearanceTemplates(
+        [FromQuery] bool includeInactive, CancellationToken cancellationToken)
+        => Ok(await _service.GetClearanceTemplatesAsync(includeInactive, cancellationToken));
+
+    /// <summary>Add a line to the clearance form. Configuration, so administration.</summary>
+    [Authorize(Policy = HrPermissions.SeparationAdminPolicy)]
+    [HttpPost("clearance-templates")]
+    [ProducesResponseType(typeof(SeparationClearanceTemplateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SeparationClearanceTemplateDto>> CreateClearanceTemplate(
+        [FromBody] CreateSeparationClearanceTemplateDto dto, CancellationToken cancellationToken)
+    {
+        if (dto == null) return BadRequest(new { message = "A clearance line is required." });
+
+        try
+        {
+            return Ok(await _service.CreateClearanceTemplateAsync(dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Amend a line of the clearance form.</summary>
+    [Authorize(Policy = HrPermissions.SeparationAdminPolicy)]
+    [HttpPut("clearance-templates/{id:guid}")]
+    [ProducesResponseType(typeof(SeparationClearanceTemplateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationClearanceTemplateDto>> UpdateClearanceTemplate(
+        Guid id, [FromBody] UpdateSeparationClearanceTemplateDto dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid clearance line id." });
+        if (dto == null) return BadRequest(new { message = "An update payload is required." });
+
+        try
+        {
+            return Ok(await _service.UpdateClearanceTemplateAsync(id, dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Remove a line from the clearance form. Forms already issued keep their copy — items snapshot
+    /// their template and hold no key to it — so this affects future clearances only. Retiring the
+    /// line (<c>isActive: false</c>) is usually the better move.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.SeparationAdminPolicy)]
+    [HttpDelete("clearance-templates/{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteClearanceTemplate(Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid clearance line id." });
+
+        try
+        {
+            await _service.DeleteClearanceTemplateAsync(id, cancellationToken);
+            return NoContent();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Create FR-HR-183's seven default lines — outstanding loans, salary advances, company
+    /// property, office equipment, duty-post keys, documents and records, payroll recoveries.
+    /// Skips any that already exist by name, so it is safe to run twice.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.SeparationAdminPolicy)]
+    [HttpPost("clearance-templates/seed-defaults")]
+    [ProducesResponseType(typeof(IEnumerable<SeparationClearanceTemplateDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<SeparationClearanceTemplateDto>>> SeedDefaultClearanceTemplates(
+        CancellationToken cancellationToken)
+        => Ok(await _service.SeedDefaultClearanceTemplatesAsync(cancellationToken));
+
+    // ── Clearance: one separation's form ──────────────────────────────────────
+
+    /// <summary>Build this separation's clearance form from the active catalogue.</summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/clearance/start")]
+    [ProducesResponseType(typeof(SeparationClearanceDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationClearanceDto>> StartClearance(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.StartClearanceAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>This separation's clearance form, its totals, and whether the gate can open.</summary>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("{id:guid}/clearance")]
+    [ProducesResponseType(typeof(SeparationClearanceDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationClearanceDto>> GetClearance(Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.GetClearanceAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Record one line's answer, and who in the owning unit gave it.</summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("clearance-items/{itemId:guid}")]
+    [ProducesResponseType(typeof(SeparationClearanceItemDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationClearanceItemDto>> RecordClearanceItem(
+        Guid itemId, [FromBody] RecordClearanceItemDto dto, CancellationToken cancellationToken)
+    {
+        if (itemId == Guid.Empty) return BadRequest(new { message = "Invalid clearance item id." });
+        if (dto == null) return BadRequest(new { message = "An answer is required." });
+
+        try
+        {
+            return Ok(await _service.RecordClearanceItemAsync(itemId, dto, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Close the clearance — FR-HR-091's gate. Refused while any mandatory line is still pending or
+    /// blocked, because entitlements are computed only after the form is complete.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/clearance/complete")]
+    [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSeparationDetailDto>> CompleteClearance(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.CompleteClearanceAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Documents ─────────────────────────────────────────────────────────────
 
     /// <summary>Every file attached to a separation, newest first.</summary>

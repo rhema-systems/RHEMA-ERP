@@ -81,4 +81,42 @@ public interface ISeparationService
         Guid documentId, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
+
+    // ── Clearance (FR-HR-091 / FR-HR-183) ────────────────────────────────────
+
+    Task<IEnumerable<SeparationClearanceTemplateDto>> GetClearanceTemplatesAsync(
+        bool includeInactive = false, CancellationToken cancellationToken = default);
+
+    Task<SeparationClearanceTemplateDto> CreateClearanceTemplateAsync(
+        CreateSeparationClearanceTemplateDto dto, CancellationToken cancellationToken = default);
+
+    Task<SeparationClearanceTemplateDto> UpdateClearanceTemplateAsync(
+        Guid id, UpdateSeparationClearanceTemplateDto dto, CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteClearanceTemplateAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Creates FR-HR-183's seven default lines for a tenant, skipping any that exist by name.</summary>
+    Task<IEnumerable<SeparationClearanceTemplateDto>> SeedDefaultClearanceTemplatesAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Builds the separation's clearance form from the active catalogue. Refused where the
+    /// separation is not yet approved, where clearance has already begun, or where the catalogue is
+    /// empty — a form with no lines would report "cleared" having checked nothing.
+    /// </summary>
+    Task<SeparationClearanceDto> StartClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
+
+    Task<SeparationClearanceDto> GetClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
+
+    Task<SeparationClearanceItemDto> RecordClearanceItemAsync(
+        Guid itemId, RecordClearanceItemDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Closes the clearance — FR-HR-091's gate. Refused while any mandatory line is still pending
+    /// or blocked, because entitlements are computed only after the form is complete.
+    /// </summary>
+    Task<EmployeeSeparationDetailDto> CompleteClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
 }

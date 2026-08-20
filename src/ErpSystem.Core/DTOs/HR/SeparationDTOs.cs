@@ -312,3 +312,153 @@ public class EmployeeSeparationQueryDto
     /// </summary>
     public bool? OnlyUnappliedToEmployee { get; set; }
 }
+
+// =============================================================================
+// CLEARANCE — FR-HR-091 (the gate) and FR-HR-183 (what it runs across)
+// =============================================================================
+
+/// <summary>One line of the tenant's clearance form.</summary>
+public class SeparationClearanceTemplateDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+
+    public ClearanceItemKind Kind { get; set; }
+    public string KindName { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public Guid? OwningOrganizationUnitId { get; set; }
+    public string? OwningOrganizationUnitName { get; set; }
+
+    public bool IsMandatory { get; set; }
+    public bool IsActive { get; set; }
+    public int SortOrder { get; set; }
+
+    /// <summary>True for the kinds that can carry money — a loan, an advance, a payroll recovery.</summary>
+    public bool CarriesAmount { get; set; }
+}
+
+public class CreateSeparationClearanceTemplateDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public ClearanceItemKind Kind { get; set; } = ClearanceItemKind.Other;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public Guid? OwningOrganizationUnitId { get; set; }
+    public bool IsMandatory { get; set; } = true;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+}
+
+public class UpdateSeparationClearanceTemplateDto
+{
+    [MaxLength(200)]
+    public string? Name { get; set; }
+
+    public ClearanceItemKind? Kind { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public Guid? OwningOrganizationUnitId { get; set; }
+    public bool? IsMandatory { get; set; }
+    public bool? IsActive { get; set; }
+    public int? SortOrder { get; set; }
+}
+
+/// <summary>One line of one employee's clearance form.</summary>
+public class SeparationClearanceItemDto
+{
+    public Guid Id { get; set; }
+    public Guid SeparationId { get; set; }
+    public Guid? TemplateId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public ClearanceItemKind Kind { get; set; }
+    public string KindName { get; set; } = string.Empty;
+
+    public Guid? OwningOrganizationUnitId { get; set; }
+    public string? OwningOrganizationUnitName { get; set; }
+
+    public bool IsMandatory { get; set; }
+    public int SortOrder { get; set; }
+
+    public ClearanceItemStatus Status { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+
+    public decimal? OutstandingAmount { get; set; }
+    public bool CarriesAmount { get; set; }
+
+    public string? Notes { get; set; }
+    public string? SignedOffBy { get; set; }
+
+    public Guid? RecordedById { get; set; }
+    public string? RecordedByName { get; set; }
+    public DateTime? RecordedOn { get; set; }
+}
+
+/// <summary>Record one line's answer.</summary>
+public class RecordClearanceItemDto
+{
+    [Required]
+    public ClearanceItemStatus Status { get; set; }
+
+    /// <summary>Who in the owning unit gave the answer, as it appears on the form.</summary>
+    [MaxLength(200)]
+    public string? SignedOffBy { get; set; }
+
+    /// <summary>
+    /// What is still owed or unreturned. Only for the kinds that carry money, and read by the
+    /// FR-HR-184 settlement.
+    /// </summary>
+    public decimal? OutstandingAmount { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>A separation's clearance form, and whether the FR-HR-091 gate can open.</summary>
+public class SeparationClearanceDto
+{
+    public Guid SeparationId { get; set; }
+    public string SeparationNumber { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+
+    public SeparationStatus SeparationStatus { get; set; }
+    public string SeparationStatusName { get; set; } = string.Empty;
+
+    public List<SeparationClearanceItemDto> Items { get; set; } = new();
+
+    public int TotalItems { get; set; }
+    public int PendingItems { get; set; }
+    public int ClearedItems { get; set; }
+    public int BlockedItems { get; set; }
+    public int WaivedItems { get; set; }
+    public int NotApplicableItems { get; set; }
+
+    /// <summary>Mandatory lines still without a terminal answer, or answered Blocked.</summary>
+    public int MandatoryOutstanding { get; set; }
+
+    /// <summary>
+    /// Everything still owed across the form. The FR-HR-184 settlement deducts this; it is shown
+    /// here so nobody has to add it up by eye before releasing someone.
+    /// </summary>
+    public decimal TotalOutstandingAmount { get; set; }
+
+    /// <summary>
+    /// Whether the clearance can be completed — FR-HR-091's gate, stated as an answer rather than
+    /// left for the caller to infer.
+    /// </summary>
+    public bool CanComplete { get; set; }
+
+    /// <summary>Why not, when <see cref="CanComplete"/> is false.</summary>
+    public string? BlockedReason { get; set; }
+}

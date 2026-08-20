@@ -2967,6 +2967,74 @@ public enum SeparationStatus
 }
 
 /// <summary>
+/// What a clearance item checks — FR-HR-183's list, verbatim: <i>"exit clearance across outstanding
+/// loans, salary advances, company property, office equipment, duty-post keys, documents and
+/// payroll recoveries"</i>.
+/// </summary>
+/// <remarks>
+/// The kind is what makes an item mean something rather than being a line of free text. Two things
+/// hang off it: whether the item can carry an outstanding <b>amount</b> (a loan can, a set of keys
+/// cannot), and which system will eventually be able to answer it automatically — loans, advances
+/// and recoveries live in payroll, property and equipment in HR Assets (area 16, unbuilt).
+/// </remarks>
+public enum ClearanceItemKind
+{
+    [Description("Outstanding Loan")]
+    OutstandingLoan = 1,
+
+    [Description("Salary Advance")]
+    SalaryAdvance = 2,
+
+    [Description("Company Property")]
+    CompanyProperty = 3,
+
+    [Description("Office Equipment")]
+    OfficeEquipment = 4,
+
+    [Description("Duty-Post Keys")]
+    DutyPostKeys = 5,
+
+    [Description("Documents And Records")]
+    DocumentsAndRecords = 6,
+
+    [Description("Payroll Recovery")]
+    PayrollRecovery = 7,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>Where a single clearance item has got to.</summary>
+public enum ClearanceItemStatus
+{
+    /// <summary>Nobody has answered it yet.</summary>
+    [Description("Pending")]
+    Pending = 1,
+
+    /// <summary>Answered and settled — nothing outstanding, or what was outstanding has been returned.</summary>
+    [Description("Cleared")]
+    Cleared = 2,
+
+    /// <summary>
+    /// Answered and NOT settled: something is still owed or unreturned. A blocking answer, and the
+    /// reason the FR-HR-091 gate exists.
+    /// </summary>
+    [Description("Blocked")]
+    Blocked = 3,
+
+    /// <summary>
+    /// Deliberately set aside — the item does not apply to this person, or what is outstanding is
+    /// being carried into the final settlement instead of recovered first. Requires a reason.
+    /// </summary>
+    [Description("Waived")]
+    Waived = 4,
+
+    /// <summary>Does not apply to this separation at all.</summary>
+    [Description("Not Applicable")]
+    NotApplicable = 5
+}
+
+/// <summary>
 /// What a document attached to a separation is (area 9b). The category is what makes the file
 /// findable years later, when the question is "show me the clearance form" rather than "show me
 /// the attachments".
