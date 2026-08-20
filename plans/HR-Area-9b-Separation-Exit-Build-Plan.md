@@ -951,3 +951,99 @@ tests for an object.
 **Area regression after slice 12: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 13 + 37 + 62 = 578
 assertions**, all green. (Slice 11 was the screens slice and has no harness of its own — its
 endpoints are covered by the slices that built them, and by the content audit in slice 13.)
+
+---
+
+## Slice 13 — the content audit
+
+`run-audit.mjs`, **136 assertions**, green on two consecutive runs. All **14 GET endpoints** read
+for CONTENT — every joined name, resolved enum and computed total checked field by field — with
+**nothing left unproven**.
+
+### The rule this file is built on
+
+Area 11 shipped a harness green on every endpoint and then failed a post-hoc content audit 20 times
+out of 37, because status-code assertions prove the **gate**, not the **feature**. A 200 carrying an
+empty string where a name should be is still a 200. So this file reads every endpoint against a
+record that genuinely has something to say — one separation carried the whole way, with documents,
+an amount left owing, a settlement through Internal Audit, and an exit interview.
+
+The second trap gets its own machinery: an endpoint returning `[]` passes `Array.isArray` forever.
+Where a collection could legitimately be empty, the file records the read as **UNPROVEN** and prints
+the list at the end, rather than passing it. Two reads started that way (the analytics window held
+no completed exits) and were closed by adding a fixture that exits *inside* the default window.
+
+### One real defect, found by the coverage grep
+
+⚠ The per-type grep flagged `BenefitPayment` and `TaxDeduction` as having no assertion anywhere.
+Probing them found that a manually added settlement line took `IsDeduction` **from the caller** and
+never checked it against the category:
+
+```
+ACCEPTED  category=TaxDeduction isDeduction=false   netPayable 0 -> 5000
+```
+
+A line categorised as tax **increased** the leaver's final pay by its amount. The update path was
+worse — `UpdateSettlementLineDto` carries no category at all, so a *system-generated* travel-advance
+recovery could be flipped into an earning after the fact.
+
+Fixed by deriving the permitted direction from the category (`DirectionOf` /
+`RequireDirectionMatchesCategory`). `PensionRelated` is deliberately left to the caller: a pension
+line can be a payout owed to the leaver or a contribution owed by them, and the category cannot say
+which. No schema change.
+
+### Also closed
+
+- **`TravelAdvanceRecovery`** — the only cross-module generator, and never once exercised. Now
+  proven end to end: two disbursed advances, one in the settlement currency and one in USD. The
+  foreign one is **not converted** — it is recorded uncomputable with the figure in the text, and
+  it **blocks finalisation**. Finance owns conversion, and its rates are known to be inverted.
+- **`ClearanceItemStatus.NotApplicable`** — one of the three answers `IsSettled()` accepts, so it
+  satisfies a *mandatory* line. Remove it from that list and nothing would have failed.
+- **The clearance-kind → settlement-category mapping**, three reachable branches, each identified by
+  a distinct amount so a crossed mapping shows as the wrong number and not merely the wrong label.
+  The fourth, `PropertyRecovery`, is **unreachable**: only three kinds carry money, and a property
+  line is refused an amount outright. The rule that makes it unreachable is asserted instead.
+
+Remaining uncovered enum members are pick-list values with no behaviour: `EndOfInternship`,
+`BenefitPayment`/`TaxDeduction` as *generated* categories (they exist only as manual lines, now
+asserted), and `PropertyRecovery`.
+
+### Four vacuous greens caught in the audit's own code
+
+Worth recording, because every one of them **passed**:
+
+1. **`isRecovery` — a field invented rather than read from the DTO.** Every line returned
+   `undefined`, so deductions summed to zero and "net is earnings less recoveries" quietly reduced
+   to "net is the sum". The field is `isDeduction`. *A field name guessed from a concept rather than
+   read from the DTO is exactly the fiction that type-checks.*
+2. **Even fixed, the fixture had cleared every clearance line**, so there was no deduction in it at
+   all. One line is now deliberately left owing.
+3. **The property-amount rejection was asserted after the settlement was prepared**, where it still
+   returned 400 — but for an unrelated reason ("clearance lines can only be answered while clearance
+   is in progress"). A bare status-code assertion would have passed while testing nothing.
+4. **`get(path, {query})` — a second argument the function does not take.** Silently ignored, so the
+   read returned an unfiltered default page. It broke slice 9b's register assertion (25+25 rows,
+   none disciplinary, against a product that was correct) and was latent in the audit's own register
+   read. `get()` in this harness takes a path only.
+
+### And one harness fragility repaired
+
+Slice 9b asked whether any row in the first 200 was disciplinary. That passed only while the
+disciplinary exits stayed among the 200 most recent; later slices added enough fixtures to push them
+off. It now **filters** instead of paging. Two related facts it pinned down while failing:
+`IsDisciplinary` is `DisciplinaryActionId != null` — "raised by the discipline module", **not** "is
+a dismissal", so a hand-raised dismissal is correctly unflagged — and the case id is a **detail**
+field: `EmployeeSeparationListDto` has 18 properties, all of them assigned, and that is not one of
+them.
+
+### ⚠ The environment trap that made a correct build look broken
+
+`dotnet run` ignores `ASPNETCORE_ENVIRONMENT`: `launchSettings.json` sets `Development` and wins.
+Started that way, every refusal comes back **500 with a stack trace** instead of 403, and slice 3
+failed four authorization assertions against code that was working perfectly. Run the built DLL, or
+pass `--no-launch-profile`, and confirm `Hosting environment: Staging` in the log before trusting a
+run. Staging also has no user-secrets, so the JWT key must be passed in.
+
+**Area regression after slice 13: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 18 + 37 + 62 + 136 =
+719 assertions**, all green, twice.

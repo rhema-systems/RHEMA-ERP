@@ -2025,6 +2025,8 @@ public class SeparationService : ISeparationService
         if (dto.Amount is < 0)
             throw new InvalidOperationException("A settlement amount cannot be negative. Use a deduction line instead.");
 
+        RequireDirectionMatchesCategory(dto.Category, dto.IsDeduction);
+
         var maxOrder = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
             .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.SettlementId == settlement.Id)
             .Select(l => (int?)l.SortOrder)
@@ -2077,7 +2079,13 @@ public class SeparationService : ISeparationService
             line.Description = dto.Description.Trim();
         }
 
-        if (dto.IsDeduction is { } deduction) line.IsDeduction = deduction;
+        // ⚠ Checked against the LINE's category, not the payload's — this DTO has no category, so
+        // without this a system-generated recovery could be flipped into an earning here.
+        if (dto.IsDeduction is { } deduction)
+        {
+            RequireDirectionMatchesCategory(line.Category, deduction);
+            line.IsDeduction = deduction;
+        }
 
         if (dto.SourceReference is not null)
             line.SourceReference = string.IsNullOrWhiteSpace(dto.SourceReference) ? null : dto.SourceReference.Trim();
@@ -2320,6 +2328,54 @@ public class SeparationService : ISeparationService
     /// carry one is refused rather than stored and ignored — a number the settlement will never
     /// read is worse than no number, because somebody will believe it.
     /// </remarks>
+    /// <summary>
+    /// Which way a settlement category points: <c>true</c> a deduction, <c>false</c> an earning,
+    /// <c>null</c> where the category genuinely does not say.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Added after the slice-13 audit found that a line could contradict its own category. A line
+    /// categorised <c>TaxDeduction</c> was accepted with <c>IsDeduction = false</c> and raised the
+    /// net payable by its amount — the leaver would have been PAID their PAYE. The same hole let a
+    /// system-generated travel-advance recovery be flipped into an earning through the update path,
+    /// which carries no category of its own to check against.
+    ///
+    /// <para>Only <c>PensionRelated</c> is left to the caller: a pension line can be a payout owed
+    /// to the leaver or a contribution owed by them, and the category alone cannot tell which.
+    /// Everything else is named by its direction, including <c>OtherEarning</c> and
+    /// <c>OtherDeduction</c>, which is where a genuinely unusual line belongs.</para>
+    /// </remarks>
+    private static bool? DirectionOf(SettlementLineCategory category) => category switch
+    {
+        SettlementLineCategory.UnpaidSalary
+            or SettlementLineCategory.NoticePay
+            or SettlementLineCategory.LeaveEncashment
+            or SettlementLineCategory.GratuityOrEndOfService
+            or SettlementLineCategory.BenefitPayment
+            or SettlementLineCategory.OtherEarning => false,
+
+        SettlementLineCategory.LoanRepayment
+            or SettlementLineCategory.SalaryAdvanceRecovery
+            or SettlementLineCategory.TravelAdvanceRecovery
+            or SettlementLineCategory.PropertyRecovery
+            or SettlementLineCategory.TaxDeduction
+            or SettlementLineCategory.OtherDeduction => true,
+
+        _ => null,
+    };
+
+    private static void RequireDirectionMatchesCategory(
+        SettlementLineCategory category, bool isDeduction)
+    {
+        if (DirectionOf(category) is not { } expected || expected == isDeduction)
+            return;
+
+        throw new InvalidOperationException(
+            $"A '{category}' line is {(expected ? "a deduction" : "an earning")}, and cannot be "
+            + $"recorded as {(isDeduction ? "a deduction" : "an earning")}. Use "
+            + $"'{(isDeduction ? nameof(SettlementLineCategory.OtherDeduction) : nameof(SettlementLineCategory.OtherEarning))}' "
+            + "if that is really what this line is.");
+    }
+
     private static bool CarriesAmount(ClearanceItemKind kind)
         => kind is ClearanceItemKind.OutstandingLoan
                 or ClearanceItemKind.SalaryAdvance
