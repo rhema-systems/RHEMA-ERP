@@ -87,7 +87,8 @@ public interface IProcurementBudgetService
     Task<IEnumerable<ProcurementBudgetDto>> GetActiveBudgetsAsync();
     Task<ProcurementBudgetDetailDto> CreateAsync(CreateProcurementBudgetDto dto);
     Task<ProcurementBudgetDetailDto> UpdateAsync(Guid id, CreateProcurementBudgetDto dto);
-    Task<ProcurementBudgetDetailDto> ApproveAsync(Guid id);
+    Task<ProcurementBudgetDetailDto> SubmitForApprovalAsync(Guid id);
+    Task<ProcurementBudgetDetailDto> ApproveAsync(Guid id, ApproveProcurementBudgetDto dto);
     Task DeleteAsync(Guid id);
 
     // Budget Allocations

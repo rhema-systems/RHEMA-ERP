@@ -23,9 +23,9 @@ public sealed class ProcurementAccessControlServiceTests
     public void RegistryContainsTheCompleteTdcLeastPrivilegeBaseline()
     {
         ProcurementAccessControlRegistry.Roles.Should().HaveCount(19).And.OnlyHaveUniqueItems(item => item.Code);
-        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(39).And.OnlyHaveUniqueItems(item => item.Code);
+        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(41).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Committees.Should().HaveCount(4).And.OnlyHaveUniqueItems(item => item.Code);
-        ProcurementAccessControlRegistry.Workflows.Should().HaveCount(13).And.OnlyHaveUniqueItems(item => item.Code);
+        ProcurementAccessControlRegistry.Workflows.Should().HaveCount(15).And.OnlyHaveUniqueItems(item => item.Code);
 
         var audit = ProcurementAccessControlRegistry.Roles.Single(item => item.Code == ProcurementAccessControlRegistry.InternalAuditRole);
         audit.IsReadOnly.Should().BeTrue();
@@ -39,6 +39,14 @@ public sealed class ProcurementAccessControlServiceTests
         ProcurementAccessControlRegistry.FindRole("TDC_PROCUREMENT_OFFICER")!
             .PermissionCodes.Should().Contain(
                 ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission);
+        ProcurementAccessControlRegistry.FindRole("TDC_PROCUREMENT_OFFICER")!
+            .PermissionCodes.Should().Contain("procurement.budget.manage", "procurement.requisition.create");
+        ProcurementAccessControlRegistry.FindRole("TDC_FINANCE_REVIEWER")!
+            .PermissionCodes.Should().Contain("procurement.budget.approve");
+        ProcurementAccessControlRegistry.Workflows.Should().Contain(item =>
+            item.Code == "TDC_PROCUREMENT_BUDGET" &&
+            item.EntityTypeCode == "PROCUREMENT_BUDGET" &&
+            item.ApprovalRoleCode == "TDC_FINANCE_REVIEWER");
     }
 
     [Fact]
@@ -50,10 +58,10 @@ public sealed class ProcurementAccessControlServiceTests
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
 
         (await fixture.Context.Roles.CountAsync(item => item.Name!.StartsWith("TDC_"))).Should().Be(19);
-        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(39);
+        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(41);
         (await fixture.Context.ProcurementCommittees.CountAsync(item => item.TenantId == fixture.TenantId)).Should().Be(4);
         var workflows = await fixture.Context.WorkflowDefinitions.Where(item => item.TenantId == fixture.TenantId).ToListAsync();
-        workflows.Should().HaveCount(13).And.OnlyContain(item =>
+        workflows.Should().HaveCount(15).And.OnlyContain(item =>
             item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft && !item.IsActive && item.PublishedAt == null);
     }
 

@@ -24,7 +24,7 @@ public class WorkflowTransactionalStatusAdapterTests
         var expectedAliases = new[]
         {
             "WorkOrder", "JobCard", "FleetTrip", "FleetTripInspection", "PurchaseOrder",
-            "ProcurementPlan", "PurchaseRequisition", "Tender", "RFQ", "SupplierQuote", "Bid",
+            "ProcurementPlan", "ProcurementBudget", "PurchaseRequisition", "Tender", "RFQ", "SupplierQuote", "Bid",
             "Evaluation", "InventoryTransfer", "InventoryRequisition", "PayrollRun", "Project",
             "ProjectDeliverable", "ProjectClosure", "Customer", "SalesOrder", "SalesAgreement",
             "SalesAllocation", "Refund", "CreditNote", "BusinessPartner", "Vendor", "ServiceRequest",
@@ -76,6 +76,27 @@ public class WorkflowTransactionalStatusAdapterTests
         quote.Status.Should().Be("Accepted");
         bid.Status.Should().Be("Rejected");
         evaluation.Status.Should().Be("Submitted");
+    }
+
+    [Fact]
+    public void Procurement_budget_adapter_requires_workflow_outcomes_for_its_lifecycle()
+    {
+        var budget = new ProcurementBudget { Status = "Draft" };
+        var approverId = Guid.NewGuid();
+        var adapter = new ProcurementBudgetWorkflowStatusAdapter();
+
+        adapter.ApplySubmitOutcome(budget, WorkflowOutcome.Pending, Guid.NewGuid());
+        budget.Status.Should().Be("Submitted");
+        budget.ApprovedById.Should().BeNull();
+
+        adapter.ApplyApprovalOutcome(budget, WorkflowOutcome.Approved, approverId);
+        budget.Status.Should().Be("Approved");
+        budget.ApprovedById.Should().Be(approverId);
+        budget.ApprovedDate.Should().NotBeNull();
+
+        adapter.ApplyRecallOutcome(budget, approverId);
+        budget.Status.Should().Be("Draft");
+        budget.ApprovedById.Should().BeNull();
     }
 
     [Fact]

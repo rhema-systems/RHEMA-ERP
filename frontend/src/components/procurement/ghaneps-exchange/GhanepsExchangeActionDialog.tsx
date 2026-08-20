@@ -206,7 +206,6 @@ export function GhanepsExchangeActionDialog({
           eventReference: sourceReference,
           payloadContent,
           fileName: fileName || undefined,
-          expectedPayloadChecksumSha256: checksum || undefined,
           evidenceReference: evidenceReference || undefined,
           idempotencyKey,
         };
@@ -247,7 +246,6 @@ export function GhanepsExchangeActionDialog({
           replacementPayloadContent:
             payloadContent.trim() ? payloadContent : undefined,
           fileName: fileName || undefined,
-          expectedPayloadChecksumSha256: checksum || undefined,
           evidenceReference: evidenceReference || undefined,
           idempotencyKey,
           expectedRowVersion: action.event.rowVersion,
@@ -262,8 +260,6 @@ export function GhanepsExchangeActionDialog({
             acknowledgementReference: reference,
             externalStatusCode: externalStatusCode || undefined,
             acknowledgementContent: payloadContent,
-            expectedAcknowledgementChecksumSha256:
-              checksum || undefined,
             evidenceReference,
             idempotencyKey,
             expectedRowVersion: action.event.rowVersion,
@@ -371,8 +367,6 @@ export function GhanepsExchangeActionDialog({
                 required
                 fileName={fileName}
                 setFileName={setFileName}
-                checksum={checksum}
-                setChecksum={setChecksum}
                 onLoadFile={loadContentFile}
                 fileReadError={fileReadError}
               />
@@ -425,8 +419,6 @@ export function GhanepsExchangeActionDialog({
                     required={action.requiresCorrectedPayload}
                     fileName={fileName}
                     setFileName={setFileName}
-                    checksum={checksum}
-                    setChecksum={setChecksum}
                     onLoadFile={loadContentFile}
                     fileReadError={fileReadError}
                   />
@@ -471,8 +463,6 @@ export function GhanepsExchangeActionDialog({
                 contentType={action.event.acknowledgementContentType}
                 subject="Acknowledgement"
                 required
-                checksum={checksum}
-                setChecksum={setChecksum}
                 onLoadFile={loadContentFile}
                 fileReadError={fileReadError}
               />
@@ -562,8 +552,6 @@ function ContentFields({
   required,
   fileName,
   setFileName,
-  checksum,
-  setChecksum,
   onLoadFile,
   fileReadError,
 }: {
@@ -574,8 +562,6 @@ function ContentFields({
   required: boolean;
   fileName?: string;
   setFileName?: (value: string) => void;
-  checksum: string;
-  setChecksum: (value: string) => void;
   onLoadFile?: (file?: File) => Promise<void>;
   fileReadError?: string;
 }) {
@@ -624,13 +610,10 @@ function ContentFields({
           />
         </Field>
       )}
-      <Field label={`Expected ${subject.toLowerCase()} SHA-256`}>
-        <Input
-          value={checksum}
-          onChange={(event) => setChecksum(event.target.value)}
-          maxLength={64}
-        />
-      </Field>
+      <p className="text-xs text-muted-foreground">
+        The system calculates and records the SHA-256 checksum from the retained
+        content. You do not need to generate or enter a checksum.
+      </p>
     </>
   );
 }
@@ -796,8 +779,6 @@ function validate(input: {
       'Payload content'
     );
     if (contentValidation) return contentValidation;
-    if (input.checksum && !isHash(input.checksum))
-      return 'Expected payload checksum must be a 64-character SHA-256 value.';
   }
   if (
     input.action.type === 'record-attempt' ||
@@ -826,14 +807,6 @@ function validate(input: {
       );
       if (contentValidation) return contentValidation;
     }
-    if (input.checksum && !isHash(input.checksum))
-      return 'Expected payload checksum must be a 64-character SHA-256 value.';
-    if (
-      input.action.type === 'retry' &&
-      input.checksum &&
-      !input.payloadContent.trim()
-    )
-      return 'An expected replacement checksum requires replacement payload content.';
   }
   if (input.action.type === 'acknowledge') {
     if (!input.outcome) return 'Acknowledgement outcome is required.';
@@ -847,8 +820,6 @@ function validate(input: {
       'Acknowledgement content'
     );
     if (contentValidation) return contentValidation;
-    if (input.checksum && !isHash(input.checksum))
-      return 'Expected acknowledgement checksum must be a 64-character SHA-256 value.';
   }
   if (input.action.type === 'reconcile') {
     if (!input.reference.trim()) return 'Actual reference is required.';

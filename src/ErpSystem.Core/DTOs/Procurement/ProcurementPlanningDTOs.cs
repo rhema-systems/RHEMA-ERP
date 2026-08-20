@@ -24,6 +24,13 @@ public class ProcurementPlanDto
     public int PlanDurationYears { get; set; }
     public string Status { get; set; } = "Draft";
     public decimal TotalEstimatedBudget { get; set; }
+
+    /// <summary>
+    /// Approved procurement budget selected by the planner.  The selection is
+    /// validated against the plan department and fiscal year before it is
+    /// linked; the system never guesses a budget at approval time.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
     public decimal ApprovedBudget { get; set; }
     public string Currency { get; set; } = "USD";
     public string? PreparedByName { get; set; }
@@ -92,6 +99,12 @@ public class CreateProcurementPlanDto
     public int PlanDurationYears { get; set; } = 1;
 
     public decimal TotalEstimatedBudget { get; set; }
+
+    /// <summary>
+    /// Optional while a plan remains Draft. Submission and final approval require
+    /// a tenant-safe, approved budget that matches the plan department and fiscal year.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
 
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
@@ -173,14 +186,27 @@ public class ApproveProcurementPlanDto
     public bool AutoGenerateSchedules { get; set; } = true;
 
     /// <summary>
-    /// Optional: Specific budget ID to link. If null, system auto-matches by department + fiscal year
+    /// The budget selection is made while the plan is being prepared. This
+    /// member is retained only for backwards-compatible API deserialization.
     /// </summary>
     public Guid? BudgetId { get; set; }
 
     /// <summary>
-    /// If true, automatically links to matching budget on approval
+    /// Retained for backwards-compatible API deserialization. Plans must not
+    /// auto-select an arbitrary matching budget at approval time.
     /// </summary>
-    public bool AutoLinkBudget { get; set; } = true;
+    public bool AutoLinkBudget { get; set; }
+}
+
+/// <summary>
+/// Shared-workflow decision for a procurement budget.
+/// </summary>
+public sealed class ApproveProcurementBudgetDto
+{
+    public bool IsApproved { get; set; } = true;
+
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 /// <summary>
