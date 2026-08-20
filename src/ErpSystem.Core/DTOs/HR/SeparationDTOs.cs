@@ -676,3 +676,42 @@ public class RetirementSweepResultDto
 
     public List<EmployeeSeparationListDto> Raised { get; set; } = new();
 }
+
+// =============================================================================
+// CONTRACT EXPIRY — FR-HR-111's other due event, and an FR-HR-182 exit route
+// =============================================================================
+
+/// <summary>One employee whose contract is running out, or has already run out.</summary>
+public class UpcomingContractExpiryDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public string? PositionTitle { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    public Guid ContractId { get; set; }
+    public string? ContractNumber { get; set; }
+    public DateOnly? ContractStartDate { get; set; }
+    public DateOnly ContractEndDate { get; set; }
+
+    public int DaysUntilExpiry { get; set; }
+
+    /// <summary>True where the contract has already run out and the employee is still on strength.</summary>
+    public bool IsOverdue { get; set; }
+
+    public Guid? ExistingSeparationId { get; set; }
+    public string? ExistingSeparationNumber { get; set; }
+    public string? ExistingSeparationStatus { get; set; }
+}
+
+/// <summary>What a contract-expiry sweep did.</summary>
+public class ContractExpirySweepResultDto
+{
+    public int HorizonDays { get; set; }
+    public int DueCount { get; set; }
+    public int RaisedCount { get; set; }
+    public int SkippedExistingCount { get; set; }
+    public List<string> Failures { get; set; } = new();
+    public List<EmployeeSeparationListDto> Raised { get; set; } = new();
+}

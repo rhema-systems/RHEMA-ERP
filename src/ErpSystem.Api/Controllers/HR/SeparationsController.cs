@@ -301,6 +301,50 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── Contract expiry ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whose contract is running out, and whose has already run out while they are still on
+    /// strength.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Empty on live data, and correctly so: 0 of 202 active contracts carry an end date. The
+    /// same shape as the retirement queue — the rule is real, the subjects are not there yet.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("contract-expiries/upcoming")]
+    [ProducesResponseType(typeof(IEnumerable<UpcomingContractExpiryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<UpcomingContractExpiryDto>>> GetUpcomingContractExpiries(
+        [FromQuery] int? withinDays, [FromQuery] bool includeOverdue = true, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(await _service.GetUpcomingContractExpiriesAsync(withinDays, includeOverdue, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Raise a contract-expiry separation for everyone due who does not already have one.</summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("contract-expiries/sweep")]
+    [ProducesResponseType(typeof(ContractExpirySweepResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ContractExpirySweepResultDto>> RunContractExpirySweep(
+        [FromQuery] int? withinDays, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _service.RunContractExpirySweepAsync(withinDays, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
 
     /// <summary>

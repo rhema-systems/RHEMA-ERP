@@ -107,6 +107,23 @@ public interface ISeparationService
     Task<RetirementSweepResultDto> RunRetirementSweepAsync(
         int? withinDays = null, CancellationToken cancellationToken = default);
 
+    // ── Contract expiry ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Employees whose active contract runs out within the horizon, and those whose contract has
+    /// already run out while they are still on strength.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Measured 2026-08-20: <b>0 of 202</b> active contracts carry an end date, so this answers
+    /// with nothing on live data. Empty is correct, not broken.
+    /// </remarks>
+    Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesAsync(
+        int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default);
+
+    /// <summary>Raises a contract-expiry separation for everyone due who has not got one.</summary>
+    Task<ContractExpirySweepResultDto> RunContractExpirySweepAsync(
+        int? withinDays = null, CancellationToken cancellationToken = default);
+
     // ── Final settlement (FR-HR-184) ─────────────────────────────────────────
 
     /// <summary>

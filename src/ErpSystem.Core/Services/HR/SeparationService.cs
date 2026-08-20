@@ -253,6 +253,30 @@ public class SeparationService : ISeparationService
                     + $"retirement date ({effectiveDate:yyyy-MM-dd}).");
         }
 
+        // A contract expiry ends on the day the contract ends — by definition of the route. An exit
+        // on some other date is a different kind of separation, not a contract expiring.
+        //
+        // ⚠ The rule bites only where a contract end date exists, and on the live tenant **none
+        // does**: 202 active contracts, 0 with an EndDate. So today this is inert for everybody,
+        // like the retirement rule was before fixtures. Where the data arrives, it applies.
+        if (dto.SeparationType == EmployeeTerminationType.ContractExpiry)
+        {
+            var (contractEnd, contractNumber) = await ActiveContractEndAsync(
+                tenantId, employee.Id, cancellationToken);
+
+            if (contractEnd is { } ends)
+            {
+                if (effectiveDate is { } supplied && supplied != ends)
+                    throw new InvalidOperationException(
+                        $"A contract expiry ends on the day the contract ends — {ends:yyyy-MM-dd} on "
+                        + $"contract {contractNumber}. The date supplied was {supplied:yyyy-MM-dd}. "
+                        + "Leave it blank to use the contract's date, or raise a different separation "
+                        + "type if the employee is leaving early.");
+
+                effectiveDate = ends;
+            }
+        }
+
         var entity = new EmployeeSeparation
         {
             // Set explicitly: the DbContext auto-stamp is dead in this codebase, and a missing
@@ -398,6 +422,9 @@ public class SeparationService : ISeparationService
             throw new InvalidOperationException(
                 "Record the date notice was given before submitting a resignation — the notice "
                 + "period, and any shortfall to be paid, are both counted from it.");
+
+        // A medical retirement or a death asserts something a file should be able to evidence.
+        await RequireSupportingEvidenceAsync(tenantId, entity, cancellationToken);
 
         // Derive what follows rather than demanding it twice. The last working day is the day
         // notice runs out unless someone says otherwise.
@@ -829,6 +856,182 @@ public class SeparationService : ISeparationService
         IsDisciplinary = d.IsDisciplinary,
         EmployeeRecordUpdated = d.EmployeeRecordUpdated,
     };
+
+    // ── Contract expiry ───────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<UpcomingContractExpiryDto>> GetUpcomingContractExpiriesAsync(
+        int? withinDays = null, bool includeOverdue = true, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var horizon = withinDays ?? settings.ContractExpiryLeadDays;
+
+        if (horizon < 0)
+            throw new InvalidOperationException("The horizon cannot be negative.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var limit = today.AddDays(horizon);
+
+        var contracts = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .Include(c => c.Employee).ThenInclude(e => e.Position)
+            .Include(c => c.Employee).ThenInclude(e => e.OrganizationUnit)
+            .AsNoTracking()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.IsActive
+                        && c.EndDate != null && c.EndDate <= limit
+                        && c.Employee.IsActive && c.Employee.StaffStatus != StaffStatus.Terminated)
+            .ToListAsync(cancellationToken);
+
+        var due = contracts
+            .Where(c => includeOverdue || c.EndDate!.Value >= today)
+            .ToList();
+
+        var employeeIds = due.Select(c => c.EmployeeId).Distinct().ToList();
+        var existing = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted
+                        && employeeIds.Contains(s.EmployeeId)
+                        && s.Status != SeparationStatus.Cancelled
+                        && s.Status != SeparationStatus.Rejected)
+            .Select(s => new { s.Id, s.EmployeeId, s.SeparationNumber, s.Status })
+            .ToListAsync(cancellationToken);
+
+        var byEmployee = existing.GroupBy(s => s.EmployeeId).ToDictionary(g => g.Key, g => g.First());
+
+        return due
+            .OrderBy(c => c.EndDate)
+            .ThenBy(c => c.Employee.LastName)
+            .Select(c =>
+            {
+                byEmployee.TryGetValue(c.EmployeeId, out var already);
+                var days = c.EndDate!.Value.DayNumber - today.DayNumber;
+
+                return new UpcomingContractExpiryDto
+                {
+                    EmployeeId = c.EmployeeId,
+                    EmployeeName = FullName(c.Employee),
+                    EmployeeNumber = c.Employee?.EmployeeNumber,
+                    PositionTitle = c.Employee?.Position?.Title,
+                    OrganizationUnitName = c.Employee?.OrganizationUnit?.Name,
+                    ContractId = c.Id,
+                    ContractNumber = c.ContractNumber,
+                    ContractStartDate = c.StartDate,
+                    ContractEndDate = c.EndDate.Value,
+                    DaysUntilExpiry = days,
+                    IsOverdue = days < 0,
+                    ExistingSeparationId = already?.Id,
+                    ExistingSeparationNumber = already?.SeparationNumber,
+                    ExistingSeparationStatus = already?.Status.ToString(),
+                };
+            })
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<ContractExpirySweepResultDto> RunContractExpirySweepAsync(
+        int? withinDays = null, CancellationToken cancellationToken = default)
+    {
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var horizon = withinDays ?? settings.ContractExpiryLeadDays;
+
+        var upcoming = (await GetUpcomingContractExpiriesAsync(horizon, includeOverdue: true, cancellationToken))
+            .ToList();
+
+        var result = new ContractExpirySweepResultDto
+        {
+            HorizonDays = horizon,
+            DueCount = upcoming.Count,
+            SkippedExistingCount = upcoming.Count(u => u.ExistingSeparationId is not null),
+        };
+
+        foreach (var candidate in upcoming.Where(u => u.ExistingSeparationId is null))
+        {
+            try
+            {
+                // System-initiated, like the retirement sweep: a contract running out is nobody's
+                // act either.
+                var raised = await CreateAsync(new CreateEmployeeSeparationDto
+                {
+                    EmployeeId = candidate.EmployeeId,
+                    SeparationType = EmployeeTerminationType.ContractExpiry,
+                    ReasonCategory = TerminationReason.ContractExpiry,
+                    ReasonNotes =
+                        $"Raised automatically: contract {candidate.ContractNumber} runs to "
+                        + $"{candidate.ContractEndDate:yyyy-MM-dd}.",
+                    EffectiveDate = null,   // computed from the contract, see CreateAsync
+                }, actorEmployeeId: null, cancellationToken);
+
+                result.Raised.Add(ToListDtoFromDetail(raised));
+                result.RaisedCount++;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                result.Failures.Add($"{candidate.EmployeeName}: {ex.Message}");
+            }
+        }
+
+        _logger.LogInformation(
+            "Contract-expiry sweep over {Horizon} days: {Due} due, {Raised} raised, {Skipped} already had one",
+            horizon, result.DueCount, result.RaisedCount, result.SkippedExistingCount);
+
+        return result;
+    }
+
+    /// <summary>
+    /// The end date of the employee's active contract, where they have one that carries a date.
+    /// </summary>
+    private async Task<(DateOnly? EndDate, string? ContractNumber)> ActiveContractEndAsync(
+        Guid tenantId, Guid employeeId, CancellationToken cancellationToken)
+    {
+        var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .AsNoTracking()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId
+                        && c.IsActive && c.EndDate != null)
+            .OrderByDescending(c => c.EndDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return (contract?.EndDate, contract?.ContractNumber);
+    }
+
+    /// <summary>
+    /// Evidence a separation type cannot reasonably be submitted without.
+    /// </summary>
+    /// <remarks>
+    /// <para>A medical retirement asserts that somebody is permanently unfit; a death asserts that
+    /// somebody has died. Both end an income, and both are the kind of claim a file should carry
+    /// evidence for rather than a checkbox. The document categories already exist — this is the
+    /// rule that makes them mean something.</para>
+    ///
+    /// <para>Deliberately at <b>submission</b>, not creation: HR opens the record when it hears,
+    /// and the certificate or report arrives afterwards. Requiring it up front would push people
+    /// into keeping the exit out of the system until the paperwork caught up.</para>
+    /// </remarks>
+    private async Task RequireSupportingEvidenceAsync(
+        Guid tenantId, EmployeeSeparation separation, CancellationToken cancellationToken)
+    {
+        var required = separation.SeparationType switch
+        {
+            EmployeeTerminationType.MedicalRetirement =>
+                (Category: SeparationDocumentCategory.MedicalReport,
+                 Message: "A medical retirement needs the medical report that supports it. Attach it "
+                          + "to the separation before submitting."),
+            EmployeeTerminationType.Death =>
+                (Category: SeparationDocumentCategory.DeathCertificate,
+                 Message: "A separation by death needs the death certificate. Attach it to the "
+                          + "separation before submitting."),
+            _ => default,
+        };
+
+        if (required.Message is null) return;
+
+        var present = await _unitOfWork.Repository<EmployeeSeparationDocument>().GetQueryable()
+            .AnyAsync(d => d.TenantId == tenantId && !d.IsDeleted
+                           && d.SeparationId == separation.Id
+                           && d.Category == required.Category, cancellationToken);
+
+        if (!present)
+            throw new InvalidOperationException(required.Message);
+    }
 
     // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
 

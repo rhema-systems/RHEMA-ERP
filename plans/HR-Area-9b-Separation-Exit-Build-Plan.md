@@ -680,6 +680,47 @@ broken query.
 **Area regression after slice 7: 67 + 44 + 50 + 64 + 75 + 37 + 46 = 383 assertions, all green,
 twice.**
 
+### Slice 8 — the other exit routes. 2026-08-20, 40/40. **No migration.**
+
+FR-HR-182 lists nine ways out; slices 1–7 gave each a route. This slice gives four of them what
+makes them *different*, rather than nine labels on one process.
+
+- **Contract expiry** gets its own queue and sweep, and the rule that it **ends on the contract's
+  own date** — an exit on another date is a different separation, not a contract expiring.
+- **Medical retirement** cannot be submitted without the medical report; **death** cannot be
+  submitted without the certificate. Both assert something that ends an income, and both should be
+  evidenced rather than ticked. The document categories have existed since slice 2; this is what
+  makes them mean something. ⚠ Enforced at **submission, not creation** — HR opens the record when
+  it hears, and the paperwork follows. Demanding it up front would keep exits out of the system
+  until the certificate arrived, which is how records go missing.
+- **Redundancy gets nothing extra, deliberately.** Notice applies; nothing else in the FRD
+  distinguishes it, and inventing a rule the specification does not state would be worse than
+  leaving it plain.
+
+⚠ **Third instance of the same data shape: 0 of 202 active contracts carry an `EndDate`.** So the
+contract-expiry queue is empty on live data and the date rule is inert for everybody — the rule
+applies only where a contract end date exists, which today is nowhere. Same handling as retirement:
+real rule, fixtures to prove it, emptiness asserted.
+
+**An assertion added against over-reach:** a plain resignation still submits with **no documents at
+all**. A rule applied too widely is as wrong as one applied too narrowly, and an evidence gate is
+exactly the kind that leaks onto neighbouring routes.
+
+⚠ **Caught on review, after the slice was "done": three enum members had never been raised by any
+harness at all** — `SummaryDismissal`, `InvoluntaryPerformance` and `MutualAgreement`. Summary
+dismissal is in **FR-HR-182's own list of eight** and carries real behaviour (dismissal *without
+notice*, so zero days) that nothing verified. The question that found it was simply "does slice 8
+account for all the routes?" — and the answer came from grepping the harnesses for each enum
+member, not from re-reading the slice.
+
+**Lesson: "every route has a code path" and "every route has an assertion" are different claims,
+and only the second one survives somebody changing the code.** A per-type coverage grep is cheap and
+belongs in the closing audit. Now 7 more assertions; every FR-HR-182 type is exercised somewhere.
+
+**Area regression after slice 8: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 = 430 assertions, green
+twice.** The slice-7 prediction held — slice 1 raises a `ContractExpiry` with a fixed date and still
+passes, because those fixtures have no contract for the rule to bite on.
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens
