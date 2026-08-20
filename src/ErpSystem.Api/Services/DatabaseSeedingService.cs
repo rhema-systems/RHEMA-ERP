@@ -7714,7 +7714,21 @@ namespace ErpSystem.Web.Services
                 },
                 // HR staff maintain occupational-health records but do not administer them:
                 // deleting a medical record stays with tenant administrators.
-                [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr),
+
+                // The two approval authorities, who hold READ on the HR records they decide:
+                // the Managing Director signs separations (FR-HR-092) and Internal Audit reviews
+                // their settlements (FR-HR-185). Their authority to decide is read off the record
+                // by the service, not granted here — see the remarks on HrPermissions.RoleGrants.
+                //
+                // ⚠ These must be listed for the same reason every other role is: this map is the
+                // SEED, and HrPermissions.RoleGrants is what the role-fallback handler reads. The
+                // fallback exists to stand in for the seed, so a role present in one and missing
+                // from the other is a drift — access that works until somebody trusts the database
+                // rows. Adding to RoleGrants alone is not enough.
+                [Constants.Roles.ManagingDirector] = HrPermissions.GrantsFor(Constants.Roles.ManagingDirector),
+                [Constants.Roles.TdcManagingDirector] = HrPermissions.GrantsFor(Constants.Roles.TdcManagingDirector),
+                [Constants.Roles.InternalAudit] = HrPermissions.GrantsFor(Constants.Roles.InternalAudit)
             };
 
             foreach (var (roleName, permissionNames) in rolePermissionMap)

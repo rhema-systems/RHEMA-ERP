@@ -139,6 +139,14 @@ public class EmployeeSeparation : TenantEntity
     /// </summary>
     public bool IsProcedural { get; set; }
 
+    /// <summary>
+    /// Days of unauthorised absence behind an absence-based termination. Compared against
+    /// <c>CompanyHrPolicySettings.ProceduralAbsenceDays</c> to decide whether
+    /// <see cref="IsProcedural"/> is true — the one exception FR-HR-092 allows to the MD's
+    /// signature.
+    /// </summary>
+    public int? AbsenceDays { get; set; }
+
     public Guid? ApprovedById { get; set; }
 
     [ForeignKey(nameof(ApprovedById))]
@@ -148,6 +156,40 @@ public class EmployeeSeparation : TenantEntity
 
     [MaxLength(2000)]
     public string? ApprovalNotes { get; set; }
+
+    public Guid? RejectedById { get; set; }
+
+    [ForeignKey(nameof(RejectedById))]
+    public virtual Employee? RejectedBy { get; set; }
+
+    public DateTime? RejectedOn { get; set; }
+
+    /// <summary>
+    /// Why the separation was refused. Its own field rather than a reuse of
+    /// <see cref="ApprovalNotes"/>: an approval and a refusal are different acts, and a record that
+    /// cannot tell them apart cannot answer "was this person refused, and on what grounds".
+    /// </summary>
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    // ── Notice, as settled at approval ───────────────────────────────────────
+
+    /// <summary>
+    /// The organisation released the employee without requiring the balance of their notice, and
+    /// is not recovering it. Decided by whoever approves the separation, never by the person
+    /// leaving.
+    /// </summary>
+    public bool IsNoticeWaived { get; set; }
+
+    [MaxLength(1000)]
+    public string? NoticeWaiverReason { get; set; }
+
+    /// <summary>
+    /// The notice not served will be paid rather than worked — pay in lieu, which the FR-HR-184
+    /// settlement adds. Mutually exclusive with <see cref="IsNoticeWaived"/>: waived notice costs
+    /// nobody anything, paid-in-lieu notice is money.
+    /// </summary>
+    public bool IsNoticePaidInLieu { get; set; }
 
     /// <summary>Set when the approval runs through the workflow engine (slice 4).</summary>
     public Guid? WorkflowInstanceId { get; set; }

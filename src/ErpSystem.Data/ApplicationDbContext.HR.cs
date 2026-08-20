@@ -3515,6 +3515,10 @@ private void ConfigureHREntities(ModelBuilder builder)
                 DefaultProbationMonths         = 6,
                 DefaultResignationNoticeDays   = 30,
                 DefaultTerminationNoticeDays   = 30,
+                // FR-HR-092's only stated exception to the MD's signature. At or above this many
+                // days of unauthorised absence a termination is procedural and HR may approve it;
+                // 0 would put every termination back on the MD.
+                ProceduralAbsenceDays          = 10,
                 VacancyAlertLeadDays           = 90,
                 ReviewDueLeadDays              = 30,
                 ContractExpiryLeadDays         = 60,
@@ -7960,6 +7964,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.SubmittedBy)
                 .WithMany()
                 .HasForeignKey(x => x.SubmittedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RejectedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RejectedById)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(x => x.Documents)

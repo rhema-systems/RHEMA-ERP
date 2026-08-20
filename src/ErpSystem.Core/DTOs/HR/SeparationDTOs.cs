@@ -87,6 +87,25 @@ public class EmployeeSeparationDetailDto : EmployeeSeparationListDto
     public string? ApprovalNotes { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
 
+    public Guid? RejectedById { get; set; }
+    public string? RejectedByName { get; set; }
+    public DateTime? RejectedOn { get; set; }
+    public string? RejectionReason { get; set; }
+
+    /// <summary>Days of unauthorised absence, where this is an absence-based termination.</summary>
+    public int? AbsenceDays { get; set; }
+
+    /// <summary>
+    /// True when the Managing Director's signature is required (FR-HR-092) — which is everything
+    /// except a procedural separation. Derived from <c>IsProcedural</c>, and exposed so a client can
+    /// route the record to the right person instead of finding out by being refused.
+    /// </summary>
+    public bool RequiresManagingDirectorSignature { get; set; }
+
+    public bool IsNoticeWaived { get; set; }
+    public string? NoticeWaiverReason { get; set; }
+    public bool IsNoticePaidInLieu { get; set; }
+
     public bool IsEligibleForRehire { get; set; }
     public DateOnly? EligibleForRehireDate { get; set; }
     public string? RehireRestrictions { get; set; }
@@ -147,6 +166,13 @@ public class CreateEmployeeSeparationDto
     public string? RehireRestrictions { get; set; }
 
     /// <summary>
+    /// Days of unauthorised absence, where this is an absence-based termination. At or above the
+    /// tenant's <c>ProceduralAbsenceDays</c> the separation becomes procedural on submission and HR
+    /// may approve it without the MD's signature (FR-HR-092).
+    /// </summary>
+    public int? AbsenceDays { get; set; }
+
+    /// <summary>
     /// Set when a disciplinary outcome is raising this separation, linking back to the action that
     /// decided it. Area 9 supplies this; a human raising a separation by hand does not.
     /// </summary>
@@ -172,6 +198,7 @@ public class UpdateEmployeeSeparationDto
 
     public bool? IsEligibleForRehire { get; set; }
     public DateOnly? EligibleForRehireDate { get; set; }
+    public int? AbsenceDays { get; set; }
 
     [MaxLength(1000)]
     public string? RehireRestrictions { get; set; }
@@ -187,6 +214,38 @@ public class CancelEmployeeSeparationDto
     /// the screen nothing about what to do. The service refuses a blank reason with a sentence that
     /// does, and that keeps every refusal on this controller one shape: <c>{ "message": "…" }</c>.
     /// </remarks>
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Sign off a separation (FR-HR-092). Who may send this depends on the record, not on a
+/// permission: the Managing Director may approve any separation, HR only a procedural one.
+/// </summary>
+public class ApproveEmployeeSeparationDto
+{
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Release the employee without requiring the balance of their notice, and without recovering
+    /// it. Requires a reason, and is refused where no notice is outstanding.
+    /// </summary>
+    public bool WaiveNotice { get; set; }
+
+    [MaxLength(1000)]
+    public string? NoticeWaiverReason { get; set; }
+
+    /// <summary>
+    /// Pay the unserved notice instead of working it — money the FR-HR-184 settlement will add.
+    /// Mutually exclusive with <see cref="WaiveNotice"/>.
+    /// </summary>
+    public bool PayNoticeInLieu { get; set; }
+}
+
+/// <summary>Refuse a separation. The reason is required — a refusal nobody can explain is not a decision.</summary>
+public class RejectEmployeeSeparationDto
+{
     [MaxLength(1000)]
     public string Reason { get; set; } = string.Empty;
 }

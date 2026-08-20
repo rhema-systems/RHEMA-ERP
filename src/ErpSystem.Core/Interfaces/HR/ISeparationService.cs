@@ -45,6 +45,18 @@ public interface ISeparationService
     Task<EmployeeSeparationDetailDto> SubmitAsync(
         Guid id, SubmitEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Sign off a separation awaiting approval (FR-HR-092), settling how any unserved notice is
+    /// dealt with. Throws <see cref="UnauthorizedAccessException"/> when the caller is not entitled
+    /// to decide this particular record — the MD may decide any, HR only a procedural one.
+    /// </summary>
+    Task<EmployeeSeparationDetailDto> ApproveAsync(
+        Guid id, ApproveEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Refuse a separation awaiting approval. Same entitlement rule as approving.</summary>
+    Task<EmployeeSeparationDetailDto> RejectAsync(
+        Guid id, RejectEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
     Task<IEnumerable<EmployeeSeparationDocumentDto>> GetDocumentsAsync(
         Guid separationId, CancellationToken cancellationToken = default);
 

@@ -252,8 +252,8 @@ and the harness asserts that emptiness deliberately rather than treating it as a
 | 0 | Gate + foundation | `HR.Separation.*` policies per [[hr-area-authz-pattern]]; role constants covering both MD spellings; DI/registration audit; workflow entity-type seeding |
 | 1 | Separation record + register | `EmployeeSeparation` covering every FR-HR-182 type (two of them appended to the enum here); paged register, detail, create — **FR-HR-090, FR-HR-182** |
 | 2 | Resignation intake | Notice period from policy settings, acceptance/rejection, last-working-day computation |
-| 3 | Clearance checklist + the gate | Configurable items, departmental sign-off, `CanTerminate` refusing an incomplete clearance — **FR-HR-091, FR-HR-183** |
-| 4 | Approval chain | Workflow engine wiring, MD signature, procedural auto-approval — **FR-HR-092** |
+| 3 | Approval chain *(was slice 4)* | MD signature, procedural auto-approval, notice waiver / pay in lieu — **FR-HR-092** |
+| 4 | Clearance checklist + the gate *(was slice 3)* | Configurable items, departmental sign-off, refusing an incomplete clearance — **FR-HR-091, FR-HR-183** |
 | 5 | Final settlement statement | Line items, notice pay, encashment at the 56-day cap and the exit-only rule — **FR-HR-184, FR-HR-046, FR-HR-152** |
 | 6 | Internal Audit review gate | Review before payment release, on `TDC_INTERNAL_AUDIT` — **FR-HR-185** |
 | 7 | Retirement | Retirement date from policy, effective on the birthday; register + advance alerts — **FR-HR-093** |
@@ -412,3 +412,87 @@ argument for the user's workflow, and a sharper one than the snapshot.
 ⚠ **A harness lesson: do not probe "not found" with `Guid.Empty`.** The controller rejects an
 all-zeros id with a 400 argument guard before any entitlement check, so that assertion passed
 against the wrong code path. Use a real-looking id that simply is not ours.
+
+### Slices 3 and 4 SWAPPED, 2026-08-20 — approval before clearance
+
+Clearance was to be slice 3, but the status ladder makes that unbuildable in the right order:
+clearance begins at `Approved`, and until FR-HR-092's decision exists **nothing can reach that
+state**. Building clearance first would have meant either a gate starting from `PendingApproval`
+that slice 4 then had to tighten, or a rule no test could reach — the area-9 `MinimumAuthority`
+shape, and the area-15b mistake, both already recorded in this plan as things not to repeat.
+
+Nothing is lost by swapping: FR-HR-091 requires clearance before the *separation* and before
+entitlements are computed, and Chapter 12's chain is MD signs → clearance → settlement → Internal
+Audit → paid. Approval genuinely comes first.
+
+### Approval role membership, measured 2026-08-20 — one reachable, one not
+
+| Role | Holders |
+|---|---|
+| `Managing Director` | **6** |
+| `TDC_MANAGING_DIRECTOR` | 0 |
+| `TDC_INTERNAL_AUDIT` | **0** |
+| `HR` | 1,394 |
+
+✅ **FR-HR-092 is reachable.** Six people hold `Managing Director`, so the MD's signature is a rule
+somebody can satisfy. Both spellings still get authorized together — only one is populated *today*,
+and which one that is could change.
+
+⚠ **FR-HR-185 is NOT reachable, and slice 6 must not pretend otherwise.** Nobody holds
+`TDC_INTERNAL_AUDIT`, so on live data no settlement could ever be reviewed and therefore no
+settlement could ever be paid. This is the fourth instance of the area's recurring shape — a
+correct rule with no data behind it — but unlike retirement ages or `DateEmployed` the fix is an
+**administrative act, not a data migration**: somebody must be granted the role. Build the feature,
+mint the role in the harness so it is genuinely tested, and put the grant to TDC as an operational
+prerequisite. Recorded in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md`.
+
+### How FR-HR-092's exception is expressed
+
+The FRD's only example of a procedural termination is "absence beyond 10 days", and there is no
+`TerminationReason` member for abandonment — so nothing in the existing model can distinguish one.
+Rather than infer it, slice 3 states it: `EmployeeSeparation.AbsenceDays` records the absence, and
+`CompanyHrPolicySettings.ProceduralAbsenceDays` (default **10**) is the threshold. At or above it
+the separation is procedural and HR may approve; below it, or with no absence recorded at all, the
+MD signs. Set the threshold to 0 to require the MD's signature on everything.
+
+**Entitlement is read off the record, not from a permission family.** Approving is gated with a
+plain `[Authorize]`, and the service decides: an MD-role caller may approve anything, an HR caller
+only what is procedural, everyone else is refused. A permission gate cannot express "may approve
+this one but not that one", and stacking role and policy attributes would AND them
+([[hr-area-authz-pattern]] trap 1).
+
+### Slice 3 log — 2026-08-20, 50/50 (slice 2 now 44, slice 1 still 67)
+
+Migration `20260820102312_AddSeparationApprovalDecision` — scaffolded, rewritten guarded, listed.
+
+⚠ **The scaffold wrote `defaultValue: 0` for `ProceduralAbsenceDays`.** That is the CLR default for
+`int`, not a decision, and it would have set every already-provisioned tenant to a threshold of
+zero. The guarded rewrite creates the column with `DEFAULT (10)` — the entity's value and the FRD's
+stated policy. **Read what a scaffold chose for a non-nullable column; it defaults to the type, not
+to your intent.**
+
+⚠ **The MD could have signed a separation they were unable to open.** Approving is a plain
+`[Authorize]`, but every read endpoint requires `HR.Separation.Read`, which the MD role does not
+hold. Fixed by granting `Managing Director`, `TDC_MANAGING_DIRECTOR` and `TDC_INTERNAL_AUDIT` a
+**Read-only** grant — Write would let them edit what they are about to sign, and the authority to
+decide is not granted as a permission at all. This is the area-15b shape again (two correct rules
+whose intersection is empty), caught because the harness asserts that everyone who *should* be able
+to act can.
+
+⚠ **And a drift that the fallback handler was hiding.** `HrPermissions.RoleGrants` feeds the
+role-fallback handler; `DatabaseSeedingService.rolePermissionMap` is the actual seed, and it is a
+**separate hardcoded dictionary**. Adding the three roles to `RoleGrants` alone made the MD's reads
+work — through the fallback — while `RolePermissions` held no rows for them. That is exactly the
+drift `HrPermissions` warns about in its own remarks. Both sides now list the three roles. **Verify
+a new grant in `RolePermissions`, not by watching a request succeed.**
+
+⚠ **Two harness bugs, both mine, both the same class:** a subject suffix that collided with an
+actor's employee number, and a `setToken` placed *before* `mintSubject` — which logs in as the
+subject it creates and leaves the harness holding a plain Employee token. Neither was a product
+defect; both cost a run.
+
+⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
+service because the engine cannot express the procedural split. That is fine for the API, but W1
+says never build a bespoke HR approval **UI** — so the engine must be wired before the screens
+land in slice 11, giving the MD one inbox rather than a separate place to sign exits. Recorded here
+so it is not discovered at UI time.

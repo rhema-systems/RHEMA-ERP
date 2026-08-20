@@ -261,6 +261,17 @@ public static class HrPermissions
     };
 
     /// <summary>
+    /// What the two approval authorities hold: the ability to <b>see</b> a separation, and nothing
+    /// else. The Managing Director signs one (FR-HR-092) and Internal Audit reviews its settlement
+    /// (FR-HR-185); neither raises, edits or administers separations, and their authority to decide
+    /// is read off the record rather than granted here.
+    /// </summary>
+    private static readonly string[] ApprovalReaderGrants =
+    {
+        ViewSeparation
+    };
+
+    /// <summary>
     /// Per-role HR permission grants. This is the single source for both the database seed
     /// (<c>DatabaseSeedingService</c>) and the role fallback
     /// (<c>HrPermissionRoleFallbackAuthorizationHandler</c>).
@@ -307,7 +318,19 @@ public static class HrPermissions
             [Constants.Roles.TenantAdmin] = AllNames,
             ["Admin"] = AllNames,
             [Constants.Roles.Hr] = HrStaffGrants,
-            [Constants.Roles.LegacyHrUser] = HrStaffGrants
+            [Constants.Roles.LegacyHrUser] = HrStaffGrants,
+
+            // The Managing Director signs separations (FR-HR-092) and Internal Audit reviews their
+            // settlements (FR-HR-185). Both need to READ the record they are deciding on — and
+            // nothing more. Without this the approve endpoint would admit the MD while every read
+            // endpoint refused them, which is a signature on something they cannot see.
+            //
+            // Deliberately Read only: the authority to decide is not a permission at all, it is
+            // read off the record by SeparationService. Granting Write here would let the MD edit
+            // what they are about to sign.
+            [Constants.Roles.ManagingDirector] = ApprovalReaderGrants,
+            [Constants.Roles.TdcManagingDirector] = ApprovalReaderGrants,
+            [Constants.Roles.InternalAudit] = ApprovalReaderGrants
         };
 
     /// <summary>

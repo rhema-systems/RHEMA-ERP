@@ -192,3 +192,27 @@ If either is needed sooner than the current plan plots them, that changes the se
   the attendance-rate calculation. **Approved leave is left in the denominator**, so a month with
   leave in it reads below 100%. This is a policy choice and easy to reverse — **confirm it is the one
   TDC wants.**
+
+---
+
+## Operational prerequisite — nobody holds the Internal Audit role (raised 2026-08-20)
+
+**FR-HR-185** requires Internal Audit to review a final settlement **before payment is released**,
+and Chapter 12 states the same chain. The role exists — `TDC_INTERNAL_AUDIT`, seeded by the
+procurement work — but measured on the DEFAULT tenant on 2026-08-20 it has **zero members**.
+
+The HR separation module (area 9b) builds the review step as specified. Until somebody is granted
+that role, **no final settlement can be reviewed and therefore none can be paid** — the control
+will hold the payment rather than fail open, which is the correct behaviour but will look like a
+stuck queue.
+
+For contrast, the other half of the chain is fine: **6 users hold `Managing Director`**, so
+FR-HR-092's signature on a termination is satisfiable today.
+
+**Question for TDC:** who in Internal Audit should hold `TDC_INTERNAL_AUDIT`, and should the role
+be granted to a named individual, a group, or both? This is an administrative grant, not a
+development task — but the settlement stage cannot complete without it.
+
+⚠ Note also that the Managing Director role exists under **two** spellings — `Managing Director`
+(6 members) and `TDC_MANAGING_DIRECTOR` (0). The HR code authorizes on both, but the duplication
+is worth resolving before it causes a grant to land on the empty one.

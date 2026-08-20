@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -68,6 +69,7 @@ public class SeparationService : ISeparationService
             .Include(s => s.ApprovedBy)
             .Include(s => s.CancelledBy)
             .Include(s => s.SubmittedBy)
+            .Include(s => s.RejectedBy)
             .Where(s => s.TenantId == tenantId && !s.IsDeleted);
 
     // ── Reads ─────────────────────────────────────────────────────────────────
@@ -235,6 +237,7 @@ public class SeparationService : ISeparationService
             EligibleForRehireDate = dto.EligibleForRehireDate,
             RehireRestrictions = string.IsNullOrWhiteSpace(dto.RehireRestrictions) ? null : dto.RehireRestrictions.Trim(),
             DisciplinaryActionId = dto.DisciplinaryActionId,
+            AbsenceDays = dto.AbsenceDays,
         };
 
         await _unitOfWork.Repository<EmployeeSeparation>().AddAsync(entity);
@@ -274,6 +277,11 @@ public class SeparationService : ISeparationService
         if (dto.EffectiveDate is { } effective) entity.EffectiveDate = effective;
         if (dto.IsEligibleForRehire is { } rehire) entity.IsEligibleForRehire = rehire;
         if (dto.EligibleForRehireDate is { } rehireDate) entity.EligibleForRehireDate = rehireDate;
+        if (dto.AbsenceDays is { } absence)
+        {
+            if (absence < 0) throw new InvalidOperationException("Days of absence cannot be negative.");
+            entity.AbsenceDays = absence;
+        }
         if (dto.RehireRestrictions is not null)
             entity.RehireRestrictions = string.IsNullOrWhiteSpace(dto.RehireRestrictions) ? null : dto.RehireRestrictions.Trim();
 
@@ -368,6 +376,15 @@ public class SeparationService : ISeparationService
         if (entity.LastWorkingDay is { } lwd && entity.EffectiveDate is { } eff && lwd > eff)
             throw new InvalidOperationException("The last working day cannot fall after the date employment ends.");
 
+        // FR-HR-092's exception is decided here and frozen, not evaluated at approval time. The
+        // threshold is tenant policy and policy can change; who was entitled to sign a separation
+        // must not change underneath it after it was queued.
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        entity.IsProcedural =
+            entity.AbsenceDays is { } absent
+            && settings.ProceduralAbsenceDays > 0
+            && absent >= settings.ProceduralAbsenceDays;
+
         entity.Status = SeparationStatus.PendingApproval;
         entity.SubmittedOn = DateTime.UtcNow;
         entity.SubmittedById = actorEmployeeId;
@@ -386,6 +403,135 @@ public class SeparationService : ISeparationService
             "Separation {Number} submitted for approval (effective {Effective:yyyy-MM-dd})",
             entity.SeparationNumber, entity.EffectiveDate);
 
+        return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    // ── FR-HR-092: the decision ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether the caller holds the Managing Director role, under either of its two seeded
+    /// spellings.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>SuperAdmin is deliberately not here.</b> FR-HR-092 exists to put a named officer's
+    /// signature on the ending of someone's employment; a technical superuser signing it is the
+    /// thing the control is for, not an exemption from it. SuperAdmin can still read and
+    /// administer, and can grant somebody the role.
+    /// </remarks>
+    private bool IsManagingDirector =>
+        _currentUserProvider.Roles.Any(r =>
+            string.Equals(r, Constants.Roles.ManagingDirector, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(r, Constants.Roles.TdcManagingDirector, StringComparison.OrdinalIgnoreCase));
+
+    private bool IsHrActor =>
+        _currentUserProvider.Roles.Any(r =>
+            string.Equals(r, Constants.Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(r, Constants.Roles.Hr, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(r, Constants.Roles.LegacyHrUser, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// FR-HR-092 in one place: the MD may decide any separation, HR only a procedural one.
+    /// </summary>
+    /// <remarks>
+    /// This is read off the record rather than expressed as a permission because no permission can
+    /// say "may approve this one but not that one" — and stacking a role attribute onto a policy
+    /// attribute would AND them, admitting nobody. The endpoint therefore carries a plain
+    /// <c>[Authorize]</c> and this decides.
+    /// </remarks>
+    private void RequireDecisionAuthority(EmployeeSeparation separation)
+    {
+        if (IsManagingDirector) return;
+
+        if (separation.IsProcedural && IsHrActor) return;
+
+        throw new UnauthorizedAccessException(
+            separation.IsProcedural
+                ? "Only HR or the Managing Director may decide a separation."
+                : "Only the Managing Director may sign this separation. It is not procedural — "
+                  + "under FR-HR-092 HR may approve only a termination for absence beyond the "
+                  + "tenant's procedural threshold.");
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto> ApproveAsync(
+        Guid id, ApproveEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var entity = await RequireAsync(tenantId, id, cancellationToken);
+
+        if (entity.Status != SeparationStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"This separation is {entity.Status}; only one awaiting approval can be signed.");
+
+        RequireDecisionAuthority(entity);
+
+        if (dto.WaiveNotice && dto.PayNoticeInLieu)
+            throw new InvalidOperationException(
+                "Notice cannot be both waived and paid in lieu — waived notice costs nothing, "
+                + "notice paid in lieu is money.");
+
+        if (dto.WaiveNotice && string.IsNullOrWhiteSpace(dto.NoticeWaiverReason))
+            throw new InvalidOperationException("Give a reason for waiving the notice period.");
+
+        if (dto.WaiveNotice || dto.PayNoticeInLieu)
+        {
+            // Nothing to waive or pay where the notice was served in full — and nothing to reason
+            // about where no notice period was ever counted, as on a retirement or a death.
+            var (_, served, shortfall) = Notice(entity);
+            if (served is null)
+                throw new InvalidOperationException(
+                    "This separation has no notice period to settle, so notice cannot be waived or paid in lieu.");
+            if (shortfall is 0)
+                throw new InvalidOperationException(
+                    "The full notice period was served, so there is no notice to waive or pay in lieu.");
+        }
+
+        entity.Status = SeparationStatus.Approved;
+        entity.ApprovedById = actorEmployeeId;
+        entity.ApprovedOn = DateTime.UtcNow;
+        entity.ApprovalNotes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        entity.IsNoticeWaived = dto.WaiveNotice;
+        entity.NoticeWaiverReason = dto.WaiveNotice ? dto.NoticeWaiverReason!.Trim() : null;
+        entity.IsNoticePaidInLieu = dto.PayNoticeInLieu;
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Separation {Number} approved (procedural={Procedural})",
+            entity.SeparationNumber, entity.IsProcedural);
+
+        return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto> RejectAsync(
+        Guid id, RejectEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException("Give a reason for refusing the separation.");
+
+        var tenantId = GetTenantId();
+        var entity = await RequireAsync(tenantId, id, cancellationToken);
+
+        if (entity.Status != SeparationStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"This separation is {entity.Status}; only one awaiting approval can be refused.");
+
+        RequireDecisionAuthority(entity);
+
+        entity.Status = SeparationStatus.Rejected;
+        entity.RejectedById = actorEmployeeId;
+        entity.RejectedOn = DateTime.UtcNow;
+        entity.RejectionReason = dto.Reason.Trim();
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Separation {Number} refused", entity.SeparationNumber);
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
     }
 
@@ -641,6 +787,16 @@ public class SeparationService : ISeparationService
         ApprovedOn = s.ApprovedOn,
         ApprovalNotes = s.ApprovalNotes,
         WorkflowInstanceId = s.WorkflowInstanceId,
+        RejectedById = s.RejectedById,
+        RejectedByName = s.RejectedBy == null ? null : FullName(s.RejectedBy),
+        RejectedOn = s.RejectedOn,
+        RejectionReason = s.RejectionReason,
+        AbsenceDays = s.AbsenceDays,
+        // The mirror of IsProcedural, said the way a client needs to hear it: who do I send this to.
+        RequiresManagingDirectorSignature = !s.IsProcedural,
+        IsNoticeWaived = s.IsNoticeWaived,
+        NoticeWaiverReason = s.NoticeWaiverReason,
+        IsNoticePaidInLieu = s.IsNoticePaidInLieu,
         IsEligibleForRehire = s.IsEligibleForRehire,
         EligibleForRehireDate = s.EligibleForRehireDate,
         RehireRestrictions = s.RehireRestrictions,

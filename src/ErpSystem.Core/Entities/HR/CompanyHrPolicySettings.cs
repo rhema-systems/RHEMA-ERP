@@ -71,6 +71,23 @@ public class CompanyHrPolicySettings : TenantEntity
     [Range(0, 365)]
     public int DefaultTerminationNoticeDays { get; set; } = 30;
 
+    /// <summary>
+    /// Unauthorised absence, in days, beyond which a termination counts as <b>procedural</b> and HR
+    /// may approve it without the Managing Director's signature (FR-HR-092).
+    /// </summary>
+    /// <remarks>
+    /// <para>FR-HR-092 says the MD signs all terminations "except procedural ones, which HR
+    /// approves automatically per policy (e.g. absence beyond 10 days)". The FRD gives exactly one
+    /// example and no list, and the user settled it on 2026-08-20: that example <b>is</b> the
+    /// list — everything else, resignation and retirement included, goes to the MD.</para>
+    ///
+    /// <para>It is a setting rather than a constant so widening the exception later is a
+    /// configuration change and not a new trust boundary. Set it to 0 to make every termination
+    /// require the MD's signature.</para>
+    /// </remarks>
+    [Range(0, 365)]
+    public int ProceduralAbsenceDays { get; set; } = 10;
+
     // ═══════════════════════════════════════════
     //  ALERT / REMINDER LEAD TIMES
     // ═══════════════════════════════════════════

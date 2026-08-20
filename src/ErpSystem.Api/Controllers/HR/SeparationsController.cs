@@ -190,6 +190,64 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── FR-HR-092: the decision ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Sign off a separation awaiting approval, settling any unserved notice (FR-HR-092).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>A plain <c>[Authorize]</c>, and that is deliberate.</b> Who may decide depends on the
+    /// record: the Managing Director may sign any separation, HR only a procedural one — a
+    /// termination for absence beyond the tenant's threshold. No permission can express "may
+    /// approve this one but not that one", and stacking a role attribute onto a policy attribute
+    /// would AND them and admit nobody. The service reads entitlement off the record and answers
+    /// 403 with the reason.
+    /// </remarks>
+    [Authorize]
+    [HttpPost("{id:guid}/approve")]
+    [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSeparationDetailDto>> Approve(
+        Guid id, [FromBody] ApproveEmployeeSeparationDto? dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.ApproveAsync(
+                id, dto ?? new ApproveEmployeeSeparationDto(), ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Refuse a separation awaiting approval. Same entitlement rule as approving.</summary>
+    [Authorize]
+    [HttpPost("{id:guid}/reject")]
+    [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSeparationDetailDto>> Reject(
+        Guid id, [FromBody] RejectEmployeeSeparationDto dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+        if (dto == null) return BadRequest(new { message = "A reason is required to refuse a separation." });
+
+        try
+        {
+            return Ok(await _service.RejectAsync(id, dto, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Documents ─────────────────────────────────────────────────────────────
 
     /// <summary>Every file attached to a separation, newest first.</summary>
