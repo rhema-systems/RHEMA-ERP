@@ -533,6 +533,76 @@ correctly.
 `TDC_MANAGING_DIRECTOR` and `TDC_INTERNAL_AUDIT` each hold a real `HR.Separation.Read` row in
 `RolePermissions`.
 
+### Slice 5 — the final settlement (FR-HR-184). Design settled 2026-08-20
+
+**The measurement that dictated the design:**
+
+| Source | Rows | Verdict |
+|---|---|---|
+| Employees with a salary on file | **202 of 3,883 (5%)** | no daily rate for 95% |
+| `LeaveBalances` | **0** | encashment cannot be valued either |
+| `PayrollLoans` | 0 | and `PayrollEmployeeProfiles` is 0, so the join bridge is dead too |
+| `PayrollSalaryAdvances` | 0 | joins on `EmployeeId` — readable, empty |
+| `PayrollPayslipSnapshots` | 0 | no unpaid-salary source |
+| **`StaffTravelAdvances`** | **54, ~GHS 156k gross** | HR-owned, real, unconnected to exit |
+
+⚠ **A settlement that only computed would print 0.00 for almost everybody**, and somebody would
+sign it. Zero and "we could not work it out" are different statements. So every line carries a
+`SettlementLineComputation` — Computed / ManuallyEntered / **CannotCompute** — and an uncomputable
+line holds **null**, not zero, and **blocks finalisation** until a person supplies the figure with
+its source named. *(User's decision, 2026-08-20.)*
+
+✅ **Travel advances are auto-populated into both clearance and the settlement** *(user's decision)*.
+54 live advances with a `SettledAmount` field, built by area 12, and until now an employee could
+leave owing one with nothing to notice.
+
+**Currency comes from Finance, not HR** — raised by the user before scaffolding, and it caught a
+hardcoded `"GHS"` in the entity that is correct on this tenant and a lie on any other. The rule:
+HR's `CompanyHrPolicySettings.DefaultCurrencyCode` wins when set, **validated against Finance's
+currency master**; preparation is refused (not silently swapped) when Finance does not hold that
+code; Finance's base currency is the fallback when HR's setting is blank. Same read-only
+relationship `StaffTravelCurrencyBridge` established for travel, and for the same reason — two
+opinions about what money is worth is how a trip came to be worth one thing on a travel screen and
+another on a financial report. ⚠ Note there are **three** default-currency settings in the system
+(Finance base, HR policy, Procurement policy); HR's had no consumer until now.
+
+⚠ **An assumption to put to TDC, not bury:** the daily rate is *monthly salary × 12 ÷ 365*, stated
+in words on every computed line. A 30-day-month or working-day basis gives different money. Raised
+in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` **with the arithmetic worked through** — GHS 6,000/month over
+16 days' notice is 3,156 calendar / 3,200 on a 30-day month / 4,364 on working days.
+
+**Slice 5 landed 2026-08-20 — 75/75 twice; full area regression green (67 + 44 + 50 + 64 + 75 =
+300 assertions).**
+
+Built: `SeparationSettlements` + `SeparationSettlementLines`, prepared from `ClearanceCompleted`,
+finalised into `SettlementUnderReview` for slice 6. Money events registered in
+`docs/HR-FINANCE-INTEGRATION-BACKLOG.md`; **nothing posts to the GL.**
+
+Rules the harness holds down:
+
+- **Null is not zero.** An unvaluable line carries no amount and blocks finalisation. On live data
+  the unpaid-salary and leave-encashment lines *always* land there, so this is the normal path, not
+  a corner case.
+- **An amount requires a named source.** FR-HR-185 puts Internal Audit in front of this statement;
+  a figure nobody can trace is one they cannot check. Supplying amount + source flips a line to
+  `ManuallyEntered` — a person vouched for it, not the system.
+- **Two ways to clear a block:** value the line, or delete it because nothing is owed. Adding a line
+  with no amount re-blocks — asserted, because that is how HR says "something is owed and I don't
+  yet know how much".
+- **Notice served in full produces no line at all**, not a zero one. A zero line is noise on a
+  document somebody signs.
+- **A finalised statement is immutable** — no additions, edits or deletions.
+- **Cross-currency travel advances are left uncomputed rather than converted.** Finance owns
+  conversion and its rates are known to be inverted (recorded on `StaffTravelCurrencyBridge` during
+  area 12); converting here would have inherited that bug silently and priced somebody's recovery
+  wrong.
+
+⚠ **Three compile errors worth the lesson**, all from assuming instead of reading:
+`StaffTravelAdvance` and `LeaveBalance` live in `.StaffTravel` / `.StaffLeave` sub-namespaces, not
+the flat `Entities.HR` the file paths suggest; and `CurrencyDto` exposes `CurrencyCode`, not `Code`
+— written from the entity's shape rather than the DTO's. The cheap version of the area-12 lesson:
+the compiler caught all three before a harness run.
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens

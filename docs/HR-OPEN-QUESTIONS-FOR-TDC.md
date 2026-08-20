@@ -216,3 +216,29 @@ development task — but the settlement stage cannot complete without it.
 ⚠ Note also that the Managing Director role exists under **two** spellings — `Managing Director`
 (6 members) and `TDC_MANAGING_DIRECTOR` (0). The HR code authorizes on both, but the duplication
 is worth resolving before it causes a grant to land on the empty one.
+
+---
+
+## How is a daily rate worked out for exit pay? (raised 2026-08-20)
+
+The final settlement (FR-HR-184) turns a monthly salary into a daily rate to value **notice pay in
+lieu** and **leave encashment**. The system currently uses **monthly salary × 12 ÷ 365** — a
+calendar-day basis — and writes that basis in words onto every computed line so the figure can be
+checked.
+
+Other bases are common and give different money on identical facts:
+
+| Basis | GHS 6,000/month, 16 days' notice |
+|---|---|
+| × 12 ÷ 365 (calendar, current) | GHS 3,156.16 |
+| ÷ 30 (30-day month) | GHS 3,200.00 |
+| ÷ 22 (working days) | GHS 4,363.64 |
+
+**Question for TDC:** which basis does TDC use for notice pay and for leave encashment, and are they
+the same for both? It is a one-line change once known, but every settlement computed before the
+answer arrives uses the calendar basis.
+
+⚠ Related and more urgent: **202 of 3,883 employees have a salary on record**, and there are **no
+leave balances at all**. Until that data exists the settlement cannot value these lines for almost
+anybody — it will say so rather than show zero, and require the amount to be entered by hand with
+its source named. That is a data-migration dependency, not a development one.

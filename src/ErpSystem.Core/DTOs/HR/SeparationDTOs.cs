@@ -462,3 +462,125 @@ public class SeparationClearanceDto
     /// <summary>Why not, when <see cref="CanComplete"/> is false.</summary>
     public string? BlockedReason { get; set; }
 }
+
+// =============================================================================
+// FINAL SETTLEMENT — FR-HR-184
+// =============================================================================
+
+/// <summary>One line of a final settlement.</summary>
+public class SeparationSettlementLineDto
+{
+    public Guid Id { get; set; }
+    public Guid SettlementId { get; set; }
+
+    public SettlementLineCategory Category { get; set; }
+    public string CategoryName { get; set; } = string.Empty;
+
+    public bool IsDeduction { get; set; }
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Null where the line could not be valued. Null is not zero.</summary>
+    public decimal? Amount { get; set; }
+
+    public SettlementLineComputation Computation { get; set; }
+    public string ComputationName { get; set; } = string.Empty;
+
+    public string? Basis { get; set; }
+    public string? SourceReference { get; set; }
+    public Guid? SourceClearanceItemId { get; set; }
+    public Guid? SourceTravelAdvanceId { get; set; }
+    public bool IsSystemGenerated { get; set; }
+    public int SortOrder { get; set; }
+}
+
+/// <summary>What a leaver is owed and owes back, with the totals derived from the lines.</summary>
+public class SeparationSettlementDto
+{
+    public Guid Id { get; set; }
+    public Guid SeparationId { get; set; }
+    public string SeparationNumber { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+
+    public SeparationStatus SeparationStatus { get; set; }
+    public string SeparationStatusName { get; set; } = string.Empty;
+
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal? DailyRate { get; set; }
+    public string? DailyRateBasis { get; set; }
+
+    public List<SeparationSettlementLineDto> Lines { get; set; } = new();
+
+    /// <summary>Everything payable to the employee, across lines that could be valued.</summary>
+    public decimal GrossEarnings { get; set; }
+
+    /// <summary>Everything recoverable from them.</summary>
+    public decimal TotalDeductions { get; set; }
+
+    /// <summary>Earnings less deductions. Meaningful only when nothing is left uncomputed.</summary>
+    public decimal NetPayable { get; set; }
+
+    /// <summary>
+    /// Lines the system could not value. While this is above zero the net figure is incomplete and
+    /// the statement cannot be finalised.
+    /// </summary>
+    public int UncomputedLines { get; set; }
+
+    public bool IsFinalised { get; set; }
+    public DateTime? FinalisedOn { get; set; }
+    public string? FinalisedByName { get; set; }
+
+    public Guid? PreparedById { get; set; }
+    public string? PreparedByName { get; set; }
+    public DateTime? PreparedOn { get; set; }
+    public string? Notes { get; set; }
+
+    /// <summary>Whether the statement can be closed for Internal Audit's review (FR-HR-185).</summary>
+    public bool CanFinalise { get; set; }
+
+    /// <summary>Why not, when it cannot.</summary>
+    public string? BlockedReason { get; set; }
+}
+
+/// <summary>Add a line by hand — the FR-HR-184 items the system cannot work out for itself.</summary>
+public class AddSettlementLineDto
+{
+    [Required]
+    public SettlementLineCategory Category { get; set; }
+
+    public bool IsDeduction { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Omit to record the line as still uncomputed.</summary>
+    public decimal? Amount { get; set; }
+
+    /// <summary>
+    /// Where a hand-entered figure came from — a payroll report, a loan statement, a letter.
+    /// Required whenever an amount is supplied.
+    /// </summary>
+    [MaxLength(300)]
+    public string? SourceReference { get; set; }
+}
+
+/// <summary>Amend a line while the statement is still a draft.</summary>
+public class UpdateSettlementLineDto
+{
+    [MaxLength(300)]
+    public string? Description { get; set; }
+
+    public decimal? Amount { get; set; }
+
+    [MaxLength(300)]
+    public string? SourceReference { get; set; }
+
+    public bool? IsDeduction { get; set; }
+}
+
+/// <summary>Close the statement for Internal Audit's review.</summary>
+public class FinaliseSettlementDto
+{
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}

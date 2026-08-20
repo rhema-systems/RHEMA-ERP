@@ -82,6 +82,33 @@ public interface ISeparationService
 
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
+    // ── Final settlement (FR-HR-184) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Builds the settlement statement from what the system knows. Refused before clearance is
+    /// complete — FR-HR-091 puts the clearance form ahead of computing entitlements.
+    /// </summary>
+    Task<SeparationSettlementDto> PrepareSettlementAsync(
+        Guid separationId, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    Task<SeparationSettlementDto> GetSettlementAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
+
+    Task<SeparationSettlementLineDto> AddSettlementLineAsync(
+        Guid separationId, AddSettlementLineDto dto, CancellationToken cancellationToken = default);
+
+    Task<SeparationSettlementLineDto> UpdateSettlementLineAsync(
+        Guid lineId, UpdateSettlementLineDto dto, CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteSettlementLineAsync(Guid lineId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Closes the statement for Internal Audit's review (FR-HR-185). Refused while any line could
+    /// not be valued: a settlement is not finalised with an unknown amount showing as zero.
+    /// </summary>
+    Task<SeparationSettlementDto> FinaliseSettlementAsync(
+        Guid separationId, FinaliseSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
     // ── Clearance (FR-HR-091 / FR-HR-183) ────────────────────────────────────
 
     Task<IEnumerable<SeparationClearanceTemplateDto>> GetClearanceTemplatesAsync(

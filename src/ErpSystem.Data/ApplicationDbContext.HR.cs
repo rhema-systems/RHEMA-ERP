@@ -319,6 +319,12 @@ public partial class ApplicationDbContext
 
     /// <summary>One line of one employee's clearance form.</summary>
     public DbSet<SeparationClearanceItem> SeparationClearanceItems { get; set; } = null!;
+
+    /// <summary>What a leaver is owed and owes back (FR-HR-184). One per separation.</summary>
+    public DbSet<SeparationSettlement> SeparationSettlements { get; set; } = null!;
+
+    /// <summary>One line of a final settlement.</summary>
+    public DbSet<SeparationSettlementLine> SeparationSettlementLines { get; set; } = null!;
     public DbSet<ProbationPeriod> ProbationPeriods { get; set; } = null!;
     public DbSet<ProbationReview> ProbationReviews { get; set; } = null!;
     public DbSet<ProbationExtension> ProbationExtensions { get; set; } = null!;
@@ -7980,6 +7986,52 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Documents)
                 .WithOne(x => x.Separation)
                 .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationSettlement>(entity =>
+        {
+            // One settlement per separation. Filtered, so a soft-deleted draft does not block a
+            // replacement being prepared.
+            entity.HasIndex(x => x.SeparationId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SeparationSettlement_SeparationId");
+
+            entity.Property(x => x.CurrencyCode).HasMaxLength(3);
+
+            entity.HasOne(x => x.Separation)
+                .WithMany()
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.PreparedBy)
+                .WithMany()
+                .HasForeignKey(x => x.PreparedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.FinalisedBy)
+                .WithMany()
+                .HasForeignKey(x => x.FinalisedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Lines)
+                .WithOne(x => x.Settlement)
+                .HasForeignKey(x => x.SettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationSettlementLine>(entity =>
+        {
+            entity.HasIndex(x => x.SettlementId).HasDatabaseName("IX_SeparationSettlementLine_SettlementId");
+            entity.HasIndex(x => x.Category).HasDatabaseName("IX_SeparationSettlementLine_Category");
+
+            entity.Property(x => x.Category).HasConversion<int>();
+            entity.Property(x => x.Computation).HasConversion<int>();
+
+            entity.HasOne(x => x.Settlement)
+                .WithMany(x => x.Lines)
+                .HasForeignKey(x => x.SettlementId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

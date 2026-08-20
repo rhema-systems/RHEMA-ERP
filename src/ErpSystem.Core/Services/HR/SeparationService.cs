@@ -1,9 +1,12 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -31,17 +34,20 @@ public class SeparationService : ISeparationService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ICompanyHrPolicyProvider _policyProvider;
+    private readonly ICurrencyService _currencies;
     private readonly ILogger<SeparationService> _logger;
 
     public SeparationService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ICompanyHrPolicyProvider policyProvider,
+        ICurrencyService currencies,
         ILogger<SeparationService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _policyProvider = policyProvider;
+        _currencies = currencies;
         _logger = logger;
     }
 
@@ -631,6 +637,584 @@ public class SeparationService : ISeparationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
+
+    /// <summary>Days per year used to turn a monthly salary into a daily rate.</summary>
+    /// <remarks>
+    /// ⚠ <b>A policy assumption, stated rather than buried.</b> Calendar days: monthly × 12 ÷ 365.
+    /// A 30-day-month or working-day basis gives different money on the same facts, and TDC has not
+    /// said which it uses — so the basis is written onto every computed line in words, and the
+    /// question is recorded in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
+    /// </remarks>
+    private const decimal DaysPerYear = 365m;
+
+    /// <summary>
+    /// The currency a settlement is stated in: HR's configured default, validated against Finance,
+    /// falling back to Finance's base currency.
+    /// </summary>
+    /// <remarks>
+    /// Finance owns what a currency <i>is</i>; HR owns which one it uses. A code HR has configured
+    /// that Finance does not hold is refused rather than silently swapped — a misconfiguration that
+    /// heals itself invisibly stays broken. Same division <c>StaffTravelCurrencyBridge</c> settled
+    /// for travel; when a third area needs this the two should become one HR-wide bridge.
+    /// </remarks>
+    private async Task<string> ResolveCurrencyAsync(
+        CompanyHrPolicySettings settings, CancellationToken cancellationToken)
+    {
+        var configured = settings.DefaultCurrencyCode?.Trim().ToUpperInvariant();
+
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var known = await _currencies.GetByCodeAsync(configured, cancellationToken);
+            if (known is null)
+                throw new InvalidOperationException(
+                    $"HR's default currency '{configured}' is not one Finance holds. Either correct "
+                    + "it in HR settings or add the currency in Finance before preparing a settlement.");
+
+            return configured;
+        }
+
+        var baseCurrency = await _currencies.GetBaseCurrencyAsync(cancellationToken);
+        if (baseCurrency is null)
+            throw new InvalidOperationException(
+                "No currency is configured. Set HR's default currency, or a base currency in Finance.");
+
+        return baseCurrency.CurrencyCode;
+    }
+
+    /// <summary>
+    /// The employee's daily rate, and how it was arrived at — or null with the reason, where no
+    /// salary is on record.
+    /// </summary>
+    private async Task<(decimal? Rate, string Basis)> DailyRateAsync(
+        Guid tenantId, Guid employeeId, string currency, CancellationToken cancellationToken)
+    {
+        var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId && c.Salary > 0)
+            .OrderByDescending(c => c.IsActive)
+            .ThenByDescending(c => c.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (contract is null)
+            return (null, "No salary is on record for this employee, so amounts based on pay cannot be computed.");
+
+        var rate = Math.Round(contract.Salary * 12m / DaysPerYear, 4, MidpointRounding.AwayFromZero);
+        return (rate,
+            $"{currency} {contract.Salary:N2} per month × 12 ÷ {DaysPerYear:N0} days = "
+            + $"{currency} {rate:N4} per day (contract {contract.ContractNumber}).");
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementDto> PrepareSettlementAsync(
+        Guid separationId, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        var existing = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .AnyAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SeparationId == separationId, cancellationToken);
+        if (existing)
+            throw new InvalidOperationException("A settlement has already been prepared for this separation.");
+
+        // FR-HR-091: entitlements are computed only AFTER the clearance form is complete. This is
+        // the sentence that gate exists to enforce, so it is checked here as well as there.
+        if (separation.Status != SeparationStatus.ClearanceCompleted)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}. A settlement is prepared once clearance is "
+                + "complete — FR-HR-091 requires the clearance form before entitlements are computed.");
+
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var currency = await ResolveCurrencyAsync(settings, cancellationToken);
+        var (rate, rateBasis) = await DailyRateAsync(tenantId, separation.EmployeeId, currency, cancellationToken);
+
+        var settlement = new SeparationSettlement
+        {
+            TenantId = tenantId,
+            SeparationId = separationId,
+            CurrencyCode = currency,
+            DailyRate = rate,
+            DailyRateBasis = rateBasis,
+            PreparedById = actorEmployeeId,
+            PreparedOn = DateTime.UtcNow,
+        };
+
+        await _unitOfWork.Repository<SeparationSettlement>().AddAsync(settlement);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var lines = new List<SeparationSettlementLine>();
+        var order = 0;
+
+        void Add(SettlementLineCategory category, bool deduction, string description,
+                 decimal? amount, SettlementLineComputation computation, string basis,
+                 Guid? clearanceItemId = null, Guid? travelAdvanceId = null)
+        {
+            order += 10;
+            lines.Add(new SeparationSettlementLine
+            {
+                TenantId = tenantId,
+                SettlementId = settlement.Id,
+                Category = category,
+                IsDeduction = deduction,
+                Description = description,
+                Amount = amount,
+                Computation = computation,
+                Basis = basis,
+                SourceClearanceItemId = clearanceItemId,
+                SourceTravelAdvanceId = travelAdvanceId,
+                IsSystemGenerated = true,
+                SortOrder = order,
+            });
+        }
+
+        // ── Earnings ──────────────────────────────────────────────────────────
+
+        // Unpaid salary has no source in this system: PayrollPayslipSnapshots is empty and there is
+        // no accrual to read. Recorded as owed and uncomputed rather than omitted, so nobody signs
+        // a statement that quietly forgot the last month's pay.
+        Add(SettlementLineCategory.UnpaidSalary, false,
+            "Unpaid salary to the last working day", null, SettlementLineComputation.CannotCompute,
+            "No payroll figure is available in this system. Enter the amount from payroll and name the source.");
+
+        // Notice pay only where the notice was to be PAID rather than served or waived.
+        var (_, _, shortfall) = Notice(separation);
+        if (separation.IsNoticePaidInLieu && shortfall is > 0)
+        {
+            if (rate is { } r)
+                Add(SettlementLineCategory.NoticePay, false,
+                    $"Notice pay in lieu — {shortfall} day(s) not served",
+                    Math.Round(r * shortfall.Value, 2, MidpointRounding.AwayFromZero),
+                    SettlementLineComputation.Computed,
+                    $"{shortfall} day(s) × {rateBasis}");
+            else
+                Add(SettlementLineCategory.NoticePay, false,
+                    $"Notice pay in lieu — {shortfall} day(s) not served",
+                    null, SettlementLineComputation.CannotCompute, rateBasis);
+        }
+
+        // Leave encashment: FR-HR-046 (on exit only) and FR-HR-152 (capped at 56 days).
+        await AddLeaveEncashmentLineAsync(tenantId, separation, rate, rateBasis, currency, Add, cancellationToken);
+
+        // ── Deductions ────────────────────────────────────────────────────────
+
+        var clearanceOutstanding = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .AsNoTracking()
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId
+                        && i.OutstandingAmount != null && i.OutstandingAmount > 0)
+            .OrderBy(i => i.SortOrder)
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in clearanceOutstanding)
+        {
+            Add(CategoryForClearance(item.Kind), true,
+                $"{item.Name} — outstanding at clearance",
+                item.OutstandingAmount,
+                SettlementLineComputation.Computed,
+                $"Recorded on the clearance form as {item.Status}"
+                + (string.IsNullOrWhiteSpace(item.SignedOffBy) ? "." : $", signed off by {item.SignedOffBy}."),
+                clearanceItemId: item.Id);
+        }
+
+        // Travel advances the employee still holds. HR's own data, and until now nothing connected
+        // it to somebody leaving — an employee could walk out owing one with nothing to notice.
+        var advances = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.EmployeeId == separation.EmployeeId
+                        && (a.Status == TravelAdvanceStatus.Disbursed
+                            || a.Status == TravelAdvanceStatus.PartiallySettled))
+            .ToListAsync(cancellationToken);
+
+        foreach (var advance in advances)
+        {
+            var outstanding = (advance.ApprovedAmount ?? advance.RequestedAmount) - advance.SettledAmount;
+            if (outstanding <= 0) continue;
+
+            // ⚠ A currency the settlement is not stated in cannot simply be added to it. Recorded
+            // as uncomputed with the figure in the text, rather than converted here: Finance owns
+            // conversion, and its rates are known to be inverted (see StaffTravelCurrencyBridge).
+            var sameCurrency = string.Equals(advance.CurrencyCode, currency, StringComparison.OrdinalIgnoreCase);
+
+            Add(SettlementLineCategory.TravelAdvanceRecovery, true,
+                $"Travel advance {advance.AdvanceNumber} outstanding",
+                sameCurrency ? outstanding : null,
+                sameCurrency ? SettlementLineComputation.Computed : SettlementLineComputation.CannotCompute,
+                sameCurrency
+                    ? $"Advance {advance.AdvanceNumber}: {currency} {(advance.ApprovedAmount ?? advance.RequestedAmount):N2} less {currency} {advance.SettledAmount:N2} settled."
+                    : $"Advance {advance.AdvanceNumber} is in {advance.CurrencyCode}, not {currency} — {advance.CurrencyCode} {outstanding:N2} outstanding. Convert through Finance and enter the amount.",
+                travelAdvanceId: advance.Id);
+        }
+
+        foreach (var line in lines)
+            await _unitOfWork.Repository<SeparationSettlementLine>().AddAsync(line);
+
+        separation.Status = SeparationStatus.SettlementPending;
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Settlement prepared for separation {Number}: {Lines} lines, {Uncomputed} uncomputed",
+            separation.SeparationNumber, lines.Count,
+            lines.Count(l => l.Computation == SettlementLineComputation.CannotCompute));
+
+        return await GetSettlementAsync(separationId, cancellationToken);
+    }
+
+    /// <summary>
+    /// The leave encashment line — FR-HR-046 (encashed on exit, and only on exit) and FR-HR-152
+    /// (capped at fifty-six days).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Measured 2026-08-20: <c>LeaveBalances</c> holds <b>zero</b> rows, so on live data this
+    /// always lands on <c>CannotCompute</c>. The cap and the rate are applied anyway, so that the
+    /// rules bite the moment balances exist rather than being remembered later.
+    /// </remarks>
+    private async Task AddLeaveEncashmentLineAsync(
+        Guid tenantId, EmployeeSeparation separation, decimal? rate, string rateBasis, string currency,
+        Action<SettlementLineCategory, bool, string, decimal?, SettlementLineComputation, string, Guid?, Guid?> add,
+        CancellationToken cancellationToken)
+    {
+        const decimal encashmentCapDays = 56m;   // FR-HR-152
+
+        var balances = await _unitOfWork.Repository<LeaveBalance>().GetQueryable()
+            .AsNoTracking()
+            .Where(b => b.TenantId == tenantId && !b.IsDeleted && b.EmployeeId == separation.EmployeeId)
+            .ToListAsync(cancellationToken);
+
+        if (balances.Count == 0)
+        {
+            add(SettlementLineCategory.LeaveEncashment, false,
+                "Accrued leave encashed on exit", null, SettlementLineComputation.CannotCompute,
+                "No leave balance is on record for this employee. Enter the days and amount, and name the source.",
+                null, null);
+            return;
+        }
+
+        var available = balances.Sum(b =>
+            b.EntitledDays + b.CarriedOverDays + b.AdjustmentDays - b.UsedDays - b.PendingDays - b.EncashedDays);
+
+        if (available <= 0)
+            return;   // nothing accrued: no line rather than a zero one
+
+        var capped = Math.Min(available, encashmentCapDays);
+        var cappedNote = capped < available
+            ? $" Capped at {encashmentCapDays:N0} days under FR-HR-152 (from {available:N2} accrued)."
+            : string.Empty;
+
+        if (rate is { } r)
+            add(SettlementLineCategory.LeaveEncashment, false,
+                $"Accrued leave encashed on exit — {capped:N2} day(s)",
+                Math.Round(r * capped, 2, MidpointRounding.AwayFromZero),
+                SettlementLineComputation.Computed,
+                $"{capped:N2} day(s) × {rateBasis}{cappedNote}",
+                null, null);
+        else
+            add(SettlementLineCategory.LeaveEncashment, false,
+                $"Accrued leave encashed on exit — {capped:N2} day(s)",
+                null, SettlementLineComputation.CannotCompute,
+                $"{rateBasis}{cappedNote}",
+                null, null);
+    }
+
+    /// <summary>Which settlement category a clearance line's outstanding amount belongs under.</summary>
+    private static SettlementLineCategory CategoryForClearance(ClearanceItemKind kind) => kind switch
+    {
+        ClearanceItemKind.OutstandingLoan => SettlementLineCategory.LoanRepayment,
+        ClearanceItemKind.SalaryAdvance => SettlementLineCategory.SalaryAdvanceRecovery,
+        ClearanceItemKind.PayrollRecovery => SettlementLineCategory.OtherDeduction,
+        _ => SettlementLineCategory.PropertyRecovery,
+    };
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementDto> GetSettlementAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var separation = await Scoped(tenantId).AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == separationId, cancellationToken)
+            ?? throw new ArgumentException($"Separation with ID '{separationId}' not found.");
+
+        var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .Include(s => s.PreparedBy)
+            .Include(s => s.FinalisedBy)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SeparationId == separationId,
+                cancellationToken)
+            ?? throw new ArgumentException("No settlement has been prepared for this separation.");
+
+        var lines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.SettlementId == settlement.Id)
+            .OrderBy(l => l.SortOrder)
+            .ThenBy(l => l.Description)
+            .ToListAsync(cancellationToken);
+
+        var uncomputed = lines.Count(l => l.Computation == SettlementLineComputation.CannotCompute);
+        var earnings = lines.Where(l => !l.IsDeduction).Sum(l => l.Amount ?? 0m);
+        var deductions = lines.Where(l => l.IsDeduction).Sum(l => l.Amount ?? 0m);
+
+        var canFinalise = !settlement.FinalisedOn.HasValue
+                          && uncomputed == 0
+                          && lines.Count > 0
+                          && separation.Status == SeparationStatus.SettlementPending;
+
+        return new SeparationSettlementDto
+        {
+            Id = settlement.Id,
+            SeparationId = separationId,
+            SeparationNumber = separation.SeparationNumber,
+            EmployeeName = FullName(separation.Employee),
+            SeparationStatus = separation.Status,
+            SeparationStatusName = separation.Status.ToString(),
+            CurrencyCode = settlement.CurrencyCode,
+            DailyRate = settlement.DailyRate,
+            DailyRateBasis = settlement.DailyRateBasis,
+            Lines = lines.Select(ToSettlementLineDto).ToList(),
+            GrossEarnings = earnings,
+            TotalDeductions = deductions,
+            NetPayable = earnings - deductions,
+            UncomputedLines = uncomputed,
+            IsFinalised = settlement.FinalisedOn.HasValue,
+            FinalisedOn = settlement.FinalisedOn,
+            FinalisedByName = settlement.FinalisedBy == null ? null : FullName(settlement.FinalisedBy),
+            PreparedById = settlement.PreparedById,
+            PreparedByName = settlement.PreparedBy == null ? null : FullName(settlement.PreparedBy),
+            PreparedOn = settlement.PreparedOn,
+            Notes = settlement.Notes,
+            CanFinalise = canFinalise,
+            BlockedReason = SettlementBlockedReason(settlement, separation, lines, uncomputed),
+        };
+    }
+
+    private static string? SettlementBlockedReason(
+        SeparationSettlement settlement, EmployeeSeparation separation,
+        List<SeparationSettlementLine> lines, int uncomputed)
+    {
+        if (settlement.FinalisedOn.HasValue)
+            return "This settlement has been finalised and is with Internal Audit.";
+
+        if (separation.Status != SeparationStatus.SettlementPending)
+            return $"This separation is {separation.Status}; a settlement is finalised while it is awaiting one.";
+
+        if (lines.Count == 0)
+            return "The settlement has no lines.";
+
+        if (uncomputed > 0)
+            return $"{uncomputed} line(s) could not be valued. Enter each amount and name its source, "
+                   + "or remove the line if nothing is owed.";
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementLineDto> AddSettlementLineAsync(
+        Guid separationId, AddSettlementLineDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var settlement = await RequireDraftSettlementAsync(tenantId, separationId, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(dto.Description))
+            throw new InvalidOperationException("Describe what the line is for.");
+
+        // An amount with no stated source is a number nobody can check. FR-HR-185 puts Internal
+        // Audit in front of this statement; they need to know where each figure came from.
+        if (dto.Amount is not null && string.IsNullOrWhiteSpace(dto.SourceReference))
+            throw new InvalidOperationException(
+                "Name the source of the amount — the payroll report, loan statement or letter it came from.");
+
+        if (dto.Amount is < 0)
+            throw new InvalidOperationException("A settlement amount cannot be negative. Use a deduction line instead.");
+
+        var maxOrder = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.SettlementId == settlement.Id)
+            .Select(l => (int?)l.SortOrder)
+            .MaxAsync(cancellationToken) ?? 0;
+
+        var line = new SeparationSettlementLine
+        {
+            TenantId = tenantId,
+            SettlementId = settlement.Id,
+            Category = dto.Category,
+            IsDeduction = dto.IsDeduction,
+            Description = dto.Description.Trim(),
+            Amount = dto.Amount,
+            Computation = dto.Amount is null
+                ? SettlementLineComputation.CannotCompute
+                : SettlementLineComputation.ManuallyEntered,
+            Basis = dto.Amount is null ? "Recorded as owed; the amount is not yet known." : null,
+            SourceReference = string.IsNullOrWhiteSpace(dto.SourceReference) ? null : dto.SourceReference.Trim(),
+            IsSystemGenerated = false,
+            SortOrder = maxOrder + 10,
+        };
+
+        await _unitOfWork.Repository<SeparationSettlementLine>().AddAsync(line);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ToSettlementLineDto(line);
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementLineDto> UpdateSettlementLineAsync(
+        Guid lineId, UpdateSettlementLineDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        var line = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .FirstOrDefaultAsync(l => l.Id == lineId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Settlement line with ID '{lineId}' not found.");
+
+        var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+
+        RequireDraft(settlement);
+
+        if (dto.Description is not null)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Description))
+                throw new InvalidOperationException("Describe what the line is for.");
+            line.Description = dto.Description.Trim();
+        }
+
+        if (dto.IsDeduction is { } deduction) line.IsDeduction = deduction;
+
+        if (dto.SourceReference is not null)
+            line.SourceReference = string.IsNullOrWhiteSpace(dto.SourceReference) ? null : dto.SourceReference.Trim();
+
+        if (dto.Amount is { } amount)
+        {
+            if (amount < 0)
+                throw new InvalidOperationException("A settlement amount cannot be negative. Use a deduction line instead.");
+
+            if (string.IsNullOrWhiteSpace(line.SourceReference))
+                throw new InvalidOperationException(
+                    "Name the source of the amount — the payroll report, loan statement or letter it came from.");
+
+            line.Amount = amount;
+
+            // Supplying the figure the system could not work out is what clears the block. The line
+            // becomes ManuallyEntered rather than Computed: a person vouched for it, not the system.
+            line.Computation = SettlementLineComputation.ManuallyEntered;
+        }
+
+        await _unitOfWork.Repository<SeparationSettlementLine>().UpdateAsync(line);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ToSettlementLineDto(line);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteSettlementLineAsync(Guid lineId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var line = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .FirstOrDefaultAsync(l => l.Id == lineId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Settlement line with ID '{lineId}' not found.");
+
+        var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+
+        RequireDraft(settlement);
+
+        await _unitOfWork.Repository<SeparationSettlementLine>().DeleteAsync(lineId);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationSettlementDto> FinaliseSettlementAsync(
+        Guid separationId, FinaliseSettlementDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+        var settlement = await RequireDraftSettlementAsync(tenantId, separationId, cancellationToken);
+
+        if (separation.Status != SeparationStatus.SettlementPending)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}; a settlement is finalised while it is awaiting one.");
+
+        var lines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.SettlementId == settlement.Id)
+            .ToListAsync(cancellationToken);
+
+        if (lines.Count == 0)
+            throw new InvalidOperationException("The settlement has no lines, so there is nothing to finalise.");
+
+        // The rule this whole slice turns on. A statement finalised with an unvalued line would go
+        // to Internal Audit, and then to payment, carrying a silent zero where a real amount was
+        // owed. Zero is a claim; the block is what keeps it from being made by accident.
+        var uncomputed = lines.Where(l => l.Computation == SettlementLineComputation.CannotCompute).ToList();
+        if (uncomputed.Count > 0)
+        {
+            var names = string.Join(", ", uncomputed.Take(4).Select(l => l.Description));
+            var more = uncomputed.Count > 4 ? $" and {uncomputed.Count - 4} more" : string.Empty;
+            throw new InvalidOperationException(
+                $"{uncomputed.Count} line(s) could not be valued — {names}{more}. Enter each amount "
+                + "and name its source, or remove the line if nothing is owed. A settlement is not "
+                + "finalised with an unknown amount showing as zero.");
+        }
+
+        settlement.FinalisedOn = DateTime.UtcNow;
+        settlement.FinalisedById = actorEmployeeId;
+        if (!string.IsNullOrWhiteSpace(dto?.Notes)) settlement.Notes = dto.Notes.Trim();
+
+        separation.Status = SeparationStatus.SettlementUnderReview;
+
+        await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Settlement finalised for separation {Number}; net {Currency} {Net}",
+            separation.SeparationNumber, settlement.CurrencyCode,
+            lines.Where(l => !l.IsDeduction).Sum(l => l.Amount ?? 0m)
+            - lines.Where(l => l.IsDeduction).Sum(l => l.Amount ?? 0m));
+
+        return await GetSettlementAsync(separationId, cancellationToken);
+    }
+
+    private static void RequireDraft(SeparationSettlement settlement)
+    {
+        if (settlement.FinalisedOn.HasValue)
+            throw new InvalidOperationException(
+                "This settlement has been finalised and is with Internal Audit. Its lines can no longer be changed.");
+    }
+
+    private async Task<SeparationSettlement> RequireDraftSettlementAsync(
+        Guid tenantId, Guid separationId, CancellationToken cancellationToken)
+    {
+        var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SeparationId == separationId,
+                cancellationToken)
+            ?? throw new ArgumentException("No settlement has been prepared for this separation.");
+
+        RequireDraft(settlement);
+        return settlement;
+    }
+
+    private static SeparationSettlementLineDto ToSettlementLineDto(SeparationSettlementLine l) => new()
+    {
+        Id = l.Id,
+        SettlementId = l.SettlementId,
+        Category = l.Category,
+        CategoryName = l.Category.ToString(),
+        IsDeduction = l.IsDeduction,
+        Description = l.Description,
+        Amount = l.Amount,
+        Computation = l.Computation,
+        ComputationName = l.Computation.ToString(),
+        Basis = l.Basis,
+        SourceReference = l.SourceReference,
+        SourceClearanceItemId = l.SourceClearanceItemId,
+        SourceTravelAdvanceId = l.SourceTravelAdvanceId,
+        IsSystemGenerated = l.IsSystemGenerated,
+        SortOrder = l.SortOrder,
+    };
 
     // ── Clearance: the catalogue ──────────────────────────────────────────────
 

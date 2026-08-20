@@ -177,3 +177,45 @@ module, whose **final settlement** is unavoidably an accounting event.
 - [ ] Confirm the Finance module's posting entry point and who owns it — Finance is not this
       module's to modify without agreement, the same rule that governs payroll.
 - [ ] Decide the treatment **once**, then apply it across every row in the register.
+
+---
+
+## Area 9b — Separation & final settlement (registered 2026-08-20)
+
+**The largest single money event in HR**, and the one the note above anticipated when it said the
+deferred separation module's final settlement "is unavoidably an accounting event". It is now
+built: `SeparationSettlements` and `SeparationSettlementLines`.
+
+| Event | Where it is recorded | Direction |
+|---|---|---|
+| Unpaid salary to the last working day | settlement line, `UnpaidSalary` | payable |
+| Notice pay in lieu | settlement line, `NoticePay` | payable |
+| Leave encashment on exit (capped 56 days, FR-HR-152) | settlement line, `LeaveEncashment` | payable |
+| Gratuity / end-of-service | settlement line, `GratuityOrEndOfService` | payable |
+| Benefit and pension-related payments | settlement lines | payable |
+| Outstanding loans, salary advances, payroll recoveries | settlement lines, from the clearance form | recoverable |
+| **Outstanding travel advances** | settlement line, `TravelAdvanceRecovery`, auto-populated from `StaffTravelAdvances` | recoverable |
+| Unreturned property and equipment | settlement line, `PropertyRecovery`, from the clearance form | recoverable |
+| Tax and other deductions | settlement lines | recoverable |
+
+**Nothing posts.** The statement records what is payable and what is recoverable, and stops. Net
+payable is derived from the lines, in the settlement's own currency.
+
+### What the sweep needs to decide here
+
+- [ ] **Who pays it.** Through payroll as a final run, or as a direct payment from Finance? The
+      answer decides whether the settlement posts to payroll control or straight to the bank, and it
+      is the same open question as the reimbursement one above — settle both together.
+- [ ] **Recoveries that exceed earnings.** A leaver can owe more than they are due; `NetPayable`
+      goes negative and the organisation is a creditor. There is no debtor record for an
+      ex-employee, and nothing today converts one into a receivable.
+- [ ] **Currency.** The settlement is stated in HR's configured default validated against Finance,
+      falling back to Finance's base. A travel advance in another currency is deliberately left
+      **uncomputed** rather than converted, because Finance owns conversion — and its rates are
+      known to be inverted (see the note on `StaffTravelCurrencyBridge`). Fix that before the sweep,
+      or every cross-currency recovery will be wrong.
+- [ ] **The daily-rate basis.** Monthly × 12 ÷ 365 today, stated on every computed line. If TDC
+      computes on a 30-day month or working days, the money differs. Raised in
+      `HR-OPEN-QUESTIONS-FOR-TDC.md`.
+- [ ] **Timing.** The settlement is finalised, then reviewed by Internal Audit (FR-HR-185), and only
+      then paid. The accounting event is the release, not the finalisation — do not post on finalise.

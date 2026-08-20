@@ -429,3 +429,154 @@ public class SeparationClearanceItem : TenantEntity
 
     public DateTime? RecordedOn { get; set; }
 }
+
+// =============================================================================
+// FINAL SETTLEMENT — FR-HR-184: "unpaid salary, notice pay, leave encashment,
+// benefits, deductions, recoveries, loans and pension-related payments".
+// Reviewed by Internal Audit before payment is released (FR-HR-185, slice 6).
+// =============================================================================
+
+/// <summary>
+/// What an employee is owed, and what is owed back, when they leave. One per separation.
+/// </summary>
+/// <remarks>
+/// <para><b>The statement is assembled, not calculated in one shot.</b> Lines arrive from three
+/// places — computed by the system, carried from the clearance form and the employee's travel
+/// advances, or entered by hand — and each says which it was. That is the whole design, and it
+/// comes from a measurement: 202 of 3,883 employees have a salary on file and there are no leave
+/// balances at all, so a settlement that only computed would be almost entirely zeros.</para>
+///
+/// <para><b>Totals are derived from the lines, never stored.</b> Once the statement is finalised
+/// its lines are immutable, so a derived total is a frozen total — without the risk that a stored
+/// copy quietly disagrees with the lines under it.</para>
+///
+/// <para>⚠ <b>Nothing here posts to the general ledger.</b> Per the standing HR↔Finance split every
+/// money event is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in one
+/// sweep after the whole HR module. This records what is payable; Finance pays it.</para>
+/// </remarks>
+public class SeparationSettlement : TenantEntity
+{
+    [Required]
+    public Guid SeparationId { get; set; }
+
+    [ForeignKey(nameof(SeparationId))]
+    public virtual EmployeeSeparation Separation { get; set; } = null!;
+
+    /// <summary>
+    /// The currency the settlement is stated in.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Finance owns this, not HR.</b> Set from Finance's <i>base currency</i> when the
+    /// statement is prepared, and any override is validated against Finance's currency master —
+    /// the same read-only relationship <c>StaffTravelCurrencyBridge</c> established for travel,
+    /// and for the same reason: travel had shipped its own rate table beside Finance's, so a trip
+    /// could be worth one thing on a travel screen and another on a financial report. A settlement
+    /// must not be able to be stated in a currency Finance does not hold.</para>
+    ///
+    /// <para>Deliberately <b>no hardcoded default</b>. It was <c>"GHS"</c> here until the question
+    /// was asked, which is correct on this tenant and a lie on any other. A code rather than a
+    /// foreign key, because Finance's uniqueness is <c>(TenantId, Code)</c> and a composite FK
+    /// would make re-coding a currency a schema problem.</para>
+    /// </remarks>
+    [Required]
+    [MaxLength(3)]
+    public string CurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The daily rate every computed line was worked out from, snapshotted at preparation.
+    /// Null when no salary could be found — which is what makes those lines
+    /// <c>CannotCompute</c> rather than zero.
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? DailyRate { get; set; }
+
+    /// <summary>
+    /// Where the rate came from and how it was derived, in words, so the figure can be argued with
+    /// rather than merely believed.
+    /// </summary>
+    [MaxLength(500)]
+    public string? DailyRateBasis { get; set; }
+
+    public Guid? PreparedById { get; set; }
+
+    [ForeignKey(nameof(PreparedById))]
+    public virtual Employee? PreparedBy { get; set; }
+
+    public DateTime? PreparedOn { get; set; }
+
+    /// <summary>
+    /// When the statement was closed for review. After this its lines cannot change — it is the
+    /// document Internal Audit signs off (FR-HR-185).
+    /// </summary>
+    public DateTime? FinalisedOn { get; set; }
+
+    public Guid? FinalisedById { get; set; }
+
+    [ForeignKey(nameof(FinalisedById))]
+    public virtual Employee? FinalisedBy { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    public virtual ICollection<SeparationSettlementLine> Lines { get; set; }
+        = new List<SeparationSettlementLine>();
+}
+
+/// <summary>One line of a final settlement — an amount owed to the employee, or back to the employer.</summary>
+public class SeparationSettlementLine : TenantEntity
+{
+    [Required]
+    public Guid SettlementId { get; set; }
+
+    [ForeignKey(nameof(SettlementId))]
+    public virtual SeparationSettlement Settlement { get; set; } = null!;
+
+    [Required]
+    public SettlementLineCategory Category { get; set; }
+
+    /// <summary>
+    /// True when the amount comes off what is payable. Held explicitly rather than inferred from
+    /// the category: a benefit can be a payment or a clawback, and a statement that guesses which
+    /// gets the sign wrong on somebody's money.
+    /// </summary>
+    public bool IsDeduction { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The amount. <b>Null where <see cref="Computation"/> is <c>CannotCompute</c></b> — null is
+    /// the honest value for "unknown", and zero is not.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? Amount { get; set; }
+
+    [Required]
+    public SettlementLineComputation Computation { get; set; } = SettlementLineComputation.ManuallyEntered;
+
+    /// <summary>How the amount was arrived at, or why it could not be.</summary>
+    [MaxLength(500)]
+    public string? Basis { get; set; }
+
+    /// <summary>For a hand-entered figure: where it came from. Required for manual amounts.</summary>
+    [MaxLength(300)]
+    public string? SourceReference { get; set; }
+
+    /// <summary>
+    /// The clearance line this deduction was carried from, where it was. Provenance, not ownership
+    /// — no foreign key, so tidying clearance later cannot orphan a signed settlement.
+    /// </summary>
+    public Guid? SourceClearanceItemId { get; set; }
+
+    /// <summary>The travel advance this recovery came from, where it did. Provenance, as above.</summary>
+    public Guid? SourceTravelAdvanceId { get; set; }
+
+    /// <summary>
+    /// True when the system put this line here. Distinguishes a line HR must justify from one the
+    /// system will regenerate — and stops a regeneration silently deleting somebody's manual entry.
+    /// </summary>
+    public bool IsSystemGenerated { get; set; }
+
+    public int SortOrder { get; set; }
+}

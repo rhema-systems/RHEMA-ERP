@@ -248,6 +248,148 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
+
+    /// <summary>
+    /// Build the settlement statement. Refused before clearance is complete — FR-HR-091 puts the
+    /// clearance form ahead of computing entitlements.
+    /// </summary>
+    /// <remarks>
+    /// Lines the system cannot value carry <b>no amount</b> rather than zero, and hold the
+    /// statement open until somebody supplies the figure and names its source.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/settlement/prepare")]
+    [ProducesResponseType(typeof(SeparationSettlementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementDto>> PrepareSettlement(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.PrepareSettlementAsync(id, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>The settlement statement, its totals, and whether it can be closed for review.</summary>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("{id:guid}/settlement")]
+    [ProducesResponseType(typeof(SeparationSettlementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementDto>> GetSettlement(Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.GetSettlementAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Add a line by hand — the FR-HR-184 items the system cannot work out for itself.</summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/settlement/lines")]
+    [ProducesResponseType(typeof(SeparationSettlementLineDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementLineDto>> AddSettlementLine(
+        Guid id, [FromBody] AddSettlementLineDto dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+        if (dto == null) return BadRequest(new { message = "A settlement line is required." });
+
+        try
+        {
+            return Ok(await _service.AddSettlementLineAsync(id, dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Amend a line while the statement is a draft — including supplying an amount the system could
+    /// not compute, which is what releases the block on finalising.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPut("settlement-lines/{lineId:guid}")]
+    [ProducesResponseType(typeof(SeparationSettlementLineDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementLineDto>> UpdateSettlementLine(
+        Guid lineId, [FromBody] UpdateSettlementLineDto dto, CancellationToken cancellationToken)
+    {
+        if (lineId == Guid.Empty) return BadRequest(new { message = "Invalid settlement line id." });
+        if (dto == null) return BadRequest(new { message = "An update payload is required." });
+
+        try
+        {
+            return Ok(await _service.UpdateSettlementLineAsync(lineId, dto, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Remove a line while the statement is a draft.</summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpDelete("settlement-lines/{lineId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteSettlementLine(Guid lineId, CancellationToken cancellationToken)
+    {
+        if (lineId == Guid.Empty) return BadRequest(new { message = "Invalid settlement line id." });
+
+        try
+        {
+            await _service.DeleteSettlementLineAsync(lineId, cancellationToken);
+            return NoContent();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Close the statement for Internal Audit's review (FR-HR-185). Refused while any line could not
+    /// be valued — a settlement is not finalised with an unknown amount showing as zero.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/settlement/finalise")]
+    [ProducesResponseType(typeof(SeparationSettlementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationSettlementDto>> FinaliseSettlement(
+        Guid id, [FromBody] FinaliseSettlementDto? dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.FinaliseSettlementAsync(
+                id, dto ?? new FinaliseSettlementDto(), ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     // ── Clearance: the tenant's form ──────────────────────────────────────────
 
     /// <summary>The clearance form — the catalogue every separation's checklist is built from.</summary>

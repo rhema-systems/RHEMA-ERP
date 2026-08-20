@@ -2967,6 +2967,85 @@ public enum SeparationStatus
 }
 
 /// <summary>
+/// What a line of the final settlement is (FR-HR-184: <i>"unpaid salary, notice pay, leave
+/// encashment, benefits, deductions, recoveries, loans and pension-related payments"</i>).
+/// </summary>
+public enum SettlementLineCategory
+{
+    [Description("Unpaid Salary")]
+    UnpaidSalary = 1,
+
+    /// <summary>Notice not served and not waived — paid in lieu.</summary>
+    [Description("Notice Pay")]
+    NoticePay = 2,
+
+    /// <summary>Accrued leave paid out. Exit only (FR-HR-046), capped at 56 days (FR-HR-152).</summary>
+    [Description("Leave Encashment")]
+    LeaveEncashment = 3,
+
+    [Description("Gratuity Or End Of Service")]
+    GratuityOrEndOfService = 4,
+
+    [Description("Benefit Payment")]
+    BenefitPayment = 5,
+
+    [Description("Pension-Related Payment")]
+    PensionRelated = 6,
+
+    [Description("Other Earning")]
+    OtherEarning = 49,
+
+    [Description("Loan Repayment")]
+    LoanRepayment = 50,
+
+    [Description("Salary Advance Recovery")]
+    SalaryAdvanceRecovery = 51,
+
+    /// <summary>An outstanding travel advance, from the employee's own travel records.</summary>
+    [Description("Travel Advance Recovery")]
+    TravelAdvanceRecovery = 52,
+
+    /// <summary>Unreturned property or equipment, carried from a clearance line.</summary>
+    [Description("Property Recovery")]
+    PropertyRecovery = 53,
+
+    [Description("Tax Deduction")]
+    TaxDeduction = 54,
+
+    [Description("Other Deduction")]
+    OtherDeduction = 99
+}
+
+/// <summary>
+/// Where a settlement line's amount came from — and whether it is trustworthy.
+/// </summary>
+/// <remarks>
+/// ⚠ This enum exists because of a measurement, not for tidiness. On the live tenant
+/// 2026-08-20, <b>202 of 3,883 employees</b> have a salary on file and <c>LeaveBalances</c> holds
+/// <b>zero</b> rows — so a settlement that simply computed from salary would print 0.00 for almost
+/// everybody. Zero and "we could not work it out" are not the same statement, and somebody would
+/// sign the first one. <see cref="CannotCompute"/> keeps them apart, and blocks finalisation until
+/// a human supplies the figure.
+/// </remarks>
+public enum SettlementLineComputation
+{
+    /// <summary>Worked out by the system from data it holds. <c>Basis</c> says how.</summary>
+    [Description("Computed")]
+    Computed = 1,
+
+    /// <summary>Entered by a person. <c>SourceReference</c> says where they got it.</summary>
+    [Description("Manually Entered")]
+    ManuallyEntered = 2,
+
+    /// <summary>
+    /// The system knows this line is owed but cannot value it — no salary on record, no leave
+    /// balance, no payroll figure. Carries no amount, and holds the statement open.
+    /// </summary>
+    [Description("Cannot Compute")]
+    CannotCompute = 3
+}
+
+/// <summary>
 /// What a clearance item checks — FR-HR-183's list, verbatim: <i>"exit clearance across outstanding
 /// loans, salary advances, company property, office equipment, duty-post keys, documents and
 /// payroll recoveries"</i>.
