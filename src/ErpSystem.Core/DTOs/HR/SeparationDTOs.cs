@@ -749,3 +749,60 @@ public class DisciplinaryOrphanRepairDto
 
     public List<EmployeeSeparationListDto> Raised { get; set; } = new();
 }
+
+// =============================================================================
+// THE REMINDER SWEEP — FR-HR-111
+// =============================================================================
+
+/// <summary>One thing the sweep would remind somebody about.</summary>
+public class SeparationReminderItemDto
+{
+    /// <summary>RetirementApproaching, ContractExpiring, ClearanceOutstanding, SettlementAwaitingReview, SettlementApprovedNotCompleted.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+
+    public Guid? SeparationId { get; set; }
+    public string? Reference { get; set; }
+
+    public DateOnly? DueDate { get; set; }
+
+    /// <summary>Negative once the date has passed — which is when somebody should look.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>
+    /// Rises as the item ages unanswered, so a reminder nobody has acted on stops looking like a
+    /// fresh one. Also part of the dedupe key, which is why a new tier raises a new reminder.
+    /// </summary>
+    public int EscalationTier { get; set; }
+
+    /// <summary>What the reader is being asked to do about it.</summary>
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>True when this exact reminder has already been raised at this tier.</summary>
+    public bool AlreadyRaised { get; set; }
+}
+
+/// <summary>What one pass of the sweep did.</summary>
+public class SeparationReminderRunResultDto
+{
+    public Guid RunId { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+
+    /// <summary>Everything the sweep found, whether or not it was raised.</summary>
+    public int CandidatesFound { get; set; }
+
+    /// <summary>Reminders actually written — the rest were already out at this tier.</summary>
+    public int RemindersQueued { get; set; }
+
+    public int SuppressedAsDuplicate { get; set; }
+
+    /// <summary>How many of each kind were raised.</summary>
+    public Dictionary<string, int> ByKind { get; set; } = new();
+
+    public List<SeparationReminderItemDto> Raised { get; set; } = new();
+}

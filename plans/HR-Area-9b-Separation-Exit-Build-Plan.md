@@ -825,6 +825,44 @@ flight.
 
 **Area regression after slice 9b: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 13 = 479 assertions.**
 
+### Slice 10 — the reminder sweep (FR-HR-111). 2026-08-20, 37/37
+
+Migration `20260820163509_AddSeparationReminderEngine` — two tables, same shape as the five reminder
+engines already in the system (SHE, movements, discipline, travel, probation). This is the sixth.
+
+**Five kinds.** FR-HR-111's two — a retirement or contract expiry approaching with no separation
+raised — plus three from the pipeline: a clearance with mandatory lines unanswered, a settlement
+with Internal Audit, and **a settlement approved but never completed**.
+
+⚠ **That last kind is why the slice is worth having.** Approved, paid, never completed means the
+employee is *still recorded as active* with a finished exit behind them — the exact shape of the
+defect this area was opened on. Slice 9b built a repair that runs after the fact; this makes the
+same situation visible the next morning.
+
+**The dedupe key is kind + subject + due date + escalation tier**, and the tier is in the key
+deliberately: an item that ages into the next tier raises a **new** reminder rather than repeating a
+stale one. Tiers: on the horizon (>30 days) → due this month → overdue → overdue by more than a
+month with nobody acting.
+
+**Two assertions that matter more than the count:**
+
+- **Acting on the thing stops the reminder.** Completing the abandoned settlement removes it from
+  the sweep; raising the retirement silences the retirement reminder. A reminder engine that nags
+  after the work is done gets ignored, and then it is decorative.
+- **The second sweep suppresses everything** — `suppressedAsDuplicate == candidatesFound`. If the
+  dedupe key were wrong in any way, that is where it would show.
+
+**The FR-HR-185 role gap, made audible.** With nobody holding `TDC_INTERNAL_AUDIT`, finalised
+settlements accumulate `SettlementAwaitingReview` reminders and escalate through the tiers. The
+control holding rather than failing open is correct; this is what stops it reading as a stuck queue.
+
+**On FR-HR-111's "30 days":** the sweep uses the tenant's lead days (365 retirement, 60 contract
+expiry), both wider than 30, so the requirement is met from policy rather than a second hard-coded
+threshold that could drift from it.
+
+**Area regression after slice 10: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 13 + 37 = 516
+assertions.**
+
 ⚠ **Owed, and deliberately not in slice 3: workflow-engine wiring.** The decision rule lives in the
 service because the engine cannot express the procedural split. That is fine for the API, but W1
 says never build a bespoke HR approval **UI** — so the engine must be wired before the screens

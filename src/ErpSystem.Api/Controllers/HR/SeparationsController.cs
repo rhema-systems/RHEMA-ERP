@@ -45,6 +45,7 @@ public class SeparationsController : ControllerBase
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
     private readonly ApplicationDbContext _db;
+    private readonly ISeparationReminderService _reminders;
     private readonly ILogger<SeparationsController> _logger;
 
     public SeparationsController(
@@ -54,6 +55,7 @@ public class SeparationsController : ControllerBase
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
         ApplicationDbContext db,
+        ISeparationReminderService reminders,
         ILogger<SeparationsController> logger)
     {
         _service = service;
@@ -62,6 +64,7 @@ public class SeparationsController : ControllerBase
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
         _db = db;
+        _reminders = reminders;
         _logger = logger;
     }
 
@@ -307,6 +310,53 @@ public class SeparationsController : ControllerBase
         try
         {
             return Ok(await _service.RepairDisciplinaryOrphansAsync(dryRun, ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    // ── The reminder sweep (FR-HR-111) ────────────────────────────────────────
+
+    /// <summary>
+    /// What the reminder sweep would raise, without writing anything.
+    /// </summary>
+    /// <remarks>
+    /// Five kinds: a retirement or contract expiry approaching with no separation raised, a
+    /// clearance with mandatory lines unanswered, a settlement with Internal Audit, and a settlement
+    /// approved but never completed — the last being the defect this area was opened on, turned
+    /// into a reminder rather than a discovery years later.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
+    [HttpGet("reminders/preview")]
+    [ProducesResponseType(typeof(IEnumerable<SeparationReminderItemDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<SeparationReminderItemDto>>> PreviewReminders(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _reminders.PreviewAsync(cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Run the sweep now. Anything already raised at its current escalation tier is suppressed, so
+    /// running it twice in a morning is harmless.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("reminders/run")]
+    [ProducesResponseType(typeof(SeparationReminderRunResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SeparationReminderRunResultDto>> RunReminderSweep(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _reminders.RunSweepAsync("Manual", cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {

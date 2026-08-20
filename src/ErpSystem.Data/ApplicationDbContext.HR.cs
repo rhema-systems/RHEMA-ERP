@@ -320,6 +320,12 @@ public partial class ApplicationDbContext
     /// <summary>One line of one employee's clearance form.</summary>
     public DbSet<SeparationClearanceItem> SeparationClearanceItems { get; set; } = null!;
 
+    /// <summary>One pass of the separation reminder sweep (FR-HR-111).</summary>
+    public DbSet<SeparationReminderRun> SeparationReminderRuns { get; set; } = null!;
+
+    /// <summary>One reminder the sweep raised, with the key that stops it repeating.</summary>
+    public DbSet<SeparationReminderDispatchLog> SeparationReminderDispatchLogs { get; set; } = null!;
+
     /// <summary>What a leaver is owed and owes back (FR-HR-184). One per separation.</summary>
     public DbSet<SeparationSettlement> SeparationSettlements { get; set; } = null!;
 
@@ -7986,6 +7992,34 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Documents)
                 .WithOne(x => x.Separation)
                 .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationReminderRun>(entity =>
+        {
+            entity.HasIndex(x => x.StartedAt).HasDatabaseName("IX_SeparationReminderRun_StartedAt");
+            entity.Property(x => x.Trigger).HasMaxLength(30);
+
+            entity.HasMany(x => x.DispatchLogs)
+                .WithOne(x => x.Run)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationReminderDispatchLog>(entity =>
+        {
+            entity.HasIndex(x => x.RunId).HasDatabaseName("IX_SeparationReminderDispatch_RunId");
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_SeparationReminderDispatch_EmployeeId");
+            entity.HasIndex(x => x.Kind).HasDatabaseName("IX_SeparationReminderDispatch_Kind");
+
+            // The dedupe key is looked up on every sweep, for every candidate — the one index that
+            // decides whether a daily pass over a whole workforce is cheap or not.
+            entity.HasIndex(x => new { x.TenantId, x.DedupeKey })
+                .HasDatabaseName("IX_SeparationReminderDispatch_Tenant_DedupeKey");
+
+            entity.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

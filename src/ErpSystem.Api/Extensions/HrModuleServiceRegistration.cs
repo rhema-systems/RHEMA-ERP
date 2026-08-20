@@ -613,6 +613,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmployeeOathOfSecrecyService, EmployeeOathOfSecrecyService>();
         // The exit register (area 9b) — one separation record per employee leaving, by any route.
         services.AddScoped<ISeparationService, SeparationService>();
+        // The sixth reminder engine in the system, after SHE, movements, discipline, travel and
+        // probation. Same shape: a run header, one dispatch row per reminder, a dedupe key.
+        services.AddScoped<ISeparationReminderService, SeparationReminderService>();
         services.AddScoped<IProbationReminderService, ProbationReminderService>();
         services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
         // Travel's read-only window onto Finance's currency and exchange-rate masters —
