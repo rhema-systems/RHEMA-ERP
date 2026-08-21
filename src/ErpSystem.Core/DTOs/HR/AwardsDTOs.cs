@@ -2115,7 +2115,15 @@ public class LongServiceSweepResultDto
     public int MilestonesConfigured { get; set; }
     public int EmployeesConsidered { get; set; }
     public int WithoutEmploymentDate { get; set; }
-    public int DisciplinaryRecordsConsidered { get; set; }
+    /// <summary>
+    /// Whether the disciplinary exemption was applied at all (AWD-15).
+    /// </summary>
+    /// <remarks>
+    /// This is a different fact from how many people it caught, which <c>Disqualified</c> already
+    /// lists. It separates "the rule ran and exempted nobody" from "the rule is switched off for
+    /// this award" — two results that look identical on screen and mean opposite things.
+    /// </remarks>
+    public bool DisciplinaryCheckApplied { get; set; }
 
     /// <summary>Awards created by this run. Always zero on a preview.</summary>
     public int AwardsCreated { get; set; }

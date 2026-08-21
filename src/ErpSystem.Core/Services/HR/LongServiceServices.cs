@@ -344,7 +344,11 @@ public class LongServiceSweepService : ILongServiceSweepService
         // clock is DateTime.UtcNow cannot be tested at a milestone it has not reached yet.
         var effectiveAsOf = asOf ?? DateTime.UtcNow;
 
-        var result = await _evaluator.EvaluateAsync(awardType, ladder, tenantId, effectiveAsOf);
+        var verdicts = await _evaluator.EvaluateAsync(awardType, ladder, tenantId, effectiveAsOf);
+
+        // The sweep's own slice of the one calculation. The report reads the same verdicts and takes
+        // a different slice; neither recomputes anything.
+        var qualified = verdicts.Where(v => v.Standing == LongServiceStanding.Eligible).ToList();
 
         var dto = new LongServiceSweepResultDto
         {
@@ -352,11 +356,11 @@ public class LongServiceSweepService : ILongServiceSweepService
             AsOf = effectiveAsOf,
             Committed = commit,
             MilestonesConfigured = ladder.Count(m => m.IsActive),
-            EmployeesConsidered = result.EmployeesConsidered,
-            WithoutEmploymentDate = result.WithoutEmploymentDate,
-            DisciplinaryRecordsConsidered = result.DisciplinaryRecordsConsidered,
-            Qualified = result.Qualified.Select(ToDto).ToList(),
-            Disqualified = result.Disqualified.Select(ToDto).ToList(),
+            EmployeesConsidered = verdicts.Count,
+            WithoutEmploymentDate = verdicts.Count(v => v.Standing == LongServiceStanding.ServiceUnknown),
+            DisciplinaryCheckApplied = awardType.DisqualifyOnDisciplinaryRecord,
+            Qualified = qualified.Select(ToDto).ToList(),
+            Disqualified = verdicts.Where(v => v.Standing == LongServiceStanding.Exempt).Select(ToDto).ToList(),
         };
 
         if (!commit)
@@ -364,23 +368,23 @@ public class LongServiceSweepService : ILongServiceSweepService
 
         var rungs = ladder.ToDictionary(m => m.Id);
 
-        foreach (var candidate in result.Qualified)
+        foreach (var candidate in qualified)
         {
-            var rung = rungs[candidate.MilestoneId];
+            var rung = rungs[candidate.MilestoneId!.Value];
 
             await _awardRepo.AddAsync(new LongServiceAward
             {
                 TenantId = tenantId,
                 EmployeeId = candidate.EmployeeId,
                 AwardTypeId = awardTypeId,
-                YearsOfService = candidate.MilestoneYears,
+                YearsOfService = candidate.MilestoneYears!.Value,
 
                 // The rung reached, not the years served: an employee swept at 22 years reaches the
                 // 20-year milestone, and the award is for that milestone. YearsOfService on the
                 // award is what was granted, which is what a certificate has to print.
                 ServiceStartDate = candidate.ServiceStartDate!.Value.ToDateTime(TimeOnly.MinValue),
                 MilestoneDate = candidate.ServiceStartDate!.Value
-                    .AddYears(candidate.MilestoneYears)
+                    .AddYears(candidate.MilestoneYears!.Value)
                     .ToDateTime(TimeOnly.MinValue),
 
                 AwardDescription = string.IsNullOrWhiteSpace(rung.Name)
@@ -407,16 +411,16 @@ public class LongServiceSweepService : ILongServiceSweepService
         return dto;
     }
 
-    private static LongServiceCandidateDto ToDto(LongServiceCandidate c) => new()
+    private static LongServiceCandidateDto ToDto(LongServiceVerdict v) => new()
     {
-        EmployeeId = c.EmployeeId,
-        EmployeeName = c.EmployeeName,
-        EmployeeNumber = c.EmployeeNumber,
-        YearsOfService = c.YearsOfService,
-        MilestoneYears = c.MilestoneYears,
-        MilestoneId = c.MilestoneId,
-        ServiceStartDate = c.ServiceStartDate?.ToDateTime(TimeOnly.MinValue),
-        Reason = c.Reason,
+        EmployeeId = v.EmployeeId,
+        EmployeeName = v.EmployeeName,
+        EmployeeNumber = v.EmployeeNumber,
+        YearsOfService = v.YearsOfService ?? 0,
+        MilestoneYears = v.MilestoneYears ?? 0,
+        MilestoneId = v.MilestoneId ?? Guid.Empty,
+        ServiceStartDate = v.ServiceStartDate?.ToDateTime(TimeOnly.MinValue),
+        Reason = v.Reason,
     };
 }
 

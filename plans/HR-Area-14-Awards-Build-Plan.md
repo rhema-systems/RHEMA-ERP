@@ -325,7 +325,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 7 | Automatic selection | ✅ **Done.** AWD-08 — candidates derived from performance and targets. *(AWD-07 was already delivered by slices 2–4; its remaining half is conferring, in slice 8.)* |
 | 8 | The award is conferred | ✅ **Done.** Nomination → `EmployeeAward`, direct conferral (AWD-07), budget reserve/spend, presentation, and the money events registered (D-7). |
 | 9 | Long service | ✅ **Done.** The ladder as data (AWD-14, D-8), the disciplinary exemption as a per-award switch (AWD-15), and the sweep — preview and run sharing one calculation. |
-| 10 | FR-HR-113 | The eligibility report, on the catalogue+service+seeder pattern used by procurement and inventory. |
+| 10 | FR-HR-113 | ✅ **Done.** The long-service eligibility report, on the catalogue + provider + seeder + **migration** pattern, reading the sweep's own calculation. |
 | 11 | Screens | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards`. UI-payload probe mandatory. **Also D-9: page the eligibility endpoint.** |
 | 12 | Content audit | Every GET asserted for content, not status. **Run it twice.** |
 
@@ -1096,3 +1096,67 @@ qualified" and the two call for opposite responses. The unique index on `(AwardT
 filtered on `IsDeleted`, applying area 13's lesson rather than relearning it. And the award copies
 the rung's value rather than referencing it, so repricing a rung cannot restate an award already
 conferred.
+
+---
+
+### Slice 10 — FR-HR-113, the eligibility report. 2026-08-21, **65/65**, run twice. Migration `TDC0703HrAwardsReportCatalogue`.
+
+Harness: `run-slice10.mjs`. Slice 9 re-run green at 91 through the restructure below. Area total:
+**32 / 49 / 51 / 6 / 44 / 49 / 42 / 27 / 35 / 91 / 65 = 491 assertions.**
+
+**The evaluator was restructured so the report cannot disagree with the button.** It now returns
+**one verdict per employee** — `Eligible`, `Exempt`, `AlreadyGranted`, `NotYetAtMilestone`,
+`ServiceUnknown` — and three surfaces project it: the sweep preview, the sweep run, and this report.
+Computing the qualified set in one place and the report's rows in another would drift, and when it
+drifts **it is the report that gets believed**. The assertion that holds this is not the matching
+counts but the matching *names*: two lists of equal length can still name different people.
+
+**The report shows the people it cannot answer for.** Measured 2026-08-21, 3,476 of 5,579 employees
+have no employment date. A report of only the eligible would be a handful of rows and would read as
+a statement about TDC's staff when it is a statement about TDC's employee records. `AlreadyGranted`
+and `NotYetAtMilestone` are kept apart for the same reason: collapsed into "not eligible", a
+twelve-year veteran and a new joiner become indistinguishable on the page.
+
+**⚠ Defect 19 — the report was built, registered, executable, and unreachable.** The catalogue was
+right, the provider was right, the seeder was wired — and `HrAwardsReportSeeder` only runs under
+`seed-db` and at tenant provisioning, neither of which happens to a tenant that already exists. The
+harness's first assertion caught it: **the report was not listed for the tenant.** The missing piece
+was a fourth part of the pattern I had not read for — procurement and inventory each carry a
+hand-written migration that inserts the rows for existing tenants. Third instance in this area of
+*declared, implemented, called by nothing*, and the first one caught by an assertion written before
+the run rather than by a symptom afterwards.
+
+**⚠ Defect 20 — the refusals would have come back as a canned 500.** `ReportsController.ExecuteReport`
+catches `InvalidOperationException` as a 400 carrying its text and **everything else as a 500 with a
+fixed string**. `AwardsWorkflowException` derives from `Exception`, so both of the report's
+refusals — *"which of these long-service awards did you mean?"* and *"no such award type"* — would
+have reached the reader as *"An error occurred while executing the report."* The area's own exception
+mapping only applies when an awards controller is the one in the path. Found by reading the calling
+code before running, not by a failure. **The thing that decides your status code is not always the
+thing you wrote** — the same lesson as slice 9's launch profile, in a different costume.
+
+They are also now **400 rather than 404**, which is the truer reading: the resource this request
+addresses is the *report*, and it was found; an award id inside `parameters` is data, so a bad one is
+a malformed request.
+
+**⚠ A field I renamed rather than shipped.** Projecting verdicts, I repointed
+`DisciplinaryRecordsConsidered` at the count of exempt verdicts — which made the name false and
+duplicated `disqualified.length`. It is now `DisciplinaryCheckApplied`, a genuinely distinct fact:
+*"the rule ran and exempted nobody"* and *"the rule is switched off"* look identical on screen and
+mean opposite things.
+
+**Deliberate design notes.** The provider lives in the **API project**, unlike its Core-resident
+siblings, because its gate is the ASP.NET `AwardsReadPolicy` — evaluated by two OR-ed handlers — and
+re-deriving that from Core would be a third implementation of a rule that already has two, one that
+would refuse a reader granted awards permissions through a custom role. The report carries, by
+implication, who has a disciplinary record, so the gate has to be the real one. Paging is **in
+memory**: completed-years arithmetic is C#, and pushing it into SQL would mean a second version of
+the very calculation this report exists to share. With no award named and several long-service
+awards it **refuses and names them**, because picking one would look authoritative while answering a
+question nobody asked. And the statistics are computed over **every** verdict rather than the
+filtered page, so a reader who has filtered to "Eligible" still sees how many people could not be
+measured at all.
+
+**One harness lesson.** The first draft looked for fixtures in page one. `pageSize` caps at 1000, the
+tenant has ~5,600 serving employees, and `ServiceUnknown` sorts **last on purpose** — so the
+"missing" row was the report being right and the harness reading it wrong. Fixture lookups now page.

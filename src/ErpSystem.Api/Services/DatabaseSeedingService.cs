@@ -45,6 +45,7 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
+        private readonly HrAwardsReportSeeder? _hrAwardsReportSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
@@ -100,6 +101,7 @@ namespace ErpSystem.Web.Services
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
             ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
+            HrAwardsReportSeeder? hrAwardsReportSeeder = null,
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null)
         {
@@ -112,6 +114,7 @@ namespace ErpSystem.Web.Services
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
+            _hrAwardsReportSeeder = hrAwardsReportSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
@@ -198,6 +201,12 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC inventory statutory report catalogue is seeded...");
                     await _inventoryStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_hrAwardsReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring HR awards system reports (FR-HR-113) are seeded...");
+                    await _hrAwardsReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)

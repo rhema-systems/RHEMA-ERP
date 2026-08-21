@@ -310,7 +310,10 @@ it is overturned.
 | Employees with 15, 20 or 25 years | **0** |
 
 The first is the blocker: a long-service report cannot see 62% of staff, because they have no start
-date to measure from. The second means the feature is being built and tested against fixtures — it
+date to measure from. ✅ **The report built for FR-HR-113 does not hide this** — employees with no
+employment date appear on it with a standing of *Service unknown* and a plain reason, and the totals
+report how many there are. That makes the data gap visible to whoever can fix it, but it does not
+close it: those employees cannot be assessed for an award until somebody supplies their start date. The second means the feature is being built and tested against fixtures — it
 has almost no live subjects to act on, which is expected for a young employee record set but should
 not be mistaken for the engine failing. Both are data-migration dependencies, not development ones.
 

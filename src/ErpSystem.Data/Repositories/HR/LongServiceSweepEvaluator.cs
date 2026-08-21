@@ -10,9 +10,14 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Data.Repositories.HR;
 
 /// <summary>
-/// Finds who has reached a long-service milestone, and who a disciplinary record disqualifies.
+/// Judges every employee against a long-service ladder, once.
 /// </summary>
 /// <remarks>
+/// <para><b>One calculation, three readers.</b> The sweep preview, the sweep run and the FR-HR-113
+/// eligibility report all read this, each projecting the slice it needs. Computing the qualified set
+/// here and the report's rows somewhere else would let the two drift, and a report that listed
+/// somebody the button then refused to award would be worse than no report at all.</para>
+///
 /// <para><b>Service is counted in completed years</b> via <c>HrPolicyCalculations.CompletedYears</c>
 /// — the single implementation area 14 slice 3b consolidated. The arithmetic matters more here than
 /// anywhere else in the module: a milestone is a threshold, and the old calendar-year subtraction
@@ -21,12 +26,9 @@ namespace ErpSystem.Data.Repositories.HR;
 /// <para>⚠ <b>Measured 2026-08-21, and this shapes what a live run can show.</b> Of 5,579 employees,
 /// <b>2,103</b> carry a <c>DateEmployed</c> at all, exactly <b>one</b> has ten completed years, and
 /// <b>none</b> has fifteen. A live sweep therefore finds at most one person. That is a fact about
-/// TDC's employee records, not about this engine, and the result reports how many employees it could
-/// even measure so the two cannot be confused.</para>
-///
-/// <para><b>An employee with no employment date is reported, not skipped.</b> They are neither
-/// qualified nor disqualified — the system cannot tell — and 62% of the workforce is in that state.
-/// Silently omitting them would make a sweep of 5,579 people look like a sweep of 2,103.</para>
+/// TDC's employee records, not about this engine, which is why every employee gets a verdict —
+/// including <see cref="LongServiceStanding.ServiceUnknown"/> — rather than being dropped from a
+/// list whose length would then describe the data and read as describing the staff.</para>
 /// </remarks>
 public class LongServiceSweepEvaluator : ILongServiceSweepEvaluator
 {
@@ -34,28 +36,23 @@ public class LongServiceSweepEvaluator : ILongServiceSweepEvaluator
 
     public LongServiceSweepEvaluator(ApplicationDbContext context) => _context = context;
 
-    public async Task<LongServiceSweepResult> EvaluateAsync(
+    public async Task<IReadOnlyList<LongServiceVerdict>> EvaluateAsync(
         AwardType awardType, IReadOnlyList<LongServiceMilestone> ladder, Guid tenantId, DateTime asOf)
     {
-        var result = new LongServiceSweepResult { AsOf = asOf };
-
-        if (ladder.Count == 0)
-            return result;
-
-        var employees = await _context.Set<Employee>()
-            .Where(e => e.TenantId == tenantId && !e.IsDeleted && e.TerminationDate == null)
-            .Select(e => new
+        var employees = await (
+            from e in _context.Set<Employee>()
+            where e.TenantId == tenantId && !e.IsDeleted && e.TerminationDate == null
+            join d in _context.Set<Department>() on e.DepartmentId equals d.Id into dj
+            from d in dj.DefaultIfEmpty()
+            select new
             {
                 e.Id,
                 e.FirstName,
                 e.LastName,
                 e.EmployeeNumber,
                 e.DateEmployed,
-            })
-            .ToListAsync();
-
-        result.EmployeesConsidered = employees.Count;
-        result.WithoutEmploymentDate = employees.Count(e => e.DateEmployed == null);
+                DepartmentName = d == null ? null : d.Name,
+            }).ToListAsync();
 
         // The highest rung each employee has already been granted, so a second run does not grant a
         // second award.
@@ -79,62 +76,104 @@ public class LongServiceSweepEvaluator : ILongServiceSweepEvaluator
             .GroupBy(a => a.EmployeeId)
             .ToDictionary(g => g.Key, g => g.Max(a => a.YearsOfService));
 
-        var disqualified = awardType.DisqualifyOnDisciplinaryRecord
+        var exempt = awardType.DisqualifyOnDisciplinaryRecord
             ? await LoadDisqualifiedAsync(tenantId, asOf, awardType.DisqualifyingDisciplineMonths)
             : new HashSet<Guid>();
 
-        result.DisciplinaryRecordsConsidered = disqualified.Count;
-
         var rungs = ladder.Where(m => m.IsActive).OrderBy(m => m.Years).ToList();
+        var asOfDate = DateOnly.FromDateTime(asOf);
+        var verdicts = new List<LongServiceVerdict>(employees.Count);
 
         foreach (var employee in employees)
         {
-            if (employee.DateEmployed == null) continue;
-
-            var years = HrPolicyCalculations.CompletedYears(employee.DateEmployed, DateOnly.FromDateTime(asOf)) ?? 0;
-
-            // The highest rung reached that stands above everything this employee already holds.
-            // Sweeping every rung at once would hand somebody who joined twenty years ago four
-            // awards in one run; sweeping the ones below would hand them out one per run afterwards.
-            var ceiling = highestGranted.TryGetValue(employee.Id, out var held) ? held : 0;
-
-            var rung = rungs
-                .Where(m => years >= m.Years && m.Years > ceiling)
-                .OrderByDescending(m => m.Years)
-                .FirstOrDefault();
-
-            if (rung == null) continue;
-
             var name = $"{employee.FirstName} {employee.LastName}".Trim();
+            var held = highestGranted.TryGetValue(employee.Id, out var h) ? h : (int?)null;
 
-            if (disqualified.Contains(employee.Id))
+            if (employee.DateEmployed == null)
             {
-                result.Disqualified.Add(new LongServiceCandidate
+                verdicts.Add(new LongServiceVerdict
                 {
                     EmployeeId = employee.Id,
                     EmployeeName = name,
                     EmployeeNumber = employee.EmployeeNumber,
-                    YearsOfService = years,
-                    MilestoneYears = rung.Years,
-                    MilestoneId = rung.Id,
-                    Reason = "A disciplinary record disqualifies this employee from the award.",
+                    DepartmentName = employee.DepartmentName,
+                    Standing = LongServiceStanding.ServiceUnknown,
+                    HighestGrantedYears = held,
+                    Reason = "No employment date is on record, so this employee's service cannot be measured.",
                 });
                 continue;
             }
 
-            result.Qualified.Add(new LongServiceCandidate
+            var years = HrPolicyCalculations.CompletedYears(employee.DateEmployed, asOfDate) ?? 0;
+
+            // The highest rung reached that stands above everything this employee already holds.
+            // Sweeping every rung at once would hand somebody who joined twenty years ago four
+            // awards in one run; sweeping the ones below would hand them out one per run afterwards.
+            var rung = rungs
+                .Where(m => years >= m.Years && m.Years > (held ?? 0))
+                .OrderByDescending(m => m.Years)
+                .FirstOrDefault();
+
+            if (rung == null)
+            {
+                // Two very different situations, and a report has to tell them apart: somebody who
+                // has not served long enough yet, and somebody who already holds everything their
+                // service has earned. Collapsing both into "not eligible" would make a thirty-year
+                // veteran indistinguishable from a new joiner.
+                verdicts.Add(new LongServiceVerdict
+                {
+                    EmployeeId = employee.Id,
+                    EmployeeName = name,
+                    EmployeeNumber = employee.EmployeeNumber,
+                    DepartmentName = employee.DepartmentName,
+                    ServiceStartDate = employee.DateEmployed,
+                    YearsOfService = years,
+                    HighestGrantedYears = held,
+                    MilestoneYears = held,
+                    Standing = held.HasValue
+                        ? LongServiceStanding.AlreadyGranted
+                        : LongServiceStanding.NotYetAtMilestone,
+                    Reason = held.HasValue
+                        ? $"Already holds the {held}-year award, the highest rung this service has reached."
+                        : NextRungMessage(rungs, years),
+                });
+                continue;
+            }
+
+            var isExempt = exempt.Contains(employee.Id);
+
+            verdicts.Add(new LongServiceVerdict
             {
                 EmployeeId = employee.Id,
                 EmployeeName = name,
                 EmployeeNumber = employee.EmployeeNumber,
+                DepartmentName = employee.DepartmentName,
+                ServiceStartDate = employee.DateEmployed,
                 YearsOfService = years,
                 MilestoneYears = rung.Years,
                 MilestoneId = rung.Id,
-                ServiceStartDate = employee.DateEmployed.Value,
+                MilestoneName = rung.Name,
+                MonetaryAmount = rung.MonetaryAmount,
+                LeaveDaysBonus = rung.LeaveDaysBonus,
+                HighestGrantedYears = held,
+                Standing = isExempt ? LongServiceStanding.Exempt : LongServiceStanding.Eligible,
+                Reason = isExempt ? "A disciplinary record exempts this employee from the award." : null,
             });
         }
 
-        return result;
+        return verdicts;
+    }
+
+    /// <summary>
+    /// How far short of the next rung somebody is — a useful thing for a report to say, and a
+    /// pointless thing for it to make the reader work out.
+    /// </summary>
+    private static string NextRungMessage(IReadOnlyList<LongServiceMilestone> rungs, int years)
+    {
+        var next = rungs.FirstOrDefault(m => m.Years > years);
+        return next == null
+            ? "No milestone applies to this employee's length of service."
+            : $"{next.Years - years} year(s) short of the {next.Years}-year milestone.";
     }
 
     /// <summary>

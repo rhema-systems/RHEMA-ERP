@@ -348,60 +348,79 @@ public interface ILongServiceMilestoneRepository : IGenericRepository<LongServic
 }
 
 /// <summary>
-/// Finds who has reached a long-service milestone, and who a disciplinary record disqualifies.
+/// Judges every employee against a long-service ladder, once.
 /// </summary>
 /// <remarks>
 /// <para>This is the second half of AWD-14 — the ladder says what the milestones are, and this says
-/// who has arrived at one. It is separated from the service that writes the awards for the reason
-/// every sweep in this module is: <b>the preview and the run must be the same calculation.</b> A
-/// preview computed one way and a run computed another is how a screen comes to promise something
-/// the button then does not do.</para>
+/// where each employee stands against them.</para>
+///
+/// <para><b>It returns one verdict per employee rather than the qualified set, and that is the whole
+/// point.</b> Three surfaces read this: the sweep preview, the sweep run, and the FR-HR-113
+/// eligibility report. Each needs a different slice — the sweep wants who to grant, the report wants
+/// everybody with a reason — and if each computed its own slice they would drift. A report that
+/// listed somebody the button then refused to award would be worse than no report. So the
+/// calculation happens once and the callers project.</para>
 /// </remarks>
 public interface ILongServiceSweepEvaluator
 {
-    Task<LongServiceSweepResult> EvaluateAsync(
+    Task<IReadOnlyList<LongServiceVerdict>> EvaluateAsync(
         AwardType awardType, IReadOnlyList<LongServiceMilestone> ladder, Guid tenantId, DateTime asOf);
 }
 
-/// <summary>Who reached a rung, who is disqualified, and how much the sweep could even see.</summary>
-/// <remarks>
-/// <para><b>The counts are not decoration.</b> Measured 2026-08-21, only 2,103 of 5,579 employees
-/// carry a <c>DateEmployed</c> at all. A sweep that returned "1 qualified" without saying it could
-/// only measure 38% of the workforce would be reporting a result about the data as though it were a
-/// result about the staff.</para>
-/// </remarks>
-public sealed class LongServiceSweepResult
+/// <summary>Where one employee stands against a long-service ladder.</summary>
+public enum LongServiceStanding
 {
-    public DateTime AsOf { get; init; }
+    /// <summary>Has reached a rung not yet granted, and nothing exempts them.</summary>
+    Eligible = 1,
 
-    /// <summary>Active, non-terminated employees the sweep looked at.</summary>
-    public int EmployeesConsidered { get; set; }
+    /// <summary>Has reached a rung, but a disciplinary record exempts them (AWD-15).</summary>
+    Exempt = 2,
 
-    /// <summary>Of those, how many have no employment date — neither qualified nor disqualified.</summary>
-    public int WithoutEmploymentDate { get; set; }
+    /// <summary>Has not served long enough for the lowest rung.</summary>
+    NotYetAtMilestone = 3,
 
-    /// <summary>Employees carrying a disciplinary record that counts against them.</summary>
-    public int DisciplinaryRecordsConsidered { get; set; }
+    /// <summary>Already holds the highest rung their service has reached.</summary>
+    AlreadyGranted = 4,
 
-    public List<LongServiceCandidate> Qualified { get; init; } = new();
-    public List<LongServiceCandidate> Disqualified { get; init; } = new();
+    /// <summary>
+    /// No employment date on record, so nothing can be computed.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not a rounding error. Measured 2026-08-21, <b>3,476 of 5,579</b> employees are in this
+    /// state. They are reported rather than dropped: a sweep that silently omitted them would
+    /// present a result about the <i>data</i> as though it were a result about the <i>staff</i>.
+    /// </remarks>
+    ServiceUnknown = 5,
 }
 
-/// <summary>One employee at one rung.</summary>
-public sealed class LongServiceCandidate
+/// <summary>One employee, one verdict, and the rung it is about.</summary>
+public sealed class LongServiceVerdict
 {
     public Guid EmployeeId { get; init; }
     public string EmployeeName { get; init; } = string.Empty;
     public string? EmployeeNumber { get; init; }
+    public string? DepartmentName { get; init; }
 
-    /// <summary>Completed years actually served, which can exceed the rung reached.</summary>
-    public int YearsOfService { get; init; }
-
-    public int MilestoneYears { get; init; }
-    public Guid MilestoneId { get; init; }
     public DateOnly? ServiceStartDate { get; init; }
 
-    /// <summary>Empty when qualified; why not when disqualified.</summary>
+    /// <summary>Completed years actually served. Null when there is no employment date.</summary>
+    public int? YearsOfService { get; init; }
+
+    public LongServiceStanding Standing { get; init; }
+
+    /// <summary>The rung this verdict is about — the one reachable, or the one already held.</summary>
+    public int? MilestoneYears { get; init; }
+    public Guid? MilestoneId { get; init; }
+    public string? MilestoneName { get; init; }
+
+    /// <summary>What that rung carries. Null is an unanswered question, not a value of zero.</summary>
+    public decimal? MonetaryAmount { get; init; }
+    public int? LeaveDaysBonus { get; init; }
+
+    /// <summary>The highest rung already granted, if any.</summary>
+    public int? HighestGrantedYears { get; init; }
+
+    /// <summary>Why, in a sentence, for anything other than plain eligibility.</summary>
     public string? Reason { get; init; }
 }
 
