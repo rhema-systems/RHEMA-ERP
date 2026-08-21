@@ -381,6 +381,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Where(ea => ea.TenantId == tenantId && !ea.IsDeleted)
             .OrderByDescending(ea => ea.AwardDate)
@@ -392,6 +393,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Include(ea => ea.PresentedBy)
             .Include(ea => ea.AwardNomination)
@@ -411,6 +413,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
     {
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Where(ea => ea.EmployeeId == employeeId && !ea.IsDeleted)
             .OrderByDescending(ea => ea.AwardDate)
@@ -432,6 +435,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.AwardLevelId == awardLevelId && !ea.IsDeleted)
             .OrderByDescending(ea => ea.AwardDate)
             .ToListAsync();
@@ -442,6 +446,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.AwardNominationId == nominationId && !ea.IsDeleted)
             .ToListAsync();
     }
@@ -451,6 +456,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Include(ea => ea.AwardLevel)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.AwardDate >= startDate 
@@ -465,6 +471,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.PresentationDate == null
                 && !ea.IsDeleted)
@@ -477,6 +484,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.MonetaryAmount > 0
                 && !ea.PaymentProcessed
@@ -490,6 +498,7 @@ public class EmployeeAwardRepository : GenericRepository<EmployeeAward>, IEmploy
         return await _context.Set<EmployeeAward>()
             .Include(ea => ea.Employee)
             .Include(ea => ea.AwardType)
+            .Include(ea => ea.AwardCycle)
             .Where(ea => ea.TenantId == tenantId 
                 && ea.LeaveDaysAwarded > 0
                 && !ea.LeaveProcessed
@@ -607,6 +616,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.Nominee)
             .Where(an => an.TenantId == tenantId && !an.IsDeleted
                 && an.CommitteeId != null && ids.Contains(an.CommitteeId.Value)
@@ -632,6 +642,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -645,6 +656,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -668,6 +680,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.NominatedBy)
             .Where(an => an.NomineeId == nomineeId && !an.IsDeleted)
@@ -680,6 +693,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Where(an => an.NominatedById == nominatedById && !an.IsDeleted)
@@ -703,6 +717,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -716,6 +731,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         var query = _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -737,6 +753,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -750,6 +767,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -763,6 +781,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
             .Include(an => an.Committee)
@@ -779,6 +798,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
             .Include(an => an.AwardCycle)
+            .Include(an => an.Award)
             .Include(an => an.Nominee)
             .Where(an => an.TenantId == tenantId 
                 && an.Status == AwardNominationStatus.Approved

@@ -541,6 +541,43 @@ public class UpdateAwardBudgetDto : UpdateDtoBase
 /// </summary>
 public class EmployeeAwardDto : BaseDto
 {
+    /// <summary>
+    /// The tier this award was conferred at, for an award that has levels.
+    /// </summary>
+    /// <remarks>
+    /// Slice 0 found that a levelled award could not be conferred AT a level, because the create DTO
+    /// carried none. Slice 8 added it — and then found the award could not report the level it had
+    /// been given either: the column was written, the read DTO had no such field and the mapper
+    /// carried nothing. A Gold award and a Bronze award were indistinguishable on every read.
+    /// </remarks>
+    public Guid? AwardLevelId { get; set; }
+    public string? AwardLevelName { get; set; }
+
+
+    /// <summary>
+    /// The nomination this award came from, where it came from one.
+    /// </summary>
+    /// <remarks>
+    /// The service has always written this column and no read surface exposed it, so the two ends of
+    /// the nomination-award link were both set in the database and invisible over the API — nothing
+    /// could follow an award back to the case made for it. The third instance of this shape in the
+    /// area, after the committee assignment and the award's own cycle.
+    /// </remarks>
+    public Guid? AwardNominationId { get; set; }
+    public string? NominationNumber { get; set; }
+
+
+    /// <summary>
+    /// The run this award was conferred in, where there was one.
+    /// </summary>
+    /// <remarks>
+    /// Added with the column in slice 8. Without it, conferring an award into a cycle produced a
+    /// response that did not mention the cycle — the same shape as the committee assignment in
+    /// slice 6, where the operation that set a field did not show the field it had set.
+    /// </remarks>
+    public Guid? AwardCycleId { get; set; }
+    public string? AwardCycleName { get; set; }
+
     public Guid TenantId { get; set; }
     public string AwardNumber { get; set; } = string.Empty;
     public Guid EmployeeId { get; set; }
@@ -584,6 +621,10 @@ public class EmployeeAwardDto : BaseDto
 /// </summary>
 public class EmployeeAwardSummaryDto
 {
+    /// <summary>The tier, so a register can tell a Gold award from a Bronze one.</summary>
+    public Guid? AwardLevelId { get; set; }
+    public string? AwardLevelName { get; set; }
+
     public Guid Id { get; set; }
     public string AwardNumber { get; set; } = string.Empty;
     public string EmployeeName { get; set; } = string.Empty;
@@ -613,6 +654,20 @@ public class CreateEmployeeAwardDto : CreateDtoBase
 
     [Required]
     public Guid AwardTypeId { get; set; }
+
+    /// <summary>
+    /// The tier being conferred, for an award that has levels.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Added in slice 8. Slice 0 found that <c>AwardType.HasLevels</c>, <c>AwardLevel</c> and
+    /// <c>EmployeeAward.AwardLevelId</c> all existed while this DTO carried no level at all — so a
+    /// levelled award could be conferred only at no level, and the created award came back with
+    /// <c>awardLevelId: null</c>. The level could then be set by a later edit, if anyone noticed.
+    /// </remarks>
+    public Guid? AwardLevelId { get; set; }
+
+    /// <summary>The cycle this award belongs to, where it was conferred through one.</summary>
+    public Guid? AwardCycleId { get; set; }
 
     [Required]
     public DateTime AwardDate { get; set; }
@@ -704,6 +759,22 @@ public class ProcessAwardPaymentDto
     [Required]
     [MaxLength(100)]
     public string PaymentReference { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What was actually paid, when it differs from the amount the award carries.
+    /// </summary>
+    /// <remarks>
+    /// Optional: leave it out and the award's own <c>MonetaryAmount</c> is taken as paid. It exists
+    /// because the sum that leaves the bank is the sum that should consume the budget, and the two
+    /// can differ — a rounding, a partial payment, a currency conversion. The award's
+    /// <c>MonetaryAmount</c> is what was promised; this is what was paid.
+    ///
+    /// ⚠ This is a RECORD, not a posting. Per the HR-Finance split it does not touch the general
+    /// ledger; the amount is registered in docs/HR-FINANCE-INTEGRATION-BACKLOG.md for the sweep that
+    /// runs after the module.
+    /// </remarks>
+    [Range(0, double.MaxValue)]
+    public decimal? AmountPaid { get; set; }
 }
 
 /// <summary>

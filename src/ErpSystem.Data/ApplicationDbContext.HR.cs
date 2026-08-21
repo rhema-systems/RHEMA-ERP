@@ -4423,6 +4423,16 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<EmployeeAward>(entity =>
+        {
+            entity.HasIndex(x => x.AwardCycleId);
+
+            entity.HasOne(x => x.AwardCycle)
+                .WithMany()
+                .HasForeignKey(x => x.AwardCycleId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<AwardVote>(entity =>
         {
             entity.HasIndex(x => x.AwardCycleId);

@@ -579,17 +579,23 @@ public class EmployeeAwardService : IEmployeeAwardService
     private readonly IEmployeeAwardRepository _awardRepo;
     private readonly IAwardNominationRepository _nominationRepo;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IAwardTypeRepository _awardTypeRepo;
+    private readonly IAwardBudgetRepository _budgetRepo;
     private readonly IUnitOfWork _unitOfWork;
 
     public EmployeeAwardService(
         IEmployeeAwardRepository awardRepo,
         IAwardNominationRepository nominationRepo,
         ICurrentUserProvider currentUserProvider,
+        IAwardTypeRepository awardTypeRepo,
+        IAwardBudgetRepository budgetRepo,
         IUnitOfWork unitOfWork)
     {
         _awardRepo = awardRepo;
         _nominationRepo = nominationRepo;
         _currentUserProvider = currentUserProvider;
+        _awardTypeRepo = awardTypeRepo;
+        _budgetRepo = budgetRepo;
         _unitOfWork = unitOfWork;
     }
 
@@ -618,6 +624,64 @@ public class EmployeeAwardService : IEmployeeAwardService
         if (entity == null || entity.TenantId != GetTenantId())
             throw AwardsWorkflowException.NotFound($"EmployeeAward {id} not found.");
         return entity;
+    }
+
+
+    /// <summary>
+    /// Puts the award's value against its budget for the year.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ Neither figure was ever maintained before slice 8.</b>
+    /// <c>GetAvailableBudgetAsync</c> computes <c>BudgetAmount - SpentAmount - ReservedAmount</c>,
+    /// and nothing anywhere incremented either — so "available" always equalled the whole budget
+    /// however many awards had been conferred and paid. Slice 2's own harness asserted that an
+    /// untouched budget had its full amount available, which passed trivially and would have passed
+    /// just as well after a hundred payouts. A budget that never depletes is worse than no budget:
+    /// it looks like a control and is not one.</para>
+    ///
+    /// <para><b>Reserved on conferral, spent on payment.</b> That is what the two columns are for.
+    /// An award decided but not yet paid is a commitment against the budget, and treating it as
+    /// nothing until the money moves would let a year's awards be over-committed by exactly the
+    /// amount awaiting payment.</para>
+    ///
+    /// <para><b>This is bookkeeping inside the awards module, not accounting.</b> Per the standing
+    /// HR-Finance split it posts nothing to the general ledger; the money events are registered in
+    /// <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep that follows the module. A budget
+    /// figure the awards desk maintains for itself is not a parallel ledger.</para>
+    ///
+    /// <para>An award with no budget for its year is <b>not</b> refused. TDC has not said budgets are
+    /// mandatory, and refusing to recognise an award somebody has already been told they won would
+    /// be inventing a control. The absence is simply recorded as nothing to draw against.</para>
+    /// </remarks>
+    private async Task ReserveAgainstBudgetAsync(EmployeeAward award, Guid userId)
+    {
+        if (award.MonetaryAmount is not > 0) return;
+
+        var budget = await _budgetRepo.GetByYearAsync(award.AwardTypeId, award.AwardDate.Year);
+        if (budget == null) return;
+
+        budget.ReservedAmount += award.MonetaryAmount.Value;
+        budget.UpdatedAt = DateTime.UtcNow;
+        budget.UpdatedBy = userId.ToString();
+        await _budgetRepo.UpdateAsync(budget);
+    }
+
+    /// <summary>Moves a reservation into spend when the money actually leaves.</summary>
+    private async Task SpendAgainstBudgetAsync(EmployeeAward award, decimal paid, Guid userId)
+    {
+        var budget = await _budgetRepo.GetByYearAsync(award.AwardTypeId, award.AwardDate.Year);
+        if (budget == null) return;
+
+        // Release what this award reserved, then record what was actually paid. The two can differ,
+        // which is why ProcessAwardPaymentDto carries an amount: a reservation is a promise and a
+        // payment is a fact, and releasing the promise rather than the fact keeps the budget honest
+        // when they disagree.
+        var reserved = award.MonetaryAmount ?? 0m;
+        budget.ReservedAmount = Math.Max(0m, budget.ReservedAmount - reserved);
+        budget.SpentAmount += paid;
+        budget.UpdatedAt = DateTime.UtcNow;
+        budget.UpdatedBy = userId.ToString();
+        await _budgetRepo.UpdateAsync(budget);
     }
 
     public async Task<EmployeeAwardDto?> GetByIdAsync(Guid id)
@@ -735,28 +799,109 @@ public class EmployeeAwardService : IEmployeeAwardService
         return awards.ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// Confers an award directly, with no nomination behind it.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is AWD-07 - <i>"some too will have to be a direct selection by management"</i> -
+    /// and it is the only route that skips nomination, voting and scoring entirely. It is therefore
+    /// restricted to awards whose candidates come from <c>ManagementDirect</c>: allowing it for a
+    /// voted award would let somebody hand out the prize while the ballot was still open, and the
+    /// vote would decide nothing.</para>
+    /// </remarks>
     public async Task<EmployeeAwardDto> CreateAsync(Guid tenantId, Guid userId, CreateEmployeeAwardDto dto)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        var awardType = await _awardTypeRepo.GetByIdAsync(dto.AwardTypeId);
+        if (awardType == null || awardType.TenantId != tenantId)
+            throw AwardsWorkflowException.NotFound($"AwardType {dto.AwardTypeId} not found.");
+
+        if (awardType.NominationSource != AwardNominationSource.ManagementDirect)
+            throw AwardsWorkflowException.InvalidState(
+                $"'{awardType.Name}' is decided by {awardType.WinnerDecision} on candidates from " +
+                $"{awardType.NominationSource}, so it cannot be conferred directly. Confer it from " +
+                "the nomination that won.");
+
+        if (awardType.HasLevels && dto.AwardLevelId == null)
+            throw AwardsWorkflowException.Invalid(
+                $"'{awardType.Name}' has levels, so the award must say which one is being conferred.");
+
         var awardNumber = $"AWD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
         var entity = dto.ToEntity(tenantId, userId, awardNumber);
+        entity.AwardCycleId = dto.AwardCycleId;
         await _awardRepo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        await ReserveAgainstBudgetAsync(entity, userId);
         await _unitOfWork.SaveChangesAsync();
 
         var created = await _awardRepo.GetWithDetailsAsync(entity.Id);
         return created!.ToDto();
     }
 
+    /// <summary>
+    /// Turns a nomination into the award it won.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ This method had no endpoint before slice 8.</b> Declared in the interface,
+    /// implemented here, and called from nowhere — the same shape as
+    /// <c>AssignToCommitteeAsync</c> in slice 6. It is the only path from a decision to an award, so
+    /// the thing the whole area builds towards could not be reached.</para>
+    ///
+    /// <para>It also had no rules. Any nomination in any state could be turned into an award, more
+    /// than once, and the nomination was never told about the award it had produced.</para>
+    /// </remarks>
     public async Task<EmployeeAwardDto> CreateFromNominationAsync(Guid nominationId, Guid userId, CreateEmployeeAwardFromNominationDto dto)
     {
         var tenantId = GetTenantId();
         var nomination = await _nominationRepo.GetWithDetailsAsync(nominationId);
-        if (nomination == null || nomination.TenantId != tenantId)
+        if (nomination == null || nomination.TenantId != tenantId || nomination.IsDeleted)
             throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
+
+        // 1. A nomination that never reached the desk cannot have won anything.
+        if (nomination.Status is AwardNominationStatus.Draft
+            or AwardNominationStatus.Rejected
+            or AwardNominationStatus.Withdrawn)
+        {
+            throw AwardsWorkflowException.InvalidState(
+                $"Nomination {nomination.NominationNumber} is {nomination.Status} and cannot be " +
+                "turned into an award.");
+        }
+
+        // 2. Once, not twice. Without this a nomination could mint an award on every call, and the
+        //    budget would be consumed each time.
+        if (nomination.EmployeeAwardId != null)
+            throw AwardsWorkflowException.Conflict(
+                $"Nomination {nomination.NominationNumber} has already produced an award.");
+
+        // 3. A team nomination names a team rather than a person, so EmployeeId has nothing to take.
+        //    The mapper resolved that to Guid.Empty, which is a foreign-key violation surfacing as a
+        //    500 - the same shape as this area's slice-0 nomination defect.
+        if (nomination.NomineeId == null)
+            throw AwardsWorkflowException.Invalid(
+                $"Nomination {nomination.NominationNumber} is a team nomination, which has no single " +
+                "recipient. Conferring a team award is not supported on this route.");
 
         var awardNumber = $"AWD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
         var entity = dto.ToEntity(nomination, tenantId, userId, awardNumber);
+        entity.AwardCycleId = nomination.AwardCycleId;
+
         await _awardRepo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        // 4. Close the loop in BOTH directions. EF treats these as two independent one-way
+        //    relationships - [ForeignKey] is declared on each side - so nothing in the model stops a
+        //    nomination pointing at one award while that award points at a different nomination.
+        //    Slice 1 recorded that and left it for this slice to hold together by hand.
+        nomination.EmployeeAwardId = entity.Id;
+        nomination.Status = AwardNominationStatus.Approved;
+        nomination.OutcomeDate = DateTime.UtcNow;
+        nomination.UpdatedAt = DateTime.UtcNow;
+        nomination.UpdatedBy = userId.ToString();
+        await _nominationRepo.UpdateAsync(nomination);
+
+        await ReserveAgainstBudgetAsync(entity, userId);
         await _unitOfWork.SaveChangesAsync();
 
         var created = await _awardRepo.GetWithDetailsAsync(entity.Id);
@@ -816,6 +961,12 @@ public class EmployeeAwardService : IEmployeeAwardService
     {
         var entity = await GetOwnedAsync(dto.AwardId);
 
+        if (entity.PaymentProcessed)
+            throw AwardsWorkflowException.Conflict(
+                $"Award {entity.AwardNumber} was already paid on {entity.PaymentDate:yyyy-MM-dd}.");
+
+        var paid = dto.AmountPaid ?? entity.MonetaryAmount ?? 0m;
+
         entity.PaymentProcessed = true;
         entity.PaymentDate = DateTime.UtcNow;
         entity.PaymentReference = dto.PaymentReference;
@@ -823,6 +974,7 @@ public class EmployeeAwardService : IEmployeeAwardService
         entity.UpdatedBy = userId.ToString();
 
         await _awardRepo.UpdateAsync(entity);
+        await SpendAgainstBudgetAsync(entity, paid, userId);
         await _unitOfWork.SaveChangesAsync();
     }
 

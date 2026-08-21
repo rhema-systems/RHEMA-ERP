@@ -219,3 +219,51 @@ payable is derived from the lines, in the settlement's own currency.
       `HR-OPEN-QUESTIONS-FOR-TDC.md`.
 - [ ] **Timing.** The settlement is finalised, then reviewed by Internal Audit (FR-HR-185), and only
       then paid. The accounting event is the release, not the finalisation — do not post on finalise.
+
+---
+
+## Area 14 — Staff Awards & Recognition (registered 2026-08-21)
+
+Status: ✅ recorded, awaiting the sweep.
+
+An award is money leaving the organisation for a named employee, so it belongs in this register. As
+everywhere else in HR, **nothing here posts to the general ledger** — the awards module records what
+was promised and what was paid, and the sweep decides what those become.
+
+| Money event | Where it is recorded | Nature |
+|---|---|---|
+| Award value at conferral | `EmployeeAwards.MonetaryAmount` | payable, committed |
+| Award payment | `EmployeeAwards.PaymentProcessed`, `PaymentDate`, `PaymentReference` | payable, settled |
+| Amount actually paid | `ProcessAwardPaymentDto.AmountPaid`, when it differs from the award value | payable, settled |
+| Long-service award value | `LongServiceAwards.MonetaryAmount`, `PaymentDate`, `PaymentReference` | payable |
+| Award level value | `AwardLevels.MonetaryAmount` — the tier's standard amount | reference |
+| Annual award budget | `AwardBudgets.BudgetAmount` | budget |
+| Committed but unpaid | `AwardBudgets.ReservedAmount` | budget consumption |
+| Paid | `AwardBudgets.SpentAmount` | budget consumption |
+
+### Two things the sweep needs to know about the budget figures
+
+**They are maintained by the awards module for itself, and they are new.** Before area 14 slice 8,
+`SpentAmount` and `ReservedAmount` existed and **nothing ever incremented either** — so
+`GetAvailableBudgetAsync`, which computes `BudgetAmount - SpentAmount - ReservedAmount`, always
+returned the whole budget however many awards had been paid. Slice 8 made conferral reserve and
+payment spend. A budget that never depletes is worse than no budget: it looks like a control and is
+not one.
+
+**This is bookkeeping, not accounting.** The figures are the awards desk's own view of what it has
+committed against a yearly allowance. They are deliberately *not* a parallel ledger, they post
+nothing, and the sweep should treat them as a source to reconcile against rather than as a set of
+entries to import.
+
+⚠ **An award whose year has no budget row is not refused.** TDC has not said budgets are mandatory,
+and refusing to record an award somebody has already been told they won would be inventing a
+control. Such an award simply draws against nothing — which means budget consumption is complete
+only for award types that have a budget for the year.
+
+### Leave as a reward
+
+`AwardType.LeaveDaysBonus`, `AwardLevel.LeaveDaysBonus` and `LongServiceAward.LeaveDaysBonus` grant
+**leave days** rather than money. `LongServiceAward` carries `LeaveProcessed`, `LeaveProcessedDate`
+and a `LeaveId` pointing into the leave module. Not a Finance item, but recorded here because it is
+the other thing an award can cost, and because `LeaveId` **has no writer** — the hook exists and
+nothing fills it. Flagged for area 14's own remaining slices, not for the sweep.

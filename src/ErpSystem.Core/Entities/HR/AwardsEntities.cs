@@ -552,6 +552,20 @@ public class EmployeeAward : TenantEntity
 	
 	public Guid? AwardNominationId { get; set; }
 
+    /// <summary>
+    /// The run this award was conferred in.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added in slice 8. An award conferred from a nomination can reach its cycle through the
+    /// nomination, but an award taken by direct management selection has no nomination at all - so
+    /// without this column a Chairman's Award for 2026 Q3 could not say which run it belonged to,
+    /// and a cycle could not list its own outcome.</para>
+    ///
+    /// <para>Nullable: awards conferred before cycles existed have none, and TDC may confer an
+    /// ad-hoc award outside any run.</para>
+    /// </remarks>
+    public Guid? AwardCycleId { get; set; }
+
     public DateTime AwardDate { get; set; }
 
     [MaxLength(2000)]
@@ -614,6 +628,9 @@ public class EmployeeAward : TenantEntity
 
     [ForeignKey(nameof(AwardNominationId))]
     public virtual AwardNomination? AwardNomination { get; set; }
+
+    [ForeignKey(nameof(AwardCycleId))]
+    public virtual AwardCycle? AwardCycle { get; set; }
 
 	public virtual ICollection<TeamAwardRecipient> TeamRecipients { get; set; } = new List<TeamAwardRecipient>();
     public virtual ICollection<AwardAttachment> Attachments { get; set; } = new List<AwardAttachment>();

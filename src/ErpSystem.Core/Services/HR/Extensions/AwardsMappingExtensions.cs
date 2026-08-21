@@ -155,6 +155,12 @@ public static class AwardsMappingExtensions
     {
         return new EmployeeAwardDto
         {
+            AwardLevelId = entity.AwardLevelId,
+            AwardLevelName = entity.AwardLevel?.Name,
+            AwardNominationId = entity.AwardNominationId,
+            NominationNumber = entity.AwardNomination?.NominationNumber,
+            AwardCycleId = entity.AwardCycleId,
+            AwardCycleName = entity.AwardCycle?.Name,
             Id = entity.Id,
             TenantId = entity.TenantId,
             AwardNumber = entity.AwardNumber,
@@ -196,6 +202,8 @@ public static class AwardsMappingExtensions
     {
         return new EmployeeAwardSummaryDto
         {
+            AwardLevelId = entity.AwardLevelId,
+            AwardLevelName = entity.AwardLevel?.Name,
             Id = entity.Id,
             AwardNumber = entity.AwardNumber,
             EmployeeName = entity.Employee != null 
@@ -259,6 +267,7 @@ public static class AwardsMappingExtensions
             AwardNumber = awardNumber,
             EmployeeId = dto.EmployeeId,
             AwardTypeId = dto.AwardTypeId,
+            AwardLevelId = dto.AwardLevelId,
             AwardDate = dto.AwardDate,
             Citation = dto.Citation,
             MonetaryAmount = dto.MonetaryAmount,

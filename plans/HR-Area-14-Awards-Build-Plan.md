@@ -323,7 +323,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 5 | The vote | ✅ **Done.** AWD-04/05/06/10 — the ballot, the electorate, one-vote-per-voter, the window, and the tally withheld until close. |
 | 6 | Committee scoring | ✅ **Done.** D-2, AWD-12/13 — score replaces verdict, highest average wins, membership is the gate. |
 | 7 | Automatic selection | ✅ **Done.** AWD-08 — candidates derived from performance and targets. *(AWD-07 was already delivered by slices 2–4; its remaining half is conferring, in slice 8.)* |
-| 8 | The award is conferred | Nomination → `EmployeeAward`; presentation; certificate; the payment record (D-7). |
+| 8 | The award is conferred | ✅ **Done.** Nomination → `EmployeeAward`, direct conferral (AWD-07), budget reserve/spend, presentation, and the money events registered (D-7). |
 | 9 | Long service | AWD-14 milestones, AWD-15 disqualification (D-6), the sweep — asserted empty on live data. |
 | 10 | FR-HR-113 | The eligibility report, on the catalogue+service+seeder pattern used by procurement and inventory. |
 | 11 | Screens | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards`. UI-payload probe mandatory. **Also D-9: page the eligibility endpoint.** |
@@ -933,3 +933,82 @@ indistinguishable, and a screen showing `0 candidates` would blame the rule for 
 
 It did in fact run on real data: **18 examined, 4 above a threshold of 80, 4 nominations created** —
 and a second run created none, attributing them to `alreadyNominated` instead.
+
+---
+
+### Slice 8 — the award is conferred. 2026-08-21, **35/35**, run twice. Migration `AddAwardCycleToEmployeeAward`.
+
+Harness: `run-slice8.mjs`. Whole area re-run: **32 / 49 / 51 / 6 / 44 / 49 / 42 / 27 / 35 = 335
+assertions**, all green.
+
+**⚠ Defect 14 — `CreateFromNominationAsync` had no endpoint.** Declared, implemented, called by
+nothing: the second unreachable service method this area has produced, after
+`AssignToCommitteeAsync` in slice 6. It is the **only** path from a decision to an award, so the
+thing the whole area builds towards had no route to it.
+
+It also had no rules whatsoever — any nomination in any state could be turned into an award,
+repeatedly. It now refuses drafts, rejected and withdrawn nominations; refuses a second award from
+the same nomination; and refuses a **team** nomination, whose `NomineeId ?? Guid.Empty` would have
+produced a foreign-key violation surfacing as a 500 — slice 0's defect A exactly.
+
+**⚠ Defect 15 — the budget never depleted.** `GetAvailableBudgetAsync` computes
+`BudgetAmount - SpentAmount - ReservedAmount` and **nothing incremented either figure**, so
+"available" always equalled the whole budget however many awards had been conferred and paid. Slice
+2's own harness asserted that an untouched budget had its full amount available — true, and equally
+true after a hundred payouts. *A budget that never depletes is worse than no budget: it looks like a
+control and is not one.*
+
+Conferral now **reserves** and payment **spends**, which is what the two columns were always for. An
+award decided but unpaid is a real commitment; treating it as nothing until the money moves would let
+a year be over-committed by exactly the amount awaiting payment.
+
+The assertion that separates a correct implementation from a plausible one is the mismatched
+payment: **release the promise, record the fact.** An award promised 1,000 and paid 900 releases
+1,000 of reservation and books 900 of spend. Code that released what was *paid* would drift by 100
+every time the two differed, and every other budget assertion would still have passed.
+
+**AWD-07 completed.** Direct conferral is restricted to `ManagementDirect` awards; allowing it
+elsewhere would let somebody hand out the prize while the ballot was still open. Slice 0's defect C
+is closed with it: `CreateEmployeeAwardDto` now carries `AwardLevelId`, and a levelled award refuses
+to be conferred at no level.
+
+**Slice 1's EF note is discharged.** EF treats `AwardNomination.Award` and
+`EmployeeAward.AwardNomination` as two independent one-way relationships, so nothing in the model
+stops them disagreeing. The service now closes the loop by hand in both directions and the harness
+asserts both ends.
+
+**⚠⚠ The dominant defect class of this area, four more instances in one slice.** Every one is *a
+field that is written correctly and cannot be read back*:
+
+| | |
+|---|---|
+| `EmployeeAward.AwardCycleId` | the column did not exist; added, with the DTO and nine `Include`s |
+| `EmployeeAwardDto.AwardNominationId` | written by the service, absent from the read DTO — an award could not be traced to the case made for it |
+| `EmployeeAwardDto.AwardLevelId` | **a Gold award and a Bronze award were indistinguishable on every read** |
+| nomination → `AwardNumber` | the `Award` navigation was included on **1 of 12** nomination reads, so the number came back blank on eleven of them |
+
+Why this class survives review is worth stating: the write succeeds, the status code is right, the
+database is correct, and the only symptom is a field quietly missing from a payload. **Nothing
+fails.** It is the reason every assertion in this area checks content rather than status — and in
+this slice the two assertions that failed were worth more than the thirty-three that passed.
+
+**⚠ Two corrections I had to make to my own claims.**
+
+1. I wrote `entity.AwardCycleId` on `EmployeeAward` **without checking the entity had that
+   property** — the "field written from a name rather than read" mistake this area punishes, made by
+   the author of the fixes for it. The user caught it in the IDE before a build. The design survived
+   review; only the assumption did not. A scripted edit then put the new navigation on `AwardVote`
+   instead, because it matched the first `[ForeignKey(nameof(AwardNominationId))]` in the file.
+
+2. I reported defect 16 as "both ends of the nomination-award link are invisible". **Only one end
+   was.** `AwardNominationDto` already exposed it as `AwardId`/`AwardNumber` in its Outcome block,
+   already mapped — my harness checked a field name I had invented. Worse, adding my own
+   `EmployeeAwardId`/`AwardNumber` pair alongside would have created **two fields for one fact**,
+   precisely the shape this area has been removing since `AutoGenerateNominees`. The compiler caught
+   it only because the names collided; a slightly different name would have compiled and shipped.
+
+**D-7 honoured.** Every money event — award value, payment, amount paid, long-service value, level
+value, budget, reservation, spend — is registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, with a
+note that the budget figures are the awards desk's own bookkeeping to reconcile against rather than
+entries to import, and that `LongServiceAward.LeaveId` is a hook with no writer. Nothing posts to a
+ledger.

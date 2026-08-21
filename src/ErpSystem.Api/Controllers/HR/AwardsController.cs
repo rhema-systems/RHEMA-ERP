@@ -489,6 +489,31 @@ public class AwardsController : HrControllerBase
         return CreatedAtAction(nameof(GetEmployeeAward), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Turn the nomination that won into the award.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This endpoint did not exist before slice 8.</b>
+    /// <c>IEmployeeAwardService.CreateFromNominationAsync</c> was declared and implemented and
+    /// called by nothing - the second unreachable service method this area has turned up, after
+    /// <c>AssignToCommitteeAsync</c> in slice 6. It is the only path from a decision to an award, so
+    /// the thing the whole area builds towards had no route to it.</para>
+    ///
+    /// <para>Admin rather than Write: conferring ends the process and commits money, it is not
+    /// participation in it.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("nominations/{nominationId:guid}/confer")]
+    public async Task<ActionResult<EmployeeAwardDto>> ConferFromNomination(
+        Guid nominationId, [FromBody] CreateEmployeeAwardFromNominationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+
+        var created = await _employeeAwardService.CreateFromNominationAsync(nominationId, userId, dto);
+        return CreatedAtAction(nameof(GetEmployeeAward), new { id = created.Id }, created);
+    }
+
     [Authorize(Policy = HrPermissions.AwardsWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<EmployeeAwardDto>> UpdateEmployeeAward(
