@@ -75,6 +75,46 @@ public sealed class CreateFixedAssetOpeningBalanceBatchDto
     public IReadOnlyList<Guid> FixedAssetBookValueIds { get; set; } = Array.Empty<Guid>();
 }
 
+/// <summary>
+/// Creates a governed bank opening from a canonical Finance-owned bank master. The caller identifies
+/// the bank and amount only; Finance derives the mapped bank GL, functional currency, and migration-
+/// clearing offset so a free-form request cannot impersonate cash/bank opening evidence.
+/// </summary>
+public sealed class CreateBankAccountOpeningBalanceDto
+{
+    public string? BatchNumber { get; set; }
+    public string? SourceReference { get; set; }
+    public string? Description { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public string? IdempotencyKey { get; set; }
+    public Guid BankAccountId { get; set; }
+    public decimal Amount { get; set; }
+}
+
+/// <summary>
+/// Creates the Finance-owned residual trial-balance opening after canonical subledger/register
+/// openings have been prepared separately. The caller may select only the direct-posting accrued-
+/// expense and share-capital accounts. Finance derives the configured retained-earnings account and
+/// the balancing migration-clearing debit.
+/// </summary>
+public sealed class CreateResidualGlEquityOpeningBalanceDto
+{
+    public string? BatchNumber { get; set; }
+    public string? SourceReference { get; set; }
+    public string? Description { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public string? IdempotencyKey { get; set; }
+    public Guid AccruedExpensesAccountId { get; set; }
+    public decimal AccruedExpensesAmount { get; set; }
+    public Guid ShareCapitalAccountId { get; set; }
+    public decimal ShareCapitalAmount { get; set; }
+    public decimal RetainedEarningsAmount { get; set; }
+}
+
 public abstract class CreateSpecializedOpeningBalanceDto
 {
     public string? BatchNumber { get; set; }
@@ -123,6 +163,61 @@ public sealed class SpecializedOpeningBalanceOptionsDto
     public IReadOnlyList<OpeningBalancePartyOptionDto> Suppliers { get; set; } = Array.Empty<OpeningBalancePartyOptionDto>();
     public IReadOnlyList<OpeningBalancePartyOptionDto> Customers { get; set; } = Array.Empty<OpeningBalancePartyOptionDto>();
     public IReadOnlyList<OpeningBalanceWhtOptionDto> WithholdingTaxes { get; set; } = Array.Empty<OpeningBalanceWhtOptionDto>();
+}
+
+public sealed class GovernedOpeningBalanceOptionsDto
+{
+    public string FunctionalCurrencyCode { get; set; } = "GHS";
+    public IReadOnlyList<BankAccountOpeningOptionDto> BankAccounts { get; set; }
+        = Array.Empty<BankAccountOpeningOptionDto>();
+    public IReadOnlyList<ResidualOpeningAccountOptionDto> AccruedExpensesAccounts { get; set; }
+        = Array.Empty<ResidualOpeningAccountOptionDto>();
+    public IReadOnlyList<ResidualOpeningAccountOptionDto> ShareCapitalAccounts { get; set; }
+        = Array.Empty<ResidualOpeningAccountOptionDto>();
+    public GovernedOpeningDerivedAccountDto? MigrationClearingAccount { get; set; }
+    public GovernedOpeningDerivedAccountDto? RetainedEarningsAccount { get; set; }
+    public IReadOnlyList<string> Blockers { get; set; } = Array.Empty<string>();
+}
+
+public sealed class GovernedOpeningBalanceOptionsRequestDto
+{
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+}
+
+public sealed class BankAccountOpeningOptionDto
+{
+    public Guid Id { get; set; }
+    public string AccountNumber { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string BankName { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public Guid? GlAccountId { get; set; }
+    public string? GlAccountCode { get; set; }
+    public string? GlAccountName { get; set; }
+    public string PostingDirection { get; set; } = "Debit";
+    public bool IsEligible { get; set; }
+    public IReadOnlyList<string> Blockers { get; set; } = Array.Empty<string>();
+}
+
+public sealed class ResidualOpeningAccountOptionDto
+{
+    public Guid Id { get; set; }
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = string.Empty;
+    public string PostingDirection { get; set; } = "Credit";
+}
+
+public sealed class GovernedOpeningDerivedAccountDto
+{
+    public Guid AccountId { get; set; }
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string PostingDirection { get; set; } = string.Empty;
+    public bool IsEligible { get; set; }
+    public IReadOnlyList<string> Blockers { get; set; } = Array.Empty<string>();
 }
 
 public sealed class OpeningBalancePartyOptionDto
@@ -200,6 +295,9 @@ public sealed class OpeningBalanceBatchDto
     public string FiscalPeriodCode { get; set; } = string.Empty;
     public string BookClassification { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string SourceKind { get; set; } = "FreeForm";
+    public bool IsSystemGenerated { get; set; }
+    public bool IsEditable { get; set; }
     public string IdempotencyKey { get; set; } = string.Empty;
     public decimal TotalDebit { get; set; }
     public decimal TotalCredit { get; set; }
