@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using ErpSystem.Api.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -112,6 +113,51 @@ namespace ErpSystem.Api.Controllers.Finance
                     message = exception.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// Returns active, tenant-scoped canonical Supplier identities for AP selection controls.
+        /// Procurement owns the Supplier master; Finance exposes this read-only projection because
+        /// VendorInvoice and AP report filters must use Supplier.Id, never BusinessPartner.Id.
+        /// </summary>
+        [HttpGet("suppliers")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        [ProducesResponseType(typeof(IReadOnlyList<ApInvoiceSupplierDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierDto>>> GetSuppliers(
+            CancellationToken cancellationToken)
+        {
+            Guid tenantId;
+            try
+            {
+                tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            }
+            catch (InvalidOperationException)
+            {
+                return Forbid();
+            }
+
+            // This is intentionally a read-only Finance boundary. Supplier activation and master
+            // data remain Procurement-owned and are never repaired or mutated from this endpoint.
+            var suppliers = await _dbContext.Suppliers
+                .AsNoTracking()
+                .Where(supplier =>
+                    supplier.TenantId == tenantId &&
+                    !supplier.IsDeleted &&
+                    supplier.IsActive &&
+                    supplier.Status == "Active")
+                .OrderBy(supplier => supplier.Name)
+                .ThenBy(supplier => supplier.SupplierCode)
+                .Select(supplier => new ApInvoiceSupplierDto
+                {
+                    Id = supplier.Id,
+                    Code = supplier.SupplierCode,
+                    Name = supplier.Name,
+                    PaymentTermId = supplier.PaymentTermId
+                })
+                .ToListAsync(cancellationToken);
+
+            return Ok(suppliers);
         }
 
         /// <summary>Creates a new vendor invoice in Draft status with the supplied line items.</summary>
