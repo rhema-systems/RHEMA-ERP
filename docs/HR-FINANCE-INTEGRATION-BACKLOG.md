@@ -236,6 +236,7 @@ was promised and what was paid, and the sweep decides what those become.
 | Award payment | `EmployeeAwards.PaymentProcessed`, `PaymentDate`, `PaymentReference` | payable, settled |
 | Amount actually paid | `ProcessAwardPaymentDto.AmountPaid`, when it differs from the award value | payable, settled |
 | Long-service award value | `LongServiceAwards.MonetaryAmount`, `PaymentDate`, `PaymentReference` | payable |
+| Long-service milestone value | `LongServiceMilestones.MonetaryAmount` — what a rung is worth | reference |
 | Award level value | `AwardLevels.MonetaryAmount` — the tier's standard amount | reference |
 | Annual award budget | `AwardBudgets.BudgetAmount` | budget |
 | Committed but unpaid | `AwardBudgets.ReservedAmount` | budget consumption |
@@ -259,6 +260,20 @@ entries to import.
 and refusing to record an award somebody has already been told they won would be inventing a
 control. Such an award simply draws against nothing — which means budget consumption is complete
 only for award types that have a budget for the year.
+
+### The long-service ladder (added by slice 9)
+
+`LongServiceMilestones` is the ladder HR maintains — one row per number of years per award, holding
+what that rung carries. The sweep **copies** the amount onto the award it grants rather than
+referencing the rung, so that repricing a rung later cannot restate the value of an award already
+conferred. For the sweep, that means: **`LongServiceAwards.MonetaryAmount` is the figure that
+matters**, and the milestone row is reference data explaining where it came from.
+
+⚠ **The seeded ladder is unpriced.** A fresh ladder carries years and nothing else, because TDC
+has not said what a twenty-year award is worth — see the long-service question in
+`docs/HR-OPEN-QUESTIONS-FOR-TDC.md`. Until that is answered, long-service awards are granted with a
+**null** amount, which is an unanswered question rather than a value of zero. The sweep should not
+read a null here as "no money owed".
 
 ### Leave as a reward
 

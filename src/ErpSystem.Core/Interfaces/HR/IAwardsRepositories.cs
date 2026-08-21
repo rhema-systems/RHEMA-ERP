@@ -337,3 +337,72 @@ public sealed class AwardPerformanceTriggerResult
 }
 
 #endregion
+
+#region Long Service Milestones
+
+/// <summary>The rungs of a long-service ladder, as rows rather than as code.</summary>
+public interface ILongServiceMilestoneRepository : IGenericRepository<LongServiceMilestone>
+{
+    Task<IEnumerable<LongServiceMilestone>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId);
+    Task<LongServiceMilestone?> GetByYearsAsync(Guid tenantId, Guid awardTypeId, int years);
+}
+
+/// <summary>
+/// Finds who has reached a long-service milestone, and who a disciplinary record disqualifies.
+/// </summary>
+/// <remarks>
+/// <para>This is the second half of AWD-14 — the ladder says what the milestones are, and this says
+/// who has arrived at one. It is separated from the service that writes the awards for the reason
+/// every sweep in this module is: <b>the preview and the run must be the same calculation.</b> A
+/// preview computed one way and a run computed another is how a screen comes to promise something
+/// the button then does not do.</para>
+/// </remarks>
+public interface ILongServiceSweepEvaluator
+{
+    Task<LongServiceSweepResult> EvaluateAsync(
+        AwardType awardType, IReadOnlyList<LongServiceMilestone> ladder, Guid tenantId, DateTime asOf);
+}
+
+/// <summary>Who reached a rung, who is disqualified, and how much the sweep could even see.</summary>
+/// <remarks>
+/// <para><b>The counts are not decoration.</b> Measured 2026-08-21, only 2,103 of 5,579 employees
+/// carry a <c>DateEmployed</c> at all. A sweep that returned "1 qualified" without saying it could
+/// only measure 38% of the workforce would be reporting a result about the data as though it were a
+/// result about the staff.</para>
+/// </remarks>
+public sealed class LongServiceSweepResult
+{
+    public DateTime AsOf { get; init; }
+
+    /// <summary>Active, non-terminated employees the sweep looked at.</summary>
+    public int EmployeesConsidered { get; set; }
+
+    /// <summary>Of those, how many have no employment date — neither qualified nor disqualified.</summary>
+    public int WithoutEmploymentDate { get; set; }
+
+    /// <summary>Employees carrying a disciplinary record that counts against them.</summary>
+    public int DisciplinaryRecordsConsidered { get; set; }
+
+    public List<LongServiceCandidate> Qualified { get; init; } = new();
+    public List<LongServiceCandidate> Disqualified { get; init; } = new();
+}
+
+/// <summary>One employee at one rung.</summary>
+public sealed class LongServiceCandidate
+{
+    public Guid EmployeeId { get; init; }
+    public string EmployeeName { get; init; } = string.Empty;
+    public string? EmployeeNumber { get; init; }
+
+    /// <summary>Completed years actually served, which can exceed the rung reached.</summary>
+    public int YearsOfService { get; init; }
+
+    public int MilestoneYears { get; init; }
+    public Guid MilestoneId { get; init; }
+    public DateOnly? ServiceStartDate { get; init; }
+
+    /// <summary>Empty when qualified; why not when disqualified.</summary>
+    public string? Reason { get; init; }
+}
+
+#endregion

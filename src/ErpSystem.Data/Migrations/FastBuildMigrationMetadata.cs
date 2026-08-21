@@ -202,3 +202,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821162315_AddAwardCommitteeScore")] partial class AddAwardCommitteeScore { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821181549_AddAwardPerformanceTriggers")] partial class AddAwardPerformanceTriggers { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821191533_AddAwardCycleToEmployeeAward")] partial class AddAwardCycleToEmployeeAward { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260821224419_AddLongServiceMilestoneAndDisciplinaryCheck")] partial class AddLongServiceMilestoneAndDisciplinaryCheck { }

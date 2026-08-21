@@ -83,6 +83,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardCommitteeMemberRepository, AwardCommitteeMemberRepository>();
         services.AddScoped<IAwardNominationReviewRepository, AwardNominationReviewRepository>();
         services.AddScoped<ILongServiceAwardRepository, LongServiceAwardRepository>();
+        services.AddScoped<ILongServiceMilestoneRepository, LongServiceMilestoneRepository>();
         services.AddScoped<IAwardTypeTargetRepository, AwardTypeTargetRepository>();
         services.AddScoped<IAwardCycleRepository, AwardCycleRepository>();
         services.AddScoped<IAwardVoteRepository, AwardVoteRepository>();
@@ -97,6 +98,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardEligibilityEvaluator, AwardEligibilityEvaluator>();
         // Reads the appraisal and goal stores to decide who an award puts forward automatically.
         services.AddScoped<IAwardPerformanceTriggerEvaluator, AwardPerformanceTriggerEvaluator>();
+        // Reads service years and disciplinary records to decide who has reached a long-service
+        // milestone. Shared by the preview and the run so the two cannot compute different answers.
+        services.AddScoped<ILongServiceSweepEvaluator, LongServiceSweepEvaluator>();
         services.AddScoped<ICompanyEventRepository, CompanyEventRepository>();
         services.AddScoped<IEventParticipantRepository, EventParticipantRepository>();
         services.AddScoped<IEventAttendanceRepository, EventAttendanceRepository>();
@@ -510,6 +514,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardCommitteeMemberService, AwardCommitteeMemberService>();
         services.AddScoped<IAwardCommitteeReviewService, AwardCommitteeReviewService>();
         services.AddScoped<ILongServiceAwardService, LongServiceAwardService>();
+        services.AddScoped<ILongServiceMilestoneService, LongServiceMilestoneService>();
+        services.AddScoped<ILongServiceSweepService, LongServiceSweepService>();
         services.AddScoped<IAwardTypeTargetService, AwardTypeTargetService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
         services.AddScoped<IMeetingRoomService, MeetingRoomService>();

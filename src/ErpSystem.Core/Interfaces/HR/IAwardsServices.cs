@@ -300,3 +300,38 @@ public interface IAwardCandidateGenerationService
 }
 
 #endregion
+
+#region Long Service Milestones and the sweep
+
+/// <summary>The ladder HR maintains: which years earn an award, and what each rung carries.</summary>
+public interface ILongServiceMilestoneService
+{
+    Task<IEnumerable<LongServiceMilestoneDto>> GetLadderAsync(Guid awardTypeId);
+    Task<LongServiceMilestoneDto?> GetByIdAsync(Guid id);
+    Task<LongServiceMilestoneDto> CreateAsync(Guid userId, CreateLongServiceMilestoneDto dto);
+    Task<LongServiceMilestoneDto> UpdateAsync(Guid id, Guid userId, UpdateLongServiceMilestoneDto dto);
+    Task DeleteAsync(Guid id);
+
+    /// <summary>Fill in the rungs this award does not have yet. Never overwrites an existing one.</summary>
+    Task<LongServiceLadderSeedResultDto> SeedDefaultLadderAsync(
+        Guid awardTypeId, Guid userId, IReadOnlyList<int>? years = null);
+}
+
+/// <summary>
+/// Grants the long-service awards that have fallen due.
+/// </summary>
+/// <remarks>
+/// The two methods run <b>the same calculation</b> and differ only in whether the result is written.
+/// That is the point of the pair: a preview computed separately from the run is how a screen comes
+/// to promise something the button does not then do.
+/// </remarks>
+public interface ILongServiceSweepService
+{
+    /// <summary>Who would be granted an award, and who is disqualified. Writes nothing.</summary>
+    Task<LongServiceSweepResultDto> PreviewAsync(Guid awardTypeId, DateTime? asOf = null);
+
+    /// <summary>The same calculation, with the awards actually created.</summary>
+    Task<LongServiceSweepResultDto> RunAsync(Guid awardTypeId, Guid userId, DateTime? asOf = null);
+}
+
+#endregion

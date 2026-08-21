@@ -164,6 +164,7 @@ public partial class ApplicationDbContext
     public DbSet<AwardBudget> AwardBudgets { get; set; } = null!;
     public DbSet<AwardCycle> AwardCycles { get; set; } = null!;
     public DbSet<AwardVote> AwardVotes { get; set; } = null!;
+    public DbSet<LongServiceMilestone> LongServiceMilestones { get; set; } = null!;
     public DbSet<EmployeeAward> EmployeeAwards { get; set; } = null!;
     public DbSet<TeamAwardRecipient> TeamAwardRecipients { get; set; } = null!;
     public DbSet<AwardAttachment> AwardAttachments { get; set; } = null!;
@@ -4373,6 +4374,7 @@ private void ConfigureHREntities(ModelBuilder builder)
             // False is both the CLR default and the intended value for every existing row: an award
             // nobody classified should not silently permit self-nomination.
             entity.Property(x => x.AllowSelfNomination).HasDefaultValue(false);
+            entity.Property(x => x.DisqualifyOnDisciplinaryRecord).HasDefaultValue(false);
 
             // A score out of 100 to two places - the same shape the appraisal module stores.
             entity.Property(x => x.MinPerformanceScore).HasColumnType("decimal(5,2)");
@@ -4420,6 +4422,24 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Nominations)
                 .WithOne(x => x.AwardCycle)
                 .HasForeignKey(x => x.AwardCycleId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<LongServiceMilestone>(entity =>
+        {
+            entity.HasIndex(x => x.AwardTypeId);
+
+            // One rung per number of years per award. Two rows both claiming "20 years" would make
+            // the sweep's choice of which to grant arbitrary.
+            entity.HasIndex(x => new { x.AwardTypeId, x.Years })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            entity.Property(x => x.MonetaryAmount).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(x => x.AwardType)
+                .WithMany()
+                .HasForeignKey(x => x.AwardTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

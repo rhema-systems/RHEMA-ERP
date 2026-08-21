@@ -103,6 +103,38 @@ public class AwardType : TenantEntity
     /// <remarks>Measured 2026-08-21: 16 employees hold a goal at 100%.</remarks>
     public int? MinGoalsAchieved { get; set; }
 
+    /// <summary>
+    /// Whether a disciplinary record disqualifies an employee from this award (AWD-15).
+    /// </summary>
+    /// <remarks>
+    /// <para>TDC's note, under its Long Service heading: <i>"any negative records such as
+    /// disciplinary action, then you are exempted"</i>. They stated the rule, so it is implemented —
+    /// but they stated it about long service, and applying it to an Employee of the Month award
+    /// would be extending a policy they did not write. It is therefore a per-award switch,
+    /// <b>off by default</b>, that HR turns on for the awards it should govern.</para>
+    ///
+    /// <para><b>What counts as a negative record.</b> A disciplinary action that reached a decision
+    /// and was not dismissed. A <c>Draft</c> case is one nobody has yet been formally accused in, and
+    /// a <c>Dismissed</c> one is an exoneration — treating either as a black mark would punish an
+    /// employee for an allegation that went nowhere. A case <c>UnderAppeal</c> does count: the
+    /// decision stands until it is overturned.</para>
+    /// </remarks>
+    public bool DisqualifyOnDisciplinaryRecord { get; set; }
+
+    /// <summary>
+    /// How far back a disciplinary record reaches, in months. Null means the whole service period.
+    /// </summary>
+    /// <remarks>
+    /// Null is the note read literally — <i>"any negative records"</i>, with no horizon — so the
+    /// unconfigured behaviour is the requirement as written, and a value here <b>relaxes</b> it. That
+    /// is the right way round: a window is a softening TDC has not asked for, and defaulting to one
+    /// would quietly grant an amnesty nobody approved. ⚠ It is also the thing most likely to be
+    /// wrong for a thirty-year award, where a warning from two decades ago would otherwise disqualify
+    /// — which is exactly why the question is in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> rather than
+    /// answered here.
+    /// </remarks>
+    public int? DisqualifyingDisciplineMonths { get; set; }
+
 
 	[MaxLength(1000)]
     public string? Notes { get; set; }
@@ -263,6 +295,47 @@ public class AwardCycle : TenantEntity
     public virtual AwardType AwardType { get; set; } = null!;
 
     public virtual ICollection<AwardNomination> Nominations { get; set; } = new List<AwardNomination>();
+}
+
+/// <summary>
+/// One rung of a long-service ladder: the years that earn an award, and what it carries.
+/// </summary>
+/// <remarks>
+/// <para><b>This is what TDC asked us to define (AWD-14).</b> Their note says only <i>"define the
+/// basis for the long service awards"</i> — an instruction to us rather than a specification — so
+/// the ladder is data, not code. HR sets the rungs and what each one carries, and the system knows
+/// nothing about "ten years" that it did not read from a row.</para>
+///
+/// <para><b>The default ladder is 10 / 15 / 20 / 25 / 30 years, and only the years are defaulted.</b>
+/// The money, leave days and benefits are left empty deliberately: TDC has not said what a
+/// twenty-year award is worth, and a seeded figure would look authoritative. See decision D-8 and
+/// the entry in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
+///
+/// <para>⚠ Measured 2026-08-21: <b>one</b> employee on the live tenant has ten years' service and
+/// none has fifteen. The rungs above ten therefore have no live subjects at all, which is why the
+/// sweep is proved against fixtures and its live run asserted empty on purpose — the same shape as
+/// retirement at 60 in area 9b.</para>
+/// </remarks>
+public class LongServiceMilestone : TenantEntity
+{
+    public Guid AwardTypeId { get; set; }
+
+    /// <summary>Completed years of service that earn this rung.</summary>
+    public int Years { get; set; }
+
+    public decimal? MonetaryAmount { get; set; }
+    public int? LeaveDaysBonus { get; set; }
+
+    [MaxLength(1000)]
+    public string? Benefits { get; set; }
+
+    [MaxLength(200)]
+    public string? Name { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    [ForeignKey(nameof(AwardTypeId))]
+    public virtual AwardType AwardType { get; set; } = null!;
 }
 
 /// <summary>

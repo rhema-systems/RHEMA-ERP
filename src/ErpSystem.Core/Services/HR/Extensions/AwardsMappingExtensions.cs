@@ -38,6 +38,8 @@ public static class AwardsMappingExtensions
             NominationSource = entity.NominationSource,
             WinnerDecision = entity.WinnerDecision,
             AllowSelfNomination = entity.AllowSelfNomination,
+            DisqualifyOnDisciplinaryRecord = entity.DisqualifyOnDisciplinaryRecord,
+            DisqualifyingDisciplineMonths = entity.DisqualifyingDisciplineMonths,
             MinPerformanceScore = entity.MinPerformanceScore,
             MinGoalsAchieved = entity.MinGoalsAchieved,
             Notes = entity.Notes,
@@ -100,6 +102,8 @@ public static class AwardsMappingExtensions
             NominationSource = dto.NominationSource,
             WinnerDecision = dto.WinnerDecision,
             AllowSelfNomination = dto.AllowSelfNomination,
+            DisqualifyOnDisciplinaryRecord = dto.DisqualifyOnDisciplinaryRecord,
+            DisqualifyingDisciplineMonths = dto.DisqualifyingDisciplineMonths,
             MinPerformanceScore = dto.MinPerformanceScore,
             MinGoalsAchieved = dto.MinGoalsAchieved,
             Notes = dto.Notes,
@@ -134,6 +138,8 @@ public static class AwardsMappingExtensions
         entity.NominationSource = dto.NominationSource;
         entity.WinnerDecision = dto.WinnerDecision;
         entity.AllowSelfNomination = dto.AllowSelfNomination;
+        entity.DisqualifyOnDisciplinaryRecord = dto.DisqualifyOnDisciplinaryRecord;
+        entity.DisqualifyingDisciplineMonths = dto.DisqualifyingDisciplineMonths;
         entity.MinPerformanceScore = dto.MinPerformanceScore;
         entity.MinGoalsAchieved = dto.MinGoalsAchieved;
         entity.Notes = dto.Notes;
@@ -1124,6 +1130,29 @@ public static class AwardsMappingExtensions
     {
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
+
+    #region LongServiceMilestone Mappings
+
+    public static LongServiceMilestoneDto ToDto(this LongServiceMilestone entity)
+    {
+        return new LongServiceMilestoneDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            AwardTypeId = entity.AwardTypeId,
+            AwardTypeName = entity.AwardType?.Name,
+            Years = entity.Years,
+            Name = entity.Name,
+            MonetaryAmount = entity.MonetaryAmount,
+            LeaveDaysBonus = entity.LeaveDaysBonus,
+            Benefits = entity.Benefits,
+            IsActive = entity.IsActive,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt,
+        };
+    }
+
+    #endregion
 
     #endregion
 }

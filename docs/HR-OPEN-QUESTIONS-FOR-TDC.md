@@ -251,10 +251,19 @@ its source named. That is a data-migration dependency, not a development one.
 own *Staff Awards Changes* note asks us to "define the basis for the long service awards". It does
 not say what that basis is.
 
-**What we assumed** (configurable, not hard-coded): milestones at **10, 15, 20, 25 and 30 years**
-of service. Each milestone can carry a monetary amount, a leave-days bonus, a certificate and a
-trophy, and every one of those is set per milestone through the admin screen — so TDC's answer is a
-data change, not a code change.
+**What was built** (delivered 2026-08-21, area 14 slice 9): the ladder is **data, not code**. Each
+award type carries its own list of milestones, one row per number of years, and each row holds what
+that rung is worth — a monetary amount, a leave-days bonus and a free-text benefits line. HR
+maintains them on the admin screen, so TDC's answer is a data change and not a development request.
+
+A "seed the default ladder" action fills in **10, 15, 20, 25 and 30 years**. ⚠ It seeds **only the
+years**. The money, leave days and benefits are left **empty on purpose**: TDC has not said what a
+twenty-year award is worth, and a seeded figure would look like an approved one. Until question 2
+below is answered, the ladder grants recognition with no value attached to it.
+
+(The tenant-wide `LongServiceMilestoneYears` setting — currently 5/10/15/20/25 — is offered on that
+screen as a one-click alternative, but it is not applied automatically: it has a coded default that
+cannot be told apart from a value someone actually chose.)
 
 **What we need from TDC:**
 
@@ -268,11 +277,29 @@ data change, not a code change.
 **The same note also states a disqualification rule:** *"any negative records such as disciplinary
 action, then you are exempted"*. Two things TDC needs to settle for that to be enforceable:
 
-- **How far back does a disciplinary record count?** Forever, or a window (e.g. the last 3 or 5
-  years)? We have defaulted to a configurable window rather than "forever", because a warning from
-  fifteen years ago disqualifying a thirty-year award is unlikely to be the intent.
-- **Which outcomes disqualify?** Every recorded case, or only those above a threshold — a written
-  warning and a final written warning are not the same thing.
+**What was built.** The rule is a **switch on each award type, off by default.** TDC stated it
+under their Long Service heading, so applying it to an Employee of the Month award would be
+extending a policy they did not write. HR turns it on for the awards it should govern.
+
+A **negative record** is currently read as *a disciplinary action that reached a decision and was
+not dismissed*. A case still in **draft** is one nobody has been formally accused in, and a
+**dismissed** case is an exoneration — treating either as a black mark would deny an award over an
+allegation that went nowhere. A case **under appeal** does count, because the decision stands until
+it is overturned.
+
+**What we still need from TDC:**
+
+- **How far back does a disciplinary record count?** The system defaults to **forever**, because
+  that is the note read literally — *"any negative records"*, with no horizon — and a window is a
+  softening nobody has asked for. A horizon can be set per award and **relaxes** the rule.
+  ⚠ This is the setting most likely to be wrong as written: a warning from two decades ago
+  currently disqualifies a thirty-year award. If that is not the intent, name the window.
+- **Which outcomes disqualify?** Every case that reached a decision, or only those above a
+  threshold — a written warning and a final written warning are not the same thing.
+  ⚠ **This one cannot be built until it is answered.** `StaffDisciplinaryActions` has **no severity
+  column** — only the authority level required to decide the case — so there is nothing to compare a
+  threshold against. If TDC wants severity to matter, the discipline record needs a severity field
+  first, and that is a schema change rather than a setting.
 
 ⚠ **Two data facts that bear on this now.** Measured on the live database, 2026-08-21:
 

@@ -324,7 +324,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 6 | Committee scoring | ✅ **Done.** D-2, AWD-12/13 — score replaces verdict, highest average wins, membership is the gate. |
 | 7 | Automatic selection | ✅ **Done.** AWD-08 — candidates derived from performance and targets. *(AWD-07 was already delivered by slices 2–4; its remaining half is conferring, in slice 8.)* |
 | 8 | The award is conferred | ✅ **Done.** Nomination → `EmployeeAward`, direct conferral (AWD-07), budget reserve/spend, presentation, and the money events registered (D-7). |
-| 9 | Long service | AWD-14 milestones, AWD-15 disqualification (D-6), the sweep — asserted empty on live data. |
+| 9 | Long service | ✅ **Done.** The ladder as data (AWD-14, D-8), the disciplinary exemption as a per-award switch (AWD-15), and the sweep — preview and run sharing one calculation. |
 | 10 | FR-HR-113 | The eligibility report, on the catalogue+service+seeder pattern used by procurement and inventory. |
 | 11 | Screens | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards`. UI-payload probe mandatory. **Also D-9: page the eligibility endpoint.** |
 | 12 | Content audit | Every GET asserted for content, not status. **Run it twice.** |
@@ -1012,3 +1012,87 @@ value, budget, reservation, spend — is registered in `docs/HR-FINANCE-INTEGRAT
 note that the budget figures are the awards desk's own bookkeeping to reconcile against rather than
 entries to import, and that `LongServiceAward.LeaveId` is a hook with no writer. Nothing posts to a
 ledger.
+
+---
+
+### Slice 9 — long service. 2026-08-21, **91/91**, run twice. Migration `AddLongServiceMilestoneAndDisciplinaryCheck`.
+
+Harness: `run-slice9.mjs`. Whole area re-run: **32 / 49 / 51 / 6 / 44 / 49 / 42 / 27 / 35 / 91 =
+426 assertions**, all green. (Slices 0 and 0b are surveys and report no summary.)
+
+**AWD-14 — the ladder is data, not code.** TDC's note asks us to *"define the basis for the long
+service awards"*, which is an instruction to build the mechanism rather than a statement of the
+policy. So `LongServiceMilestones` holds one row per number of years per award, carrying what that
+rung is worth, and the seed action fills in D-8's 10/15/20/25/30. It seeds **only the years** — the
+money is left empty because TDC has not said what a twenty-year award is worth and a seeded figure
+would look like an approved one.
+
+**A pre-existing field turned out to be lying, and was not made to lie differently.**
+`CompanyHrPolicy.LongServiceMilestoneYears` has documented itself since it was written as feeding
+*"awards eligibility"*, and nothing had ever read it. The obvious move was to make it the authority.
+That would have been wrong: `ICompanyHrPolicyProvider` returns a **coded-defaults instance** when a
+tenant has never opened the settings page, so its value cannot be told apart from one HR actually
+chose — every fresh tenant would silently have got 5/10/15/20/25 instead of the ladder that was
+decided, with nothing showing that a default had beaten a decision. It is now **reported** in the
+seed response so a screen can offer it in one click, and applied only when passed in explicitly.
+
+**AWD-15 — the exemption, and what a "negative record" is.** TDC stated the rule under their Long
+Service heading, so it is a **per-award switch, off by default**: applying it to an Employee of the
+Month award would be extending a policy they did not write. A negative record is *a disciplinary
+action that reached a decision and was not dismissed* — a **draft** case is one nobody has been
+formally accused in, a **dismissed** one is an exoneration, and a case **under appeal** still counts
+because the decision stands until overturned. `DisqualifyingDisciplineMonths` is **null by default**,
+which is the note read literally, so a value **relaxes** the rule rather than tightening it; a window
+is a softening nobody asked for and defaulting to one would grant an amnesty nobody approved.
+
+The assertion that carries this rule is not any of the ones about the switch working. It is **a
+draft case must not disqualify**: an implementation that counted rows in the table would pass every
+other disqualification assertion in the file and still deny a decade of service over an allegation
+that has not been made.
+
+**⚠⚠ Defect 17 — the sweep walked BACKWARDS down the ladder.** The duplicate guard excluded the
+exact `(employee, rung)` pairs already granted, which looks equivalent to the correct rule and is
+not. An employee first swept at twenty-two years is granted the twenty-year rung; on the next run
+the fifteen- and ten-year rungs still satisfy *"reached, and not yet granted"*, so each subsequent
+run granted one more, **descending**. Only the two employees in the fixture set past more than one
+rung showed it — for everyone else the counts were identical either way. The rule is that a rung is
+reachable only if it stands **above** the highest one the employee already holds: a milestone that
+passed before the system was granting them is **missed, not owed**, and awarding it three seconds
+after the twenty-year award would put two certificates on one wall in the wrong order.
+
+**⚠ Defect 18 — the area's dominant class, produced while fixing its seventeenth instance.**
+`DisqualifyOnDisciplinaryRecord` and `DisqualifyingDisciplineMonths` were added to the entity, given
+a migration column, and read by the engine — with **no way to set or read either through the API**.
+Every behavioural assertion about the switch would have passed against a field settable only in SQL.
+Caught while writing the harness, by asking whether the thing being asserted was reachable at all.
+The reachability assertions are kept deliberately apart from the behaviour ones for that reason.
+
+**Two harness-environment corrections, both worth more than the slice.**
+
+1. **The API was running in Development, not Staging.** `launchSettings.json` sets
+   `ASPNETCORE_ENVIRONMENT=Development` and `dotnet run` applies the launch profile's variables
+   **over** the ambient ones, so the environment variable did nothing. Two 409s came back as 500s
+   carrying a raw stack trace, and the exception mapping they appeared to indict was correct all
+   along. `--no-launch-profile` fixes it. **This was already recorded in memory and was not
+   checked.** Every harness README under `dev-harness/` now carries the flag and a warning to
+   confirm `Hosting environment: Staging` in the startup log rather than trusting the command.
+
+2. **The discipline endpoints refuse a caller whose user account is not linked to an employee
+   record**, and admin is not one. The HR actor is — and is also the actor who would really raise a
+   case.
+
+**⚠ What a live run finds, and why that is not a failure.** Measured 2026-08-21: of 5,579 employees
+only **2,103** carry a `DateEmployed`, exactly **one** has ten completed years, and **none** has
+fifteen. Every rung above ten has no live subjects at all. The engine is therefore proved against
+fixtures, and the sweep result reports `employeesConsidered` and `withoutEmploymentDate` alongside
+the qualified list so that a screen cannot present a result about the *data* as though it were a
+result about the *staff*. This is the retirement-at-60 shape from area 9b and the `ExpectedHeadcount`
+shape from area 8, for the third time.
+
+**Also settled here.** The preview and the run are one calculation with a `commit` flag, so a screen
+cannot promise something the button does not do. An **inactive** award type **refuses** to grant
+rather than sweeping to nothing, because a silent empty result is indistinguishable from "nobody
+qualified" and the two call for opposite responses. The unique index on `(AwardTypeId, Years)` is
+filtered on `IsDeleted`, applying area 13's lesson rather than relearning it. And the award copies
+the rung's value rather than referencing it, so repricing a rung cannot restate an award already
+conferred.

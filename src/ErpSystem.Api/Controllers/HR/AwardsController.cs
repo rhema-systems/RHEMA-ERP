@@ -66,6 +66,8 @@ public class AwardsController : HrControllerBase
     private readonly IAwardVotingService _votingService;
     private readonly IAwardCommitteeScoringService _scoringService;
     private readonly IAwardCandidateGenerationService _generationService;
+    private readonly ILongServiceMilestoneService _milestoneService;
+    private readonly ILongServiceSweepService _sweepService;
 
     public AwardsController(
         IAwardTypeService awardTypeService,
@@ -87,6 +89,8 @@ public class AwardsController : HrControllerBase
         IAwardVotingService votingService,
         IAwardCommitteeScoringService scoringService,
         IAwardCandidateGenerationService generationService,
+        ILongServiceMilestoneService milestoneService,
+        ILongServiceSweepService sweepService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -109,6 +113,8 @@ public class AwardsController : HrControllerBase
         _votingService = votingService;
         _scoringService = scoringService;
         _generationService = generationService;
+        _milestoneService = milestoneService;
+        _sweepService = sweepService;
     }
 
     #region Award Types
@@ -1393,5 +1399,121 @@ public class AwardsController : HrControllerBase
 
     #endregion
 
-}
+    #region Long Service Ladder and Sweep
 
+    /// <summary>
+    /// The rungs of this award's long-service ladder (AWD-14).
+    /// </summary>
+    /// <remarks>
+    /// TDC asked us to <i>"define the basis for the long service awards"</i>, which is an instruction
+    /// to build the mechanism rather than a statement of the policy — so the milestones are rows HR
+    /// owns, not constants in the code. Decision <b>D-8</b>: configurable, seeded at 10/15/20/25/30.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("types/{awardTypeId:guid}/long-service/milestones")]
+    public async Task<ActionResult<IEnumerable<LongServiceMilestoneDto>>> GetLongServiceLadder(Guid awardTypeId)
+        => Ok(await _milestoneService.GetLadderAsync(awardTypeId));
+
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("long-service/milestones/{id:guid}")]
+    public async Task<ActionResult<LongServiceMilestoneDto>> GetLongServiceMilestone(Guid id)
+    {
+        var result = await _milestoneService.GetByIdAsync(id);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("long-service/milestones")]
+    public async Task<ActionResult<LongServiceMilestoneDto>> CreateLongServiceMilestone(
+        [FromBody] CreateLongServiceMilestoneDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+
+        var created = await _milestoneService.CreateAsync(userId, dto);
+        return CreatedAtAction(nameof(GetLongServiceMilestone), new { id = created.Id }, created);
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPut("long-service/milestones/{id:guid}")]
+    public async Task<ActionResult<LongServiceMilestoneDto>> UpdateLongServiceMilestone(
+        Guid id, [FromBody] UpdateLongServiceMilestoneDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+
+        return Ok(await _milestoneService.UpdateAsync(id, userId, dto));
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpDelete("long-service/milestones/{id:guid}")]
+    public async Task<IActionResult> DeleteLongServiceMilestone(Guid id)
+    {
+        await _milestoneService.DeleteAsync(id);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Fill in the rungs this award does not have yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>Additive, never destructive: a rung HR has already priced survives a second press of
+    /// the button. The response names what was created <b>and</b> what was already there, so a
+    /// second run does not look like a failed first one.</para>
+    ///
+    /// <para>The body is optional. With no years it seeds D-8's 10/15/20/25/30; the response also
+    /// reports the company-wide list from <c>CompanyHrPolicy</c> so a screen can offer that instead
+    /// in one click. It is offered rather than applied because the provider behind it cannot tell a
+    /// value HR chose from its own coded default.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("types/{awardTypeId:guid}/long-service/milestones/seed")]
+    public async Task<ActionResult<LongServiceLadderSeedResultDto>> SeedLongServiceLadder(
+        Guid awardTypeId, [FromBody] SeedLongServiceLadderDto? dto = null)
+    {
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+        return Ok(await _milestoneService.SeedDefaultLadderAsync(awardTypeId, userId, dto?.Years));
+    }
+
+    /// <summary>
+    /// Who has reached a milestone, and who a disciplinary record disqualifies. Writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>The preview and the run are the same calculation — see
+    /// <see cref="ILongServiceSweepService"/>. Reading this is a read, so it sits behind the read
+    /// policy; granting the awards does not.</para>
+    ///
+    /// <para><c>asOf</c> exists so the sweep can be exercised at a milestone the workforce has not
+    /// reached yet. Measured 2026-08-21, exactly one live employee has ten completed years and none
+    /// has fifteen, so without a server-stamped date the rungs above ten could never be proved. It is
+    /// the same seam area 9 slice 8 added to its reminder sweep.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("types/{awardTypeId:guid}/long-service/sweep/preview")]
+    public async Task<ActionResult<LongServiceSweepResultDto>> PreviewLongServiceSweep(
+        Guid awardTypeId, [FromQuery] DateTime? asOf = null)
+        => Ok(await _sweepService.PreviewAsync(awardTypeId, asOf));
+
+    /// <summary>
+    /// Grant the long-service awards that have fallen due (AWD-14, AWD-15).
+    /// </summary>
+    /// <remarks>
+    /// <para>A button HR presses, not a background job. Granting an award is a decision, nothing in
+    /// TDC's note asks for it to happen unattended, and it means the preview somebody looked at is
+    /// the state this acts on.</para>
+    ///
+    /// <para>Re-running is safe: a milestone already granted is not granted twice.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("types/{awardTypeId:guid}/long-service/sweep")]
+    public async Task<ActionResult<LongServiceSweepResultDto>> RunLongServiceSweep(
+        Guid awardTypeId, [FromQuery] DateTime? asOf = null)
+    {
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+        return Ok(await _sweepService.RunAsync(awardTypeId, userId, asOf));
+    }
+
+    #endregion
+
+}

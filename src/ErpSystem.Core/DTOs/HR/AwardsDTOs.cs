@@ -58,6 +58,29 @@ public class AwardTypeDto : BaseDto
     /// <summary>Whether an employee may nominate themselves. Off by default; see the entity.</summary>
     public bool AllowSelfNomination { get; set; }
 
+    /// <summary>
+    /// Whether a disciplinary record exempts an employee from this award (AWD-15).
+    /// </summary>
+    /// <remarks>
+    /// TDC stated this rule under their Long Service heading, so it is implemented — but applying it
+    /// to an Employee of the Month award would be extending a policy they did not write. Off by
+    /// default; HR turns it on for the awards it should govern. A <i>negative record</i> is a
+    /// disciplinary action that reached a decision and was not dismissed: a draft case is one nobody
+    /// has been formally accused in, a dismissed one is an exoneration.
+    /// </remarks>
+    public bool DisqualifyOnDisciplinaryRecord { get; set; }
+
+    /// <summary>
+    /// How far back a disciplinary record reaches, in months. Null means the whole service period.
+    /// </summary>
+    /// <remarks>
+    /// Null is the note read literally — <i>"any negative records"</i>, with no horizon — so a value
+    /// here <b>relaxes</b> the rule rather than tightening it. That direction is deliberate: a window
+    /// is a softening TDC has not asked for, and defaulting to one would grant an amnesty nobody
+    /// approved.
+    /// </remarks>
+    public int? DisqualifyingDisciplineMonths { get; set; }
+
     /// <summary>Minimum appraisal score for automatic candidacy. See the entity for the data caveat.</summary>
     public decimal? MinPerformanceScore { get; set; }
 
@@ -178,6 +201,29 @@ public class CreateAwardTypeDto : CreateDtoBase
     public bool AllowSelfNomination { get; set; }
 
     /// <summary>
+    /// Whether a disciplinary record exempts an employee from this award (AWD-15).
+    /// </summary>
+    /// <remarks>
+    /// TDC stated this rule under their Long Service heading, so it is implemented — but applying it
+    /// to an Employee of the Month award would be extending a policy they did not write. Off by
+    /// default; HR turns it on for the awards it should govern. A <i>negative record</i> is a
+    /// disciplinary action that reached a decision and was not dismissed: a draft case is one nobody
+    /// has been formally accused in, a dismissed one is an exoneration.
+    /// </remarks>
+    public bool DisqualifyOnDisciplinaryRecord { get; set; }
+
+    /// <summary>
+    /// How far back a disciplinary record reaches, in months. Null means the whole service period.
+    /// </summary>
+    /// <remarks>
+    /// Null is the note read literally — <i>"any negative records"</i>, with no horizon — so a value
+    /// here <b>relaxes</b> the rule rather than tightening it. That direction is deliberate: a window
+    /// is a softening TDC has not asked for, and defaulting to one would grant an amnesty nobody
+    /// approved.
+    /// </remarks>
+    public int? DisqualifyingDisciplineMonths { get; set; }
+
+    /// <summary>
     /// Minimum appraisal score for automatic candidacy, when the award's candidates are
     /// performance-triggered. Combines with <see cref="MinGoalsAchieved"/>: set both and a candidate
     /// must satisfy both.
@@ -271,6 +317,29 @@ public class UpdateAwardTypeDto : UpdateDtoBase
     /// per award, typically to innovation and improvement awards rather than to behavioural ones.
     /// </summary>
     public bool AllowSelfNomination { get; set; }
+
+    /// <summary>
+    /// Whether a disciplinary record exempts an employee from this award (AWD-15).
+    /// </summary>
+    /// <remarks>
+    /// TDC stated this rule under their Long Service heading, so it is implemented — but applying it
+    /// to an Employee of the Month award would be extending a policy they did not write. Off by
+    /// default; HR turns it on for the awards it should govern. A <i>negative record</i> is a
+    /// disciplinary action that reached a decision and was not dismissed: a draft case is one nobody
+    /// has been formally accused in, a dismissed one is an exoneration.
+    /// </remarks>
+    public bool DisqualifyOnDisciplinaryRecord { get; set; }
+
+    /// <summary>
+    /// How far back a disciplinary record reaches, in months. Null means the whole service period.
+    /// </summary>
+    /// <remarks>
+    /// Null is the note read literally — <i>"any negative records"</i>, with no horizon — so a value
+    /// here <b>relaxes</b> the rule rather than tightening it. That direction is deliberate: a window
+    /// is a softening TDC has not asked for, and defaulting to one would grant an amnesty nobody
+    /// approved.
+    /// </remarks>
+    public int? DisqualifyingDisciplineMonths { get; set; }
 
     /// <summary>
     /// Minimum appraisal score for automatic candidacy, when the award's candidates are
@@ -1921,6 +1990,138 @@ public class AwardGeneratedNomineeDto
     public string NominationNumber { get; set; } = string.Empty;
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+}
+
+#endregion
+
+#region Long Service Milestone DTOs
+
+/// <summary>One rung of a long-service ladder.</summary>
+public class LongServiceMilestoneDto : BaseDto
+{
+    public Guid TenantId { get; set; }
+    public Guid AwardTypeId { get; set; }
+    public string? AwardTypeName { get; set; }
+
+    public int Years { get; set; }
+    public string? Name { get; set; }
+    public decimal? MonetaryAmount { get; set; }
+    public int? LeaveDaysBonus { get; set; }
+    public string? Benefits { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class CreateLongServiceMilestoneDto : CreateDtoBase
+{
+    [Required]
+    public Guid AwardTypeId { get; set; }
+
+    [Required]
+    [Range(1, 100)]
+    public int Years { get; set; }
+
+    [MaxLength(200)]
+    public string? Name { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? MonetaryAmount { get; set; }
+
+    [Range(0, 365)]
+    public int? LeaveDaysBonus { get; set; }
+
+    [MaxLength(1000)]
+    public string? Benefits { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
+public class UpdateLongServiceMilestoneDto : UpdateDtoBase
+{
+    [Required]
+    [Range(1, 100)]
+    public int Years { get; set; }
+
+    [MaxLength(200)]
+    public string? Name { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? MonetaryAmount { get; set; }
+
+    [Range(0, 365)]
+    public int? LeaveDaysBonus { get; set; }
+
+    [MaxLength(1000)]
+    public string? Benefits { get; set; }
+
+    public bool IsActive { get; set; }
+}
+
+/// <summary>What a seed run did, and what it left alone.</summary>
+/// <remarks>
+/// <b>Seeding is additive and never overwrites.</b> A rung HR has already priced must survive a
+/// second press of the button, so an existing year is reported as skipped rather than reset to an
+/// empty default — which would silently delete the money.
+/// </remarks>
+public class LongServiceLadderSeedResultDto
+{
+    public Guid AwardTypeId { get; set; }
+
+    /// <summary>Where the years came from: the company HR policy, or the built-in default.</summary>
+    public string Source { get; set; } = string.Empty;
+
+    public List<int> Created { get; set; } = new();
+    public List<int> AlreadyPresent { get; set; } = new();
+
+    /// <summary>
+    /// The company-wide milestone list, offered rather than applied.
+    /// </summary>
+    /// <remarks>
+    /// <c>CompanyHrPolicy.LongServiceMilestoneYears</c> is the tenant's shared notion of service
+    /// milestones and its documentation has always claimed to feed awards. It is reported here so a
+    /// screen can offer "use the company list" in one click — but it is not applied silently,
+    /// because the provider behind it cannot tell a value HR chose from its own coded default.
+    /// </remarks>
+    public List<int> CompanyPolicyYears { get; set; } = new();
+}
+
+/// <summary>One employee at one rung, as the sweep sees them.</summary>
+public class LongServiceCandidateDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public int YearsOfService { get; set; }
+    public int MilestoneYears { get; set; }
+    public Guid MilestoneId { get; set; }
+    public DateTime? ServiceStartDate { get; set; }
+    public string? Reason { get; set; }
+}
+
+/// <summary>Which years to seed a ladder with. An empty list means "use the default".</summary>
+public class SeedLongServiceLadderDto
+{
+    public List<int> Years { get; set; } = new();
+}
+
+/// <summary>The result of a sweep — the same shape whether it was a preview or a run.</summary>
+public class LongServiceSweepResultDto
+{
+    public Guid AwardTypeId { get; set; }
+    public DateTime AsOf { get; set; }
+
+    /// <summary>False for a preview. True when awards were actually written.</summary>
+    public bool Committed { get; set; }
+
+    public int MilestonesConfigured { get; set; }
+    public int EmployeesConsidered { get; set; }
+    public int WithoutEmploymentDate { get; set; }
+    public int DisciplinaryRecordsConsidered { get; set; }
+
+    /// <summary>Awards created by this run. Always zero on a preview.</summary>
+    public int AwardsCreated { get; set; }
+
+    public List<LongServiceCandidateDto> Qualified { get; set; } = new();
+    public List<LongServiceCandidateDto> Disqualified { get; set; } = new();
 }
 
 #endregion

@@ -1189,3 +1189,31 @@ public class LongServiceAwardRepository : GenericRepository<LongServiceAward>, I
 
 
 
+
+public class LongServiceMilestoneRepository : GenericRepository<LongServiceMilestone>, ILongServiceMilestoneRepository
+{
+    public LongServiceMilestoneRepository(ApplicationDbContext context) : base(context) { }
+
+    public override async Task<LongServiceMilestone?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<LongServiceMilestone>()
+            .Include(m => m.AwardType)
+            .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
+    }
+
+    public async Task<IEnumerable<LongServiceMilestone>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId)
+    {
+        return await _context.Set<LongServiceMilestone>()
+            .Include(m => m.AwardType)
+            .Where(m => m.TenantId == tenantId && m.AwardTypeId == awardTypeId && !m.IsDeleted)
+            .OrderBy(m => m.Years)
+            .ToListAsync();
+    }
+
+    public async Task<LongServiceMilestone?> GetByYearsAsync(Guid tenantId, Guid awardTypeId, int years)
+    {
+        return await _context.Set<LongServiceMilestone>()
+            .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.AwardTypeId == awardTypeId
+                && m.Years == years && !m.IsDeleted);
+    }
+}
