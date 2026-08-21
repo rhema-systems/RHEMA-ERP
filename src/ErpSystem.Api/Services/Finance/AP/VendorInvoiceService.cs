@@ -983,6 +983,41 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
 
+                // A posted supplier debit note is the controlled correction of this exact AP
+                // recognition. Do not void its source invoice underneath that evidence; reverse
+                // the debit note and any payment applications first.
+                var activeDebitNoteExists = await _unitOfWork.Repository<SupplierDebitNote>()
+                    .ExistsAsync(note =>
+                        note.TenantId == TenantId &&
+                        note.OriginalVendorInvoiceId == invoice.Id &&
+                        !note.IsDeleted &&
+                        note.Status != SupplierDebitNoteStatus.Cancelled &&
+                        note.Status != SupplierDebitNoteStatus.Reversed);
+                if (activeDebitNoteExists)
+                    throw new InvalidOperationException(
+                        "Cannot void an invoice with an active linked supplier debit note. Cancel or reverse the debit note and its payment applications first.");
+
+                var supplierCreditApplications = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryable(application =>
+                        application.TenantId == TenantId &&
+                        application.VendorInvoiceId == invoice.Id &&
+                        !application.IsDeleted)
+                    .Select(application => new
+                    {
+                        application.Id,
+                        application.IsReversal,
+                        application.OriginalApplicationId
+                    })
+                    .ToListAsync(cancellationToken);
+                var reversedApplicationIds = supplierCreditApplications
+                    .Where(item => item.IsReversal && item.OriginalApplicationId.HasValue)
+                    .Select(item => item.OriginalApplicationId!.Value)
+                    .ToHashSet();
+                if (supplierCreditApplications.Any(item =>
+                        !item.IsReversal && !reversedApplicationIds.Contains(item.Id)))
+                    throw new InvalidOperationException(
+                        "Cannot void an invoice with an effective supplier debit-note application. Reverse the application first.");
+
                 var activeSettlement = RoundMoney(invoice.PaymentAllocations.Sum(
                     allocation => allocation.AllocatedAmount +
                                   allocation.DiscountAmount +

@@ -111,6 +111,30 @@ public interface IVendorPaymentService
     Task<List<VendorPaymentAllocationDto>> GetPaymentAllocationsAsync(Guid paymentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reserves posted supplier debit notes against invoices in this payment settlement. The
+    /// application is a Finance-owned AP subledger link and never creates a second GL posting.
+    /// It becomes effective against invoice PaidAmount only when the payment posts.
+    /// </summary>
+    Task<SupplierDebitNoteApplicationResultDto> ApplySupplierDebitNotesAsync(
+        Guid paymentId,
+        List<SupplierDebitNoteApplicationCreateDto> applications,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the complete original-and-reversal supplier-credit application history.</summary>
+    Task<List<SupplierDebitNoteApplicationDto>> GetSupplierDebitNoteApplicationsAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Releases a draft supplier debit-note application through an immutable compensating row.
+    /// Posted applications are reversed only with the containing payment.
+    /// </summary>
+    Task ReverseSupplierDebitNoteApplicationAsync(
+        Guid applicationId,
+        string reason,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets outstanding (not fully paid) invoices for a specific supplier.
     /// Used when creating payments or allocating funds.
     /// </summary>

@@ -518,6 +518,52 @@ namespace ErpSystem.Api.Controllers.Finance
             catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
+        /// <summary>
+        /// Reserves posted supplier debit notes against invoices in this Finance-owned AP
+        /// settlement. The debit note has already posted to AP control, so this endpoint creates
+        /// subledger evidence only and never posts a second journal.
+        /// </summary>
+        [HttpPost("{id}/supplier-debit-note-applications")]
+        [Authorize(Policy = FinancePermissions.ProcessApPayments)]
+        public async Task<ActionResult<SupplierDebitNoteApplicationResultDto>> ApplySupplierDebitNotes(
+            Guid id,
+            [FromBody] List<SupplierDebitNoteApplicationCreateDto> applications)
+        {
+            try { return Ok(await _paymentService.ApplySupplierDebitNotesAsync(id, applications)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Returns original and reversal supplier-credit applications for this payment.</summary>
+        [HttpGet("{id}/supplier-debit-note-applications")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<List<SupplierDebitNoteApplicationDto>>> GetSupplierDebitNoteApplications(Guid id)
+        {
+            try { return Ok(await _paymentService.GetSupplierDebitNoteApplicationsAsync(id)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        }
+
+        /// <summary>Releases an unposted supplier-credit reservation using a compensating row.</summary>
+        [HttpPost("supplier-debit-note-applications/{applicationId}/reverse")]
+        [Authorize(Policy = FinancePermissions.ProcessApPayments)]
+        public async Task<IActionResult> ReverseSupplierDebitNoteApplication(
+            Guid applicationId,
+            [FromBody] string reason)
+        {
+            try
+            {
+                await _paymentService.ReverseSupplierDebitNoteApplicationAsync(applicationId, reason);
+                return Ok();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
         /// <summary>Posts an authorized vendor payment to the general ledger through the central finance posting engine.</summary>
         [HttpPost("{id}/post")]
         [Authorize(Policy = FinancePermissions.ProcessApPayments)]
