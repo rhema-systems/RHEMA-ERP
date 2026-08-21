@@ -72,6 +72,7 @@ export interface VendorInvoice {
     notes?: string;
     reference?: string;
     isOpeningBalance: boolean;
+    journalEntryId?: string;
     approvedByUserId?: string;
     approvedAt?: string;
     lineItems: VendorInvoiceLineItem[];

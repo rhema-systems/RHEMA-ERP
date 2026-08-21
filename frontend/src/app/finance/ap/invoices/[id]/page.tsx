@@ -38,6 +38,12 @@ import {
     invoiceThreeWayMatchQueryKey,
 } from '@/components/finance/InvoiceThreeWayMatchControl';
 import { InvoiceMatchExceptionControl } from '@/components/finance/InvoiceMatchExceptionControl';
+import {
+    ApInvoicePrintDocument,
+    printApInvoiceDocument,
+} from '@/components/finance/ap/ApInvoicePrintDocument';
+import printStyles from '@/components/finance/ap/ApInvoicePrintDocument.module.css';
+import { useTenant } from '@/contexts/TenantContext';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -46,6 +52,7 @@ export default function VendorInvoiceDetailsPage() {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const { hasPermission, hasAnyPermission } = useAuth();
+    const { currentTenant, currentTenantCode } = useTenant();
     const [workflowSummary, setWorkflowSummary] = useState<WorkflowEntitySummaryDto | null>(null);
 
     const { data: invoice, isLoading } = useQuery({
@@ -157,7 +164,8 @@ export default function VendorInvoiceDetailsPage() {
     const mandatoryMatchReady = !invoice.purchaseOrderId || invoice.isOpeningBalance || matchReadiness?.approvalReady === true;
 
     return (
-        <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
+        <>
+            <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
             {/* Header Actions */}
             <div className="flex items-center justify-between no-print">
                 <div className="flex items-center space-x-4">
@@ -170,7 +178,7 @@ export default function VendorInvoiceDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
-                    <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Button variant="outline" size="sm" onClick={printApInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
                     {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
@@ -346,7 +354,13 @@ export default function VendorInvoiceDetailsPage() {
                     )}
                 </CardContent>
             </Card>
-        </div>
+            </div>
+            <ApInvoicePrintDocument
+                invoice={invoice}
+                tenantName={currentTenant?.name}
+                tenantCode={currentTenant?.code || currentTenantCode}
+            />
+        </>
     );
 }
 
