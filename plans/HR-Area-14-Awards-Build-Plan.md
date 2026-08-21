@@ -258,6 +258,15 @@ open-questions list.
 `ProcessAwardPayment`, `EmployeeAward` monetary amounts and `LongServiceAward.MonetaryAmount` in
 `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` and leave the plain payment fields as they are.
 
+**D-9 — the eligibility endpoint gets paging and filters in slice 11, and keeps its reasons.**
+`GET types/{id}/eligible` judges every active employee (5,579 on DEFAULT) and returns the eligible
+**and** ineligible lists in full. That is right for slice 3, whose job is to make the criteria bite,
+and the harness needs the whole set to prove the counts add up. **Settled with the user 2026-08-21:**
+when the screen is built it gains paging plus a filter (eligible only / ineligible only / search by
+name), and the reasons stay on whichever page is shown — collapsing them into counts would take away
+the thing that lets HR tell a mis-set rule from a correct one. Until then the endpoint stays
+complete and slow rather than fast and partial.
+
 **D-8 — AWD-14 milestones are configurable, defaulted, and raised with TDC.** The document says
 only "define the basis"; the milestones and what each carries are not stated. **Settled with the
 user 2026-08-21:** build the ladder fully configurable through the admin surface, default it to
@@ -281,6 +290,25 @@ performance modules beyond reading them; payroll.
 
 ---
 
+## 6b. Risks carried, and one owed decision
+
+**`Employee.YearsOfService` is wrong, and it is not this area's to fix quietly.**
+`HREntities.cs:241` computes service as `DateTime.Today.Year - DateEmployed.Value.Year`, which
+overstates by up to a year for anyone whose anniversary has not yet come round. Found in slice 3
+while writing the eligibility evaluator, which does **not** use it.
+
+It is a computed property on the shared `Employee` entity, surfaced through DTOs in succession,
+HR core and others — all **closed** areas with harnesses written against its current behaviour.
+Correcting it is a one-line change and a multi-area regression run, which is precisely the area-13
+lesson: *a correct fix can invalidate an assumption held somewhere else entirely.* It therefore
+needs its own decision, not a quiet edit inside area 14.
+
+Raise it with the user at the end of this area, alongside the FR-HR-113 long-service work in
+slice 9 — which is the first place the difference between "6 years" and "7 years" decides whether
+somebody gets an award.
+
+---
+
 ## 7. Slice plan
 
 Provisional — slices are re-cut as findings land, and the log records any change.
@@ -290,7 +318,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 0 | ✅ Prove the ground | Run the happy path across all eight endpoint groups. Establish which of the 100 endpoints actually execute. Expect casualties. |
 | 1 | ✅ Identity | Token tenant + token actor; `HrControllerBase`; remove all 56 caller-supplied id parameters; `HR.Awards.*` policies. |
 | 2 | Types, levels, targets, budgets | ✅ **Done.** The configuration surface, with D-3's two axes, honest status codes, and target-name resolution. |
-| 3 | Cycles and eligibility | D-4 cycle entity with windows; AWD-01 eligibility evaluation producing the qualified set. |
+| 3 | Cycles and eligibility | ✅ **Done.** D-4 cycle entity with windows; AWD-01 eligibility evaluation producing the qualified set. |
 | 4 | Nomination | AWD-02, AWD-09; management route and the `api/awards/me` employee route (D-1). |
 | 5 | The vote | AWD-04, AWD-05, AWD-06, AWD-10 — the vote model, the electorate, one-vote-per-voter, the window gate. |
 | 6 | Committee scoring | D-2 model change, AWD-12, AWD-13 highest-average outcome. Test with identical scores and ≥3 reviewers. |
@@ -298,7 +326,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 8 | The award is conferred | Nomination → `EmployeeAward`; presentation; certificate; the payment record (D-7). |
 | 9 | Long service | AWD-14 milestones, AWD-15 disqualification (D-6), the sweep — asserted empty on live data. |
 | 10 | FR-HR-113 | The eligibility report, on the catalogue+service+seeder pattern used by procurement and inventory. |
-| 11 | Screens | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards`. UI-payload probe mandatory. |
+| 11 | Screens | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards`. UI-payload probe mandatory. **Also D-9: page the eligibility endpoint.** |
 | 12 | Content audit | Every GET asserted for content, not status. **Run it twice.** |
 
 ---
@@ -505,3 +533,75 @@ Two intermediate conclusions stated before measuring were wrong — first "the b
 because the DTO change is visible in the JSON", then the reverse. **Both were inferences from code
 when a log line was available.** For a symptom that contradicts the source, get the runtime to say
 what it did before reasoning about what it should have done.
+
+---
+
+### Slice 3 — cycles and eligibility. 2026-08-21, **51/51**, run twice. Migration `AddAwardCycles`.
+
+Harness: `run-slice3.mjs`. Slices 1 and 2 re-run afterwards at 30/30 and 49/49 — no regression.
+
+**Delivered: the cycle (D-4 / AWD-11).** New `AwardCycles` table and a nullable
+`AwardNominations.AwardCycleId`. Eleven endpoints — the register, the two derived open-lists,
+create, update, publish, cancel and delete.
+
+Two design calls, both made to avoid a defect shape this area keeps producing:
+
+- **Open and closed are derived from the dates, never stored.** `AwardCycleStatus` is a lifecycle
+  flag (Draft / Published / Completed / Cancelled) and carries no "NominationsOpen" member. Whether
+  a window is open is `Status == Published` plus the clock. A stored flag *and* a window are two
+  facts about one thing, free to disagree the moment the close date passes.
+- **Which windows a cycle must carry is read off slice 2's selection model.** A `StaffVote` award
+  must have a voting window; anything else must not, because a voting window on an award nobody
+  votes on describes a ballot that will never be held. A `ManagementDirect` award has no nomination
+  stage, so it carries no nomination window. And **voting cannot open before nominations close** —
+  TDC's note sequences them deliberately, and overlapping them would mean early ballots were cast
+  against a different candidate list from later ones.
+
+`PublishAsync` re-runs the window checks on the way out of draft, because the award type's selection
+model can be edited after the cycle was drafted — a published cycle must not describe a stage its
+award no longer has.
+
+**⚠ Defect G — the eligibility criteria had never been consulted.** The existing evaluator checked
+the award's *targets* — unit / position / staff-level scoping — and nothing else. Six fields on
+`AwardType` appear **only in mappers**, mapped in and mapped out and applied by nothing:
+`MinServiceYears`, `MaxServiceYears`, `MinAge`, `MaxAge`, `MaxAwardsPerEmployee`,
+`MaxAwardsPerPeriod`. Those six are exactly the "eligibility criteria" TDC's note has HR set up
+before anyone nominates, so *"management will set the criteria and then it will qualify some
+employees"* could not work at all.
+
+`AwardEligibilityEvaluator` applies all of them and **returns reasons**. The ineligible list comes
+back deliberately: whoever sets the criteria has to see why an expected name is absent, or a
+mis-set rule produces the same screen as a correct one.
+
+Three further things it repairs:
+
+- **`AwardTypeTarget`'s effective dating was never honoured** — a target that expired last year
+  still scoped the award. The harness proves an expired exclusion stops excluding, and that an
+  `asOf` inside its lifetime still shows it did.
+- **Age was `Now.Year - DateOfBirth.Year`** — 40 for someone who is still 39 for another eleven
+  months, which on a minimum-age rule admits people a year early. Now whole completed years.
+- **A missing `DateEmployed` is said out loud** rather than passing silently, which matters because
+  62% of live records are in that state.
+
+**⚠ Recorded, deliberately not fixed: `Employee.YearsOfService` has the same wrong arithmetic.**
+`HREntities.cs:241` computes `DateTime.Today.Year - DateEmployed.Value.Year`. It is a computed
+property on the shared employee entity, read by succession and other **closed** areas whose
+harnesses were written against its current behaviour. Changing it here would be the area-13 lesson
+repeated — a correct fix invalidating an assumption held somewhere else. The evaluator does not use
+it. It needs its own decision and its own regression run; see the risks section.
+
+**A dead rule of my own, found by an assertion that failed for the wrong reason.** `CancelAsync`
+guards against a whitespace-only reason, and that guard is **unreachable over HTTP**: `[Required]`
+trims before testing, so `"   "` reads as missing and the model layer refuses it first. The guard is
+kept for callers that are not the controller, and the harness now asserts where the refusal actually
+comes from — naming the field in `errors` — rather than where it was assumed to. Worth noting that
+the same reasoning applies to *any* service-level string guard behind a `[Required]` DTO field in
+this codebase.
+
+**Efficiency, fixed before it became the pattern.** The first cut of the cycle service counted
+nominations with `GetAllAsync()` and looked the award type up per row — the shape that turns a cycle
+register into a full scan per page. Replaced with `IAwardCycleRepository` (tenant-scoped queries, a
+published-only read for the open-lists) and `GetCountsByCycleAsync` (one grouped query).
+
+**Open, per decision D-9:** `GET types/{id}/eligible` judges every active employee and returns both
+lists in full. Correct for now; slice 11 adds paging and filters and keeps the reasons.

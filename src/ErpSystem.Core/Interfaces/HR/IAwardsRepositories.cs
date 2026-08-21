@@ -48,6 +48,74 @@ public interface IAwardTypeTargetRepository : IGenericRepository<AwardTypeTarget
     Task<bool> IsEmployeeEligibleAsync(Guid awardTypeId, Guid employeeId);
 }
 
+/// <summary>
+/// Answers "who qualifies for this award, and why not" against the full set of criteria.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this replaces the old check.</b> <c>IAwardTypeTargetRepository.IsEmployeeEligibleAsync</c>
+/// evaluated the award's <i>targets</i> — the unit/position/level scoping — and nothing else. The
+/// award type's own eligibility vocabulary was never consulted: <c>MinServiceYears</c>,
+/// <c>MaxServiceYears</c>, <c>MinAge</c>, <c>MaxAge</c>, <c>MaxAwardsPerEmployee</c> and
+/// <c>MaxAwardsPerPeriod</c> appeared only in mappers, mapped in and mapped out and applied by
+/// nothing. Those six fields are exactly the "eligibility criteria" TDC's note has HR set up before
+/// anyone nominates, so the feature the note describes could not work.</para>
+///
+/// <para><b>Why it returns reasons.</b> TDC's note has management "set the criteria and then it
+/// will qualify some employees". An HR officer configuring that needs to see why somebody they
+/// expected is absent — a list of names alone makes a mis-set rule indistinguishable from a correct
+/// one.</para>
+/// </remarks>
+public interface IAwardEligibilityEvaluator
+{
+    /// <summary>Everyone who qualifies, with the reasons anyone excluded did not.</summary>
+    Task<AwardEligibilityResult> EvaluateAsync(Guid awardTypeId, Guid tenantId, DateTime asOf);
+
+    /// <summary>One employee's standing against the same criteria.</summary>
+    Task<AwardEligibilityVerdict> EvaluateEmployeeAsync(Guid awardTypeId, Guid employeeId, Guid tenantId, DateTime asOf);
+}
+
+/// <summary>The qualified set, plus everyone considered and rejected and why.</summary>
+public sealed class AwardEligibilityResult
+{
+    public Guid AwardTypeId { get; init; }
+    public DateTime AsOf { get; init; }
+    public int ConsideredCount { get; init; }
+    public List<AwardEligibilityVerdict> Eligible { get; init; } = new();
+    public List<AwardEligibilityVerdict> Ineligible { get; init; } = new();
+}
+
+/// <summary>One employee's standing, and the criteria they failed if any.</summary>
+public sealed class AwardEligibilityVerdict
+{
+    public Guid EmployeeId { get; init; }
+    public string EmployeeName { get; init; } = string.Empty;
+    public string? EmployeeNumber { get; init; }
+    public bool IsEligible { get; init; }
+
+    /// <summary>Empty when eligible. Each entry names one criterion and the value that failed it.</summary>
+    public List<string> Reasons { get; init; } = new();
+}
+
+/// <summary>
+/// Award cycles, queried by tenant rather than loaded whole.
+/// </summary>
+/// <remarks>
+/// The open-for-nomination and open-for-voting lists are read on every visit to the awards landing
+/// page, so they must not begin by loading every cycle that has ever run. The window comparison
+/// itself stays in the service — it depends on <c>Status</c> as well as the clock, and expressing
+/// that in the predicate would put the rule in two places.
+/// </remarks>
+public interface IAwardCycleRepository : IGenericRepository<AwardCycle>
+{
+    Task<IEnumerable<AwardCycle>> GetByTenantAsync(Guid tenantId);
+    Task<IEnumerable<AwardCycle>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId);
+
+    /// <summary>Published cycles only — the candidates for an "is it open right now" test.</summary>
+    Task<IEnumerable<AwardCycle>> GetPublishedAsync(Guid tenantId);
+
+    Task<bool> CodeExistsAsync(Guid tenantId, string cycleCode);
+}
+
 public interface IAwardBudgetRepository : IGenericRepository<AwardBudget>
 {
     Task<IEnumerable<AwardBudget>> GetByAwardTypeIdAsync(Guid awardTypeId);
@@ -102,6 +170,13 @@ public interface IAwardNominationRepository : IGenericRepository<AwardNomination
     Task<AwardNomination?> GetWithDetailsAsync(Guid id);
     Task<AwardNomination?> GetByNominationNumberAsync(Guid tenantId, string nominationNumber);
     Task<IEnumerable<AwardNomination>> GetByNomineeIdAsync(Guid nomineeId);
+
+    /// <summary>
+    /// How many live nominations each cycle holds, in one query. Counting them by loading every
+    /// nomination in the tenant and grouping in memory is the shape that turns a cycle register
+    /// into a full table scan per page.
+    /// </summary>
+    Task<Dictionary<Guid, int>> GetCountsByCycleAsync(Guid tenantId);
     Task<IEnumerable<AwardNomination>> GetByNominatedByIdAsync(Guid nominatedById);
     Task<IEnumerable<AwardNomination>> GetByAwardTypeIdAsync(Guid awardTypeId);
     Task<IEnumerable<AwardNomination>> GetByYearAsync(Guid tenantId, int year);

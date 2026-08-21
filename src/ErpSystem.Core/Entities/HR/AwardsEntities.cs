@@ -154,6 +154,62 @@ public class AwardBudget : TenantEntity
 }
 
 /// <summary>
+/// One run of an award: the period it covers and the windows in which people may take part.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this exists (area 14 slice 3, decision D-4).</b> TDC's note requires the awards to
+/// be <i>"listed for people to nominate before the voting takes place"</i> — a nomination window,
+/// then a voting window. The nomination entity could only say <c>Year</c>, <c>Quarter</c> and
+/// <c>Month</c>, which cannot express "nominations close on Friday and voting opens on Monday".
+/// <c>AwardType.Frequency</c> stays what it was: the template that says how often a cycle recurs.
+/// This is the run itself.</para>
+///
+/// <para><b>Open and closed are derived from the dates, not stored.</b> <see cref="Status"/> is a
+/// lifecycle flag — is this cycle a draft, published, cancelled or finished — and whether
+/// nominations are open right now is <c>Status == Published &amp;&amp; now is inside the window</c>.
+/// Storing "NominationsOpen" as a status as well would create two facts that can disagree, which is
+/// the defect shape this area has produced four times already (a duplicated employee id, a
+/// decorative flag, a name field nothing wrote).</para>
+///
+/// <para><b>Which windows are required depends on slice 2's selection model.</b> An award decided
+/// by <c>StaffVote</c> must carry a voting window; one decided any other way must not, because a
+/// voting window on an award nobody votes on is a claim about a ballot that will never happen. An
+/// award whose candidates come from a <c>ManagementDirect</c> selection has no nomination stage, so
+/// it carries no nomination window either.</para>
+/// </remarks>
+public class AwardCycle : TenantEntity
+{
+    [MaxLength(50)]
+    public string CycleCode { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+
+    public Guid AwardTypeId { get; set; }
+
+    /// <summary>The period the award is for — not the window in which people nominate.</summary>
+    public int Year { get; set; }
+    public int? Quarter { get; set; }
+    public int? Month { get; set; }
+
+    public DateTime? NominationOpensOn { get; set; }
+    public DateTime? NominationClosesOn { get; set; }
+
+    public DateTime? VotingOpensOn { get; set; }
+    public DateTime? VotingClosesOn { get; set; }
+
+    public AwardCycleStatus Status { get; set; } = AwardCycleStatus.Draft;
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(AwardTypeId))]
+    public virtual AwardType AwardType { get; set; } = null!;
+
+    public virtual ICollection<AwardNomination> Nominations { get; set; } = new List<AwardNomination>();
+}
+
+/// <summary>
 /// Award nomination for committee review
 /// </summary>
 public class AwardNomination : TenantEntity
@@ -163,6 +219,12 @@ public class AwardNomination : TenantEntity
 
     public Guid AwardTypeId { get; set; }
     public Guid? AwardLevelId { get; set; }
+
+    /// <summary>
+    /// The run this nomination belongs to (area 14 slice 3). Nullable: nominations raised before
+    /// cycles existed have none, and an award taken by direct management selection never has one.
+    /// </summary>
+    public Guid? AwardCycleId { get; set; }
 
     public Guid? NomineeId { get; set; } // Nullable for team nominations
     public Guid NominatedById { get; set; }
@@ -211,6 +273,9 @@ public class AwardNomination : TenantEntity
 
     [ForeignKey(nameof(CommitteeId))]
     public virtual AwardCommittee? Committee { get; set; }
+
+    [ForeignKey(nameof(AwardCycleId))]
+    public virtual AwardCycle? AwardCycle { get; set; }
 
     public virtual ICollection<AwardNomineeContribution> NomineeContributions { get; set; } = new List<AwardNomineeContribution>();
     public virtual ICollection<AwardNominationAttachment> Attachments { get; set; } = new List<AwardNominationAttachment>();

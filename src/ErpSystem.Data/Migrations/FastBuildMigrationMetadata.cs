@@ -196,3 +196,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820175026_AddSeparationExitInterview")] partial class AddSeparationExitInterview { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260820235451_AddSeparationNoticeDecision")] partial class AddSeparationNoticeDecision { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821120959_AddAwardSelectionModel")] partial class AddAwardSelectionModel { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260821135708_AddAwardCycles")] partial class AddAwardCycles { }

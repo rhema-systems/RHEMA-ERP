@@ -3781,6 +3781,34 @@ public enum AwardNominationSource
 }
 
 /// <summary>
+/// Where an award cycle is in its life, which is not the same question as whether its windows are open.
+/// </summary>
+/// <remarks>
+/// Deliberately excludes "NominationsOpen" and "VotingOpen". Those are answered by comparing the
+/// clock to <c>AwardCycle.NominationOpensOn</c> / <c>VotingOpensOn</c>, so they cannot drift out of
+/// step with the dates they describe. A status that says a window is open while the dates say it
+/// closed yesterday is the two-sources-of-one-fact defect this area keeps producing.
+/// </remarks>
+public enum AwardCycleStatus
+{
+    /// <summary>Being set up. Not visible to employees, and nothing may be nominated to it.</summary>
+    [Description("Draft")]
+    Draft = 1,
+
+    /// <summary>Live. Its windows govern what may happen and when.</summary>
+    [Description("Published")]
+    Published = 2,
+
+    /// <summary>The winner has been decided and the cycle is finished.</summary>
+    [Description("Completed")]
+    Completed = 3,
+
+    /// <summary>Abandoned before completion. Kept so its nominations still have a home.</summary>
+    [Description("Cancelled")]
+    Cancelled = 4
+}
+
+/// <summary>
 /// How the winner is chosen once there are candidates.
 /// </summary>
 /// <remarks>

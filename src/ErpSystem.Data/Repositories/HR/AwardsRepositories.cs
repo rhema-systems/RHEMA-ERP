@@ -271,6 +271,50 @@ public class AwardTypeTargetRepository : GenericRepository<AwardTypeTarget>, IAw
     }
 }
 
+public class AwardCycleRepository : GenericRepository<AwardCycle>, IAwardCycleRepository
+{
+    public AwardCycleRepository(ApplicationDbContext context) : base(context) { }
+
+    public override async Task<AwardCycle?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
+    }
+
+    public async Task<IEnumerable<AwardCycle>> GetByTenantAsync(Guid tenantId)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted)
+            .OrderByDescending(c => c.Year).ThenBy(c => c.Name)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<AwardCycle>> GetByAwardTypeIdAsync(Guid tenantId, Guid awardTypeId)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .Where(c => c.TenantId == tenantId && c.AwardTypeId == awardTypeId && !c.IsDeleted)
+            .OrderByDescending(c => c.Year).ThenBy(c => c.Name)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<AwardCycle>> GetPublishedAsync(Guid tenantId)
+    {
+        return await _context.Set<AwardCycle>()
+            .Include(c => c.AwardType)
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.Status == AwardCycleStatus.Published)
+            .ToListAsync();
+    }
+
+    public async Task<bool> CodeExistsAsync(Guid tenantId, string cycleCode)
+    {
+        return await _context.Set<AwardCycle>()
+            .AnyAsync(c => c.TenantId == tenantId && !c.IsDeleted && c.CycleCode == cycleCode);
+    }
+}
+
 public class AwardBudgetRepository : GenericRepository<AwardBudget>, IAwardBudgetRepository
 {
     public AwardBudgetRepository(ApplicationDbContext context) : base(context) { }
@@ -555,6 +599,15 @@ public class TeamAwardRecipientRepository : GenericRepository<TeamAwardRecipient
 
 public class AwardNominationRepository : GenericRepository<AwardNomination>, IAwardNominationRepository
 {
+    public async Task<Dictionary<Guid, int>> GetCountsByCycleAsync(Guid tenantId)
+    {
+        return await _context.Set<AwardNomination>()
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.AwardCycleId != null)
+            .GroupBy(n => n.AwardCycleId!.Value)
+            .Select(g => new { CycleId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CycleId, x => x.Count);
+    }
+
     public AwardNominationRepository(ApplicationDbContext context) : base(context) { }
 
     public async Task<IEnumerable<AwardNomination>> GetByTenantAsync(Guid tenantId)

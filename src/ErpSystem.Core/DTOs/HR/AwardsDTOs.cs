@@ -1386,3 +1386,165 @@ public class ProcessLongServiceAwardDto
 
 #endregion
 
+
+#region Award Cycle DTOs
+
+/// <summary>An award cycle, with its windows and whether they are open right now.</summary>
+public class AwardCycleDto : BaseDto
+{
+    public Guid TenantId { get; set; }
+    public string CycleCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    public Guid AwardTypeId { get; set; }
+    public string AwardTypeName { get; set; } = string.Empty;
+
+    /// <summary>How this award's winner is chosen — it decides which windows the cycle must carry.</summary>
+    public AwardWinnerDecision WinnerDecision { get; set; }
+    public string WinnerDecisionName => WinnerDecision.ToString();
+    public AwardNominationSource NominationSource { get; set; }
+    public string NominationSourceName => NominationSource.ToString();
+
+    public int Year { get; set; }
+    public int? Quarter { get; set; }
+    public int? Month { get; set; }
+
+    public DateTime? NominationOpensOn { get; set; }
+    public DateTime? NominationClosesOn { get; set; }
+    public DateTime? VotingOpensOn { get; set; }
+    public DateTime? VotingClosesOn { get; set; }
+
+    public AwardCycleStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    /// <summary>
+    /// Derived, never stored. A stored "nominations are open" flag and a nomination window are two
+    /// facts about one thing, and they drift apart the moment the clock passes the close date.
+    /// </summary>
+    public bool IsNominationOpen { get; set; }
+    public bool IsVotingOpen { get; set; }
+
+    /// <summary>What a caller may do right now, in words, when neither window is open.</summary>
+    public string? WindowState { get; set; }
+
+    public int NominationCount { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class AwardCycleSummaryDto
+{
+    public Guid Id { get; set; }
+    public string CycleCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public Guid AwardTypeId { get; set; }
+    public string AwardTypeName { get; set; } = string.Empty;
+    public int Year { get; set; }
+    public int? Quarter { get; set; }
+    public int? Month { get; set; }
+    public AwardCycleStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+    public bool IsNominationOpen { get; set; }
+    public bool IsVotingOpen { get; set; }
+    public int NominationCount { get; set; }
+}
+
+public class CreateAwardCycleDto : CreateDtoBase
+{
+    [MaxLength(50)]
+    public string CycleCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    public Guid AwardTypeId { get; set; }
+
+    [Required]
+    [Range(2000, 2100)]
+    public int Year { get; set; }
+
+    [Range(1, 4)]
+    public int? Quarter { get; set; }
+
+    [Range(1, 12)]
+    public int? Month { get; set; }
+
+    public DateTime? NominationOpensOn { get; set; }
+    public DateTime? NominationClosesOn { get; set; }
+    public DateTime? VotingOpensOn { get; set; }
+    public DateTime? VotingClosesOn { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+public class UpdateAwardCycleDto : UpdateDtoBase
+{
+    [Required]
+    [MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    [Range(2000, 2100)]
+    public int Year { get; set; }
+
+    [Range(1, 4)]
+    public int? Quarter { get; set; }
+
+    [Range(1, 12)]
+    public int? Month { get; set; }
+
+    public DateTime? NominationOpensOn { get; set; }
+    public DateTime? NominationClosesOn { get; set; }
+    public DateTime? VotingOpensOn { get; set; }
+    public DateTime? VotingClosesOn { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>Cancelling a cycle requires saying why — the record outlives the person who cancelled it.</summary>
+public class CancelAwardCycleDto
+{
+    [Required]
+    [MaxLength(500)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+#endregion
+
+#region Award Eligibility DTOs
+
+/// <summary>Who qualifies for an award, and why anyone else does not.</summary>
+public class AwardEligibilityResultDto
+{
+    public Guid AwardTypeId { get; set; }
+    public string AwardTypeName { get; set; } = string.Empty;
+    public DateTime AsOf { get; set; }
+
+    /// <summary>Active employees considered — the denominator behind the counts below.</summary>
+    public int ConsideredCount { get; set; }
+    public int EligibleCount { get; set; }
+    public int IneligibleCount { get; set; }
+
+    public List<AwardEligibilityVerdictDto> Eligible { get; set; } = new();
+
+    /// <summary>
+    /// Included on purpose. TDC's note has management "set the criteria and then it will qualify
+    /// some employees"; whoever sets them needs to see why an expected name is missing, or a
+    /// mis-set rule looks identical to a correct one.
+    /// </summary>
+    public List<AwardEligibilityVerdictDto> Ineligible { get; set; } = new();
+}
+
+public class AwardEligibilityVerdictDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public bool IsEligible { get; set; }
+    public List<string> Reasons { get; set; } = new();
+}
+
+#endregion

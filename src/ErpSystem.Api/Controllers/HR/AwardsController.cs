@@ -61,6 +61,8 @@ public class AwardsController : HrControllerBase
     private readonly IAwardCommitteeMemberService _committeeMemberService;
     private readonly IAwardCommitteeReviewService _committeeReviewService;
     private readonly ILongServiceAwardService _longServiceAwardService;
+    private readonly IAwardCycleService _cycleService;
+    private readonly IAwardEligibilityService _eligibilityService;
 
     public AwardsController(
         IAwardTypeService awardTypeService,
@@ -77,6 +79,8 @@ public class AwardsController : HrControllerBase
         IAwardCommitteeMemberService committeeMemberService,
         IAwardCommitteeReviewService committeeReviewService,
         ILongServiceAwardService longServiceAwardService,
+        IAwardCycleService cycleService,
+        IAwardEligibilityService eligibilityService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -94,6 +98,8 @@ public class AwardsController : HrControllerBase
         _committeeMemberService = committeeMemberService;
         _committeeReviewService = committeeReviewService;
         _longServiceAwardService = longServiceAwardService;
+        _cycleService = cycleService;
+        _eligibilityService = eligibilityService;
     }
 
     #region Award Types
@@ -1175,5 +1181,109 @@ public class AwardsController : HrControllerBase
     }
 
     #endregion
+
+    #region Award Cycles
+
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("types/{awardTypeId:guid}/cycles")]
+    public async Task<ActionResult<IEnumerable<AwardCycleSummaryDto>>> GetCycles(Guid awardTypeId)
+        => Ok(await _cycleService.GetByAwardTypeIdAsync(awardTypeId));
+
+    /// <summary>Cycles accepting nominations right now — derived from the clock, never from a stored flag.</summary>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("cycles/open-for-nomination")]
+    public async Task<ActionResult<IEnumerable<AwardCycleSummaryDto>>> GetCyclesOpenForNomination()
+        => Ok(await _cycleService.GetOpenForNominationAsync());
+
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("cycles/open-for-voting")]
+    public async Task<ActionResult<IEnumerable<AwardCycleSummaryDto>>> GetCyclesOpenForVoting()
+        => Ok(await _cycleService.GetOpenForVotingAsync());
+
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("cycles/{id:guid}")]
+    public async Task<ActionResult<AwardCycleDto>> GetCycle(Guid id)
+    {
+        var result = await _cycleService.GetByIdAsync(id);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("cycles")]
+    public async Task<ActionResult<AwardCycleDto>> CreateCycle([FromBody] CreateAwardCycleDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
+
+        var created = await _cycleService.CreateAsync(tenantId, userId, dto);
+        return CreatedAtAction(nameof(GetCycle), new { id = created.Id }, created);
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPut("cycles/{id:guid}")]
+    public async Task<ActionResult<AwardCycleDto>> UpdateCycle(Guid id, [FromBody] UpdateAwardCycleDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+
+        return Ok(await _cycleService.UpdateAsync(id, userId, dto));
+    }
+
+    /// <summary>Takes a cycle out of draft. Re-checks the windows: the award's selection model may have changed since.</summary>
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("cycles/{id:guid}/publish")]
+    public async Task<ActionResult<AwardCycleDto>> PublishCycle(Guid id)
+    {
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+        return Ok(await _cycleService.PublishAsync(id, userId));
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("cycles/{id:guid}/cancel")]
+    public async Task<ActionResult<AwardCycleDto>> CancelCycle(Guid id, [FromBody] CancelAwardCycleDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+        return Ok(await _cycleService.CancelAsync(id, userId, dto.Reason));
+    }
+
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpDelete("cycles/{id:guid}")]
+    public async Task<IActionResult> DeleteCycle(Guid id)
+    {
+        await _cycleService.DeleteAsync(id);
+        return NoContent();
+    }
+
+    #endregion
+
+    #region Eligibility
+
+    /// <summary>
+    /// Who qualifies for this award, and why anyone else does not.
+    /// </summary>
+    /// <remarks>
+    /// This is the "management will set the criteria and then it will qualify some employees" step
+    /// of TDC's note. The ineligible list is returned deliberately: without it, a mis-set rule and a
+    /// correct one produce the same screen.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("types/{awardTypeId:guid}/eligible")]
+    public async Task<ActionResult<AwardEligibilityResultDto>> GetEligible(
+        Guid awardTypeId,
+        [FromQuery] DateTime? asOf = null)
+        => Ok(await _eligibilityService.EvaluateAsync(awardTypeId, asOf));
+
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("types/{awardTypeId:guid}/eligible/{employeeId:guid}")]
+    public async Task<ActionResult<AwardEligibilityVerdictDto>> GetEmployeeEligibility(
+        Guid awardTypeId,
+        Guid employeeId,
+        [FromQuery] DateTime? asOf = null)
+        => Ok(await _eligibilityService.EvaluateEmployeeAsync(awardTypeId, employeeId, asOf));
+
+    #endregion
+
 }
 

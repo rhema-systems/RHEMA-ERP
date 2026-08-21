@@ -210,3 +210,26 @@ public interface ILongServiceAwardService
 
 
 
+
+#region Award Cycle & Eligibility Services
+
+public interface IAwardCycleService
+{
+    Task<IEnumerable<AwardCycleSummaryDto>> GetByAwardTypeIdAsync(Guid awardTypeId);
+    Task<IEnumerable<AwardCycleSummaryDto>> GetOpenForNominationAsync();
+    Task<IEnumerable<AwardCycleSummaryDto>> GetOpenForVotingAsync();
+    Task<AwardCycleDto?> GetByIdAsync(Guid id);
+    Task<AwardCycleDto> CreateAsync(Guid tenantId, Guid userId, CreateAwardCycleDto dto);
+    Task<AwardCycleDto> UpdateAsync(Guid id, Guid userId, UpdateAwardCycleDto dto);
+    Task<AwardCycleDto> PublishAsync(Guid id, Guid userId);
+    Task<AwardCycleDto> CancelAsync(Guid id, Guid userId, string reason);
+    Task DeleteAsync(Guid id);
+}
+
+public interface IAwardEligibilityService
+{
+    Task<AwardEligibilityResultDto> EvaluateAsync(Guid awardTypeId, DateTime? asOf);
+    Task<AwardEligibilityVerdictDto> EvaluateEmployeeAsync(Guid awardTypeId, Guid employeeId, DateTime? asOf);
+}
+
+#endregion

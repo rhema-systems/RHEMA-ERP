@@ -84,9 +84,13 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardNominationReviewRepository, AwardNominationReviewRepository>();
         services.AddScoped<ILongServiceAwardRepository, LongServiceAwardRepository>();
         services.AddScoped<IAwardTypeTargetRepository, AwardTypeTargetRepository>();
+        services.AddScoped<IAwardCycleRepository, AwardCycleRepository>();
         // Resolves the polymorphic AwardTypeTarget.TargetId to a name. Not a repository for an
         // entity of its own — it reads four different tables depending on the target's kind.
         services.AddScoped<IAwardTargetNameResolver, AwardTargetNameResolver>();
+        // Applies every criterion an award type carries - service years, age, target scoping and
+        // the per-employee cap - not just the target scoping the old check looked at.
+        services.AddScoped<IAwardEligibilityEvaluator, AwardEligibilityEvaluator>();
         services.AddScoped<ICompanyEventRepository, CompanyEventRepository>();
         services.AddScoped<IEventParticipantRepository, EventParticipantRepository>();
         services.AddScoped<IEventAttendanceRepository, EventAttendanceRepository>();
@@ -483,6 +487,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAssetRequisitionService, AssetRequisitionService>();
         services.AddScoped<IAssetTransferService, AssetTransferService>();
         services.AddScoped<IAwardTypeService, AwardTypeService>();
+        services.AddScoped<IAwardCycleService, AwardCycleService>();
+        services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();
         services.AddScoped<IAwardLevelService, AwardLevelService>();
         services.AddScoped<IAwardBudgetService, AwardBudgetService>();
         services.AddScoped<IEmployeeAwardService, EmployeeAwardService>();

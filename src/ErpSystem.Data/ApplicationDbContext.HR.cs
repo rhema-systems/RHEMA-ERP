@@ -162,6 +162,7 @@ public partial class ApplicationDbContext
     public DbSet<AwardLevel> AwardLevels { get; set; } = null!;
     public DbSet<AwardTypeTarget> AwardTypeTargets { get; set; } = null!;
     public DbSet<AwardBudget> AwardBudgets { get; set; } = null!;
+    public DbSet<AwardCycle> AwardCycles { get; set; } = null!;
     public DbSet<EmployeeAward> EmployeeAwards { get; set; } = null!;
     public DbSet<TeamAwardRecipient> TeamAwardRecipients { get; set; } = null!;
     public DbSet<AwardAttachment> AwardAttachments { get; set; } = null!;
@@ -4391,6 +4392,26 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Nominations)
                 .WithOne(x => x.AwardType)
                 .HasForeignKey(x => x.AwardTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AwardCycle>(entity =>
+        {
+            entity.HasIndex(x => x.AwardTypeId);
+            entity.HasIndex(x => x.CycleCode);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => new { x.AwardTypeId, x.Year, x.Quarter, x.Month });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.AwardType)
+                .WithMany()
+                .HasForeignKey(x => x.AwardTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Nominations)
+                .WithOne(x => x.AwardCycle)
+                .HasForeignKey(x => x.AwardCycleId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
