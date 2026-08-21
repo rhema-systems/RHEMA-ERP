@@ -1,99 +1,111 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
-    DetailedLedgerReport,
-    LedgerPartnerOption,
-    PartnerDetailedLedgerReport,
+  DetailedLedgerReport,
+  PartnerDetailedLedgerReport,
 } from '@/components/finance/PartnerDetailedLedgerReport';
+import { Button } from '@/components/ui/button';
+import { useTenant } from '@/contexts/TenantContext';
+import {
+  apSupplierDetailedLedgerQueryKey,
+  toApLedgerSupplierOptions,
+} from '@/lib/finance/ap-supplier-detailed-ledger';
 import { accountsPayableService } from '@/services/accountsPayableService';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
-
-const supplierPartnerTypes = new Set(['supplier', 'contractor', 'both']);
-
-const isSupplierPartner = (partner: BusinessPartnerDto) =>
-    supplierPartnerTypes.has((partner.partnerType ?? '').toLowerCase());
 
 export default function SupplierDetailedLedgerPage() {
-    const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
-    const [partnersLoading, setPartnersLoading] = useState(true);
+  const { currentTenantCode, isLoadingTenants } = useTenant();
+  const {
+    data: suppliers = [],
+    isLoading: suppliersLoading,
+    isError: suppliersFailed,
+    error: suppliersError,
+    refetch: refetchSuppliers,
+  } = useQuery({
+    queryKey: apSupplierDetailedLedgerQueryKey(currentTenantCode),
+    queryFn: () => accountsPayableService.getInvoiceSuppliers(),
+    enabled: !isLoadingTenants && Boolean(currentTenantCode),
+  });
+  const partners = useMemo(
+    () => toApLedgerSupplierOptions(suppliers),
+    [suppliers]
+  );
+  const supplierLookupError =
+    !isLoadingTenants && !currentTenantCode
+      ? 'Choose a tenant before loading Finance suppliers.'
+      : suppliersFailed
+        ? suppliersError instanceof Error
+          ? suppliersError.message
+          : 'Finance suppliers could not be loaded.'
+        : undefined;
 
-    useEffect(() => {
-        let isMounted = true;
-
-        const loadPartners = async () => {
-            setPartnersLoading(true);
-            try {
-                const allPartners = await businessPartnerService.getAllPartnersForDropdown();
-                if (!isMounted) return;
-
-                setPartners(
-                    allPartners
-                        .filter(isSupplierPartner)
-                        .map((partner) => ({
-                            id: partner.id,
-                            code: partner.partnerCode,
-                            name: partner.partnerName,
-                            currencyCode: partner.currency,
-                        }))
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                );
-            } catch (error) {
-                console.error('Failed to load supplier partners', error);
-                if (isMounted) setPartners([]);
-            } finally {
-                if (isMounted) setPartnersLoading(false);
+  return (
+    <>
+      {supplierLookupError ? (
+        <div
+          role="alert"
+          className="mx-auto mt-6 flex max-w-[1536px] items-center justify-between gap-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
+          <p>{supplierLookupError}</p>
+          {suppliersFailed ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void refetchSuppliers()}
+            >
+              Retry supplier lookup
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      <PartnerDetailedLedgerReport
+        key={currentTenantCode ?? 'missing-tenant'}
+        title="Supplier Detailed Ledger"
+        description="Review opening balances, AP movements, and closing balances by supplier."
+        partnerLabel="Supplier"
+        partnerPluralLabel="Suppliers"
+        currencyToggleLabel="Show transactions in supplier currency where available"
+        exportFilePrefix="supplier-detailed-ledger"
+        backHref="/finance/ap/reports"
+        partners={partners}
+        partnersLoading={
+          isLoadingTenants || suppliersLoading || !currentTenantCode
+        }
+        loadReport={async (params): Promise<DetailedLedgerReport> => {
+          const report = await accountsPayableService.getSupplierDetailedLedger(
+            {
+              fromDate: params.fromDate,
+              toDate: params.toDate,
+              supplierIds: params.partnerIds,
+              showSupplierCurrency: params.showPartnerCurrency,
             }
-        };
+          );
 
-        loadPartners();
-
-        return () => {
-            isMounted = false;
-        };
-    }, []);
-
-    return (
-        <PartnerDetailedLedgerReport
-            title="Supplier Detailed Ledger"
-            description="Review opening balances, AP movements, and closing balances by supplier."
-            partnerLabel="Supplier"
-            partnerPluralLabel="Suppliers"
-            currencyToggleLabel="Show transactions in supplier currency where available"
-            exportFilePrefix="supplier-detailed-ledger"
-            backHref="/finance/ap/reports"
-            partners={partners}
-            partnersLoading={partnersLoading}
-            loadReport={async (params): Promise<DetailedLedgerReport> => {
-                const report = await accountsPayableService.getSupplierDetailedLedger({
-                    fromDate: params.fromDate,
-                    toDate: params.toDate,
-                    supplierIds: params.partnerIds,
-                    showSupplierCurrency: params.showPartnerCurrency,
-                });
-
-                return {
-                    fromDate: report.fromDate,
-                    toDate: report.toDate,
-                    currencyCode: report.currencyCode,
-                    totalOpeningBalance: report.totalOpeningBalance,
-                    totalDebits: report.totalDebits,
-                    totalCredits: report.totalCredits,
-                    totalClosingBalance: report.totalClosingBalance,
-                    warnings: report.warnings ?? [],
-                    accounts: report.suppliers.map((supplier) => ({
-                        id: supplier.businessPartnerId ?? supplier.supplierId,
-                        code: supplier.supplierCode,
-                        name: supplier.supplierName,
-                        currencyCode: supplier.currencyCode,
-                        openingBalance: supplier.openingBalance,
-                        totalDebits: supplier.totalDebits,
-                        totalCredits: supplier.totalCredits,
-                        closingBalance: supplier.closingBalance,
-                        lines: supplier.lines,
-                    })),
-                };
-            }}
-        />
-    );
+          return {
+            fromDate: report.fromDate,
+            toDate: report.toDate,
+            currencyCode: report.currencyCode,
+            totalOpeningBalance: report.totalOpeningBalance,
+            totalDebits: report.totalDebits,
+            totalCredits: report.totalCredits,
+            totalClosingBalance: report.totalClosingBalance,
+            warnings: report.warnings ?? [],
+            accounts: report.suppliers.map((supplier) => ({
+              id: supplier.supplierId,
+              code: supplier.supplierCode,
+              name: supplier.supplierName,
+              currencyCode: supplier.currencyCode,
+              openingBalance: supplier.openingBalance,
+              totalDebits: supplier.totalDebits,
+              totalCredits: supplier.totalCredits,
+              closingBalance: supplier.closingBalance,
+              lines: supplier.lines,
+            })),
+          };
+        }}
+      />
+    </>
+  );
 }

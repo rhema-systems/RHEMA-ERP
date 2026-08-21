@@ -28,7 +28,8 @@ import type {
     VendorInvoiceMatchExceptionReport,
     VendorInvoiceMatchExceptionStatus,
     ProcurementFinanceReconciliationReport,
-    ProcurementAcceptedSupplyOptions
+    ProcurementAcceptedSupplyOptions,
+    ApInvoiceSupplier
 } from '../types/ap';
 
 // Re-using the PagedResult structure from ar-service
@@ -113,6 +114,11 @@ class AccountsPayableService {
 
     public async getInvoice(id: string): Promise<VendorInvoice> {
         return apiService.get<VendorInvoice>(`${this.baseUrl}/invoices/${id}`);
+    }
+
+    /** Returns canonical Supplier.Id values through a tenant-scoped Finance read model. */
+    public async getInvoiceSuppliers(): Promise<ApInvoiceSupplier[]> {
+        return apiService.get<ApInvoiceSupplier[]>(`${this.baseUrl}/invoices/suppliers`);
     }
 
     public async createInvoice(data: VendorInvoiceCreateRequest): Promise<VendorInvoice> {
@@ -328,6 +334,14 @@ class AccountsPayableService {
         const params = new URLSearchParams();
         if (asOfDate) params.append('AsOfDate', asOfDate);
         return apiService.silentGet<ApAgingReport>(`${this.baseUrl}/reports/aging?${params.toString()}`);
+    }
+
+    public async downloadAgingReportCsv(asOfDate: string): Promise<Blob> {
+        return apiService.postBlob('/finance/report-exports/export', {
+            reportType: 'ApAging',
+            format: 'Csv',
+            asOfDate,
+        });
     }
 
     public async getCashRequirementForecast(asOfDate?: string): Promise<CashRequirementForecast> {

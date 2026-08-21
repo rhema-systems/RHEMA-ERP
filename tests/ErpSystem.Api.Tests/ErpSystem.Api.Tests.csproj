@@ -163,6 +163,7 @@
     <Compile Include="Services\Finance\FinanceClosePackDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApPaymentVoucherDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
     <Compile Include="Services\Finance\GhanaStatutoryTaxEngineTests.cs" />
