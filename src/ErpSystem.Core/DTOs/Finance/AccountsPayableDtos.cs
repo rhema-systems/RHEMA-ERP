@@ -590,6 +590,7 @@ public class VendorPaymentDto
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
+    public List<SupplierDebitNoteApplicationDto> SupplierDebitNoteApplications { get; set; } = new();
 }
 
 /// <summary>

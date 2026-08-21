@@ -308,6 +308,14 @@ public class VendorInvoice : TenantEntity
 
     public virtual ICollection<VendorInvoiceLineItem> LineItems { get; set; } = new List<VendorInvoiceLineItem>();
     public virtual ICollection<VendorPaymentAllocation> PaymentAllocations { get; set; } = new List<VendorPaymentAllocation>();
+
+    /// <summary>
+    /// Finance-owned supplier debit-note applications that reduce this invoice's AP balance.
+    /// They are separate from cash allocations because the debit note has already posted its
+    /// own AP-control reduction and must not be posted again as part of the payment journal.
+    /// </summary>
+    public virtual ICollection<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
+        = new List<SupplierDebitNoteApplication>();
 }
 
 /// <summary>
@@ -670,6 +678,13 @@ public class VendorPayment : TenantEntity
     // ── Navigation ──────────────────────────────────────────────────────
 
     public virtual ICollection<VendorPaymentAllocation> Allocations { get; set; } = new List<VendorPaymentAllocation>();
+
+    /// <summary>
+    /// Finance AP settlement bridge for supplier credits consumed alongside this payment.
+    /// These rows do not consume payment cash and therefore do not change AllocatedAmount.
+    /// </summary>
+    public virtual ICollection<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
+        = new List<SupplierDebitNoteApplication>();
 }
 
 /// <summary>

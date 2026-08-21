@@ -3,6 +3,7 @@ export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
 export type InvoiceMatchingStatus = 'Unmatched' | 'TwoWayMatched' | 'ThreeWayMatched' | 'MatchException';
 export type VendorPaymentStatus = 'Draft' | 'PendingAuthorization' | 'Authorized' | 'Processed' | 'Cleared' | 'Voided' | 'Failed' | 'Reconciled' | 'Reversed';
 export type VendorPaymentMethod = 'BankTransfer' | 'Cheque' | 'Cash' | 'WireTransfer' | 'MobileMoney' | 'DirectDebit' | 'Other';
+export type SupplierDebitNoteStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Posted' | 'Rejected' | 'Cancelled' | 'Reversed';
 export type PaymentBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Processing' | 'Completed' | 'PartiallyCompleted' | 'Cancelled';
 export type VendorInvoiceMatchExceptionStatus = 'PendingApproval' | 'Approved' | 'Rejected' | 'Cancelled' | 'Expired';
 export type VendorInvoiceMatchExceptionEvidenceKind = 'WorkflowEvidenceDocument' | 'CentralDocument';
@@ -61,6 +62,7 @@ export interface VendorInvoice {
     notes?: string;
     reference?: string;
     isOpeningBalance: boolean;
+    journalEntryId?: string;
     approvedByUserId?: string;
     approvedAt?: string;
     lineItems: VendorInvoiceLineItem[];
@@ -423,6 +425,150 @@ export interface VendorPayment {
     notes?: string;
     createdAt: string;
     allocations: VendorPaymentAllocation[];
+    supplierDebitNoteApplications?: SupplierDebitNoteApplication[];
+}
+
+export interface SupplierDebitNoteLine {
+    id: string;
+    originalVendorInvoiceLineItemId?: string;
+    originalFinancePurchaseOrderItemId?: string;
+    glAccountId?: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxGroupId?: string;
+    taxRate: number;
+    taxAmount: number;
+    discountPercentage: number;
+    discountAmount: number;
+    lineTotal: number;
+}
+
+export interface SupplierDebitNoteApplication {
+    id: string;
+    supplierDebitNoteId: string;
+    debitNoteNumber: string;
+    supplierCreditNoteReference?: string;
+    vendorPaymentId: string;
+    paymentNumber: string;
+    vendorInvoiceId: string;
+    invoiceNumber: string;
+    applicationAmount: number;
+    functionalAmount: number;
+    currencyCode: string;
+    exchangeRate: number;
+    applicationDate: string;
+    notes?: string;
+    isReversal: boolean;
+    originalApplicationId?: string;
+    paymentPostingEventId?: string;
+    paymentJournalEntryId?: string;
+    appliedAt?: string;
+    createdAt: string;
+    createdBy?: string;
+}
+
+export interface SupplierDebitNote {
+    id: string;
+    debitNoteNumber: string;
+    supplierCreditNoteReference?: string;
+    /** Finance-owned business-partner identity used to create and approve the debit note. */
+    vendorId: string;
+    /** Canonical Procurement supplier identity used by AP invoices and payments. */
+    supplierId: string;
+    vendorName: string;
+    supplierReturnId?: string;
+    originalVendorInvoiceId?: string;
+    originalVendorInvoiceNumber?: string;
+    debitNoteDate: string;
+    reason?: string;
+    notes?: string;
+    currencyCode: string;
+    exchangeRate: number;
+    subTotal: number;
+    taxAmount: number;
+    discountAmount: number;
+    totalAmount: number;
+    baseCurrencyAmount: number;
+    appliedAmount: number;
+    remainingAmount: number;
+    applicationStatus: string;
+    journalEntryId?: string;
+    postingEventId?: string;
+    workflowInstanceId?: string;
+    submittedById?: string;
+    submittedAt?: string;
+    approvedById?: string;
+    approvedAt?: string;
+    rejectedById?: string;
+    rejectedAt?: string;
+    rejectionReason?: string;
+    approvalSource: string;
+    reversalJournalEntryId?: string;
+    reversalPostingEventId?: string;
+    reversedAt?: string;
+    reversedById?: string;
+    reversalReason?: string;
+    status: number;
+    statusName: SupplierDebitNoteStatus;
+    lineItems: SupplierDebitNoteLine[];
+    applications: SupplierDebitNoteApplication[];
+    createdAt: string;
+    rowVersion: string;
+}
+
+/**
+ * Explicit bridge between Finance's business-partner master and Procurement's supplier master.
+ * The identifiers are intentionally kept separate; clients must not infer identity from names or codes.
+ */
+export interface ApSupplierIdentity {
+    businessPartnerId: string;
+    supplierId: string;
+    displayName: string;
+    isVerified: boolean;
+}
+
+export interface SupplierDebitNoteLineRequest {
+    originalVendorInvoiceLineItemId?: string;
+    glAccountId?: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxGroupId?: string;
+    taxRate?: number;
+    taxAmount?: number;
+    discountPercentage?: number;
+    discountAmount?: number;
+    lineTotal?: number;
+}
+
+export interface SupplierDebitNoteCreateRequest {
+    vendorId: string;
+    originalVendorInvoiceId?: string;
+    supplierCreditNoteReference?: string;
+    debitNoteDate: string;
+    reason: string;
+    notes?: string;
+    currencyCode: string;
+    exchangeRate: number;
+    lines: SupplierDebitNoteLineRequest[];
+}
+
+export interface SupplierDebitNoteUpdateRequest extends SupplierDebitNoteCreateRequest {
+    rowVersion: string;
+}
+
+export interface SupplierDebitNoteApplicationRequest {
+    supplierDebitNoteId: string;
+    vendorInvoiceId: string;
+    applicationAmount: number;
+    notes?: string;
+}
+
+export interface SupplierDebitNoteApplicationResult {
+    paymentId: string;
+    totalSupplierCreditsApplied: number;
+    applications: SupplierDebitNoteApplication[];
 }
 
 export interface VendorPaymentCreateRequest {

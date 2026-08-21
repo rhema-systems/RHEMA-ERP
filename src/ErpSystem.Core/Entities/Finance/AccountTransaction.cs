@@ -153,6 +153,12 @@ public class AccountTransaction : BusinessEntity
     public Guid? SourceDocumentId { get; set; }
 
     /// <summary>
+    /// Immutable line-level origin within the source document. Operational modules retain their
+    /// source records while Finance uses this lineage for exact corrective postings and audit.
+    /// </summary>
+    public Guid? SourceDocumentLineId { get; set; }
+
+    /// <summary>
     /// Source document type for reference and reporting.
     /// Examples: "Invoice", "Payment", "Journal Entry", "Asset Depreciation"
     /// </summary>
