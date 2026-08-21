@@ -44,17 +44,20 @@ public class AwardsMeController : HrControllerBase
     private readonly IAwardCycleService _cycleService;
     private readonly IAwardEligibilityService _eligibilityService;
     private readonly IAwardNominationService _nominationService;
+    private readonly IAwardVotingService _votingService;
 
     public AwardsMeController(
         IAwardCycleService cycleService,
         IAwardEligibilityService eligibilityService,
         IAwardNominationService nominationService,
+        IAwardVotingService votingService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
         _cycleService = cycleService;
         _eligibilityService = eligibilityService;
         _nominationService = nominationService;
+        _votingService = votingService;
     }
 
     /// <summary>
@@ -179,4 +182,66 @@ public class AwardsMeController : HrControllerBase
         await _nominationService.WithdrawOwnAsync(id, employeeId);
         return NoContent();
     }
+
+    // ── voting ────────────────────────────────────────────────────────────────
+
+    /// <summary>Cycles currently accepting votes.</summary>
+    [HttpGet("cycles/voting")]
+    public async Task<ActionResult<IEnumerable<AwardCycleSummaryDto>>> GetVotingCycles()
+    {
+        if (TryGetWriteContext(out _, out _) is { } error) return error;
+        return Ok(await _cycleService.GetOpenForVotingAsync());
+    }
+
+    /// <summary>
+    /// The ballot: who is standing, whether the caller may vote, and what they already chose.
+    /// </summary>
+    /// <remarks>
+    /// Carries no vote counts. The tally is withheld until voting closes so that it cannot
+    /// influence the vote it reports, and a per-nominee count here would be the same disclosure by
+    /// another route.
+    /// </remarks>
+    [HttpGet("cycles/{cycleId:guid}/ballot")]
+    public async Task<ActionResult<AwardBallotDto>> GetBallot(Guid cycleId)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var voterId,
+            "Viewing a ballot") is { } error) return error;
+
+        return Ok(await _votingService.GetBallotAsync(cycleId, voterId));
+    }
+
+    /// <summary>
+    /// Cast or change the caller's single vote in a cycle. The voter is the token, never the payload.
+    /// </summary>
+    [HttpPost("cycles/{cycleId:guid}/vote")]
+    public async Task<ActionResult<AwardVoteDto>> Vote(Guid cycleId, [FromBody] CastAwardVoteDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var voterId,
+            "Voting") is { } error) return error;
+
+        return Ok(await _votingService.CastAsync(cycleId, voterId, userId, dto));
+    }
+
+    [HttpGet("cycles/{cycleId:guid}/vote")]
+    public async Task<ActionResult<AwardVoteDto>> GetMyVote(Guid cycleId)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var voterId,
+            "Reading your vote") is { } error) return error;
+
+        var vote = await _votingService.GetMyVoteAsync(cycleId, voterId);
+        return vote == null ? NotFound() : Ok(vote);
+    }
+
+    /// <summary>Take the caller's vote back while the window is still open.</summary>
+    [HttpDelete("cycles/{cycleId:guid}/vote")]
+    public async Task<IActionResult> WithdrawMyVote(Guid cycleId)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var voterId,
+            "Withdrawing your vote") is { } error) return error;
+
+        await _votingService.WithdrawMyVoteAsync(cycleId, voterId);
+        return NoContent();
+    }
+
 }

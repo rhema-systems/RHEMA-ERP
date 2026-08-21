@@ -131,6 +131,13 @@ public class AwardTypeTarget : TenantEntity
 {
     public Guid AwardTypeId { get; set; }
 
+    /// <summary>
+    /// Whether this target scopes who may win the award or who may vote in it.
+    /// See <see cref="AwardTargetPurpose"/>. Defaults to eligibility, so every target written
+    /// before voting existed keeps the meaning it had.
+    /// </summary>
+    public AwardTargetPurpose Purpose { get; set; } = AwardTargetPurpose.Eligibility;
+
     public AwardTargetType TargetType { get; set; }
     public Guid? TargetId { get; set; }
 
@@ -231,6 +238,56 @@ public class AwardCycle : TenantEntity
     public virtual AwardType AwardType { get; set; } = null!;
 
     public virtual ICollection<AwardNomination> Nominations { get; set; } = new List<AwardNomination>();
+}
+
+/// <summary>
+/// One ballot: one employee's choice of who should win one cycle.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this exists (area 14 slice 5).</b> The staff vote is the centre of TDC's note —
+/// <i>"then staff can vote for who is supposed to win"</i>, <i>"a section of the employees or all of
+/// them can vote on the nominees with regards to who will win"</i> — and nothing modelled it. A
+/// grep for <c>AwardVote</c>, <c>Ballot</c> or <c>CastVote</c> across the solution returned nothing
+/// at all.</para>
+///
+/// <para><b>One vote per voter per cycle, not per nomination.</b> The question the note asks is
+/// "who is supposed to win", which is a single choice among the nominees rather than approval of
+/// each in turn. The unique index is therefore on (cycle, voter), and changing your mind means
+/// updating the ballot you already cast rather than adding a second one.</para>
+///
+/// <para><b>The justification is kept because TDC asked for it</b> — <i>"in the portal nomination or
+/// voting, people can state their justification or reason"</i>. It is optional: requiring a
+/// paragraph before somebody may vote suppresses turnout, and the note presents it as something
+/// people <i>can</i> do.</para>
+///
+/// <para><b>A ballot is not secret from the system, and is not shown to colleagues.</b> The voter is
+/// recorded because one-vote-per-person cannot be enforced otherwise, and because a disputed result
+/// has to be auditable. No read surface returns who voted for whom; the tally is a count.</para>
+/// </remarks>
+public class AwardVote : TenantEntity
+{
+    public Guid AwardCycleId { get; set; }
+
+    /// <summary>The nomination being voted for.</summary>
+    public Guid AwardNominationId { get; set; }
+
+    /// <summary>The employee casting it, taken from the token and never from the payload.</summary>
+    public Guid VoterId { get; set; }
+
+    public DateTime CastOn { get; set; }
+
+    /// <summary>Optional. TDC's note offers it; requiring it would suppress turnout.</summary>
+    [MaxLength(2000)]
+    public string? Justification { get; set; }
+
+    [ForeignKey(nameof(AwardCycleId))]
+    public virtual AwardCycle AwardCycle { get; set; } = null!;
+
+    [ForeignKey(nameof(AwardNominationId))]
+    public virtual AwardNomination AwardNomination { get; set; } = null!;
+
+    [ForeignKey(nameof(VoterId))]
+    public virtual Employee Voter { get; set; } = null!;
 }
 
 /// <summary>

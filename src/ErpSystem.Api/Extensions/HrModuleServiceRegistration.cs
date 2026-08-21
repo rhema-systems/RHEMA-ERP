@@ -85,6 +85,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILongServiceAwardRepository, LongServiceAwardRepository>();
         services.AddScoped<IAwardTypeTargetRepository, AwardTypeTargetRepository>();
         services.AddScoped<IAwardCycleRepository, AwardCycleRepository>();
+        services.AddScoped<IAwardVoteRepository, AwardVoteRepository>();
+        // Who may vote. Mirrors the eligibility evaluator on purpose - same targets, same
+        // matching - so the two cannot drift into behaving differently.
+        services.AddScoped<IAwardElectorateEvaluator, AwardElectorateEvaluator>();
         // Resolves the polymorphic AwardTypeTarget.TargetId to a name. Not a repository for an
         // entity of its own — it reads four different tables depending on the target's kind.
         services.AddScoped<IAwardTargetNameResolver, AwardTargetNameResolver>();
@@ -489,6 +493,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardTypeService, AwardTypeService>();
         services.AddScoped<IAwardCycleService, AwardCycleService>();
         services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();
+        services.AddScoped<IAwardVotingService, AwardVotingService>();
         services.AddScoped<IAwardLevelService, AwardLevelService>();
         services.AddScoped<IAwardBudgetService, AwardBudgetService>();
         services.AddScoped<IEmployeeAwardService, EmployeeAwardService>();

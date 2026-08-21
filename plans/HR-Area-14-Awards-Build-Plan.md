@@ -320,7 +320,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 2 | Types, levels, targets, budgets | ✅ **Done.** The configuration surface, with D-3's two axes, honest status codes, and target-name resolution. |
 | 3 | Cycles and eligibility | ✅ **Done.** D-4 cycle entity with windows; AWD-01 eligibility evaluation producing the qualified set. |
 | 4 | Nomination | ✅ **Done.** AWD-02, AWD-09; the gates, the employee surface, and self-nomination as a per-award setting. |
-| 5 | The vote | AWD-04, AWD-05, AWD-06, AWD-10 — the vote model, the electorate, one-vote-per-voter, the window gate. |
+| 5 | The vote | ✅ **Done.** AWD-04/05/06/10 — the ballot, the electorate, one-vote-per-voter, the window, and the tally withheld until close. |
 | 6 | Committee scoring | D-2 model change, AWD-12, AWD-13 highest-average outcome. Test with identical scores and ≥3 reviewers. |
 | 7 | Direct and automatic selection | AWD-07, AWD-08 — management selection, and nomination derived from performance/targets. |
 | 8 | The award is conferred | Nomination → `EmployeeAward`; presentation; certificate; the payment record (D-7). |
@@ -736,3 +736,68 @@ Three separate repairs, each worth noting:
 
 The general point: **a new rule reaches backwards through every harness that predates it.** Running
 only the new slice would have left three green-looking files that no longer execute.
+
+---
+
+### Slice 5 — the vote. 2026-08-21, **49/49**, run twice. Migration `AddAwardVoting`.
+
+Harness: `run-slice5.mjs`. Slices 1, 2, 3, 3b, 4 re-run at 30/49/51/6/44.
+
+**The centre of TDC's note, and nothing modelled it.** *"HR will setup the eligibility criteria,
+then employees or management will do the nomination, and then staff can vote for who is supposed to
+win."* Before this slice, a search for `AwardVote`, `Ballot` or `CastVote` across the whole solution
+returned nothing at all.
+
+**The electorate reuses the eligibility targets, told apart by `Purpose`.** The note asks for two
+different sets — *"it will qualify some employees"* (who may win) and *"a section of the employees or
+all of them can vote"* (who may vote) — and they are genuinely different: a department might nominate
+from its own staff while the whole company votes. Same shape, same table, one column. **No electorate
+targets means everybody votes**, which is the "or all of them" half of the sentence.
+
+⚠ **That change carried its own trap, and the harness exists to catch it.** The eligibility evaluator
+now filters on `Purpose = Eligibility`. Without that filter a rule saying "the whole company votes"
+would silently have become a rule about who may **win** — the two-meanings-one-column shape this area
+has produced repeatedly. The harness scopes an electorate down to one employee and then asserts
+eligibility is still wide.
+
+**Three judgement calls, each recorded in the code that makes them:**
+
+1. **One vote per voter per cycle, enforced by a unique index rather than a service check.** The note
+   asks *who is supposed to win* — a single choice, not approval of each nominee in turn. The index
+   is filtered on `IsDeleted = 0` so a withdrawn ballot leaves room for a replacement; unfiltered, a
+   soft-deleted row would lock a voter out of their own vote permanently. Changing your mind updates
+   the ballot you cast; a second row would double-count the tally.
+
+2. **The tally is withheld until voting closes — from the awards desk too.** A visible running count
+   changes the result it reports: people break towards a leader, and an early lead in a small
+   electorate is mostly noise. Turnout is shown throughout, because it says nothing about who is
+   winning. Withholding it from `/results` while exposing per-nominee counts on the ballot would be
+   the same disclosure by another route, so the harness asserts no count key appears on a ballot
+   entry at all.
+
+3. **A tie is reported, never broken.** Earliest nomination, alphabetical order — any rule this code
+   invented would settle a real award on a basis nobody at TDC chose. The result names the tied
+   nominations and says the committee decides.
+
+Self-voting is governed by the same `AllowSelfNomination` setting rather than a second flag: both are
+ways of advancing your own candidacy.
+
+**⚠ A hollow assertion I caught in my own harness, and the reason it was hollow.** The first version
+of the self-voting block asserted only that *self-nomination* was refused — so it never reached the
+voting rule at all, and would have passed however that rule behaved. The case that matters is the one
+where an employee is on the ballot **without having put themselves there**: a colleague nominates
+them, and then they try to vote for their own nomination. Rewritten to set that up explicitly, and it
+now also asserts they can still vote for somebody else — being on the ballot must not disenfranchise
+you. This is the area-13 lesson restated: *a conditional or mis-aimed assertion is a skipped
+assertion wearing a tick.*
+
+**Two harness bugs of the same shape, worth naming because they will recur.** Both the self-voting
+and the tie fixtures were first written against a cycle whose nomination window was **already closed**
+— nominations were raised into a state they could never have been raised in. A cycle now has to be
+*walked forward* in the harness the way a real one moves through time: nominations open, nominations
+close, voting opens, voting closes. Fixtures that skip to the end state cannot be built by the rules
+that govern the beginning.
+
+**Not a defect: a transient 500 from `/api/auth/login`** during a batch of overlapping harness runs.
+The API stayed healthy and the retry was clean. Recorded rather than diagnosed — it was not
+reproduced and is not this area's code.

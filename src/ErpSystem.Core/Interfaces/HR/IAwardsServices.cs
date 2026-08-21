@@ -245,3 +245,29 @@ public interface IAwardEligibilityService
 }
 
 #endregion
+
+
+#region Award Voting
+
+public interface IAwardVotingService
+{
+    /// <summary>What an employee sees when they come to vote, including what they already chose.</summary>
+    Task<AwardBallotDto> GetBallotAsync(Guid cycleId, Guid voterId);
+
+    /// <summary>
+    /// Cast, or change, this voter's single ballot for the cycle. Changing it updates the existing
+    /// row rather than adding another — a second row would break one-vote-per-voter and
+    /// double-count the tally.
+    /// </summary>
+    Task<AwardVoteDto> CastAsync(Guid cycleId, Guid voterId, Guid userId, CastAwardVoteDto dto);
+
+    Task<AwardVoteDto?> GetMyVoteAsync(Guid cycleId, Guid voterId);
+    Task WithdrawMyVoteAsync(Guid cycleId, Guid voterId);
+
+    /// <summary>
+    /// The tally, or the reason it is withheld. Counts are not returned while voting is open.
+    /// </summary>
+    Task<AwardVoteResultDto> GetResultAsync(Guid cycleId);
+}
+
+#endregion

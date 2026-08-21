@@ -3781,6 +3781,31 @@ public enum AwardNominationSource
 }
 
 /// <summary>
+/// What a target on an award type is scoping: who may win it, or who may vote in it.
+/// </summary>
+/// <remarks>
+/// <para>TDC's note asks for both, and they are different sets: <i>"management will set the criteria
+/// and then it will qualify some employees"</i> is who may win, while <i>"a section of the employees
+/// or all of them can vote on the nominees"</i> is who may vote. A department might nominate from
+/// its own staff but let the whole company vote, or the reverse.</para>
+///
+/// <para>They share one table because they are the same shape — an organisation unit, a position, a
+/// staff level or a named person, included or excluded, optionally effective-dated — and because
+/// sharing it means the name resolver and the matching logic are written once. <c>Eligibility</c> is
+/// the default, so every target written before voting existed keeps meaning what it meant.</para>
+/// </remarks>
+public enum AwardTargetPurpose
+{
+    /// <summary>Scopes who may receive the award.</summary>
+    [Description("Eligible to win")]
+    Eligibility = 1,
+
+    /// <summary>Scopes who may vote in it. An award with none of these is voted on by everyone.</summary>
+    [Description("Eligible to vote")]
+    Electorate = 2
+}
+
+/// <summary>
 /// Where an award cycle is in its life, which is not the same question as whether its windows are open.
 /// </summary>
 /// <remarks>

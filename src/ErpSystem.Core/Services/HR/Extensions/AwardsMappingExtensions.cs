@@ -615,6 +615,7 @@ public static class AwardsMappingExtensions
             Id = entity.Id,
             TenantId = entity.TenantId,
             AwardTypeId = entity.AwardTypeId,
+            Purpose = entity.Purpose,
             TargetType = entity.TargetType,
             TargetId = entity.TargetId,
             MinAge = entity.MinAge,
@@ -634,6 +635,7 @@ public static class AwardsMappingExtensions
         {
             TenantId = tenantId,
             AwardTypeId = dto.AwardTypeId,
+            Purpose = dto.Purpose,
             TargetType = dto.TargetType,
             TargetId = dto.TargetId,
             MinAge = dto.MinAge,
@@ -648,6 +650,7 @@ public static class AwardsMappingExtensions
 
     public static void UpdateEntity(this AwardTypeTarget entity, UpdateAwardTypeTargetDto dto, Guid userId)
     {
+        entity.Purpose = dto.Purpose;
         entity.TargetType = dto.TargetType;
         entity.TargetId = dto.TargetId;
         entity.MinAge = dto.MinAge;

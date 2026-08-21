@@ -254,4 +254,31 @@ public interface ILongServiceAwardRepository : IGenericRepository<LongServiceAwa
 #endregion
 
 
+#region Award Voting Repositories
 
+public interface IAwardVoteRepository : IGenericRepository<AwardVote>
+{
+    /// <summary>This voter's ballot in this cycle, or null. There can only ever be one.</summary>
+    Task<AwardVote?> GetByVoterAsync(Guid cycleId, Guid voterId);
+
+    Task<IEnumerable<AwardVote>> GetByCycleAsync(Guid cycleId);
+
+    /// <summary>Votes per nomination for a cycle, counted in the database rather than in memory.</summary>
+    Task<Dictionary<Guid, int>> GetCountsByNominationAsync(Guid cycleId);
+}
+
+/// <summary>
+/// Answers whether an employee may vote in an award.
+/// </summary>
+/// <remarks>
+/// TDC's note: <i>"a section of the employees or all of them can vote on the nominees"</i>. The
+/// electorate is scoped with the same targets as eligibility, distinguished by
+/// <c>AwardTargetPurpose.Electorate</c> — an award with no electorate targets is voted on by
+/// everyone, which is the "or all of them" half of the sentence and the sensible default.
+/// </remarks>
+public interface IAwardElectorateEvaluator
+{
+    Task<bool> CanVoteAsync(Guid awardTypeId, Guid employeeId, Guid tenantId, DateTime asOf);
+}
+
+#endregion

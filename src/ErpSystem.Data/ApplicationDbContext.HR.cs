@@ -163,6 +163,7 @@ public partial class ApplicationDbContext
     public DbSet<AwardTypeTarget> AwardTypeTargets { get; set; } = null!;
     public DbSet<AwardBudget> AwardBudgets { get; set; } = null!;
     public DbSet<AwardCycle> AwardCycles { get; set; } = null!;
+    public DbSet<AwardVote> AwardVotes { get; set; } = null!;
     public DbSet<EmployeeAward> EmployeeAwards { get; set; } = null!;
     public DbSet<TeamAwardRecipient> TeamAwardRecipients { get; set; } = null!;
     public DbSet<AwardAttachment> AwardAttachments { get; set; } = null!;
@@ -4419,6 +4420,34 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<AwardVote>(entity =>
+        {
+            entity.HasIndex(x => x.AwardCycleId);
+            entity.HasIndex(x => x.AwardNominationId);
+
+            // One ballot per voter per cycle, enforced by the database rather than by a check the
+            // service could be refactored past. Filtered so a withdrawn ballot does not block a
+            // replacement.
+            entity.HasIndex(x => new { x.AwardCycleId, x.VoterId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            entity.HasOne(x => x.AwardCycle)
+                .WithMany()
+                .HasForeignKey(x => x.AwardCycleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AwardNomination)
+                .WithMany()
+                .HasForeignKey(x => x.AwardNominationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Voter)
+                .WithMany()
+                .HasForeignKey(x => x.VoterId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<AwardLevel>(entity =>
         {
             entity.HasIndex(x => x.AwardTypeId);
@@ -4449,8 +4478,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.AwardTypeId);
             entity.HasIndex(x => x.TargetType);
             entity.HasIndex(x => x.TargetId);
+            entity.HasIndex(x => new { x.AwardTypeId, x.Purpose });
 
             entity.Property(x => x.TargetType).HasConversion<int>();
+
+            // Eligibility is the default so every target written before voting existed keeps the
+            // meaning it had: it scoped who could win, not who could vote.
+            entity.Property(x => x.Purpose).HasConversion<int>()
+                .HasDefaultValue(AwardTargetPurpose.Eligibility);
 
             entity.HasOne(x => x.AwardType)
                 .WithMany(x => x.Targets)

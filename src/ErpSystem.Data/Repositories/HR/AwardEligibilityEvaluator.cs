@@ -81,13 +81,21 @@ public class AwardEligibilityEvaluator : IAwardEligibilityEvaluator
             .FirstOrDefaultAsync(t => t.Id == awardTypeId && t.TenantId == tenantId && !t.IsDeleted);
 
     /// <summary>
-    /// Targets in force at <paramref name="asOf"/>. The effective dating on
-    /// <c>AwardTypeTarget</c> existed and was never honoured — a target that expired last year still
-    /// scoped the award.
+    /// Eligibility targets in force at <paramref name="asOf"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>Filtered on <c>Purpose</c> since slice 5. The same table now also holds the electorate
+    /// — who may vote — and without this filter a rule saying "the whole company votes" would have
+    /// silently become a rule about who may win. That is the shape of defect this area keeps
+    /// finding, so it is guarded at the query rather than left to a caller.</para>
+    ///
+    /// <para>The effective dating was honoured from slice 3: before that a target that expired last
+    /// year still scoped the award.</para>
+    /// </remarks>
     private async Task<List<AwardTypeTarget>> LoadTargetsAsync(Guid awardTypeId, Guid tenantId, DateTime asOf)
         => await _context.Set<AwardTypeTarget>()
             .Where(t => t.AwardTypeId == awardTypeId && t.TenantId == tenantId && !t.IsDeleted
+                && t.Purpose == AwardTargetPurpose.Eligibility
                 && (t.EffectiveFrom == null || t.EffectiveFrom <= asOf)
                 && (t.EffectiveTo == null || t.EffectiveTo >= asOf))
             .ToListAsync();

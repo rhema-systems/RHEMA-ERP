@@ -63,6 +63,7 @@ public class AwardsController : HrControllerBase
     private readonly ILongServiceAwardService _longServiceAwardService;
     private readonly IAwardCycleService _cycleService;
     private readonly IAwardEligibilityService _eligibilityService;
+    private readonly IAwardVotingService _votingService;
 
     public AwardsController(
         IAwardTypeService awardTypeService,
@@ -81,6 +82,7 @@ public class AwardsController : HrControllerBase
         ILongServiceAwardService longServiceAwardService,
         IAwardCycleService cycleService,
         IAwardEligibilityService eligibilityService,
+        IAwardVotingService votingService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -100,6 +102,7 @@ public class AwardsController : HrControllerBase
         _longServiceAwardService = longServiceAwardService;
         _cycleService = cycleService;
         _eligibilityService = eligibilityService;
+        _votingService = votingService;
     }
 
     #region Award Types
@@ -1282,6 +1285,29 @@ public class AwardsController : HrControllerBase
         Guid employeeId,
         [FromQuery] DateTime? asOf = null)
         => Ok(await _eligibilityService.EvaluateEmployeeAsync(awardTypeId, employeeId, asOf));
+
+    #endregion
+
+
+    #region Vote Results
+
+    /// <summary>
+    /// The result of a cycle's staff vote, or the reason it is being withheld.
+    /// </summary>
+    /// <remarks>
+    /// <para>Counts are <b>not</b> returned while voting is open, and that applies to the awards
+    /// desk as well as to employees. A visible running tally changes the result it reports, and a
+    /// figure that leaks from the desk to the floor is the same disclosure by a slower route.
+    /// Turnout is returned throughout, because it says nothing about who is winning.</para>
+    ///
+    /// <para>A tie is reported, never broken. Any rule this code invented — earliest nomination,
+    /// alphabetical order — would decide a real award on an arbitrary basis that nobody at TDC
+    /// chose.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("cycles/{cycleId:guid}/results")]
+    public async Task<ActionResult<AwardVoteResultDto>> GetVoteResult(Guid cycleId)
+        => Ok(await _votingService.GetResultAsync(cycleId));
 
     #endregion
 

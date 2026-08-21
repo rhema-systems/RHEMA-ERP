@@ -353,6 +353,10 @@ public class UpdateAwardLevelDto : UpdateDtoBase
 /// </summary>
 public class AwardTypeTargetDto : BaseDto
 {
+    /// <summary>Whether this scopes who may win the award or who may vote in it.</summary>
+    public AwardTargetPurpose Purpose { get; set; }
+    public string PurposeName => Purpose.ToString();
+
     public Guid TenantId { get; set; }
     public Guid AwardTypeId { get; set; }
     public AwardTargetType TargetType { get; set; }
@@ -372,6 +376,12 @@ public class AwardTypeTargetDto : BaseDto
 /// </summary>
 public class CreateAwardTypeTargetDto : CreateDtoBase
 {
+    /// <summary>
+    /// Whether this target scopes who may win or who may vote. Defaults to eligibility, so a
+    /// caller that predates voting keeps the behaviour it had.
+    /// </summary>
+    public AwardTargetPurpose Purpose { get; set; } = AwardTargetPurpose.Eligibility;
+
     [Required]
     public Guid AwardTypeId { get; set; }
 
@@ -400,6 +410,12 @@ public class CreateAwardTypeTargetDto : CreateDtoBase
 /// </summary>
 public class UpdateAwardTypeTargetDto : UpdateDtoBase
 {
+    /// <summary>
+    /// Whether this target scopes who may win or who may vote. Defaults to eligibility, so a
+    /// caller that predates voting keeps the behaviour it had.
+    /// </summary>
+    public AwardTargetPurpose Purpose { get; set; } = AwardTargetPurpose.Eligibility;
+
     [Required]
     public AwardTargetType TargetType { get; set; }
 
@@ -1574,6 +1590,116 @@ public class AwardEligibilityVerdictDto
     public string? EmployeeNumber { get; set; }
     public bool IsEligible { get; set; }
     public List<string> Reasons { get; set; } = new();
+}
+
+#endregion
+
+
+#region Award Voting DTOs
+
+/// <summary>What an employee sees when they come to vote.</summary>
+public class AwardBallotDto
+{
+    public Guid AwardCycleId { get; set; }
+    public string CycleName { get; set; } = string.Empty;
+    public Guid AwardTypeId { get; set; }
+    public string AwardTypeName { get; set; } = string.Empty;
+
+    public DateTime? VotingOpensOn { get; set; }
+    public DateTime? VotingClosesOn { get; set; }
+    public bool IsVotingOpen { get; set; }
+
+    /// <summary>Whether this employee is in the electorate for this award.</summary>
+    public bool IsInElectorate { get; set; }
+
+    /// <summary>What they have already voted for, if anything. Null means they have not voted.</summary>
+    public Guid? MyVoteNominationId { get; set; }
+
+    public List<AwardBallotEntryDto> Nominees { get; set; } = new();
+}
+
+/// <summary>
+/// One name on the ballot.
+/// </summary>
+/// <remarks>
+/// Carries no vote count. The tally is withheld until voting closes, and a per-entry count here
+/// would be the same disclosure by another route.
+/// </remarks>
+public class AwardBallotEntryDto
+{
+    public Guid NominationId { get; set; }
+    public string NominationNumber { get; set; } = string.Empty;
+    public Guid? NomineeId { get; set; }
+    public string NomineeName { get; set; } = string.Empty;
+    public bool IsTeam { get; set; }
+    public string? TeamName { get; set; }
+
+    /// <summary>Why they were nominated — what the voter is being asked to judge.</summary>
+    public string? Justification { get; set; }
+
+    public bool IsMyVote { get; set; }
+}
+
+public class CastAwardVoteDto
+{
+    [Required]
+    public Guid AwardNominationId { get; set; }
+
+    /// <summary>
+    /// Optional. TDC's note offers it — "in the portal nomination or voting, people can state their
+    /// justification or reason" — and offering is not requiring: a mandatory paragraph before
+    /// somebody may vote suppresses turnout.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? Justification { get; set; }
+}
+
+public class AwardVoteDto
+{
+    public Guid Id { get; set; }
+    public Guid AwardCycleId { get; set; }
+    public string CycleName { get; set; } = string.Empty;
+    public Guid AwardNominationId { get; set; }
+    public string NomineeName { get; set; } = string.Empty;
+    public Guid VoterId { get; set; }
+    public DateTime CastOn { get; set; }
+    public string? Justification { get; set; }
+}
+
+/// <summary>The result of a staff vote, or the reason it is not being shown.</summary>
+public class AwardVoteResultDto
+{
+    public Guid AwardCycleId { get; set; }
+    public string CycleName { get; set; } = string.Empty;
+    public string AwardTypeName { get; set; } = string.Empty;
+    public DateTime? VotingClosesOn { get; set; }
+    public bool IsVotingOpen { get; set; }
+
+    /// <summary>Turnout. Safe to show while voting is open: it says nothing about who is winning.</summary>
+    public int VotesCast { get; set; }
+
+    /// <summary>False while voting is open — see <see cref="WithheldReason"/>.</summary>
+    public bool ResultsAvailable { get; set; }
+
+    /// <summary>Why there is no result: voting still open, not yet opened, no votes, or a tie.</summary>
+    public string? WithheldReason { get; set; }
+
+    public List<AwardVoteTallyDto> Tally { get; set; } = new();
+
+    public Guid? WinningNominationId { get; set; }
+    public string? WinnerName { get; set; }
+
+    /// <summary>A tie is reported, never broken — see the service for why.</summary>
+    public bool IsTied { get; set; }
+    public List<Guid> TiedNominationIds { get; set; } = new();
+}
+
+public class AwardVoteTallyDto
+{
+    public Guid NominationId { get; set; }
+    public Guid? NomineeId { get; set; }
+    public string NomineeName { get; set; } = string.Empty;
+    public int Votes { get; set; }
 }
 
 #endregion
