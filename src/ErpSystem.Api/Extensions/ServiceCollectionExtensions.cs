@@ -838,6 +838,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceMatchExceptionService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceMatchExceptionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
+            // FIN-INT-012/013 is a Finance-owned, fail-closed consumer only. Procurement/Inventory
+            // supplies approved immutable envelopes, never Finance account ids, and remains the
+            // owner of return approval, dispatch, quantities, locations and carrying-cost evidence.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISupplierReturnFinanceAdapter,
+                ErpSystem.Api.Services.Finance.AP.SupplierReturnFinanceAdapter>();
             services.AddScoped<ErpSystem.Api.Services.Finance.AP.FinancePurchaseOrderReceiptPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
             // FIN-INT-007 consumes Procurement's accepted-supply contract but keeps all asset

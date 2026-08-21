@@ -41,6 +41,9 @@
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <!-- Supplier-return ownership is shared with Procurement/Inventory, but Finance must keep
+         its legacy mutation endpoints fail-closed until FIN-INT-012/013 producer contracts exist. -->
+    <Compile Include="Controllers\Finance\SupplierReturnsQuarantineTests.cs" />
     <Compile Include="Controllers\Finance\VendorInvoiceMatchingControllerTests.cs" />
     <Compile Include="Controllers\Finance\VendorInvoiceMatchExceptionControllerTests.cs" />
     <Compile Include="Controllers\Finance\PaymentMethodControllerTests.cs" />
@@ -138,6 +141,9 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
+    <!-- FIN-INT-012/013 is an inter-team callable promise. Keep its fail-closed ownership,
+         canonical-integrity and producer retry-identity tests in the default Finance suite. -->
+    <Compile Include="Services\Finance\SupplierReturnFinanceAdapterTests.cs" />
     <Compile Include="Services\Finance\ProcurementFinanceReconciliationTests.cs" />
     <Compile Include="Services\Finance\InventoryValuationFinancePostingTests.cs" />
     <Compile Include="Services\Finance\E2E012InventoryAdjustmentFinancePostingTests.cs" />

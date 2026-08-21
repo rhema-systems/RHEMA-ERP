@@ -170,7 +170,35 @@ public static class FinanceIntegrationContractCatalog
             "Not defined",
             "Not defined",
             null,
-            "TDC must define SH Fund, PF, ESB and fuel-allocation source systems, events, balances and reconciliation outcomes before an interface can be designed.")
+            "TDC must define SH Fund, PF, ESB and fuel-allocation source systems, events, balances and reconciliation outcomes before an interface can be designed."),
+
+        // FIN-INT-012 and FIN-INT-013 deliberately model two different business dates. Dispatching
+        // accepted stock back to a supplier does not prove that the supplier has accepted a credit,
+        // refund or replacement. Procurement owns the Return-to-Vendor lifecycle, Inventory owns
+        // quantity movements and carrying-cost layers, and Finance owns AP/GRV, tax and GL effects.
+        // The modules exchange immutable contract DTOs; no module may write another module's tables.
+        new(
+            "FIN-INT-012",
+            "Post-acceptance supplier return dispatch and valuation handoff",
+            "Procurement and Inventory",
+            "Finance / Accounts Payable, GRV and General Ledger",
+            FinanceIntegrationContractStatus.Planned,
+            "0.1",
+            "SupplierReturnFinanceAdapter.ConsumeDispatchAsync (fail-closed)",
+            "SupplierReturnDispatch v0.1",
+            null,
+            "Procurement owns the approved return and dispatch lifecycle; Inventory owns the authoritative outbound quantity movement and carrying-cost layers; Finance owns AP/GRV and GL treatment. Producers must not write Finance tables directly. Keep Planned until the callable Finance consumer and producer consumer-contract tests pass."),
+        new(
+            "FIN-INT-013",
+            "Supplier return commercial resolution to AP, tax and settlement",
+            "Procurement",
+            "Finance / Accounts Payable, Tax and Cash",
+            FinanceIntegrationContractStatus.Planned,
+            "0.1",
+            "SupplierReturnFinanceAdapter.ConsumeCommercialResolutionAsync (fail-closed)",
+            "SupplierReturnCommercialResolution v0.1",
+            null,
+            "Procurement owns the supplier credit, refund, replacement or warranty-resolution evidence; Inventory remains authoritative for quantity and cost layers; Finance owns AP application, GRV clearing, tax, cash/refund and GL effects. Producers must not write Finance tables directly. Keep Planned until the callable Finance consumer and producer consumer-contract tests pass.")
     ];
 
     public static FinanceIntegrationContractDefinition GetRequired(string id)
