@@ -180,6 +180,105 @@ recorded in `StaffTravelCurrencyBridge.GetRateToBaseAsync`, and the travel harne
 
 ---
 
+---
+
+## 3. Workflow engine — a transition's `Condition` is stored as a JSON blob and evaluated as an expression, so **conditional routing never routes**
+
+**Module:** Workflow (shared infrastructure) · **Found by:** HR area 9b slice 15 · **2026-08-21**
+
+### What is broken
+
+`CreateWorkflowTransitionDto.Condition` is a **`WorkflowConditionDto`** — an object with
+`ConditionType`, `Expression`, `Variables`. When a definition is created,
+`WorkflowDefinitionServiceAdapter.CreateStepsAndTransitionsAsync` persists it as:
+
+```csharp
+Condition = transitionDto.Condition != null
+    ? JsonSerializer.Serialize(transitionDto.Condition, WorkflowJsonOptions)
+    : null,
+```
+
+into `WorkflowTransition.Condition`, which is a **`string?`**.
+
+`WorkflowEngine` then passes that column straight to the evaluator, in four places
+(`AdvanceFromStepAsync`, `ExecuteTransitionAsync`, and two others):
+
+```csharp
+if (await EvaluateConditionAsync(transition.Condition, context))
+```
+
+But `WorkflowConditionEvaluator.EvaluateConditionAsync` expects a **bare expression** —
+`isProcedural == true`. What it receives is the serialised DTO:
+
+```json
+{"conditionType":"Expression","expression":"isProcedural == true","variables":null,
+ "logicalOperator":"And","childConditions":null}
+```
+
+The evaluator never sees the expression it was given. Nothing errors: the evaluator catches its own
+exceptions and the engine logs nothing, so a definition with conditional routing looks correct in
+the admin UI, publishes cleanly, reads back with the condition intact — and routes by priority
+alone.
+
+### What was proven
+
+A definition with two branches out of `Draft` — one conditional on `isProcedural == true` going to
+an HR approval step, one default going to a Managing Director approval step:
+
+| conditional branch priority | record | expected | actual |
+|---|---|---|---|
+| 1 (below the default's 2) | `isProcedural = true` | HR approval | **Managing Director approval** |
+| 10 (above the default's 0) | `isProcedural = false` | Managing Director approval | **HR approval** |
+
+The branch taken tracks **priority only**; the condition changes nothing. Measured directly: the
+record read back `isProcedural: false` while the engine reported `currentStep: "HR approval"` and
+`pendingApprovers: [{approverRole: "HR"}]`.
+
+⚠ Also observed while measuring, and possibly a second defect: the instance's `DataContext` came
+back **empty** through `GET /api/Workflow/instances/{id}`, even though `SimpleWorkflowService`
+builds a populated context and passes it to `StartWorkflowAsync`. If the context is genuinely not
+being persisted onto the instance, then `MergeDataContext(instance, stepData)` has nothing to merge
+on any later step and conditions would fail on a second count. Worth checking as part of the same
+fix — it may be a projection omission in the read endpoint rather than a storage problem.
+
+### What it blocks
+
+**Any per-record routing, in every module.** Threshold rules are the main reason
+`SimpleWorkflowService.BuildEntityContextAsync` exists at all — procurement's value bands, the
+requisition's headcount and budget flags, HR's `isProcedural`. All of that context is assembled,
+passed in, and then ignored at the moment it would matter.
+
+For HR area 9b specifically: FR-HR-092 wants a procedural absence termination signed by HR and
+every other exit by the Managing Director. That routing cannot be expressed. **The requirement is
+still enforced** — `SeparationService.RequireDecisionAuthority` refuses on the record itself and
+runs before the engine's own check — so no exit can be signed by the wrong authority. What is lost
+is the *assignment*: both roles have to be listed as approvers on a single step, so an HR officer
+sees exits in their queue that the service will refuse them.
+
+### What a fix needs
+
+1. Decide which side is canonical. Storing the DTO is the richer choice (it carries
+   `ConditionType`, `Variables`, `ChildConditions`), so the smaller correct change is at the read
+   side: deserialise before evaluating.
+2. In `WorkflowEngine`, replace each `EvaluateConditionAsync(transition.Condition, context)` with a
+   helper that deserialises the stored JSON to `WorkflowConditionDto` and evaluates
+   `.Expression` — falling back to treating the string as a bare expression, since
+   hand-authored and seeded definitions may hold one. There are **four** call sites; fixing one is
+   worse than fixing none, because the behaviour would then differ by code path.
+3. Make an unparseable condition **loud**. Today it silently means "false" in the evaluator and
+   "no opinion" in the engine. A definition whose routing cannot be evaluated should log a warning
+   naming the definition, the transition and the expression.
+4. Note for whoever fixes it: `AdvanceFromStepAsync` selects
+   `validTransitions.OrderByDescending(t => t.Priority).FirstOrDefault()` — **highest priority
+   wins**, not lowest. That is not documented anywhere and reads as "1st, 2nd" to anyone authoring
+   a definition. Once conditions work, a conditional branch must still outrank its default or it
+   can never be taken.
+5. Re-run `dev-harness/hr-separation/run-slice15.mjs` with the conditional definition restored
+   (it is preserved in `workflow-definition.mjs` as `publishSeparationDefinition`'s
+   `useConditionalRouting` option) — it asserts the routing in both directions.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

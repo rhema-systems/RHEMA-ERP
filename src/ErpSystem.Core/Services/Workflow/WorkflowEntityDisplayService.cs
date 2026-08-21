@@ -395,6 +395,25 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("EmployeeSeparation") || key == Normalize("EMPLOYEE_SEPARATION") || key == Normalize("Employee Separation"))
+            {
+                var separation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSeparation>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "EmployeeSeparation";
+                info.EntityNumber = separation?.SeparationNumber;
+                // ⚠ The PERSON is the subject of an exit, so their name belongs in what the signatory
+                // reads in their queue. "SEP-2026-0031" alone says nothing about who is leaving, and
+                // this is a signature that ends somebody's employment — the one approval in the
+                // inbox that should never be given without knowing whose it is.
+                info.EntityName = separation == null
+                    ? null
+                    : separation.Employee == null
+                        ? separation.SeparationNumber
+                        : $"{separation.SeparationNumber} — {separation.Employee.FirstName} {separation.Employee.LastName}";
+                info.ActionUrl = $"/hr/separations/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("SuccessionPlan") || key == Normalize("SUCCESSION_PLAN") || key == Normalize("Succession Plan"))
             {
                 var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()

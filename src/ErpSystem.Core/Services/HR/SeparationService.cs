@@ -37,7 +37,16 @@ public class SeparationService : ISeparationService
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrencyService _currencies;
     private readonly IEmployeeService _employeeService;
+    private readonly IWorkflowIntegrationService _workflow;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly ILogger<SeparationService> _logger;
+
+    /// <summary>
+    /// The workflow entity type this service drives. Who may sign at a step comes from the
+    /// published definition; what the outcome MEANS on the record comes from
+    /// <c>EmployeeSeparationWorkflowStatusAdapter</c>.
+    /// </summary>
+    private const string EntityType = "EmployeeSeparation";
 
     public SeparationService(
         IUnitOfWork unitOfWork,
@@ -45,6 +54,8 @@ public class SeparationService : ISeparationService
         ICompanyHrPolicyProvider policyProvider,
         ICurrencyService currencies,
         IEmployeeService employeeService,
+        IWorkflowIntegrationService workflow,
+        IWorkflowStatusAdapterRegistry workflowAdapters,
         ILogger<SeparationService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -52,6 +63,8 @@ public class SeparationService : ISeparationService
         _policyProvider = policyProvider;
         _currencies = currencies;
         _employeeService = employeeService;
+        _workflow = workflow;
+        _workflowAdapters = workflowAdapters;
         _logger = logger;
     }
 
@@ -455,9 +468,34 @@ public class SeparationService : ISeparationService
             && settings.ProceduralAbsenceDays > 0
             && absent >= settings.ProceduralAbsenceDays;
 
-        entity.Status = SeparationStatus.PendingApproval;
-        entity.SubmittedOn = DateTime.UtcNow;
         entity.SubmittedById = actorEmployeeId;
+
+        // ⚠ The status is NOT set here. Submitting starts the FR-HR-092 approval on the generic
+        // workflow engine, and the adapter writes whatever the engine's outcome means — normally
+        // PendingApproval, but Approved outright if the published definition routes this exit
+        // straight through. Setting it here as well would be a second opinion about a decision the
+        // engine owns, and the two would eventually disagree.
+        //
+        // Everything above this line stays in the service: the resignation-needs-a-notice-date rule,
+        // the evidence a medical retirement or a death must carry, the derived dates, and the
+        // freezing of IsProcedural. Those are facts about the RECORD, not routing choices, and they
+        // must refuse before an approver is ever troubled with the exit.
+        // ⚠ SAVED BEFORE THE HAND-OFF, and this is load-bearing. The engine builds its routing
+        // context by READING the separation back, so anything set above but not yet persisted is
+        // invisible to it. IsProcedural is exactly that: set a few lines up, and the one fact the
+        // FR-HR-092 routing branches on. Handing off first meant every procedural termination was
+        // read as non-procedural and routed to the Managing Director — and because the condition
+        // evaluator answers false on anything it cannot resolve, the misrouting was silent.
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var submitted = await _workflow.SubmitAsync(EntityType, entity.Id);
+        if (!submitted.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                submitted.ExecutionResult.Message ?? "Failed to start the separation approval workflow.");
+
+        _workflowAdapters.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, submitted.Outcome, _currentUserProvider.UserId);
 
         if (!string.IsNullOrWhiteSpace(dto.Notes))
         {
@@ -538,7 +576,33 @@ public class SeparationService : ISeparationService
 
         // ⚠ The notice decision no longer rides here — see RecordNoticeDecisionAsync. Approval is a
         // yes/no plus a comment, which is all the generic workflow engine's approve action carries.
-        entity.Status = SeparationStatus.Approved;
+
+        // ⚠ TWO gates, deliberately, and in this order.
+        //
+        // RequireDecisionAuthority (above) is FR-HR-092: a rule about the RECORD — the Managing
+        // Director may sign any exit, HR only a procedural one. It runs FIRST so a refusal explains
+        // itself in terms of the separation rather than answering the generic "you are not assigned
+        // as an approver", and so the rule holds even if the definition is missing or wrong.
+        //
+        // The engine's check is about the STEP: whether this user is the approver the published
+        // definition assigned. A definition can express the same procedural split for assignment,
+        // but the guarantee lives in the service.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this separation.");
+
+        var approval = await _workflow.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Approve", dto.Notes);
+        if (!approval.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                approval.ExecutionResult.Message ?? "Failed to process the separation approval.");
+
+        _workflowAdapters.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, approval.Outcome, actingUserId);
+
+        // The engine names the ApplicationUser who acted; the record wants the Employee, because
+        // ApprovedById is an Employee FK and "who signed this exit" is a person, not a login.
         entity.ApprovedById = actorEmployeeId;
         entity.ApprovedOn = DateTime.UtcNow;
         entity.ApprovalNotes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
@@ -671,7 +735,21 @@ public class SeparationService : ISeparationService
 
         RequireDecisionAuthority(entity);
 
-        entity.Status = SeparationStatus.Rejected;
+        // Same two gates as approving, same order and for the same reasons.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this separation.");
+
+        var refusal = await _workflow.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Reject", dto.Reason);
+        if (!refusal.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                refusal.ExecutionResult.Message ?? "Failed to process the separation refusal.");
+
+        _workflowAdapters.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, refusal.Outcome, actingUserId, dto.Reason);
+
         entity.RejectedById = actorEmployeeId;
         entity.RejectedOn = DateTime.UtcNow;
         entity.RejectionReason = dto.Reason.Trim();

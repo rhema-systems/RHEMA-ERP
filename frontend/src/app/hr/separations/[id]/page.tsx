@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -8,7 +9,6 @@ import {
   Info,
   Loader2,
   ShieldAlert,
-  ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +25,9 @@ import {
 } from '@/components/ui/select';
 import { separationService } from '@/services/hr/separation.service';
 import { ExitInterviewTab } from '@/components/hr/separations/exit-interview-tab';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import type {
   SeparationDetail,
   SettlementLine,
@@ -95,6 +98,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export default function SeparationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -145,11 +149,46 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
     queryFn: () => separationService.getDocuments(id),
   });
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['separation', id] });
-    queryClient.invalidateQueries({ queryKey: ['separation-clearance', id] });
-    queryClient.invalidateQueries({ queryKey: ['separation-settlement', id] });
+  // Awaited, not fire-and-forget: the workflow hook's afterAction chains onto this, and an
+  // approval that returns before the record has been refetched shows the old status for a beat.
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['separation', id] }),
+      queryClient.invalidateQueries({ queryKey: ['separation-clearance', id] }),
+      queryClient.invalidateQueries({ queryKey: ['separation-settlement', id] }),
+    ]);
   };
+
+  /**
+   * FR-HR-092 runs on the generic workflow engine, so the Managing Director signs exits from the
+   * same inbox as everything else rather than from a screen only this module has.
+   *
+   * ⚠ This page never sets a status. The service drives the engine and
+   * `EmployeeSeparationWorkflowStatusAdapter` maps the outcome onto the record — so we refetch and
+   * let it decide. A screen that also wrote a status would be a second opinion about a decision the
+   * engine owns.
+   *
+   * The notice settlement is deliberately NOT here: it is its own act, below, because the engine's
+   * approve action carries a comment and nothing else, and that decision changes what the leaver is
+   * paid.
+   */
+  const workflow = useWorkflowRecord({
+    entityType: 'EmployeeSeparation',
+    entityId: id,
+    entityLabel: 'Separation',
+    entityNumber: separation?.separationNumber,
+    status: separation?.status ?? 'Draft',
+    canSubmit: separation?.status === 'Draft',
+    canApproveReject: separation?.status === 'PendingApproval',
+    enabled: !!separation,
+    commands: {
+      submit: () => separationService.submit(id),
+      approve: (ctx) => separationService.approve(id, { notes: ctx.comments || null }),
+      reject: (ctx) => separationService.reject(id, { reason: ctx.comments || '' }),
+      afterAction: refresh,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   const act = useMutation({
     mutationFn: (fn: () => Promise<unknown>) => fn(),
@@ -221,6 +260,7 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
           <TabsTrigger value="clearance">Clearance</TabsTrigger>
           <TabsTrigger value="settlement">Settlement</TabsTrigger>
           <TabsTrigger value="exit-interview">Exit interview</TabsTrigger>
+          <WorkflowTabTrigger value="workflow" />
           <TabsTrigger value="documents">Documents ({documents?.length ?? 0})</TabsTrigger>
         </TabsList>
 
@@ -297,41 +337,12 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
           <Card>
             <CardHeader><CardTitle className="text-base">What happens next</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {s.status === 'Draft' && (
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => run(() => separationService.submit(id))} disabled={act.isPending}>
-                    Submit for approval
-                  </Button>
-                </div>
-              )}
-
-              {s.status === 'PendingApproval' && (
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <Label>Notes / grounds</Label>
-                    <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      onClick={() => run(() => separationService.approve(id, { notes: reason || null }))}
-                      disabled={act.isPending}
-                    >
-                      <ShieldCheck className="mr-2 h-4 w-4" />
-                      Approve
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => run(() => separationService.reject(id, { reason }))}
-                      disabled={act.isPending || !reason.trim()}
-                    >
-                      Refuse
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Refusing needs grounds — a refusal nobody can explain cannot be acted on.
-                  </p>
-                </div>
-              )}
+              {/*
+                Submit, approve, refuse and recall all come from the engine. W1: never build a
+                module-specific approval UI — the MD signs exits in the same inbox as everything
+                else, and a refusal recorded here shows up in the same audit trail as any other.
+              */}
+              <WorkflowApprovalActions {...workflow.actionProps} />
 
               {/*
                 ⚠ The notice settlement is its own act, not part of approving. It decides money —
@@ -766,6 +777,19 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
         <TabsContent value="exit-interview" className="space-y-4">
           <ExitInterviewTab separationId={id} canRecord={!!approvedOrLater} />
         </TabsContent>
+
+        <WorkflowTabContent
+          value="workflow"
+          entityType="EmployeeSeparation"
+          entityId={id}
+          entityLabel="Separation"
+          entityNumber={s.separationNumber}
+          status={s.status}
+          onAfterAction={async () => {
+            await refresh();
+            await workflow.refresh();
+          }}
+        />
 
         <TabsContent value="documents" className="space-y-4">
           <Card>

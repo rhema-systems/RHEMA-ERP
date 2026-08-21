@@ -1186,3 +1186,93 @@ in [[hr-harness-run-environment]], and not followed.
 **Still owed:** the engine wiring itself (slice 15) — entity type, adapter, entity context, display
 resolver, the definition, and swapping the detail page onto `<WorkflowApprovalActions>`. The blocker
 that stopped it is now cleared.
+
+---
+
+## Slice 15 — FR-HR-092 moves onto the workflow engine
+
+The last thing this area owed, recorded since slice 3. W1: never build a module-specific approval
+UI. The Managing Director signs a great many things and should sign them all in one inbox.
+
+The recipe held — entity type and seed, status adapter (auto-discovered), routing context, display
+resolver, `entityTypeMapping.ts`, and the detail page swapped onto `<WorkflowApprovalActions>` with
+a workflow tab. Three things were judgement rather than recipe:
+
+**The adapter owns three states and nothing after.** `Draft → PendingApproval → Approved/Rejected`
+is a single-writer approval lifecycle. Everything from `ClearanceInProgress` on — the clearance run,
+the settlement, Internal Audit's review, completion — has several writers and records that somebody
+*did the work*, not that anybody approved it. Those stay direct actions, which is why the
+settlement-review buttons remain on the page.
+
+**No new enum member.** `SeparationStatus` already carried `PendingApproval`, `Approved` and
+`Rejected` meaning exactly what the engine's outcomes mean. Look before adding one.
+
+**Two gates on approve, in this order.** `RequireDecisionAuthority` (FR-HR-092 — a rule about the
+RECORD) runs first, so a refusal explains itself in terms of the separation rather than answering
+the generic "you are not assigned as an approver", and so the rule holds even if the definition is
+missing or wrong. The engine's `CanUserApproveAsync` (a rule about the STEP) runs second.
+
+### ⚠ The engine cannot route per record — cross-module defect 3
+
+FR-HR-092 wants a procedural absence termination signed by HR and every other exit by the Managing
+Director. That is per-record routing, and it does not work:
+`CreateStepsAndTransitionsAsync` stores a transition's condition as
+`JsonSerializer.Serialize(transitionDto.Condition)` — the whole `WorkflowConditionDto` — into a
+`string?` column, and `WorkflowEngine` then hands that JSON blob to an evaluator that expects a bare
+expression. The condition is never seen, nothing errors, and the branch taken tracks **priority
+alone**.
+
+Measured both ways round:
+
+| conditional branch priority | record | expected | actual |
+|---|---|---|---|
+| below the default | `isProcedural = true` | HR approval | Managing Director approval |
+| above the default | `isProcedural = false` | Managing Director approval | HR approval |
+
+Recorded in `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §3 rather than fixed — the workflow
+engine is shared infrastructure and four call sites would need changing together. The conditional
+definition is preserved behind `publishSeparationDefinition`'s `useConditionalRouting` flag so
+whoever fixes it has a ready test.
+
+**The workaround, and its honest cost.** The definition names *both* authorities on one approval
+step, and the service decides. The requirement is still met — no exit can be signed by the wrong
+authority, which is what slice 15's 403 assertions hold down. What is lost is only the assignment:
+an HR officer sees exits in their queue that the service will refuse them. That is the right way
+round to be wrong. Naming the MD alone would be worse — the engine would then refuse HR the
+procedural terminations FR-HR-092 says they may sign.
+
+**And a detail worth keeping:** `AdvanceFromStepAsync` picks
+`validTransitions.OrderByDescending(t => t.Priority).FirstOrDefault()` — **highest priority wins**,
+not lowest. Undocumented, and it reads as "1st, 2nd" to anyone authoring a definition.
+
+### Two defects the harness found in my own work
+
+- **The hand-off happened before the save.** `SubmitAsync` computed `IsProcedural` and called the
+  engine before persisting, so the engine's routing context read the record back with the old
+  value. Fixed by saving the record's own facts before handing off, which is the right dependency
+  regardless of the engine defect above.
+- **`preventInitiatorApproval` was the wrong control for this entity, and I had set it true.** It
+  guards "nobody approves their own request", where the initiator is the BENEFICIARY. An exit is
+  raised by HR about somebody else — the initiator gains nothing, and the person with the real
+  conflict is the SUBJECT, who is barred by role long before the engine is consulted. Left on, it
+  silently rewrote FR-HR-092's "HR may approve a procedural absence termination" into "two HR
+  officers must". Slice 3 caught it by failing. Now false, with the subject-side conflict asserted
+  explicitly instead.
+
+### Delivered
+
+- `EmployeeSeparation` in the entity-type catalogue; seeded and verified (160 types registered)
+- `EmployeeSeparationWorkflowStatusAdapter` — Pending → `PendingApproval`, Approved → `Approved`,
+  Rejected → `Rejected` with the grounds kept, Recalled → `Draft` with the submission stamp cleared
+- Routing context (`isProcedural`, type, absence days, and the two DTO-derived flags), display
+  resolver naming the PERSON as well as the number, frontend entity-type mapping
+- Service drives the engine on submit / approve / reject
+- Detail page on `<WorkflowApprovalActions>` + workflow tab; the bespoke approve/refuse buttons gone
+- `workflow-definition.mjs` and `run-slice15.mjs` — **35 assertions**, green on two runs
+
+**Area regression after slice 15: 67 + 44 + 58 + 64 + 75 + 37 + 46 + 47 + 36 + 18 + 37 + 62 + 35 +
+35 + 136 (audit) = 797 assertions**, all green.
+
+**Nothing is owed on this area now.** The out-of-scope items keep their recorded owners: GL posting
+waits for the module-wide Finance sweep, payroll computation belongs to another developer, asset
+return needs area 16, and the grievance expansion is its own deferred module.

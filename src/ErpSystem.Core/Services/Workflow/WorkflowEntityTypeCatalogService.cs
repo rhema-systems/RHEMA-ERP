@@ -46,6 +46,7 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("JobOffer", "Human Resources", "Employment offers approved before they are issued to a candidate", "FileSignature", "#0284C7", 79),
             new("StaffMovement", "Human Resources", "Promotions, transfers, demotions, secondments and acting appointments approved before they take effect", "ArrowRightLeft", "#9333EA", 79),
             new("StaffDisciplinaryAction", "Human Resources", "Disciplinary decisions confirmed before the sanction takes effect", "Gavel", "#DC2626", 79),
+            new("EmployeeSeparation", "Human Resources", "Exits signed before clearance begins — resignation, retirement, contract expiry, redundancy, dismissal or death (FR-HR-092)", "DoorOpen", "#B45309", 79),
             new("StaffTravelRequest", "Human Resources", "Staff travel requests approved before flights, hotels or advances are committed", "Plane", "#0EA5E9", 79),
             new("SuccessionPlan", "Human Resources", "Succession plans approved before anyone is named as the intended successor to a post", "Network", "#7C3AED", 79),
             new("ProbationPeriod", "Human Resources", "Probation confirmed by the named confirming authority before HR issues the confirmation letter", "UserCheck", "#059669", 79),

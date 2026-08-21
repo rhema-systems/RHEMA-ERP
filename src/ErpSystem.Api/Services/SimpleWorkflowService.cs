@@ -1718,6 +1718,38 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = requisition.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "EMPLOYEE_SEPARATION", "EmployeeSeparation", "Employee Separation"))
+        {
+            var separation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSeparation>()
+                .FirstOrDefaultAsync(x => x.Id == entityId)
+                ?? throw new InvalidOperationException("Employee separation not found");
+
+            // ⚠ `isProcedural` is THE routing fact for FR-HR-092. Under the rule settled with the
+            // client, a termination for absence beyond the tenant's threshold auto-approves at HR
+            // and everything else — resignation and retirement included — goes to the Managing
+            // Director. A definition branches on this to assign the step; the guarantee itself
+            // stays in SeparationService.RequireDecisionAuthority, so the rule holds even against a
+            // definition that was never authored or was authored wrongly.
+            context["separationNumber"] = separation.SeparationNumber;
+            context["employeeId"] = separation.EmployeeId;
+            context["separationType"] = separation.SeparationType.ToString();
+            context["reasonCategory"] = separation.ReasonCategory?.ToString();
+            context["isProcedural"] = separation.IsProcedural;
+            // ⚠ Derived exactly as the detail DTO derives them, not read off columns that do not
+            // exist: an exit is disciplinary because it carries a disciplinary action, and it needs
+            // the Managing Director's signature precisely when it is not procedural. A definition
+            // must branch on the same facts a screen shows, or the two will explain the same
+            // decision differently.
+            context["isDisciplinary"] = separation.DisciplinaryActionId != null;
+            context["isSystemInitiated"] = separation.IsSystemInitiated;
+            context["absenceDays"] = separation.AbsenceDays;
+            context["requiresManagingDirectorSignature"] = !separation.IsProcedural;
+            context["effectiveDate"] = separation.EffectiveDate;
+            context["lastWorkingDay"] = separation.LastWorkingDay;
+            context["initiatedById"] = separation.InitiatedById;
+            context["status"] = separation.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "SUCCESSION_PLAN", "SuccessionPlan", "Succession Plan"))
         {
             var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()
