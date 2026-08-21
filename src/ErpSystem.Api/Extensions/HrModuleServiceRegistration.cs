@@ -84,6 +84,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardNominationReviewRepository, AwardNominationReviewRepository>();
         services.AddScoped<ILongServiceAwardRepository, LongServiceAwardRepository>();
         services.AddScoped<IAwardTypeTargetRepository, AwardTypeTargetRepository>();
+        // Resolves the polymorphic AwardTypeTarget.TargetId to a name. Not a repository for an
+        // entity of its own — it reads four different tables depending on the target's kind.
+        services.AddScoped<IAwardTargetNameResolver, AwardTargetNameResolver>();
         services.AddScoped<ICompanyEventRepository, CompanyEventRepository>();
         services.AddScoped<IEventParticipantRepository, EventParticipantRepository>();
         services.AddScoped<IEventAttendanceRepository, EventAttendanceRepository>();

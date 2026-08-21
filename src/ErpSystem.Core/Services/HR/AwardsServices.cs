@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 
@@ -49,7 +50,7 @@ public class AwardTypeService : IAwardTypeService
     {
         var entity = await _awardTypeRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardType {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardType {id} not found.");
         return entity;
     }
 
@@ -158,9 +159,36 @@ public class AwardTypeService : IAwardTypeService
         return await _awardTypeRepo.IsInUseAsync(id);
     }
 
+    /// <summary>
+    /// Refuses the one combination of source and decision that cannot be carried out.
+    /// </summary>
+    /// <remarks>
+    /// A direct management selection has no nomination stage, so there is no candidate list for
+    /// employees to vote on or for a committee to score. Every other pairing is real and named in
+    /// TDC's note: open nomination decided by a vote, by a committee, or by management; and
+    /// performance-triggered candidates decided any of those three ways.
+    ///
+    /// The message states both halves. A rule that fires correctly but cannot explain itself
+    /// leaves the user on a form that will not submit with no idea which field to change.
+    /// </remarks>
+    private static void ValidateSelection(AwardNominationSource source, AwardWinnerDecision decision)
+    {
+        if (source == AwardNominationSource.ManagementDirect
+            && decision != AwardWinnerDecision.ManagementDecision)
+        {
+            throw AwardsWorkflowException.Invalid(
+                $"An award whose candidates come from a direct management selection cannot be decided by " +
+                $"{decision}. There is no nomination stage, so there are no candidates to vote on or to score. " +
+                $"Either set the winner decision to ManagementDecision, or change the nomination source to " +
+                $"OpenNomination or PerformanceTriggered.");
+        }
+    }
+
     public async Task<AwardTypeDto> CreateAsync(Guid tenantId, Guid userId, CreateAwardTypeDto dto)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        ValidateSelection(dto.NominationSource, dto.WinnerDecision);
+
         var entity = dto.ToEntity(tenantId, userId);
         await _awardTypeRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -170,6 +198,8 @@ public class AwardTypeService : IAwardTypeService
     public async Task<AwardTypeDto> UpdateAsync(Guid id, Guid userId, UpdateAwardTypeDto dto)
     {
         var entity = await GetOwnedAsync(id);
+        ValidateSelection(dto.NominationSource, dto.WinnerDecision);
+
         entity.UpdateEntity(dto, userId);
         await _awardTypeRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -227,7 +257,7 @@ public class AwardLevelService : IAwardLevelService
     {
         var entity = await _levelRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardLevel {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardLevel {id} not found.");
         return entity;
     }
 
@@ -290,20 +320,49 @@ public class AwardTypeTargetService : IAwardTypeTargetService
 {
     private readonly IAwardTypeTargetRepository _targetRepo;
     private readonly IAwardTypeRepository _awardTypeRepo;
+    private readonly IAwardTargetNameResolver _targetNames;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
 
     public AwardTypeTargetService(
         IAwardTypeTargetRepository targetRepo,
         IAwardTypeRepository awardTypeRepo,
+        IAwardTargetNameResolver targetNames,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork)
     {
         _targetRepo = targetRepo;
         _awardTypeRepo = awardTypeRepo;
+        _targetNames = targetNames;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
     }
+
+    /// <summary>
+    /// Maps targets and fills in what each one points at.
+    /// </summary>
+    /// <remarks>
+    /// <c>TargetName</c> is on the DTO but had no writer anywhere, so every eligibility rule read
+    /// back as its kind and a blank — "Employee: " — which is unusable on a screen and indexes
+    /// nothing for a search. A target whose subject has since been deleted stays null rather than
+    /// getting an invented label: a dangling reference should look like one.
+    /// </remarks>
+    private async Task<List<AwardTypeTargetDto>> ToDtosWithNamesAsync(IEnumerable<AwardTypeTarget> targets)
+    {
+        var list = targets.ToList();
+        var names = await _targetNames.ResolveAsync(list);
+
+        var dtos = list.ToDtoList();
+        foreach (var dto in dtos)
+        {
+            if (dto.TargetId.HasValue && names.TryGetValue(dto.TargetId.Value, out var name))
+                dto.TargetName = name;
+        }
+        return dtos;
+    }
+
+    private async Task<AwardTypeTargetDto> ToDtoWithNameAsync(AwardTypeTarget target)
+        => (await ToDtosWithNamesAsync(new[] { target }))[0];
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -328,7 +387,7 @@ public class AwardTypeTargetService : IAwardTypeTargetService
     {
         var entity = await _targetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardTypeTarget {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardTypeTarget {id} not found.");
         return entity;
     }
 
@@ -337,21 +396,21 @@ public class AwardTypeTargetService : IAwardTypeTargetService
         var entity = await _targetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
             return null;
-        return entity.ToDto();
+        return await ToDtoWithNameAsync(entity);
     }
 
     public async Task<IEnumerable<AwardTypeTargetDto>> GetByAwardTypeIdAsync(Guid awardTypeId)
     {
         var tenantId = GetTenantId();
         var targets = await _targetRepo.GetByAwardTypeIdAsync(awardTypeId);
-        return targets.Where(t => t.TenantId == tenantId).ToDtoList();
+        return await ToDtosWithNamesAsync(targets.Where(t => t.TenantId == tenantId));
     }
 
     public async Task<IEnumerable<AwardTypeTargetDto>> GetByScopeAsync(Guid awardTypeId, AwardScope scope)
     {
         var tenantId = GetTenantId();
         var targets = await _targetRepo.GetByScopeAsync(awardTypeId, scope);
-        return targets.Where(t => t.TenantId == tenantId).ToDtoList();
+        return await ToDtosWithNamesAsync(targets.Where(t => t.TenantId == tenantId));
     }
 
     public async Task<bool> IsEmployeeEligibleAsync(Guid awardTypeId, Guid employeeId)
@@ -368,7 +427,7 @@ public class AwardTypeTargetService : IAwardTypeTargetService
         var entity = dto.ToEntity(tenantId, userId);
         await _targetRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return entity.ToDto();
+        return await ToDtoWithNameAsync(entity);
     }
 
     public async Task<AwardTypeTargetDto> UpdateAsync(Guid id, Guid userId, UpdateAwardTypeTargetDto dto)
@@ -377,7 +436,7 @@ public class AwardTypeTargetService : IAwardTypeTargetService
         entity.UpdateEntity(dto, userId);
         await _targetRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return entity.ToDto();
+        return await ToDtoWithNameAsync(entity);
     }
 
     public async Task DeleteAsync(Guid id)
@@ -427,7 +486,7 @@ public class AwardBudgetService : IAwardBudgetService
     {
         var entity = await _budgetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardBudget {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardBudget {id} not found.");
         return entity;
     }
 
@@ -483,7 +542,7 @@ public class AwardBudgetService : IAwardBudgetService
         // Check if budget already exists for this award type and year (per-tenant)
         var existing = await _budgetRepo.GetByYearAsync(dto.AwardTypeId, dto.Year);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException($"Budget for award type {dto.AwardTypeId} and year {dto.Year} already exists.");
+            throw AwardsWorkflowException.Conflict($"Budget for award type {dto.AwardTypeId} and year {dto.Year} already exists.");
 
         var entity = dto.ToEntity(tenantId, userId);
         await _budgetRepo.AddAsync(entity);
@@ -557,7 +616,7 @@ public class EmployeeAwardService : IEmployeeAwardService
     {
         var entity = await _awardRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"EmployeeAward {id} not found.");
+            throw AwardsWorkflowException.NotFound($"EmployeeAward {id} not found.");
         return entity;
     }
 
@@ -693,7 +752,7 @@ public class EmployeeAwardService : IEmployeeAwardService
         var tenantId = GetTenantId();
         var nomination = await _nominationRepo.GetWithDetailsAsync(nominationId);
         if (nomination == null || nomination.TenantId != tenantId)
-            throw new InvalidOperationException($"AwardNomination {nominationId} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
 
         var awardNumber = $"AWD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
         var entity = dto.ToEntity(nomination, tenantId, userId, awardNumber);
@@ -820,7 +879,7 @@ public class AwardAttachmentService : IAwardAttachmentService
     {
         var entity = await _attachmentRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardAttachment {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardAttachment {id} not found.");
         return entity;
     }
 
@@ -909,7 +968,7 @@ public class AwardNominationService : IAwardNominationService
     {
         var entity = await _nominationRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardNomination {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNomination {id} not found.");
         return entity;
     }
 
@@ -1051,7 +1110,7 @@ public class AwardNominationService : IAwardNominationService
         var entity = await GetOwnedAsync(id);
 
         if (entity.Status != AwardNominationStatus.Draft)
-            throw new InvalidOperationException("Only draft nominations can be updated.");
+            throw AwardsWorkflowException.InvalidState("Only draft nominations can be updated.");
 
         entity.UpdateEntity(dto, userId);
         await _nominationRepo.UpdateAsync(entity);
@@ -1073,7 +1132,7 @@ public class AwardNominationService : IAwardNominationService
         var entity = await GetOwnedAsync(id);
 
         if (entity.Status != AwardNominationStatus.Draft)
-            throw new InvalidOperationException("Only draft nominations can be submitted.");
+            throw AwardsWorkflowException.InvalidState("Only draft nominations can be submitted.");
 
         entity.Status = AwardNominationStatus.Submitted;
         entity.NominationDate = DateTime.UtcNow;
@@ -1153,7 +1212,7 @@ public class TeamAwardNomineeService : ITeamAwardNomineeService
     {
         var entity = await _nomineeRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"TeamAwardNominee {id} not found.");
+            throw AwardsWorkflowException.NotFound($"TeamAwardNominee {id} not found.");
         return entity;
     }
 
@@ -1237,7 +1296,7 @@ public class AwardNomineeContributionService : IAwardNomineeContributionService
     {
         var entity = await _contributionRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardNomineeContribution {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNomineeContribution {id} not found.");
         return entity;
     }
 
@@ -1253,7 +1312,7 @@ public class AwardNomineeContributionService : IAwardNomineeContributionService
         var tenantId = GetTenantId();
         var nomination = await _nominationRepo.GetByIdAsync(nominationId);
         if (nomination == null || nomination.TenantId != tenantId)
-            throw new InvalidOperationException($"AwardNomination {nominationId} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
 
         var entity = dto.ToEntity(tenantId, nominationId, userId);
         await _contributionRepo.AddAsync(entity);
@@ -1311,7 +1370,7 @@ public class AwardNominationAttachmentService : IAwardNominationAttachmentServic
     {
         var entity = await _attachmentRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardNominationAttachment {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNominationAttachment {id} not found.");
         return entity;
     }
 
@@ -1327,7 +1386,7 @@ public class AwardNominationAttachmentService : IAwardNominationAttachmentServic
         var tenantId = GetTenantId();
         var nomination = await _nominationRepo.GetByIdAsync(nominationId);
         if (nomination == null || nomination.TenantId != tenantId)
-            throw new InvalidOperationException($"AwardNomination {nominationId} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
 
         var entity = dto.ToEntity(tenantId, nominationId, uploadedById, userId);
         await _attachmentRepo.AddAsync(entity);
@@ -1390,7 +1449,7 @@ public class AwardCommitteeService : IAwardCommitteeService
     {
         var entity = await _committeeRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardCommittee {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardCommittee {id} not found.");
         return entity;
     }
 
@@ -1499,7 +1558,7 @@ public class AwardCommitteeMemberService : IAwardCommitteeMemberService
     {
         var entity = await _memberRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardCommitteeMember {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardCommitteeMember {id} not found.");
         return entity;
     }
 
@@ -1616,7 +1675,7 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
     {
         var entity = await _reviewRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"AwardNominationReview {id} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNominationReview {id} not found.");
         return entity;
     }
 
@@ -1682,11 +1741,11 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
         // Check if review already exists
         var existing = await _reviewRepo.GetReviewAsync(nominationId, reviewerId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException($"Review already exists for nomination {nominationId} by reviewer {reviewerId}.");
+            throw AwardsWorkflowException.Conflict($"Review already exists for nomination {nominationId} by reviewer {reviewerId}.");
 
         var nomination = await _nominationRepo.GetByIdAsync(nominationId);
         if (nomination == null || nomination.TenantId != tenantId)
-            throw new InvalidOperationException($"AwardNomination {nominationId} not found.");
+            throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
 
         var entity = dto.ToEntity(nominationId, reviewerId, tenantId, userId);
         await _reviewRepo.AddAsync(entity);
@@ -1750,7 +1809,7 @@ public class LongServiceAwardService : ILongServiceAwardService
     {
         var entity = await _lsaRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new InvalidOperationException($"LongServiceAward {id} not found.");
+            throw AwardsWorkflowException.NotFound($"LongServiceAward {id} not found.");
         return entity;
     }
 
@@ -1821,7 +1880,7 @@ public class LongServiceAwardService : ILongServiceAwardService
         // Check if award already exists for this employee and years (per-tenant)
         var existing = await _lsaRepo.GetByEmployeeAndYearsAsync(dto.EmployeeId, dto.YearsOfService);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException($"Long service award for {dto.YearsOfService} years already exists for this employee.");
+            throw AwardsWorkflowException.Conflict($"Long service award for {dto.YearsOfService} years already exists for this employee.");
 
         var entity = dto.ToEntity(tenantId, userId);
         await _lsaRepo.AddAsync(entity);

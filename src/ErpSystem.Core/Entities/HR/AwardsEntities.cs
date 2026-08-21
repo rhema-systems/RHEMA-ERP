@@ -47,9 +47,14 @@ public class AwardType : TenantEntity
 
     public bool RequiresFormalReview { get; set; }
     public int? MinRequiredReviewers { get; set; }
-	
-	public bool AutoGenerateNominees { get; set; } // System auto-generates eligible list
-	
+
+    /// <summary>Where this award's candidates come from. See <see cref="AwardNominationSource"/>.</summary>
+    public AwardNominationSource NominationSource { get; set; } = AwardNominationSource.OpenNomination;
+
+    /// <summary>How this award's winner is chosen. See <see cref="AwardWinnerDecision"/>.</summary>
+    public AwardWinnerDecision WinnerDecision { get; set; } = AwardWinnerDecision.CommitteeScore;
+
+
 	[MaxLength(1000)]
     public string? Notes { get; set; }
 

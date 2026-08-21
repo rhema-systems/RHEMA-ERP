@@ -45,7 +45,16 @@ public class AwardTypeDto : BaseDto
     
     public bool RequiresFormalReview { get; set; }
     public int? MinRequiredReviewers { get; set; }
-    public bool AutoGenerateNominees { get; set; }
+
+    public AwardNominationSource NominationSource { get; set; }
+
+    // Computed, not mapped — the convention already used by TargetTypeName below. A mapped name
+    // field is one more thing a mapper can forget to set; a computed one cannot go stale.
+    public string NominationSourceName => NominationSource.ToString();
+
+    public AwardWinnerDecision WinnerDecision { get; set; }
+    public string WinnerDecisionName => WinnerDecision.ToString();
+
     public string? Notes { get; set; }
     public bool IsActive { get; set; }
 }
@@ -68,6 +77,16 @@ public class AwardTypeSummaryDto
     public decimal? MaxMonetaryAmount { get; set; }
     public bool HasLevels { get; set; }
     public bool RequiresFormalReview { get; set; }
+
+    // On the summary as well as the detail: since slice 2 the selection model is the main thing
+    // that distinguishes one award type from another, so a register that omitted it would list
+    // several identical-looking rows and give the reader no way to tell a voted award from a
+    // committee-scored one without opening each.
+    public AwardNominationSource NominationSource { get; set; }
+    public string NominationSourceName => NominationSource.ToString();
+    public AwardWinnerDecision WinnerDecision { get; set; }
+    public string WinnerDecisionName => WinnerDecision.ToString();
+
     public bool IsActive { get; set; }
     public int AwardCount { get; set; }
 }
@@ -133,7 +152,14 @@ public class CreateAwardTypeDto : CreateDtoBase
     [Range(1, 50)]
     public int? MinRequiredReviewers { get; set; }
 
-    public bool AutoGenerateNominees { get; set; }
+    /// <summary>Where the candidates come from. Defaults to open nomination.</summary>
+    public AwardNominationSource NominationSource { get; set; } = AwardNominationSource.OpenNomination;
+
+    /// <summary>
+    /// How the winner is chosen. A ManagementDirect award cannot be decided by a vote or by
+    /// scoring — there is no candidate list — and the service refuses that combination.
+    /// </summary>
+    public AwardWinnerDecision WinnerDecision { get; set; } = AwardWinnerDecision.CommitteeScore;
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -202,7 +228,14 @@ public class UpdateAwardTypeDto : UpdateDtoBase
     [Range(1, 50)]
     public int? MinRequiredReviewers { get; set; }
 
-    public bool AutoGenerateNominees { get; set; }
+    /// <summary>Where the candidates come from. Defaults to open nomination.</summary>
+    public AwardNominationSource NominationSource { get; set; } = AwardNominationSource.OpenNomination;
+
+    /// <summary>
+    /// How the winner is chosen. A ManagementDirect award cannot be decided by a vote or by
+    /// scoring — there is no candidate list — and the service refuses that combination.
+    /// </summary>
+    public AwardWinnerDecision WinnerDecision { get; set; } = AwardWinnerDecision.CommitteeScore;
 
     [MaxLength(1000)]
     public string? Notes { get; set; }

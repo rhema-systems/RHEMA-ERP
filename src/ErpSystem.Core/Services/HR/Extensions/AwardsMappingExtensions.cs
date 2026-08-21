@@ -35,7 +35,8 @@ public static class AwardsMappingExtensions
             HasLevels = entity.HasLevels,
             RequiresFormalReview = entity.RequiresFormalReview,
             MinRequiredReviewers = entity.MinRequiredReviewers,
-            AutoGenerateNominees = entity.AutoGenerateNominees,
+            NominationSource = entity.NominationSource,
+            WinnerDecision = entity.WinnerDecision,
             Notes = entity.Notes,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
@@ -60,6 +61,8 @@ public static class AwardsMappingExtensions
             MaxMonetaryAmount = entity.MaxMonetaryAmount,
             HasLevels = entity.HasLevels,
             RequiresFormalReview = entity.RequiresFormalReview,
+            NominationSource = entity.NominationSource,
+            WinnerDecision = entity.WinnerDecision,
             IsActive = entity.IsActive,
             AwardCount = awardCount
         };
@@ -91,7 +94,8 @@ public static class AwardsMappingExtensions
             HasLevels = dto.HasLevels,
             RequiresFormalReview = dto.RequiresFormalReview,
             MinRequiredReviewers = dto.MinRequiredReviewers,
-            AutoGenerateNominees = dto.AutoGenerateNominees,
+            NominationSource = dto.NominationSource,
+            WinnerDecision = dto.WinnerDecision,
             Notes = dto.Notes,
             IsActive = dto.IsActive,
             CreatedBy = userId.ToString()
@@ -121,7 +125,8 @@ public static class AwardsMappingExtensions
         entity.HasLevels = dto.HasLevels;
         entity.RequiresFormalReview = dto.RequiresFormalReview;
         entity.MinRequiredReviewers = dto.MinRequiredReviewers;
-        entity.AutoGenerateNominees = dto.AutoGenerateNominees;
+        entity.NominationSource = dto.NominationSource;
+        entity.WinnerDecision = dto.WinnerDecision;
         entity.Notes = dto.Notes;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;

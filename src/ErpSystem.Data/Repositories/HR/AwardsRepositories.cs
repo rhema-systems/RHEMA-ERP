@@ -127,6 +127,66 @@ public class AwardLevelRepository : GenericRepository<AwardLevel>, IAwardLevelRe
     }
 }
 
+/// <summary>
+/// Resolves the polymorphic <c>AwardTypeTarget.TargetId</c> to a display name, one query per kind.
+/// </summary>
+/// <remarks>
+/// See <see cref="IAwardTargetNameResolver"/> for why this is needed at all. A row whose target has
+/// since been deleted resolves to nothing rather than to a fabricated label — the caller renders
+/// the raw id, which is honest about a dangling reference instead of hiding it.
+/// </remarks>
+public class AwardTargetNameResolver : IAwardTargetNameResolver
+{
+    private readonly ApplicationDbContext _context;
+
+    public AwardTargetNameResolver(ApplicationDbContext context) => _context = context;
+
+    public async Task<IReadOnlyDictionary<Guid, string>> ResolveAsync(IEnumerable<AwardTypeTarget> targets)
+    {
+        var names = new Dictionary<Guid, string>();
+
+        var byKind = targets
+            .Where(t => t.TargetId.HasValue)
+            .GroupBy(t => t.TargetType)
+            .ToDictionary(g => g.Key, g => g.Select(t => t.TargetId!.Value).Distinct().ToList());
+
+        foreach (var (kind, ids) in byKind)
+        {
+            switch (kind)
+            {
+                case AwardTargetType.OrganizationUnit:
+                    foreach (var row in await _context.Set<OrganizationUnit>()
+                        .Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Name }).ToListAsync())
+                        names[row.Id] = row.Name;
+                    break;
+
+                case AwardTargetType.Position:
+                    foreach (var row in await _context.Set<EmployeePosition>()
+                        .Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Title }).ToListAsync())
+                        names[row.Id] = row.Title;
+                    break;
+
+                case AwardTargetType.StaffLevel:
+                    foreach (var row in await _context.Set<StaffLevel>()
+                        .Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Name }).ToListAsync())
+                        names[row.Id] = row.Name;
+                    break;
+
+                case AwardTargetType.Employee:
+                    // Employee.FullName is a computed property, so it cannot be translated to SQL —
+                    // the parts are projected and joined here instead.
+                    foreach (var row in await _context.Set<Employee>()
+                        .Where(x => ids.Contains(x.Id))
+                        .Select(x => new { x.Id, x.FirstName, x.LastName }).ToListAsync())
+                        names[row.Id] = $"{row.FirstName} {row.LastName}".Trim();
+                    break;
+            }
+        }
+
+        return names;
+    }
+}
+
 public class AwardTypeTargetRepository : GenericRepository<AwardTypeTarget>, IAwardTypeTargetRepository
 {
     public AwardTypeTargetRepository(ApplicationDbContext context) : base(context) { }

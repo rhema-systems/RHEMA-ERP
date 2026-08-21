@@ -165,6 +165,29 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)jobArchStatus;
                 break;
 
+            // Staff awards (area 14). The fifth area to need this shape. Without this case its 38
+            // service rules were flattened to one fixed string, and — worse — every "not found"
+            // among them answered 400, so no caller could tell a deleted award from a bad payload.
+            // See AwardsWorkflowException.
+            case AwardsWorkflowException awardsEx:
+                var awardsStatus = awardsEx.Reason switch
+                {
+                    AwardsFailureReason.NotFound => HttpStatusCode.NotFound,
+                    AwardsFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    AwardsFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = awardsStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)awardsStatus;
+                response.Detail = awardsEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)awardsStatus;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Status = (int)HttpStatusCode.Conflict;

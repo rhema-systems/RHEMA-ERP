@@ -287,9 +287,9 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 
 | # | Slice | Delivers |
 |---|---|---|
-| 0 | Prove the ground | Run the happy path across all eight endpoint groups. Establish which of the 100 endpoints actually execute. Expect casualties. |
-| 1 | Identity | Token tenant + token actor; `HrControllerBase`; remove all 56 caller-supplied id parameters; `HR.Awards.*` policies. |
-| 2 | Types, levels, targets, budgets | The configuration surface, with the selection method of D-3. |
+| 0 | ✅ Prove the ground | Run the happy path across all eight endpoint groups. Establish which of the 100 endpoints actually execute. Expect casualties. |
+| 1 | ✅ Identity | Token tenant + token actor; `HrControllerBase`; remove all 56 caller-supplied id parameters; `HR.Awards.*` policies. |
+| 2 | Types, levels, targets, budgets | ✅ **Done.** The configuration surface, with D-3's two axes, honest status codes, and target-name resolution. |
 | 3 | Cycles and eligibility | D-4 cycle entity with windows; AWD-01 eligibility evaluation producing the qualified set. |
 | 4 | Nomination | AWD-02, AWD-09; management route and the `api/awards/me` employee route (D-1). |
 | 5 | The vote | AWD-04, AWD-05, AWD-06, AWD-10 — the vote model, the electorate, one-vote-per-voter, the window gate. |
@@ -421,3 +421,87 @@ different nomination. Slice 8 confers awards from nominations and should assert 
 **Also done:** the long-service basis, its disciplinary disqualification rule and the two data facts
 behind them (38% `DateEmployed` coverage; one employee at 10 years, none beyond) are written up in
 `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` per decision D-8.
+
+---
+
+### Slice 2 — the configuration surface. 2026-08-21, **49/49**, run twice. Migration `AddAwardSelectionModel`.
+
+Harness: `run-slice2.mjs`. Slice 1 re-run afterwards at 30/30 — no regression.
+
+**D-3 revised: two axes, not one.** The plan called for a single "selection method". Building it
+showed that TDC's note varies two things independently, so the field became two:
+
+| | |
+|---|---|
+| `AwardNominationSource` | `OpenNomination` · `PerformanceTriggered` · `ManagementDirect` |
+| `AwardWinnerDecision` | `StaffVote` · `CommitteeScore` · `ManagementDecision` |
+
+The evidence is in the note itself: *"employees or management will do the nomination, and then staff
+can vote"* pairs open nomination with a vote, *"some might not have to go through the employee vote
+since management will decide and award"* pairs the **same** source with a management decision, and
+the committee section pairs it with scoring. One field would have forced a fixed menu of
+combinations and lost the ones TDC actually described. The harness asserts that pair of cases
+specifically, because they are the whole argument for the split.
+
+One pairing is refused: `ManagementDirect` with a vote or with scoring — there is no nomination
+stage, so there is no candidate list. Refused **on create and on edit**; a rule that only guards the
+front door lets an award type be edited into the impossible state afterwards.
+
+**Defaults.** `NominationSource = OpenNomination`, `WinnerDecision = CommitteeScore`, on the column
+and in the entity. Deliberately not `StaffVote`: every pre-existing row acquires a value, and for a
+row nobody classified, "a committee decided" is an absence of information whereas "the staff voted"
+would assert a ballot that never happened. Verified in SQL — all 7 existing rows backfilled to 1|2.
+
+**`AutoGenerateNominees` dropped.** Mapped through all three DTOs, read by no logic anywhere. It
+means what `NominationSource = PerformanceTriggered` now means, and two fields carrying one fact are
+free to disagree — the same defect slice 1 fixed for the team-nominee employee id. The deferred
+`AwardDataSeeder` sets the two new fields explicitly, with a note for whoever rewrites it against
+TDC's catalogue.
+
+**⚠ Defect E — 38 refusals the caller could not read, and ~18 of them lying about the status.**
+`AwardsServices` threw `InvalidOperationException` at 38 sites, and
+`GlobalExceptionHandlingMiddleware` replaces that exception's detail with the fixed string "The
+operation is not valid for the current state of the object." Every rule fired correctly and then
+said nothing.
+
+Worse than the lost text: about eighteen are *"… not found"* and **all were answering 400**. No
+client could distinguish a deleted award from a malformed payload, so none could decide whether to
+re-fetch, show "no longer available", or highlight a field. Fixed with `AwardsWorkflowException` and
+a middleware case — the fifth HR area to need this shape, after medical, succession, probation and
+job architecture. **24 throws converted**: 18 → 404, 3 → 409 conflict, 2 → 409 state, 1 → 400.
+
+The 14 `"No tenant is associated with the current user."` guards are deliberately left as they are:
+since slice 1 the tenant comes from the token, so reaching one means the token itself is malformed,
+and a generic 400 is the right answer to a should-never-happen.
+
+**⚠ Defect F — `AwardTypeTargetDto.TargetName` was declared and written by nothing.** Always null,
+in every path, so every eligibility rule read back as its kind and a blank: *"Employee: "*. The
+reason it survived is structural — `AwardTypeTarget.TargetId` is **polymorphic** (organisation unit,
+position, staff level or employee, by `TargetType`), so there is no navigation for EF to load and no
+mapper could have filled it. Fixed with `IAwardTargetNameResolver`, batched **one query per kind**
+rather than one per row. A target whose subject has since been deleted stays null rather than
+getting an invented label: a dangling reference should look like one. Asserted on the write
+response, on the list read, and across two different kinds.
+
+**Also: `AwardTypeSummaryDto` did not carry the selection model.** Since this slice that is the main
+thing distinguishing one award type from another, so the register would have listed several
+identical-looking rows with no way to tell a voted award from a committee-scored one without opening
+each. Added to the summary and its mapper.
+
+**⚠ The lesson that cost the most: a green build is not a rebuilt binary, and I mis-diagnosed it
+twice before measuring.** The summary fields returned `0` — an undefined enum value — through three
+API restarts and one successful build, while the detail DTO returned the right names from the same
+row. Source, DTO, mapper, DB and snapshot all checked out; there was one definition of each and no
+second project compiling them.
+
+What settled it was **turning on EF command logging and reading the SQL**: the list query selected
+`[a].[NominationSource]` and `[a].[WinnerDecision]`, exactly as the detail query did. So the entity
+arrived populated and the compiled mapper was dropping the values — a stale assembly that MSBuild
+kept skipping, because the source (12:08:19) was already older than the DLL (12:08:34) and its
+timestamp check saw nothing to do. `touch` on the two files broke the tie and the next build fixed
+it.
+
+Two intermediate conclusions stated before measuring were wrong — first "the binary must be current
+because the DTO change is visible in the JSON", then the reverse. **Both were inferences from code
+when a log line was available.** For a symptom that contradicts the source, get the runtime to say
+what it did before reasoning about what it should have done.

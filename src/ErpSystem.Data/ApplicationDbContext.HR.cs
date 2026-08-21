@@ -4356,6 +4356,18 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.MinMonetaryAmount).HasColumnType("decimal(18,2)");
             entity.Property(x => x.MaxMonetaryAmount).HasColumnType("decimal(18,2)");
 
+            // How a winner is arrived at (area 14, decision D-3). Defaults chosen so that a row
+            // written before these columns existed reads as the safest description of itself:
+            // open nomination decided by the committee — not a staff vote, which would imply a
+            // ballot that never happened.
+            entity.Property(x => x.NominationSource).HasConversion<int>()
+                .HasDefaultValue(AwardNominationSource.OpenNomination);
+            entity.Property(x => x.WinnerDecision).HasConversion<int>()
+                .HasDefaultValue(AwardWinnerDecision.CommitteeScore);
+
+            entity.HasIndex(x => x.NominationSource);
+            entity.HasIndex(x => x.WinnerDecision);
+
             entity.HasMany(x => x.Awards)
                 .WithOne(x => x.AwardType)
                 .HasForeignKey(x => x.AwardTypeId)

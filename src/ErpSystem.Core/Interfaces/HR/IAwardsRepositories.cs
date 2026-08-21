@@ -26,6 +26,21 @@ public interface IAwardLevelRepository : IGenericRepository<AwardLevel>
     Task<AwardLevel?> GetByRankAsync(Guid awardTypeId, int rank);
 }
 
+/// <summary>
+/// Resolves what an award-eligibility target actually points at.
+/// </summary>
+/// <remarks>
+/// <c>AwardTypeTarget.TargetId</c> is polymorphic — an organisation unit, a position, a staff level
+/// or an employee, according to <c>TargetType</c> — so there is no navigation to load and
+/// <c>AwardTypeTargetDto.TargetName</c> had no writer anywhere in the solution. It was declared and
+/// always null, which made the eligibility list unreadable: "Employee: (blank)" for every row.
+/// Batched by kind on purpose — one query per target type, not one per row.
+/// </remarks>
+public interface IAwardTargetNameResolver
+{
+    Task<IReadOnlyDictionary<Guid, string>> ResolveAsync(IEnumerable<AwardTypeTarget> targets);
+}
+
 public interface IAwardTypeTargetRepository : IGenericRepository<AwardTypeTarget>
 {
     Task<IEnumerable<AwardTypeTarget>> GetByAwardTypeIdAsync(Guid awardTypeId);

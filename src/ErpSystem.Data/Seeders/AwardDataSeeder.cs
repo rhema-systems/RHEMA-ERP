@@ -81,7 +81,15 @@ public sealed class AwardDataSeeder
                     Description = data.Description,
                     Category = data.Category,
                     Frequency = data.Frequency,
-                    AutoGenerateNominees = false,
+
+                    // Area 14 slice 2 replaced AutoGenerateNominees (a flag nothing read) with the
+                    // two axes of decision D-3. These are the entity defaults, stated explicitly
+                    // because this seeder is still deferred pending TDC's real award catalogue —
+                    // whoever rewrites it against that catalogue must set them per award type
+                    // rather than inherit a default. See HrSeedOrchestrator.DeferredSteps.
+                    NominationSource = AwardNominationSource.OpenNomination,
+                    WinnerDecision = AwardWinnerDecision.CommitteeScore,
+
                     CreatedAt = now,
                     CreatedBy = string.Empty
                 };

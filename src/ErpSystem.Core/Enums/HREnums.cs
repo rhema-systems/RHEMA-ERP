@@ -3752,6 +3752,65 @@ public enum AwardTargetType
     Employee = 4,
 }
 
+/// <summary>
+/// Where the candidates for an award come from.
+/// </summary>
+/// <remarks>
+/// <para>TDC's <i>Staff Awards Changes</i> note describes three distinct origins, and they are not
+/// interchangeable: <i>"employees or management will do the nomination"</i>, <i>"some of the
+/// nomination will be due to performance or target reached"</i>, and <i>"some too will have to be a
+/// direct selection by management"</i>.</para>
+///
+/// <para>This replaces the decorative <c>AutoGenerateNominees</c> flag, which was mapped through
+/// every DTO and read by nothing. Keeping both would have left two fields meaning the same thing
+/// and free to disagree.</para>
+/// </remarks>
+public enum AwardNominationSource
+{
+    /// <summary>Employees or management nominate. The document's main flow.</summary>
+    [Description("Open nomination")]
+    OpenNomination = 1,
+
+    /// <summary>The system derives the candidates from performance results or targets reached.</summary>
+    [Description("Performance or target triggered")]
+    PerformanceTriggered = 2,
+
+    /// <summary>There is no nomination stage at all — management names the recipient.</summary>
+    [Description("Direct management selection")]
+    ManagementDirect = 3
+}
+
+/// <summary>
+/// How the winner is chosen once there are candidates.
+/// </summary>
+/// <remarks>
+/// <para>Deliberately separate from <see cref="AwardNominationSource"/>, because the source and the
+/// decision vary independently in TDC's note. <i>"HR will setup the eligibility criteria, then
+/// employees or management will do the nomination, and then staff can vote"</i> pairs open
+/// nomination with a vote; <i>"some might not have to go through the employee vote since management
+/// will decide and award"</i> pairs the same open nomination with a management decision; and the
+/// committee section pairs it with scoring. Collapsing the two axes into one field would force a
+/// fixed menu of combinations and lose real ones.</para>
+///
+/// <para>One combination is invalid and is refused: a <see cref="AwardNominationSource.ManagementDirect"/>
+/// award cannot be decided by <see cref="StaffVote"/> or <see cref="CommitteeScore"/>, because there
+/// is no candidate list for anyone to vote on or score.</para>
+/// </remarks>
+public enum AwardWinnerDecision
+{
+    /// <summary>Eligible employees vote on the shortlist; most votes wins.</summary>
+    [Description("Staff vote")]
+    StaffVote = 1,
+
+    /// <summary>The award committee scores each nominee; the highest average score wins.</summary>
+    [Description("Committee score")]
+    CommitteeScore = 2,
+
+    /// <summary>Management decides outright, with no vote and no scoring.</summary>
+    [Description("Management decision")]
+    ManagementDecision = 3
+}
+
 public enum AwardStatus
 {
     [Description("Nominated")]
