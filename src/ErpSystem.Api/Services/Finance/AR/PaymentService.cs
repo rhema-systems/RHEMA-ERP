@@ -1709,7 +1709,34 @@ namespace ErpSystem.Api.Services.Finance.AR
                     $"Invoice '{wrongCustomer.InvoiceNumber}' does not belong to the customer selected for this receipt.");
             }
 
+            foreach (var invoice in invoices)
+            {
+                EnsureInvoiceCollectibleForReceipt(invoice);
+            }
+
             return invoices.ToDictionary(i => i.Id);
+        }
+
+        internal static void EnsureInvoiceCollectibleForReceipt(Invoice invoice)
+        {
+            var collectibleStatus = invoice.Status is
+                InvoiceStatus.Sent or
+                InvoiceStatus.PartiallyPaid or
+                InvoiceStatus.Overdue;
+
+            if (!collectibleStatus)
+            {
+                throw new InvalidOperationException(
+                    $"Invoice '{invoice.InvoiceNumber}' is not collectible while its status is {invoice.Status}.");
+            }
+
+            // Opening balances become operational receivables only after their governed
+            // approval has produced immutable GL evidence. Do not infer posting from Sent alone.
+            if (invoice.IsOpeningBalance && !invoice.JournalEntryId.HasValue)
+            {
+                throw new InvalidOperationException(
+                    $"Opening-balance invoice '{invoice.InvoiceNumber}' has no posting evidence and cannot receive a customer receipt.");
+            }
         }
 
         private async Task<PaymentAllocationResultDto> AllocatePostedCustomerAdvanceAsync(
@@ -2509,7 +2536,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.TenantId == TenantId &&
                     i.BusinessPartnerId == customerId &&
                     (i.TotalAmount - i.PaidAmount) > 0 &&
-                    (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue))
+                    (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.PartiallyPaid || i.Status == InvoiceStatus.Overdue) &&
+                    (!i.IsOpeningBalance || i.JournalEntryId.HasValue))
                 .OrderBy(i => i.InvoiceDate)
                 .ToListAsync(cancellationToken);
 
