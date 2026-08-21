@@ -721,7 +721,7 @@ public class FinanceApprovalsController : ControllerBase
             EntityType = display.EntityType,
             Reference = reference,
             Title = title,
-            DetailHref = display.ActionUrl ?? "/finance/approvals",
+            DetailHref = ResolveDetailHref(entityType, instance.EntityId, display.ActionUrl),
             DocumentType = GetDocumentType(entityType),
             Module = GetModule(entityType),
             CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
@@ -898,17 +898,23 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.OpeningBalanceBatches
                 .AsNoTracking()
-                .Include(x => x.FiscalPeriod)
+                .Include(x => x.Lines)
                 .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null
                 ? FinanceApprovalFacts.Empty
-                : new(
-                    item.BatchNumber,
-                    item.Description ?? item.SourceReference,
-                    item.Status,
-                    item.OpeningDate,
-                    item.TotalDebit,
-                    item.FiscalPeriod?.PeriodCode ?? item.BookClassification);
+                : new FinanceApprovalFacts(
+                    Reference: item.BatchNumber,
+                    Title: item.Description ?? item.SourceReference,
+                    StatusLabel: item.Status,
+                    Date: item.OpeningDate,
+                    Amount: item.TotalDebit,
+                    // Opening-balance debit/credit totals are functional-currency amounts.
+                    // Use the validated line currency instead of period or book metadata.
+                    CurrencyCode: item.Lines
+                        .Where(line => !line.IsDeleted)
+                        .OrderBy(line => line.LineNumber)
+                        .Select(line => line.FunctionalCurrencyCode)
+                        .FirstOrDefault());
         }
 
         if (key == Normalize("FixedAsset"))
@@ -2378,6 +2384,18 @@ public class FinanceApprovalsController : ControllerBase
 
     private static bool IsFinanceEntity(string? entityType)
         => FinanceWorkflowEntityKeys.Contains(Normalize(entityType));
+
+    internal static string ResolveDetailHref(string? entityType, Guid entityId, string? displayUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(displayUrl))
+        {
+            return displayUrl;
+        }
+
+        return Normalize(entityType) == "OPENINGBALANCEBATCH"
+            ? $"/finance/opening-balances?batchId={entityId:D}"
+            : "/finance/approvals";
+    }
 
     private static bool RequiresSubmitterApproverSeparation(string? entityType)
     {
