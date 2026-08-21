@@ -13,10 +13,8 @@ import { Button } from '@/components/ui/button';
 import {
     Card,
     CardContent,
-    CardDescription,
     CardHeader,
     CardTitle,
-    CardFooter
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -26,6 +24,13 @@ import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/components/ui/use-toast';
+import {
+    ArInvoicePrintDocument,
+    printArInvoiceDocument,
+} from '@/components/finance/ar/ArInvoicePrintDocument';
+import printStyles from '@/components/finance/ar/ArInvoicePrintDocument.module.css';
+import { useTenant } from '@/contexts/TenantContext';
+import { canRecordArReceipt } from '@/lib/finance/ar-receipt-eligibility';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
@@ -34,6 +39,7 @@ export default function InvoiceDetailsPage() {
     const { hasPermission } = useAuth();
     const { toast } = useToast();
     const queryClient = useQueryClient();
+    const { currentTenant, currentTenantCode } = useTenant();
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
@@ -74,9 +80,14 @@ export default function InvoiceDetailsPage() {
     const lineSubtotal = invoice.lineItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
     const lineDiscounts = invoice.lineItems.reduce((sum, item) => sum + (Number(item.discountAmount) || 0), 0);
     const documentDiscount = Number(invoice.discountAmount) || 0;
+    const showRecordReceipt = canRecordArReceipt(
+        invoice,
+        hasPermission('Finance.AR.Payments.Receive')
+    );
 
     return (
-        <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
+        <>
+        <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
             {/* Header Actions */}
             <div className="flex items-center justify-between no-print">
                 <div className="flex items-center space-x-4">
@@ -95,7 +106,7 @@ export default function InvoiceDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
-                    <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Button variant="outline" size="sm" onClick={printArInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
                     {invoice.status === 'Draft' && hasPermission('Finance.AR.Invoices.Send') && (
@@ -104,7 +115,7 @@ export default function InvoiceDetailsPage() {
                         Issue / Post
                     </Button>
                     )}
-                    {(invoice.status === 'Sent' || invoice.status === 'Posted') && invoice.balanceAmount > 0 && (
+                    {showRecordReceipt && (
                         <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
                         </Button>
@@ -117,13 +128,11 @@ export default function InvoiceDetailsPage() {
                     <div className="space-y-2">
                         <div className="flex items-center space-x-2">
                             <div className="h-8 w-8 bg-black rounded-lg"></div>
-                            <span className="text-xl font-bold">Acme Inc.</span>
+                            <span className="text-xl font-bold">{currentTenant?.name || 'RHEMA ERP'}</span>
                         </div>
                         <p className="text-sm text-muted-foreground w-[250px]">
-                            123 Business Rd.<br />
-                            Suite 100<br />
-                            Tech City, TC 10101<br />
-                            billing@acme.inc
+                            {currentTenant?.code || currentTenantCode || 'Finance'}<br />
+                            Finance · Accounts Receivable
                         </p>
                     </div>
                     <div className="text-right space-y-1">
@@ -139,7 +148,7 @@ export default function InvoiceDetailsPage() {
                             </div>
                             <div className="text-left">
                                 <p className="text-xs text-muted-foreground uppercase font-bold">Due Date</p>
-                                <p className="font-medium">{format(new Date(invoice.dueDate), 'MMM dd, yyyy')}</p>
+                                <p className="font-medium">{invoice.dueDate ? format(new Date(invoice.dueDate), 'MMM dd, yyyy') : '—'}</p>
                             </div>
                         </div>
                     </div>
@@ -225,6 +234,12 @@ export default function InvoiceDetailsPage() {
                 </CardContent>
             </Card>
         </div>
+        <ArInvoicePrintDocument
+            invoice={invoice}
+            tenantName={currentTenant?.name}
+            tenantCode={currentTenant?.code || currentTenantCode}
+        />
+        </>
     );
 }
 

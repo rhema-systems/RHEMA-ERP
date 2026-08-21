@@ -28,6 +28,50 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ArReceiptPostingMigrationTests
 {
+    [Theory]
+    [InlineData(InvoiceStatus.Draft)]
+    [InlineData(InvoiceStatus.PendingApproval)]
+    [InlineData(InvoiceStatus.Approved)]
+    [InlineData(InvoiceStatus.Rejected)]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public void ReceiptAllocation_ShouldRejectInvoiceBeforeItBecomesCollectible(InvoiceStatus status)
+    {
+        var invoice = new Invoice
+        {
+            InvoiceNumber = "INV-REVIEW-001",
+            Status = status,
+            TotalAmount = 100m
+        };
+
+        var action = () => PaymentService.EnsureInvoiceCollectibleForReceipt(invoice);
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage($"*not collectible*{status}*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public void OpeningReceipt_ShouldRequirePostingEvidenceButRemainCollectibleAfterPosting()
+    {
+        var invoice = new Invoice
+        {
+            InvoiceNumber = "INV-OPEN-001",
+            Status = InvoiceStatus.Sent,
+            IsOpeningBalance = true,
+            TotalAmount = 100m
+        };
+
+        var unpostedAction = () => PaymentService.EnsureInvoiceCollectibleForReceipt(invoice);
+        unpostedAction.Should().Throw<InvalidOperationException>()
+            .WithMessage("*no posting evidence*");
+
+        invoice.JournalEntryId = Guid.NewGuid();
+        var postedAction = () => PaymentService.EnsureInvoiceCollectibleForReceipt(invoice);
+        postedAction.Should().NotThrow();
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
     [Trait("Category", "AccountsReceivable")]
