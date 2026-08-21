@@ -193,9 +193,17 @@ public interface IAwardCommitteeReviewService
     Task<AwardCommitteeReviewDto?> GetReviewAsync(Guid nominationId, Guid reviewerId);
     Task<IEnumerable<AwardCommitteeReviewDto>> GetByNominationIdAsync(Guid nominationId);
     Task<IEnumerable<AwardCommitteeReviewDto>> GetByReviewerIdAsync(Guid reviewerId);
-    Task<IEnumerable<AwardCommitteeReviewDto>> GetPendingReviewsAsync(Guid reviewerId);
-    Task<int> GetApprovalCountAsync(Guid nominationId);
-    Task<int> GetRejectionCountAsync(Guid nominationId);
+    /// <summary>
+    /// Nominations this member still owes a score on.
+    /// </summary>
+    /// <remarks>
+    /// Returns <b>nominations</b>, not reviews. Before slice 6 this asked the review table for rows
+    /// with a null <c>ReviewDate</c> — placeholder rows that the seeder created to mean "pending".
+    /// A review row now IS a score and is stamped when it is written, so that query can only ever
+    /// return nothing. The real question is which nominations are with a committee this person sits
+    /// on and carry no score from them yet.
+    /// </remarks>
+    Task<IEnumerable<AwardNominationSummaryDto>> GetPendingReviewsAsync(Guid reviewerId);
     Task<AwardCommitteeReviewDto> SubmitReviewAsync(Guid nominationId, Guid reviewerId, Guid userId, SubmitCommitteeReviewDto dto);
     Task<AwardCommitteeReviewDto> UpdateReviewAsync(Guid id, Guid userId, UpdateCommitteeReviewDto dto);
 }
@@ -248,6 +256,14 @@ public interface IAwardEligibilityService
 
 
 #region Award Voting
+
+public interface IAwardCommitteeScoringService
+{
+    /// <summary>
+    /// The committee's scores for a cycle: the average each nomination received, and the winner.
+    /// </summary>
+    Task<AwardCommitteeResultDto> GetResultAsync(Guid cycleId);
+}
 
 public interface IAwardVotingService
 {

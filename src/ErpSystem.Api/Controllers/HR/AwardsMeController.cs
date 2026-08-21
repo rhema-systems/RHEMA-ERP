@@ -45,12 +45,16 @@ public class AwardsMeController : HrControllerBase
     private readonly IAwardEligibilityService _eligibilityService;
     private readonly IAwardNominationService _nominationService;
     private readonly IAwardVotingService _votingService;
+    private readonly IAwardCommitteeReviewService _reviewService;
+    private readonly IAwardCommitteeScoringService _scoringService;
 
     public AwardsMeController(
         IAwardCycleService cycleService,
         IAwardEligibilityService eligibilityService,
         IAwardNominationService nominationService,
         IAwardVotingService votingService,
+        IAwardCommitteeReviewService reviewService,
+        IAwardCommitteeScoringService scoringService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -58,6 +62,8 @@ public class AwardsMeController : HrControllerBase
         _eligibilityService = eligibilityService;
         _nominationService = nominationService;
         _votingService = votingService;
+        _reviewService = reviewService;
+        _scoringService = scoringService;
     }
 
     /// <summary>
@@ -242,6 +248,103 @@ public class AwardsMeController : HrControllerBase
 
         await _votingService.WithdrawMyVoteAsync(cycleId, voterId);
         return NoContent();
+    }
+
+
+    // ── committee scoring ─────────────────────────────────────────────────────
+    //
+    // Scoring lives here rather than on AwardsController because a committee member is defined by
+    // the record - membership of the committee a nomination was assigned to - and not by an HR
+    // grant. Most committee members are HODs and senior staff who hold no awards permission at all;
+    // gating the score on HR.Awards.Write refused them before the membership rule could run.
+    //
+    // The service enforces membership, so this route is deliberately bare [Authorize]: the gate is
+    // the committee, not the permission.
+
+    /// <summary>Nominations waiting for the caller's score.</summary>
+    [HttpGet("reviews/pending")]
+    public async Task<ActionResult<IEnumerable<AwardNominationSummaryDto>>> GetMyPendingReviews()
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var reviewerId,
+            "Listing what you have to score") is { } error) return error;
+
+        return Ok(await _reviewService.GetPendingReviewsAsync(reviewerId));
+    }
+
+    /// <summary>Scores the caller has already given.</summary>
+    [HttpGet("reviews")]
+    public async Task<ActionResult<IEnumerable<AwardCommitteeReviewDto>>> GetMyReviews()
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var reviewerId,
+            "Listing your scores") is { } error) return error;
+
+        return Ok(await _reviewService.GetByReviewerIdAsync(reviewerId));
+    }
+
+    /// <summary>
+    /// Score a nomination. The reviewer is the token, and the service refuses anyone who is not an
+    /// active member of the committee that nomination was assigned to.
+    /// </summary>
+    [HttpPost("nominations/{nominationId:guid}/score")]
+    public async Task<ActionResult<AwardCommitteeReviewDto>> ScoreNomination(
+        Guid nominationId, [FromBody] SubmitCommitteeReviewDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var reviewerId,
+            "Scoring a nomination") is { } error) return error;
+
+        return Ok(await _reviewService.SubmitReviewAsync(nominationId, reviewerId, userId, dto));
+    }
+
+    /// <summary>Revise a score the caller gave.</summary>
+    [HttpPut("reviews/{id:guid}")]
+    public async Task<ActionResult<AwardCommitteeReviewDto>> UpdateMyScore(
+        Guid id, [FromBody] UpdateCommitteeReviewDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var reviewerId,
+            "Revising your score") is { } error) return error;
+
+        var mine = await _reviewService.GetByIdAsync(id);
+        if (mine == null || mine.ReviewerId != reviewerId) return NotFound();
+
+        return Ok(await _reviewService.UpdateReviewAsync(id, userId, dto));
+    }
+
+
+    /// <summary>
+    /// What the caller's own committee has scored so far.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The same trap a third time, so it is worth stating as a rule.</b> The desk's
+    /// <c>cycles/{id}/committee-result</c> needs <c>HR.Awards.Read</c>, which committee members do
+    /// not hold — so the people doing the scoring could not see the scores. Slices 4, 5 and 6 each
+    /// began by gating an act on an HR permission when the actor was defined by the record, and each
+    /// time the symptom was a 403 that looks like misconfiguration rather than a design error.</para>
+    ///
+    /// <para>The rule, stated plainly: <b>if the person entitled to do a thing is identified by a
+    /// row rather than by a grant, the route belongs on this controller and the row is the gate.</b></para>
+    ///
+    /// <para>Membership is checked here rather than in the scoring service, because the service
+    /// answers a question about a cycle and has no opinion about who is asking.</para>
+    /// </remarks>
+    [HttpGet("cycles/{cycleId:guid}/committee-result")]
+    public async Task<ActionResult<AwardCommitteeResultDto>> GetMyCommitteeResult(Guid cycleId)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var reviewerId,
+            "Viewing your committee's scores") is { } error) return error;
+
+        // Only somebody with something to score in this cycle may read its scores. Anyone else asks
+        // the awards desk.
+        var owed = await _reviewService.GetPendingReviewsAsync(reviewerId);
+        var mine = await _reviewService.GetByReviewerIdAsync(reviewerId);
+        var involved = owed.Any() || mine.Any();
+
+        if (!involved)
+            return NotFound();
+
+        return Ok(await _scoringService.GetResultAsync(cycleId));
     }
 
 }

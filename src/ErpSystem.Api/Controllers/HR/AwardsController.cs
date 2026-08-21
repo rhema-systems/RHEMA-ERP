@@ -64,6 +64,7 @@ public class AwardsController : HrControllerBase
     private readonly IAwardCycleService _cycleService;
     private readonly IAwardEligibilityService _eligibilityService;
     private readonly IAwardVotingService _votingService;
+    private readonly IAwardCommitteeScoringService _scoringService;
 
     public AwardsController(
         IAwardTypeService awardTypeService,
@@ -83,6 +84,7 @@ public class AwardsController : HrControllerBase
         IAwardCycleService cycleService,
         IAwardEligibilityService eligibilityService,
         IAwardVotingService votingService,
+        IAwardCommitteeScoringService scoringService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -103,6 +105,7 @@ public class AwardsController : HrControllerBase
         _cycleService = cycleService;
         _eligibilityService = eligibilityService;
         _votingService = votingService;
+        _scoringService = scoringService;
     }
 
     #region Award Types
@@ -652,6 +655,31 @@ public class AwardsController : HrControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Hand a nomination to a committee for scoring.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ This endpoint did not exist before area 14 slice 6.</b>
+    /// <c>IAwardNominationService.AssignToCommitteeAsync</c> was declared in the interface and
+    /// implemented in the service, and nothing anywhere called it — no controller action, no other
+    /// service, no background job. It was reachable from nothing.</para>
+    ///
+    /// <para>That mattered the moment slice 6 made committee membership the gate on scoring: a
+    /// nomination can only be scored by a member of the committee it is assigned to, and there was
+    /// no way to assign one. The whole committee path would have been dead, and dead in a way that
+    /// looks like a permissions problem rather than a missing route.</para>
+    ///
+    /// <para>Admin rather than Write: handing work to a committee is administering the process, not
+    /// taking part in it.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("nominations/{id:guid}/committee/{committeeId:guid}")]
+    public async Task<ActionResult<AwardNominationDto>> AssignNominationToCommittee(Guid id, Guid committeeId)
+    {
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+        return Ok(await _nominationService.AssignToCommitteeAsync(id, committeeId, userId));
+    }
+
     [Authorize(Policy = HrPermissions.AwardsWritePolicy)]
     [HttpPost("nominations/{id:guid}/submit")]
     public async Task<ActionResult<AwardNominationDto>> SubmitNomination(Guid id)
@@ -996,6 +1024,19 @@ public class AwardsController : HrControllerBase
 
     #region Award Committee Reviews
 
+    // Scoring a nomination is NOT on this controller.
+    //
+    // A committee member is defined by the record - membership of the committee the nomination was
+    // assigned to - and not by an HR grant. Gating the score on HR.Awards.Write meant a committee
+    // member who is not an HR officer, which is most of them, was refused by the policy before the
+    // membership rule ever ran. That is the area-15b trap: a permission gate used for an actor the
+    // record defines.
+    //
+    // Scoring therefore lives on AwardsMeController alongside nominating and voting, behind bare
+    // [Authorize] with membership as the real gate. The reads below stay here: the awards desk needs
+    // to see what the committee scored without being on it.
+
+
     [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
     [HttpGet("nominations/{nominationId:guid}/reviews")]
     public async Task<ActionResult<IEnumerable<AwardCommitteeReviewDto>>> GetNominationReviews(Guid nominationId)
@@ -1004,21 +1045,7 @@ public class AwardsController : HrControllerBase
         return Ok(result);
     }
 
-    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
-    [HttpGet("nominations/{nominationId:guid}/reviews/approval-count")]
-    public async Task<ActionResult<int>> GetApprovalCount(Guid nominationId)
-    {
-        var result = await _committeeReviewService.GetApprovalCountAsync(nominationId);
-        return Ok(new { nominationId, approvalCount = result });
-    }
 
-    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
-    [HttpGet("nominations/{nominationId:guid}/reviews/rejection-count")]
-    public async Task<ActionResult<int>> GetRejectionCount(Guid nominationId)
-    {
-        var result = await _committeeReviewService.GetRejectionCountAsync(nominationId);
-        return Ok(new { nominationId, rejectionCount = result });
-    }
 
     [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
     [HttpGet("reviews/{id:guid}")]
@@ -1036,40 +1063,18 @@ public class AwardsController : HrControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// What a given committee member still owes a score on. Returns nominations, not reviews — see
+    /// the remarks on <c>IAwardCommitteeReviewService.GetPendingReviewsAsync</c>.
+    /// </summary>
     [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
     [HttpGet("reviews/reviewer/{reviewerId:guid}/pending")]
-    public async Task<ActionResult<IEnumerable<AwardCommitteeReviewDto>>> GetPendingReviews(Guid reviewerId)
+    public async Task<ActionResult<IEnumerable<AwardNominationSummaryDto>>> GetPendingReviews(Guid reviewerId)
     {
         var result = await _committeeReviewService.GetPendingReviewsAsync(reviewerId);
         return Ok(result);
     }
 
-    [Authorize(Policy = HrPermissions.AwardsWritePolicy)]
-    [HttpPost("nominations/{nominationId:guid}/reviews")]
-    public async Task<ActionResult<AwardCommitteeReviewDto>> SubmitReview(
-        Guid nominationId,
-        [FromBody] SubmitCommitteeReviewDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out _, out var userId, out var reviewerId, "Scoring a nomination") is { } error) return error;
-
-        var created = await _committeeReviewService.SubmitReviewAsync(nominationId, reviewerId, userId, dto);
-        return Ok(created);
-    }
-
-    [Authorize(Policy = HrPermissions.AwardsWritePolicy)]
-    [HttpPut("reviews/{id:guid}")]
-    public async Task<ActionResult<AwardCommitteeReviewDto>> UpdateReview(
-        Guid id,
-        [FromBody] UpdateCommitteeReviewDto dto)
-    {
-        if (id != dto.Id) return BadRequest("ID mismatch");
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
-
-        var updated = await _committeeReviewService.UpdateReviewAsync(id, userId, dto);
-        return Ok(updated);
-    }
 
     #endregion
 
@@ -1308,6 +1313,29 @@ public class AwardsController : HrControllerBase
     [HttpGet("cycles/{cycleId:guid}/results")]
     public async Task<ActionResult<AwardVoteResultDto>> GetVoteResult(Guid cycleId)
         => Ok(await _votingService.GetResultAsync(cycleId));
+
+    #endregion
+
+
+    #region Committee Result
+
+    /// <summary>
+    /// What the committee scored, and who that makes the winner.
+    /// </summary>
+    /// <remarks>
+    /// <para>TDC's note decides this award on the <b>highest average score</b>, so the average is
+    /// what is reported — alongside how many members produced it, because an average of one score
+    /// is not the same claim as an average of five.</para>
+    ///
+    /// <para>Unlike the staff vote, committee scores are <b>not</b> withheld while scoring is in
+    /// progress. The concern with a running tally is that voters influence each other; a committee
+    /// is a small group appointed to deliberate, and seeing where colleagues stand is part of what
+    /// they were appointed to do.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
+    [HttpGet("cycles/{cycleId:guid}/committee-result")]
+    public async Task<ActionResult<AwardCommitteeResultDto>> GetCommitteeResult(Guid cycleId)
+        => Ok(await _scoringService.GetResultAsync(cycleId));
 
     #endregion
 

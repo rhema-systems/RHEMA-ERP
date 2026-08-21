@@ -172,6 +172,16 @@ public interface IAwardNominationRepository : IGenericRepository<AwardNomination
     Task<IEnumerable<AwardNomination>> GetByNomineeIdAsync(Guid nomineeId);
 
     /// <summary>
+    /// Live nominations assigned to any of the given committees.
+    /// </summary>
+    /// <remarks>
+    /// Used to answer "what do I still have to score", which is a question about nominations rather
+    /// than about reviews. Loading every nomination in the tenant and filtering in memory is the
+    /// shape this area has been removing since slice 3.
+    /// </remarks>
+    Task<IEnumerable<AwardNomination>> GetForCommitteesAsync(Guid tenantId, IEnumerable<Guid> committeeIds);
+
+    /// <summary>
     /// How many live nominations each cycle holds, in one query. Counting them by loading every
     /// nomination in the tenant and grouping in memory is the shape that turns a cycle register
     /// into a full table scan per page.
@@ -227,12 +237,20 @@ public interface IAwardCommitteeMemberRepository : IGenericRepository<AwardCommi
 
 public interface IAwardNominationReviewRepository : IGenericRepository<AwardNominationReview>
 {
+    /// <summary>
+    /// Average score and reviewer count per nomination for a cycle, computed in the database.
+    /// </summary>
+    /// <remarks>
+    /// Replaces <c>GetApprovalCountAsync</c> and <c>GetRejectionCountAsync</c>, which counted
+    /// approvals and rejections of a <c>bool? Approved</c> that no longer exists. Those two encoded
+    /// the wrong model: TDC decides the winner on the highest average score, and a count of
+    /// approvals cannot rank two nominations everybody approved.
+    /// </remarks>
+    Task<Dictionary<Guid, (double Average, int Reviewers)>> GetScoreSummaryByCycleAsync(Guid cycleId);
+
     Task<IEnumerable<AwardNominationReview>> GetByNominationIdAsync(Guid nominationId);
     Task<IEnumerable<AwardNominationReview>> GetByReviewerIdAsync(Guid reviewerId);
-    Task<IEnumerable<AwardNominationReview>> GetPendingReviewsAsync(Guid reviewerId);
     Task<AwardNominationReview?> GetReviewAsync(Guid nominationId, Guid reviewerId);
-    Task<int> GetApprovalCountAsync(Guid nominationId);
-    Task<int> GetRejectionCountAsync(Guid nominationId);
     Task<bool> HasReviewedAsync(Guid nominationId, Guid reviewerId);
 }
 

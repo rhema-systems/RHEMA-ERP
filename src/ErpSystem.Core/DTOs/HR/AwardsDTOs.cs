@@ -807,6 +807,18 @@ public class AwardNominationDto : BaseDto
     public Guid? AwardCycleId { get; set; }
     public string? AwardCycleName { get; set; }
 
+    /// <summary>
+    /// The committee reviewing it, once assigned.
+    /// </summary>
+    /// <remarks>
+    /// Moved up from <c>AwardNominationDetailDto</c> in slice 6. <c>AssignToCommitteeAsync</c>
+    /// returns this DTO, so before the move the operation that assigned a committee did not show
+    /// the committee it had just assigned — the caller had to re-fetch a different endpoint to see
+    /// whether their own call had worked.
+    /// </remarks>
+    public Guid? CommitteeId { get; set; }
+    public string? CommitteeName { get; set; }
+
     public Guid? AwardLevelId { get; set; }
     public string? AwardLevelName { get; set; }
     public Guid? NomineeId { get; set; }
@@ -953,8 +965,7 @@ public class ReviewAwardNominationDto
 /// </summary>
 public class AwardNominationDetailDto : AwardNominationDto
 {
-    public Guid? CommitteeId { get; set; }
-    public string? CommitteeName { get; set; }
+    // CommitteeId / CommitteeName now live on the base DTO - see the remarks there.
     // public Guid? AwardLevelId { get; set; }
     // public string? AwardLevelName { get; set; }
     public List<TeamAwardNomineeDto> TeamNominees { get; set; } = new();
@@ -1263,8 +1274,10 @@ public class AwardCommitteeReviewDto : BaseDto
     public Guid ReviewerId { get; set; }
     public string ReviewerName { get; set; } = string.Empty;
     public DateTime? ReviewDate { get; set; }
-    public bool? Approved { get; set; }
-    public int? Score { get; set; }
+
+    /// <summary>This member's score, 1–100. The winner is decided on the average of these.</summary>
+    public int Score { get; set; }
+
     public string? Comments { get; set; }
 }
 
@@ -1273,11 +1286,13 @@ public class AwardCommitteeReviewDto : BaseDto
 /// </summary>
 public class SubmitCommitteeReviewDto : CreateDtoBase
 {
+    /// <summary>
+    /// This member's score, 1–100. Required — an unscored review cannot contribute to an average,
+    /// and TDC's note decides the winner on the average.
+    /// </summary>
     [Required]
-    public bool Approved { get; set; }
-
     [Range(1, 100)]
-    public int? Score { get; set; }
+    public int Score { get; set; }
 
     [Required]
     [MaxLength(2000)]
@@ -1289,15 +1304,15 @@ public class SubmitCommitteeReviewDto : CreateDtoBase
 /// </summary>
 public class UpdateCommitteeReviewDto : UpdateDtoBase
 {
+    /// <summary>Revised score, 1–100.</summary>
     [Required]
-    public bool Approved { get; set; }
-
     [Range(1, 100)]
-    public int? Score { get; set; }
+    public int Score { get; set; }
 
     [Required]
     [MaxLength(2000)]
     public string Comments { get; set; } = string.Empty;
+
 }
 
 #endregion
@@ -1700,6 +1715,63 @@ public class AwardVoteTallyDto
     public Guid? NomineeId { get; set; }
     public string NomineeName { get; set; } = string.Empty;
     public int Votes { get; set; }
+}
+
+#endregion
+
+
+#region Award Committee Result DTOs
+
+/// <summary>
+/// What the committee decided, or why it has not decided yet.
+/// </summary>
+/// <remarks>
+/// TDC's note: <i>"the committee members will score, and the winner will be the one with the highest
+/// average score"</i>. The average is reported alongside how many members produced it, because an
+/// average of one score is not the same claim as an average of five and a screen that showed only
+/// the number would not let anyone tell them apart.
+/// </remarks>
+public class AwardCommitteeResultDto
+{
+    public Guid AwardCycleId { get; set; }
+    public string CycleName { get; set; } = string.Empty;
+    public string AwardTypeName { get; set; } = string.Empty;
+
+    /// <summary>How many members must score a nomination before it counts. Null means no minimum.</summary>
+    public int? MinRequiredReviewers { get; set; }
+
+    public bool ResultAvailable { get; set; }
+
+    /// <summary>Why there is no winner: nothing scored, too few reviewers, or a tie.</summary>
+    public string? WithheldReason { get; set; }
+
+    public List<AwardCommitteeScoreDto> Scores { get; set; } = new();
+
+    public Guid? WinningNominationId { get; set; }
+    public string? WinnerName { get; set; }
+
+    public bool IsTied { get; set; }
+    public List<Guid> TiedNominationIds { get; set; } = new();
+}
+
+public class AwardCommitteeScoreDto
+{
+    public Guid NominationId { get; set; }
+    public string NominationNumber { get; set; } = string.Empty;
+    public Guid? NomineeId { get; set; }
+    public string NomineeName { get; set; } = string.Empty;
+
+    /// <summary>The average of every score this nomination received. Null when nobody has scored it.</summary>
+    public double? AverageScore { get; set; }
+
+    public int ReviewerCount { get; set; }
+
+    /// <summary>
+    /// False when fewer members have scored than the award requires. Such a nomination is listed
+    /// with its partial average rather than hidden — the committee needs to see who is still
+    /// outstanding — but it cannot win.
+    /// </summary>
+    public bool MeetsReviewerMinimum { get; set; }
 }
 
 #endregion

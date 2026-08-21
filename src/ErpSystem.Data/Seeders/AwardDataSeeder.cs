@@ -315,37 +315,18 @@ public sealed class AwardDataSeeder
 
             await _context.SaveChangesAsync(cancellationToken);
 
-            // 6. Seed Committee Reviews (for nominations)
-            var nominations = await _context.AwardNominations
-                .Where(n => n.TenantId == tenantId && (n.Status == AwardNominationStatus.Submitted || n.Status == AwardNominationStatus.UnderReview))
-                .ToListAsync(cancellationToken);
-
-            foreach (var nomination in nominations)
-            {
-                var existingReview = await _context.AwardNominationReviews
-                    .FirstOrDefaultAsync(r => r.AwardNominationId == nomination.Id && r.ReviewerId == employeeId, cancellationToken);
-
-                if (existingReview == null)
-                {
-                    var review = new AwardNominationReview
-                    {
-                        Id = Guid.NewGuid(),
-                        TenantId = tenantId,
-                        AwardNominationId = nomination.Id,
-                        ReviewerId = employeeId,
-                        ReviewDate = null, // Pending review
-                        Approved = null, // Not yet reviewed
-                        Comments = null,
-                        CreatedAt = now,
-                        CreatedBy = string.Empty
-                    };
-
-                    _context.AwardNominationReviews.Add(review);
-                    totalCreated++;
-                }
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
+            // 6. Committee reviews are NOT seeded.
+            //
+            // This block used to create an empty review row per nomination - ReviewDate null,
+            // Approved null - to represent "pending review". Area 14 slice 6 replaced that
+            // approve/reject field with a required score, because TDC decides these awards on the
+            // highest average score and a boolean cannot rank anything.
+            //
+            // Under that model an empty review row is not merely useless, it is wrong: the scoring
+            // service counts rows to decide whether a nomination has met AwardType.MinRequiredReviewers,
+            // and a placeholder would count as a reviewer who had scored while contributing a
+            // meaningless value to the mean. "Not yet reviewed" is now the ABSENCE of a row, which is
+            // also the honest representation - a member who has not scored has not left an opinion.
 
             // 7. Seed Employee Awards (approved awards)
             if (awardTypes.TryGetValue("Customer Service Excellence", out var cseType))

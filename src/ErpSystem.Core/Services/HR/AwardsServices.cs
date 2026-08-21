@@ -1783,19 +1783,54 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
 {
     private readonly IAwardNominationReviewRepository _reviewRepo;
     private readonly IAwardNominationRepository _nominationRepo;
+    private readonly IAwardCommitteeMemberRepository _memberRepo;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
 
     public AwardCommitteeReviewService(
         IAwardNominationReviewRepository reviewRepo,
         IAwardNominationRepository nominationRepo,
+        IAwardCommitteeMemberRepository memberRepo,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork)
     {
         _reviewRepo = reviewRepo;
         _nominationRepo = nominationRepo;
+        _memberRepo = memberRepo;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+    }
+
+    /// <summary>
+    /// Checks that this person may score this nomination at all.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Membership is the gate, not a permission.</b> Before slice 6 any holder of
+    /// <c>HR.Awards.Write</c> could score any nomination, which makes the committee decorative —
+    /// the whole point of appointing one is that its members, and only its members, decide. This is
+    /// the same shape as the area-15b rule: <i>when the actor is defined by the record, a permission
+    /// is the wrong instrument.</i></para>
+    ///
+    /// <para>A nomination with no committee assigned cannot be scored at all. Scoring it would
+    /// produce an average that no committee stands behind.</para>
+    /// </remarks>
+    private async Task<AwardNomination> RequireCommitteeMemberAsync(Guid nominationId, Guid reviewerId, Guid tenantId)
+    {
+        var nomination = await _nominationRepo.GetWithDetailsAsync(nominationId);
+        if (nomination == null || nomination.TenantId != tenantId || nomination.IsDeleted)
+            throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
+
+        if (nomination.CommitteeId == null)
+            throw AwardsWorkflowException.InvalidState(
+                $"Nomination {nomination.NominationNumber} has not been assigned to a committee, so it " +
+                "cannot be scored yet. Assign it to a committee first.");
+
+        if (!await _memberRepo.IsActiveMemberAsync(nomination.CommitteeId.Value, reviewerId))
+            throw AwardsWorkflowException.Invalid(
+                "You are not an active member of the committee reviewing this nomination, so you " +
+                "cannot score it.");
+
+        return nomination;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -1847,30 +1882,34 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
         return reviews.Where(r => r.TenantId == tenantId).ToDtoList();
     }
 
-    public async Task<IEnumerable<AwardCommitteeReviewDto>> GetPendingReviewsAsync(Guid reviewerId)
+    public async Task<IEnumerable<AwardNominationSummaryDto>> GetPendingReviewsAsync(Guid reviewerId)
     {
         var tenantId = GetTenantId();
-        var reviews = await _reviewRepo.GetPendingReviewsAsync(reviewerId);
-        return reviews.Where(r => r.TenantId == tenantId).ToDtoList();
+
+        // Which committees this person actually sits on. No membership, nothing to score.
+        var memberships = (await _memberRepo.GetByEmployeeIdAsync(reviewerId))
+            .Where(m => m.TenantId == tenantId && !m.IsDeleted && m.IsActive)
+            .Select(m => m.CommitteeId)
+            .Distinct()
+            .ToList();
+
+        if (memberships.Count == 0)
+            return Enumerable.Empty<AwardNominationSummaryDto>();
+
+        var nominations = await _nominationRepo.GetForCommitteesAsync(tenantId, memberships);
+
+        // Already scored by this person drops out. Everything else is outstanding.
+        var alreadyScored = (await _reviewRepo.GetByReviewerIdAsync(reviewerId))
+            .Where(r => !r.IsDeleted)
+            .Select(r => r.AwardNominationId)
+            .ToHashSet();
+
+        return nominations
+            .Where(n => !alreadyScored.Contains(n.Id))
+            .ToSummaryDtoList();
     }
 
-    public async Task<int> GetApprovalCountAsync(Guid nominationId)
-    {
-        var tenantId = GetTenantId();
-        var nomination = await _nominationRepo.GetByIdAsync(nominationId);
-        if (nomination == null || nomination.TenantId != tenantId)
-            return 0;
-        return await _reviewRepo.GetApprovalCountAsync(nominationId);
-    }
 
-    public async Task<int> GetRejectionCountAsync(Guid nominationId)
-    {
-        var tenantId = GetTenantId();
-        var nomination = await _nominationRepo.GetByIdAsync(nominationId);
-        if (nomination == null || nomination.TenantId != tenantId)
-            return 0;
-        return await _reviewRepo.GetRejectionCountAsync(nominationId);
-    }
 
     public async Task<AwardCommitteeReviewDto> SubmitReviewAsync(Guid nominationId, Guid reviewerId, Guid userId, SubmitCommitteeReviewDto dto)
     {
@@ -1884,6 +1923,8 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
         var nomination = await _nominationRepo.GetByIdAsync(nominationId);
         if (nomination == null || nomination.TenantId != tenantId)
             throw AwardsWorkflowException.NotFound($"AwardNomination {nominationId} not found.");
+
+        await RequireCommitteeMemberAsync(nominationId, reviewerId, tenantId);
 
         var entity = dto.ToEntity(nominationId, reviewerId, tenantId, userId);
         await _reviewRepo.AddAsync(entity);

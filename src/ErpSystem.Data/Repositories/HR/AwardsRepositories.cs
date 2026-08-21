@@ -599,6 +599,23 @@ public class TeamAwardRecipientRepository : GenericRepository<TeamAwardRecipient
 
 public class AwardNominationRepository : GenericRepository<AwardNomination>, IAwardNominationRepository
 {
+    public async Task<IEnumerable<AwardNomination>> GetForCommitteesAsync(Guid tenantId, IEnumerable<Guid> committeeIds)
+    {
+        var ids = committeeIds.ToList();
+        if (ids.Count == 0) return new List<AwardNomination>();
+
+        return await _context.Set<AwardNomination>()
+            .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
+            .Include(an => an.Nominee)
+            .Where(an => an.TenantId == tenantId && !an.IsDeleted
+                && an.CommitteeId != null && ids.Contains(an.CommitteeId.Value)
+                && (an.Status == AwardNominationStatus.Submitted
+                    || an.Status == AwardNominationStatus.UnderReview))
+            .OrderBy(an => an.NominationDate)
+            .ToListAsync();
+    }
+
     public async Task<Dictionary<Guid, int>> GetCountsByCycleAsync(Guid tenantId)
     {
         return await _context.Set<AwardNomination>()
@@ -1005,6 +1022,19 @@ public class AwardCommitteeMemberRepository : GenericRepository<AwardCommitteeMe
 
 public class AwardNominationReviewRepository : GenericRepository<AwardNominationReview>, IAwardNominationReviewRepository
 {
+    public async Task<Dictionary<Guid, (double Average, int Reviewers)>> GetScoreSummaryByCycleAsync(Guid cycleId)
+    {
+        var rows = await (
+            from r in _context.Set<AwardNominationReview>()
+            join n in _context.Set<AwardNomination>() on r.AwardNominationId equals n.Id
+            where n.AwardCycleId == cycleId && !r.IsDeleted && !n.IsDeleted
+            group r by r.AwardNominationId into g
+            select new { NominationId = g.Key, Average = g.Average(x => (double)x.Score), Reviewers = g.Count() }
+        ).ToListAsync();
+
+        return rows.ToDictionary(x => x.NominationId, x => (x.Average, x.Reviewers));
+    }
+
     public AwardNominationReviewRepository(ApplicationDbContext context) : base(context) { }
 
     /// <summary>
@@ -1040,19 +1070,6 @@ public class AwardNominationReviewRepository : GenericRepository<AwardNomination
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<AwardNominationReview>> GetPendingReviewsAsync(Guid reviewerId)
-    {
-        return await _context.Set<AwardNominationReview>()
-            .Include(acr => acr.AwardNomination)
-                .ThenInclude(an => an.AwardType)
-            .Include(acr => acr.AwardNomination)
-                .ThenInclude(an => an.Nominee)
-            .Where(acr => acr.ReviewerId == reviewerId 
-                && acr.ReviewDate == null 
-                && !acr.IsDeleted)
-            .OrderBy(acr => acr.CreatedAt)
-            .ToListAsync();
-    }
 
     public async Task<AwardNominationReview?> GetReviewAsync(Guid nominationId, Guid reviewerId)
     {
@@ -1062,21 +1079,7 @@ public class AwardNominationReviewRepository : GenericRepository<AwardNomination
                 && !acr.IsDeleted);
     }
 
-    public async Task<int> GetApprovalCountAsync(Guid nominationId)
-    {
-        return await _context.Set<AwardNominationReview>()
-            .CountAsync(acr => acr.AwardNominationId == nominationId 
-                && acr.Approved == true 
-                && !acr.IsDeleted);
-    }
 
-    public async Task<int> GetRejectionCountAsync(Guid nominationId)
-    {
-        return await _context.Set<AwardNominationReview>()
-            .CountAsync(acr => acr.AwardNominationId == nominationId 
-                && acr.Approved == false 
-                && !acr.IsDeleted);
-    }
 
     public async Task<bool> HasReviewedAsync(Guid nominationId, Guid reviewerId)
     {

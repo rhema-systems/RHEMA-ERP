@@ -472,13 +472,34 @@ public class AwardCommitteeMember : TenantEntity
 /// <summary>
 /// Reviews for a nomination (many-to-many)
 /// </summary>
+/// <summary>
+/// One committee member's score for one nomination.
+/// </summary>
+/// <remarks>
+/// <para><b>A score, not a verdict (area 14 slice 6, decision D-2).</b> TDC's note is explicit:
+/// <i>"the committee members will score, and the winner will be the one with the highest average
+/// score"</i>. This entity previously held <c>bool? Approved</c> - approve or reject - which cannot
+/// rank anything. Two nominations both approved by everyone were indistinguishable, so the award
+/// could not be decided from the data the committee had entered.</para>
+///
+/// <para><b>The score was already being thrown away.</b> <c>SubmitCommitteeReviewDto</c> carried
+/// <c>[Range(1, 100)] int? Score</c> before this slice, the entity had no such column, and
+/// <c>AwardsMappingExtensions</c> mapped the read DTO's score as the literal <c>Score = null</c>. A
+/// committee member could submit 87, receive 200, and the system would keep nothing and report
+/// <c>null</c> back.</para>
+///
+/// <para><b>The 1-100 scale is inherited, not invented.</b> It was already on the DTO's
+/// <c>[Range]</c>. TDC has not stated a rubric; any scale a committee prefers maps onto a
+/// percentage, and the question is recorded for them rather than settled here.</para>
+/// </remarks>
 public class AwardNominationReview : TenantEntity
 {
     public Guid AwardNominationId { get; set; }
     
     public Guid ReviewerId { get; set; }
     
-    public bool? Approved { get; set; } // Vote: Yes/No
+    /// <summary>This member's score, 1-100. Required: a review with no score ranks nothing.</summary>
+    public int Score { get; set; }
 	
 	[MaxLength(2000)]
     public string? Comments { get; set; }

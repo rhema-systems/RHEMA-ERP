@@ -339,6 +339,8 @@ public static class AwardsMappingExtensions
             AwardTypeName = entity.AwardType?.Name ?? string.Empty,
             AwardCycleId = entity.AwardCycleId,
             AwardCycleName = entity.AwardCycle?.Name,
+            CommitteeId = entity.CommitteeId,
+            CommitteeName = entity.Committee?.Name,
             AwardLevelId = entity.AwardLevelId,
             AwardLevelName = entity.AwardLevel?.Name,
             NomineeId = entity.NomineeId,
@@ -910,8 +912,7 @@ public static class AwardsMappingExtensions
                 ? $"{entity.Reviewer.FirstName} {entity.Reviewer.LastName}" 
                 : string.Empty,
             ReviewDate = entity.ReviewDate,
-            Approved = entity.Approved,
-            Score = null,
+            Score = entity.Score,
             Comments = entity.Comments,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -928,7 +929,7 @@ public static class AwardsMappingExtensions
             AwardNominationId = nominationId,
             ReviewerId = reviewerId,
             ReviewDate = DateTime.UtcNow,
-            Approved = dto.Approved,
+            Score = dto.Score,
             Comments = dto.Comments,
             CreatedBy = userId.ToString()
         };
@@ -936,7 +937,7 @@ public static class AwardsMappingExtensions
 
     public static void UpdateEntity(this AwardNominationReview entity, UpdateCommitteeReviewDto dto, Guid userId)
     {
-        entity.Approved = dto.Approved;
+        entity.Score = dto.Score;
         entity.Comments = dto.Comments;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();

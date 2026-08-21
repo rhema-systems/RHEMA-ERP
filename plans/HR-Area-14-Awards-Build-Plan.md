@@ -321,7 +321,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 3 | Cycles and eligibility | ✅ **Done.** D-4 cycle entity with windows; AWD-01 eligibility evaluation producing the qualified set. |
 | 4 | Nomination | ✅ **Done.** AWD-02, AWD-09; the gates, the employee surface, and self-nomination as a per-award setting. |
 | 5 | The vote | ✅ **Done.** AWD-04/05/06/10 — the ballot, the electorate, one-vote-per-voter, the window, and the tally withheld until close. |
-| 6 | Committee scoring | D-2 model change, AWD-12, AWD-13 highest-average outcome. Test with identical scores and ≥3 reviewers. |
+| 6 | Committee scoring | ✅ **Done.** D-2, AWD-12/13 — score replaces verdict, highest average wins, membership is the gate. |
 | 7 | Direct and automatic selection | AWD-07, AWD-08 — management selection, and nomination derived from performance/targets. |
 | 8 | The award is conferred | Nomination → `EmployeeAward`; presentation; certificate; the payment record (D-7). |
 | 9 | Long service | AWD-14 milestones, AWD-15 disqualification (D-6), the sweep — asserted empty on live data. |
@@ -801,3 +801,82 @@ that govern the beginning.
 **Not a defect: a transient 500 from `/api/auth/login`** during a batch of overlapping harness runs.
 The API stayed healthy and the retry was clean. Recorded rather than diagnosed — it was not
 reproduced and is not this area's code.
+
+---
+
+### Slice 6 — committee scoring. 2026-08-21, **42/42**, run twice. Migration `AddAwardCommitteeScore`.
+
+Harness: `run-slice6.mjs`. Whole area re-run afterwards: **32 / 49 / 51 / 6 / 44 / 49 / 42 = 273
+assertions**, all green.
+
+**D-2 delivered.** `AwardNominationReview.Approved` (a `bool?`) becomes `Score` (1–100), and the
+winner is the highest **average**. TDC's note is the whole specification: *"the committee members
+will score, and the winner will be the one with the highest average score"*. Approve/reject cannot
+rank anything — two nominations approved by everybody were indistinguishable, so the award could not
+be decided from the data the committee had entered.
+
+**⚠ Defect 11 — the score was already being thrown away, explicitly.** `SubmitCommitteeReviewDto`
+carried `[Range(1, 100)] int? Score` before this slice. The entity had no such column. And
+`AwardsMappingExtensions` contained the literal **`Score = null`**. A committee member could submit
+87, receive **200 OK**, and the system would keep nothing and report `null` back. Every other dead
+field in this area was merely unused; this one was nulled out on the way home. It also settles the
+scale question without inventing anything — 1–100 was already chosen, just never stored.
+
+**⚠ Defect 12 — `AssignToCommitteeAsync` had no endpoint at all.** Declared in the interface,
+implemented in the service, called by nothing: no controller action, no other service, no job. That
+was survivable while any HR user could score anything. The moment membership became the gate it was
+fatal — a nomination can only be scored once assigned, and nothing could assign one. The committee
+path would have been dead, and dead in the worst way: looking like a permissions problem rather than
+a missing route. Found only because the harness needed to assign a nomination and I went to read the
+route instead of guessing it — the first draft *did* guess, with a `.catch()` fallback onto a second
+URL, which would have hidden the finding entirely.
+
+**⚠ Defect 13 — `GetPendingReviewsAsync` could only ever return nothing.** "Pending" meant a review
+row with a null `ReviewDate` — one of the placeholder rows the seeder created. A review row now *is*
+a score and is stamped when written, so no such row can exist. Reimplemented as the question it
+should always have asked: *which nominations are with a committee I sit on that I have not scored* —
+a query over nominations, not reviews.
+
+**The migration retires verdicts rather than converting them.** The doc comment first claimed the
+table was empty; checking found **9 rows**, all `Approved = 1`, all fixtures from this area's own
+slice 1. The scaffolded migration would have given each of them `Score = 0` — not a harmless default
+but an **inversion**, recording a member who approved a nomination as scoring it zero out of a
+hundred, and the scoring service counts rows, so those zeros would drag the average of the very
+nominations their authors supported. They are soft-deleted with the reason in `DeletedBy`. Verified
+in SQL: 0 live, 9 retired, none carrying a fabricated score.
+
+The same reasoning removed `AwardDataSeeder`'s "pending review" placeholder rows: an empty review row
+would count as a reviewer who had scored while contributing nothing to the mean.
+
+**⚠⚠ The pattern worth naming: three slices, three instances of the same mistake.**
+
+| slice | act gated on an HR permission | who actually performs it |
+|---|---|---|
+| 4 | nominating | any employee |
+| 5 | voting | any employee in the electorate |
+| 6 | scoring — and then *reading the scores* | committee members |
+
+Each time the symptom was a **403 that reads like a misconfiguration rather than a design error**,
+and each time it surfaced only because a harness ran as the real actor instead of as admin. The
+sharpest instance was the last: my own doc comment on the desk's result endpoint argued that *"seeing
+where colleagues stand is part of what they were appointed to do"* — while that endpoint required a
+permission committee members do not hold. **The committee could score and could not see the
+scores.**
+
+The rule, now written into `AwardsMeController`: **if the person entitled to do a thing is identified
+by a row rather than by a grant, the route belongs on the employee surface and the row is the
+gate.** Scoring, the pending list, and a member's view of their own committee's result all moved
+there; the desk keeps the reads, because HR must see what a committee scored without sitting on it.
+
+**The mean is tested the way the appraisal engine taught us**: 87, 87, 87 → 87 (identical scores
+catch a sum never divided, and three catch a divisor hard-coded to two), 60/70/80 → 70, and an
+unscored nomination reports `null` rather than 0 — asserted to sort **last** rather than among the
+zeros, because ordering it there would read as the committee having rejected it. `MinRequiredReviewers`
+now bites: one score out of three is listed with its partial average and cannot win.
+
+**⚠ And a coverage erosion I caught in my own harness.** Reordering slice 1 (assignment moves a
+nomination to `UnderReview`, so it must be submitted first) silently **deleted** its
+"a nomination submits with no userId parameter" assertion, leaving a stale section comment behind.
+The file then passed 31/31 while testing less than it had before. Restored, and it is now 32/32.
+*A harness that goes green after an edit has not necessarily kept doing what it did — count the
+assertions, not just the failures.*

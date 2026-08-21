@@ -494,6 +494,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardCycleService, AwardCycleService>();
         services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();
         services.AddScoped<IAwardVotingService, AwardVotingService>();
+        services.AddScoped<IAwardCommitteeScoringService, AwardCommitteeScoringService>();
         services.AddScoped<IAwardLevelService, AwardLevelService>();
         services.AddScoped<IAwardBudgetService, AwardBudgetService>();
         services.AddScoped<IEmployeeAwardService, EmployeeAwardService>();
