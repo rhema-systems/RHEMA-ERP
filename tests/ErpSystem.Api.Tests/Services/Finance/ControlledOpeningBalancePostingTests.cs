@@ -28,6 +28,69 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class ControlledOpeningBalancePostingTests
 {
     [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "ProjectionContract")]
+    public async Task ApprovalProjection_ShouldLabelFunctionalAmountWithFunctionalCurrency_NotFiscalPeriod()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenantId, isOpen: true, isClosed: false);
+        period.PeriodCode = "2025-01";
+        var batch = new OpeningBalanceBatch
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BatchNumber = "FINDEMO-OB-001",
+            OpeningDate = new DateTime(2025, 1, 1),
+            FiscalPeriodId = period.Id,
+            FiscalPeriod = period,
+            BookClassification = "IFRS",
+            Status = "PendingApproval",
+            TotalDebit = 1_500m,
+            TotalCredit = 1_500m
+        };
+        batch.Lines.Add(new OpeningBalanceLine
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            OpeningBalanceBatchId = batch.Id,
+            AccountId = Guid.NewGuid(),
+            LineNumber = 1,
+            DebitAmount = 1_500m,
+            TransactionDebitAmount = 100m,
+            TransactionCurrencyCode = "USD",
+            FunctionalCurrencyCode = "GHS"
+        });
+        db.OpeningBalanceBatches.Add(batch);
+        await db.SaveChangesAsync();
+
+        var controller = new ErpSystem.Api.Controllers.Finance.FinanceApprovalsController(
+            db,
+            Mock.Of<ICurrentUserService>(),
+            Mock.Of<Microsoft.AspNetCore.Authorization.IAuthorizationService>(),
+            Mock.Of<IWorkflowService>(),
+            Mock.Of<ErpSystem.Core.Interfaces.Workflow.IWorkflowEntityDisplayService>(),
+            Mock.Of<IJournalEntryService>(),
+            Mock.Of<IInvoiceService>(),
+            Mock.Of<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService>(),
+            null!,
+            Mock.Of<ILogger<ErpSystem.Api.Controllers.Finance.FinanceApprovalsController>>());
+        var resolver = typeof(ErpSystem.Api.Controllers.Finance.FinanceApprovalsController)
+            .GetMethod("ResolveFactsAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        var projectionTask = (Task)resolver.Invoke(
+            controller,
+            new object[] { tenantId, "OpeningBalanceBatch", batch.Id, CancellationToken.None })!;
+        await projectionTask;
+        var facts = projectionTask.GetType().GetProperty("Result")!.GetValue(projectionTask)!;
+        var currencyCode = facts.GetType().GetProperty("CurrencyCode")!.GetValue(facts);
+
+        currencyCode.Should().Be("GHS");
+        currencyCode.Should().NotBe(period.PeriodCode);
+        currencyCode.Should().NotBe(batch.BookClassification);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-SpecializedOpeningBalances")]
     [Trait("Requirement", "FIN-LIM-0048")]
     public async Task SupplierAndCustomerAdvanceOpenings_ShouldPostAndRemainVisibleAsUnappliedAdvances()
