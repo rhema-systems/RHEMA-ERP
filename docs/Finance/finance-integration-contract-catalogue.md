@@ -24,6 +24,8 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 | FIN-INT-009 | Shared payment-method ownership | Sales/Procurement/etc. → Finance Cash | Decision required | 0.1 | Shared reference contract | FIN-LIM-0050 |
 | FIN-INT-010 | Different customer and supplier payment terms | Sales/Procurement → Finance AR/AP | Decision required | 0.1 | Shared partner/payment-term contract | FIN-LIM-0053 |
 | FIN-INT-011 | SH Fund, PF, ESB and fuel allocation | Owner not defined → Finance | Requirements clarification | 0.0 | Not yet designable | SRS-INT-004 |
+| FIN-INT-012 | Post-acceptance supplier return dispatch and valuation handoff | Procurement/Inventory → Finance AP/GRV/GL | Planned | 0.1 | `SupplierReturnFinanceAdapter.ConsumeDispatchAsync` (fail-closed) | Finance envelope validation is implemented; authoritative producer evidence and posting orchestration remain pending |
+| FIN-INT-013 | Supplier return commercial resolution → AP, tax and settlement | Procurement → Finance AP/Tax/Cash | Planned | 0.1 | `SupplierReturnFinanceAdapter.ConsumeCommercialResolutionAsync` (fail-closed) | Finance envelope validation is implemented; producer lifecycle, durable correlation and AP/tax settlement remain pending |
 
 ## Contract-wide rules
 
@@ -33,5 +35,52 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 4. The adapter saves the returned posting and journal references on the source document. A retry returns the original outcome rather than creating a second accounting event.
 5. A customer or supplier balance is never represented by GL lines alone; the applicable AR/AP source and settlement records must exist.
 6. Breaking request or outcome changes require a new major contract version and coordinated consumer migration. Additive evidence can use a minor version.
+
+## Agreed post-acceptance Return-to-Vendor boundary
+
+FIN-INT-012 and FIN-INT-013 cover goods that passed receipt inspection and were accepted, but are subsequently returned under a supplier claim such as a latent defect, warranty failure, recall, excess supply or another supplier-authorised reason. They do not replace either of these existing operational paths:
+
+- goods rejected before acceptance remain in Procurement's governed receipt-inspection process and never enter accepted stock;
+- internally damaged, obsolete, lost or expired stock with no supplier claim remains an Inventory adjustment or write-off.
+
+### Ownership
+
+| Capability | Authoritative owner |
+|---|---|
+| Return request, reason, supplier claim, PO/GRN lineage, approval, RMA/authorisation and dispatch evidence | Procurement |
+| Warehouse/location, item/UOM, lot/serial quantities, physical outbound movement and carrying-cost/valuation layers | Inventory |
+| AP or GRV treatment, supplier debit/credit application, tax, refund/cash, account policy, fiscal periods, journals, audit, reversal and idempotency | Finance |
+
+The agreed boundary does **not** authorise direct cross-module table writes. Procurement and Inventory must publish immutable, tenant-scoped contract DTOs through the agreed adapter. Finance validates and persists its own subledger, tax, posting and audit records through Finance-owned services. Finance must not change Procurement return states or Inventory quantity/cost records.
+
+### FIN-INT-012 — physical dispatch and valuation
+
+This event occurs only after Procurement has approved the Return-to-Vendor dispatch and Inventory has posted the authoritative outbound movement. It does not assert that the supplier has issued or accepted a commercial credit.
+
+The proposed request must carry at least:
+
+- tenant, return and dispatch IDs, human reference, approval evidence and dispatch date;
+- supplier, PO, GRN and optional supplier-invoice lineage;
+- item, UOM, quantity, warehouse/location and applicable lot/serial evidence;
+- Inventory movement and valuation-layer references, actual carrying cost and currency evidence;
+- deterministic idempotency key, correlation ID, contract version and correction/reversal lineage.
+
+Finance will determine the valid AP/GRV, return-clearing and GL treatment from Finance configuration. The producer must not manufacture a balanced journal or supply Finance account IDs as its accounting result.
+
+### FIN-INT-013 — supplier commercial resolution
+
+This later event records the supplier's authoritative commercial outcome: credit note, cash refund, replacement, repair/warranty resolution or an agreed future credit. It is separate because dispatch and commercial acceptance can occur on different dates and in different fiscal periods.
+
+The proposed request must carry at least:
+
+- tenant and resolution IDs plus the related return/dispatch reference from FIN-INT-012;
+- resolution type, supplier reference, acceptance/effective date and supporting evidence;
+- original supplier-invoice lineage where applicable;
+- commercial, discount and tax values with transaction/functional currency and exchange-rate evidence;
+- deterministic idempotency key, correlation ID, contract version and correction/reversal lineage.
+
+Finance owns AP application, GRV or return-clearing settlement, input-tax correction, refund/cash treatment and GL posting. A balanced control-account journal without AP aging/application and tax evidence is not a complete FIN-INT-013 outcome.
+
+Both entries remain **Planned**. Agreement on ownership is necessary but is not implementation evidence. Each may become **Available** only after a callable Finance consumer exists and the Procurement/Inventory producer consumer-contract tests, retry/idempotency tests, failure-state tests and Finance subledger/reconciliation tests pass.
 
 Use the [adapter checklist](finance-integration-adapter-checklist.md) before implementation and the [consumer-test template](finance-integration-consumer-test-template.md) before requesting review. FIN-INT-006 is documented as the first full [reference contract](fixed-asset-disposal-ar-tax-cash-contract.md).
