@@ -30,6 +30,7 @@ public static class HrPermissions
     public const string CategoryCompetency = "HR - Competency";
     public const string CategoryManpowerBudget = "HR - Manpower Budget & Establishment";
     public const string CategorySeparation = "HR - Separation, Clearance & Exit";
+    public const string CategoryAwards = "HR - Staff Awards & Recognition";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -97,6 +98,14 @@ public static class HrPermissions
     public const string SeparationReadPolicy = "HR.Policy.SeparationRead";
     public const string SeparationWritePolicy = "HR.Policy.SeparationWrite";
     public const string SeparationAdminPolicy = "HR.Policy.SeparationAdmin";
+
+    public const string ViewAwards = "HR.Awards.Read";
+    public const string MaintainAwards = "HR.Awards.Write";
+    public const string AdministerAwards = "HR.Awards.Admin";
+
+    public const string AwardsReadPolicy = "HR.Policy.AwardsRead";
+    public const string AwardsWritePolicy = "HR.Policy.AwardsWrite";
+    public const string AwardsAdminPolicy = "HR.Policy.AwardsAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
@@ -178,7 +187,17 @@ public static class HrPermissions
             CategorySeparation),
         new(AdministerSeparation, "Administer Separation, Clearance & Exit",
             "Delete separation records and administer the clearance-item catalogue and separation authorities. Signing a termination (FR-HR-092) and reviewing a settlement (FR-HR-185) are NOT this permission — those are read off the record, see the remarks on RoleGrants.",
-            CategorySeparation)
+            CategorySeparation),
+
+        new(ViewAwards, "View Staff Awards & Recognition",
+            "View the award catalogue and its levels, budgets and eligibility rules, the nomination register, award committees and their scoring, conferred awards and long-service milestones.",
+            CategoryAwards),
+        new(MaintainAwards, "Maintain Staff Awards & Recognition",
+            "Raise and submit nominations, score nominations as a committee member, confer awards, schedule presentations, record award payments and process long-service milestones.",
+            CategoryAwards),
+        new(AdministerAwards, "Administer Staff Awards & Recognition",
+            "Administer the award-type catalogue, levels, eligibility targets, budgets and committees, and delete award records. Nominating and voting are NOT this permission — every employee may do both from their own self-service surface.",
+            CategoryAwards)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -257,7 +276,8 @@ public static class HrPermissions
         ViewJobArchitecture, MaintainJobArchitecture,
         ViewCompetency, MaintainCompetency,
         ViewManpowerBudget, MaintainManpowerBudget,
-        ViewSeparation, MaintainSeparation
+        ViewSeparation, MaintainSeparation,
+        ViewAwards, MaintainAwards
     };
 
     /// <summary>

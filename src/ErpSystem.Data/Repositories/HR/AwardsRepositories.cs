@@ -687,6 +687,19 @@ public class TeamAwardNomineeRepository : GenericRepository<TeamAwardNominee>, I
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Overridden to load <c>Employee</c>, following <see cref="AwardBudgetRepository"/>. The
+    /// inherited version loads no navigations, and <c>ToDto</c> renders an unloaded navigation as
+    /// an empty string rather than failing — so a create that mapped its own just-saved entity
+    /// returned a blank <c>EmployeeName</c> that a later read then filled in correctly.
+    /// </summary>
+    public override async Task<TeamAwardNominee?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<TeamAwardNominee>()
+            .Include(tan => tan.Employee)
+            .FirstOrDefaultAsync(tan => tan.Id == id && !tan.IsDeleted);
+    }
+
     public async Task DeleteByNominationIdAsync(Guid nominationId)
     {
         var nominees = await _context.Set<TeamAwardNominee>()
@@ -809,6 +822,19 @@ public class AwardCommitteeMemberRepository : GenericRepository<AwardCommitteeMe
 {
     public AwardCommitteeMemberRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Overridden to load <c>Committee</c> and <c>Employee</c>, which <c>ToDto</c> renders as names.
+    /// See the note on <see cref="TeamAwardNomineeRepository.GetByIdAsync"/> — an unloaded
+    /// navigation maps to an empty string, so a write response came back with blank names.
+    /// </summary>
+    public override async Task<AwardCommitteeMember?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<AwardCommitteeMember>()
+            .Include(acm => acm.Committee)
+            .Include(acm => acm.Employee)
+            .FirstOrDefaultAsync(acm => acm.Id == id && !acm.IsDeleted);
+    }
+
     public async Task<IEnumerable<AwardCommitteeMember>> GetByCommitteeIdAsync(Guid committeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
@@ -857,6 +883,18 @@ public class AwardCommitteeMemberRepository : GenericRepository<AwardCommitteeMe
 public class AwardNominationReviewRepository : GenericRepository<AwardNominationReview>, IAwardNominationReviewRepository
 {
     public AwardNominationReviewRepository(ApplicationDbContext context) : base(context) { }
+
+    /// <summary>
+    /// Overridden to load <c>AwardNomination</c> and <c>Reviewer</c>, which <c>ToDto</c> renders as
+    /// names. See the note on <see cref="TeamAwardNomineeRepository.GetByIdAsync"/>.
+    /// </summary>
+    public override async Task<AwardNominationReview?> GetByIdAsync(Guid id)
+    {
+        return await _context.Set<AwardNominationReview>()
+            .Include(acr => acr.AwardNomination)
+            .Include(acr => acr.Reviewer)
+            .FirstOrDefaultAsync(acr => acr.Id == id && !acr.IsDeleted);
+    }
 
     public async Task<IEnumerable<AwardNominationReview>> GetByNominationIdAsync(Guid nominationId)
     {

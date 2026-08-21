@@ -242,3 +242,47 @@ answer arrives uses the calendar basis.
 leave balances at all**. Until that data exists the settlement cannot value these lines for almost
 anybody — it will say so rather than show zero, and require the amount to be entered by hand with
 its source named. That is a data-migration dependency, not a development one.
+
+---
+
+## What is the basis for a long-service award? (raised 2026-08-21)
+
+**Requirement:** FR-HR-113 requires the system to report long-service-award eligibility, and TDC's
+own *Staff Awards Changes* note asks us to "define the basis for the long service awards". It does
+not say what that basis is.
+
+**What we assumed** (configurable, not hard-coded): milestones at **10, 15, 20, 25 and 30 years**
+of service. Each milestone can carry a monetary amount, a leave-days bonus, a certificate and a
+trophy, and every one of those is set per milestone through the admin screen — so TDC's answer is a
+data change, not a code change.
+
+**What we need from TDC:**
+
+1. **Which milestones?** 10/15/20/25/30, or a different ladder (some organisations start at 5, some
+   stop at 25, some add 35 and 40).
+2. **What does each milestone carry** — an amount, extra leave days, a certificate, a trophy, or a
+   combination? The amounts are the part we cannot guess.
+3. **What counts as service?** The system measures from `DateEmployed`. If a break in service, a
+   secondment, or prior service elsewhere in the group should count differently, say so.
+
+**The same note also states a disqualification rule:** *"any negative records such as disciplinary
+action, then you are exempted"*. Two things TDC needs to settle for that to be enforceable:
+
+- **How far back does a disciplinary record count?** Forever, or a window (e.g. the last 3 or 5
+  years)? We have defaulted to a configurable window rather than "forever", because a warning from
+  fifteen years ago disqualifying a thirty-year award is unlikely to be the intent.
+- **Which outcomes disqualify?** Every recorded case, or only those above a threshold — a written
+  warning and a final written warning are not the same thing.
+
+⚠ **Two data facts that bear on this now.** Measured on the live database, 2026-08-21:
+
+| | |
+|---|---|
+| Employees with a `DateEmployed` on record | **2,103 of 5,579 (38%)** |
+| Employees with 10+ years' service | **1** |
+| Employees with 15, 20 or 25 years | **0** |
+
+The first is the blocker: a long-service report cannot see 62% of staff, because they have no start
+date to measure from. The second means the feature is being built and tested against fixtures — it
+has almost no live subjects to act on, which is expected for a young employee record set but should
+not be mistaken for the engine failing. Both are data-migration dependencies, not development ones.

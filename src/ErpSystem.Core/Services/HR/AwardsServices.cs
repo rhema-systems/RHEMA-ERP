@@ -488,7 +488,10 @@ public class AwardBudgetService : IAwardBudgetService
         var entity = dto.ToEntity(tenantId, userId);
         await _budgetRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return entity.ToDto();
+
+        // Re-read before mapping: ToDto renders names off navigations, and the entity we just
+        // constructed has none loaded. See TeamAwardNomineeService.AddAsync.
+        return (await _budgetRepo.GetByIdAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<AwardBudgetDto> UpdateAsync(Guid id, Guid userId, UpdateAwardBudgetDto dto)
@@ -1174,7 +1177,14 @@ public class TeamAwardNomineeService : ITeamAwardNomineeService
         entity.TenantId = GetTenantId();
         await _nomineeRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return entity.ToDto();
+
+        // Re-read before mapping. The entity we just constructed has no Employee navigation loaded,
+        // and the mapper renders an unloaded navigation as an empty string rather than failing — so
+        // the write response came back with employeeName: "" while a subsequent read resolved it
+        // correctly. A screen that renders the create response therefore showed a blank row that
+        // fixed itself on refresh, which reads as a UI bug and is not one.
+        var saved = await _nomineeRepo.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task UpdateAsync(Guid id, Guid userId, UpdateTeamAwardNomineeDto dto)
@@ -1536,7 +1546,10 @@ public class AwardCommitteeMemberService : IAwardCommitteeMemberService
         entity.TenantId = GetTenantId();
         await _memberRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return entity.ToDto();
+
+        // Re-read before mapping: ToDto renders names off navigations, and the entity we just
+        // constructed has none loaded. See TeamAwardNomineeService.AddAsync.
+        return (await _memberRepo.GetByIdAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<AwardCommitteeMemberDto> UpdateAsync(Guid id, Guid userId, UpdateAwardCommitteeMemberDto dto)
@@ -1678,7 +1691,10 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
         var entity = dto.ToEntity(nominationId, reviewerId, tenantId, userId);
         await _reviewRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return entity.ToDto();
+
+        // Re-read before mapping: ToDto renders names off navigations, and the entity we just
+        // constructed has none loaded. See TeamAwardNomineeService.AddAsync.
+        return (await _reviewRepo.GetByIdAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<AwardCommitteeReviewDto> UpdateReviewAsync(Guid id, Guid userId, UpdateCommitteeReviewDto dto)

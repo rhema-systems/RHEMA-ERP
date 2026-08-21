@@ -1420,6 +1420,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerSeparation)));
 
+            // Area 14 — Staff Awards & Recognition. Same ladder: Administer implies Write implies
+            // Read. What is deliberately NOT gated on this family is the employee's own surface:
+            // nominating a colleague and voting for a nominee are acts every employee performs, so
+            // they live on the self-service controller behind bare [Authorize] with the actor taken
+            // from the token. Gating them here would lock the whole workforce out of the feature
+            // the area exists for — the area-15b trap, where a permission gate was used for an
+            // actor who is defined by the record rather than by a grant.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.AwardsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewAwards,
+                        HrPermissions.MaintainAwards,
+                        HrPermissions.AdministerAwards)))
+                .AddPolicy(HrPermissions.AwardsWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainAwards,
+                        HrPermissions.AdministerAwards)))
+                .AddPolicy(HrPermissions.AwardsAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerAwards)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
