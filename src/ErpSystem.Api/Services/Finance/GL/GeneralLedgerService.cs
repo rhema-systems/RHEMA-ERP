@@ -1987,31 +1987,82 @@ namespace ErpSystem.Api.Services.Finance.GL
         public async Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request)
         {
             var tenantId = TenantId;
+            if (request.PeriodEnd.Date < request.PeriodStart.Date)
+            {
+                throw new ArgumentException("Period end must be on or after period start.");
+            }
+
+            var periodStart = request.PeriodStart.Date;
+            var periodEnd = request.PeriodEnd.Date;
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
 
             var cashFlowStatement = new CashFlowStatementDto
             {
                 CompanyName = await _tenantSettings.GetCompanyNameAsync(),
-                PeriodStart = request.PeriodStart,
-                PeriodEnd = request.PeriodEnd,
-                BookClassification = request.BookClassification,
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd,
+                BookClassification = bookClassification,
                 CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
             };
 
+            // A bank GL is a cash account because the tenant's bank master maps it as one.
+            // Account names and broad balance-sheet categories are not authoritative enough
+            // on their own, but the legacy fallbacks remain for petty-cash style accounts.
+            var mappedBankGlAccountIds = await _context.BankAccounts
+                .AsNoTracking()
+                .Where(bank =>
+                    bank.TenantId == tenantId &&
+                    !bank.IsDeleted &&
+                    bank.GLAccountId.HasValue)
+                .Select(bank => bank.GLAccountId!.Value)
+                .Distinct()
+                .ToListAsync();
+
+            var cashAccounts = await _context.Accounts
+                .Where(account =>
+                    account.TenantId == tenantId &&
+                    !account.IsDeleted &&
+                    (mappedBankGlAccountIds.Contains(account.Id) ||
+                     account.AccountCategory == "Cash" ||
+                     account.AccountCategory == "Cash and Cash Equivalents" ||
+                     EF.Functions.Like(account.AccountName, "%Cash%")))
+                .ToListAsync();
+            var cashAccountIds = cashAccounts.Select(account => account.Id).ToHashSet();
+
+            var activityEndExclusive = periodEnd.AddDays(1);
+            var cashActivityJournalIds = cashAccountIds.Count == 0
+                ? new List<Guid>()
+                : await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(transaction =>
+                        cashAccountIds.Contains(transaction.AccountId) &&
+                        transaction.TransactionDate >= periodStart &&
+                        transaction.TransactionDate < activityEndExclusive &&
+                        !(transaction.SourceModule == "MIGRATION" &&
+                          transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                    .Select(transaction => transaction.JournalEntryId)
+                    .Distinct()
+                    .ToListAsync();
+
             // Get all accounts with cash flow classifications
             var accounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.CashFlowClassification != null)
+                .Where(account =>
+                    account.TenantId == tenantId &&
+                    !account.IsDeleted &&
+                    account.CashFlowClassification != null &&
+                    !cashAccountIds.Contains(account.Id))
                 .ToListAsync();
 
             // Calculate activity for each account during the period
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
-                var activity = await CalculateAccountActivityForPeriod(
+                var activity = await CalculateCashFlowAccountActivityForPeriod(
                     tenantId,
                     account.Id,
-                    request.PeriodStart,
-                    request.PeriodEnd,
-                    request.BookClassification);
+                    periodStart,
+                    periodEnd,
+                    bookClassification,
+                    cashActivityJournalIds);
                 if (Math.Abs(activity) > 0.01m)
                 {
                     accountActivity[account.Id] = activity;
@@ -2029,7 +2080,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 1,
                 operatingAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             // Build Investing Activities section
@@ -2038,7 +2089,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 2,
                 investingAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             // Build Financing Activities section
@@ -2047,7 +2098,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 3,
                 financingAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             // Calculate totals
@@ -2058,13 +2109,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                                                    cashFlowStatement.NetCashFromInvesting + 
                                                    cashFlowStatement.NetCashFromFinancing;
 
-            // Get cash balances
-            var cashAccounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId 
-                    && !a.IsDeleted 
-                    && (a.AccountCategory == "Cash" || EF.Functions.Like(a.AccountName, "%Cash%")))
-                .ToListAsync();
-
             decimal cashAtBeginning = 0;
             decimal cashAtEnd = 0;
 
@@ -2073,19 +2117,64 @@ namespace ErpSystem.Api.Services.Finance.GL
                 cashAtBeginning += await CalculateAccountBalanceAsOf(
                     tenantId,
                     cashAccount.Id,
-                    request.PeriodStart.AddDays(-1),
-                    request.BookClassification);
+                    periodStart.AddDays(-1),
+                    bookClassification);
                 cashAtEnd += await CalculateAccountBalanceAsOf(
                     tenantId,
                     cashAccount.Id,
-                    request.PeriodEnd,
-                    request.BookClassification);
+                    periodEnd,
+                    bookClassification);
+            }
+
+            // A governed opening posted on the first report date represents the position at
+            // the opening boundary. It is not a receipt generated during that reporting day.
+            // Add only the cash legs to beginning cash; the helper above excludes the entire
+            // opening batch from operating, investing and financing activity.
+            if (cashAccountIds.Count > 0)
+            {
+                var firstDayEndExclusive = periodStart.AddDays(1);
+                var cutoverCashAtBoundary = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(transaction =>
+                        cashAccountIds.Contains(transaction.AccountId) &&
+                        transaction.TransactionDate >= periodStart &&
+                        transaction.TransactionDate < firstDayEndExclusive &&
+                        transaction.SourceModule == "MIGRATION" &&
+                        transaction.SourceDocumentType == "OpeningBalanceBatch")
+                    .SumAsync(transaction => (decimal?)(transaction.DebitAmount - transaction.CreditAmount)) ?? 0m;
+                cashAtBeginning += cutoverCashAtBoundary;
             }
 
             cashFlowStatement.CashAtBeginning = cashAtBeginning;
             cashFlowStatement.CashAtEnd = cashAtEnd;
 
             return cashFlowStatement;
+        }
+
+        private async Task<decimal> CalculateCashFlowAccountActivityForPeriod(
+            Guid tenantId,
+            Guid accountId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification,
+            IReadOnlyCollection<Guid> cashActivityJournalIds)
+        {
+            if (cashActivityJournalIds.Count == 0)
+            {
+                return 0m;
+            }
+
+            var endExclusive = periodEnd.Date.AddDays(1);
+            var transactions = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(transaction =>
+                    transaction.AccountId == accountId &&
+                    cashActivityJournalIds.Contains(transaction.JournalEntryId) &&
+                    transaction.TransactionDate >= periodStart.Date &&
+                    transaction.TransactionDate < endExclusive &&
+                    !(transaction.SourceModule == "MIGRATION" &&
+                      transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                .ToListAsync();
+
+            return transactions.Sum(transaction => transaction.CreditAmount - transaction.DebitAmount);
         }
 
         private CashFlowSectionDto BuildCashFlowSection(
