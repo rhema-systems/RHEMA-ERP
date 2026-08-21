@@ -319,7 +319,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 1 | ✅ Identity | Token tenant + token actor; `HrControllerBase`; remove all 56 caller-supplied id parameters; `HR.Awards.*` policies. |
 | 2 | Types, levels, targets, budgets | ✅ **Done.** The configuration surface, with D-3's two axes, honest status codes, and target-name resolution. |
 | 3 | Cycles and eligibility | ✅ **Done.** D-4 cycle entity with windows; AWD-01 eligibility evaluation producing the qualified set. |
-| 4 | Nomination | AWD-02, AWD-09; management route and the `api/awards/me` employee route (D-1). |
+| 4 | Nomination | ✅ **Done.** AWD-02, AWD-09; the gates, the employee surface, and self-nomination as a per-award setting. |
 | 5 | The vote | AWD-04, AWD-05, AWD-06, AWD-10 — the vote model, the electorate, one-vote-per-voter, the window gate. |
 | 6 | Committee scoring | D-2 model change, AWD-12, AWD-13 highest-average outcome. Test with identical scores and ≥3 reviewers. |
 | 7 | Direct and automatic selection | AWD-07, AWD-08 — management selection, and nomination derived from performance/targets. |
@@ -672,3 +672,67 @@ share one tenant and one database. An assertion anchored on "the first row of an
 therefore owned by every other area, and it fails silently in the sense that nobody re-runs a closed
 area's harness. Two habits follow: anchor on a row you created or can identify, and re-run the
 harnesses of any area whose data your fixtures could reach.
+
+---
+
+### Slice 4 — nomination, and the employee's own surface. 2026-08-21, **44/44**, run twice. Migration `AddAwardSelfNomination`.
+
+Harness: `run-slice4.mjs`. Slices 1, 2, 3, 3b re-run at 30/49/51/6.
+
+**A nomination now has to mean something.** Before this slice it was a row: any award type, any
+nominee, at any time. TDC's note describes a sequence — HR sets the criteria, the criteria qualify
+some employees, those employees are nominated during a window, the result is voted on — and each
+gate is one step of it refusing to be skipped:
+
+| | |
+|---|---|
+| a direct-selection award | accepts no nominations at all |
+| every nomination | must name its cycle; without one there is no window and nothing to vote against |
+| the cycle | must be published, belong to that award, and be inside its nomination window |
+| an individual nomination | must name a nominee; a team one must name a team |
+| the nominee | must pass the criteria HR configured — the step nothing consulted before slice 3 |
+| the same nominator | cannot nominate the same person twice in one cycle; different colleagues still can |
+
+**`api/awards/me` — the first employee-facing surface (D-1).** Built on the area-12 pattern: no
+employee id in any route or query parameter, someone else's nomination is a **404 not a 403** (a 403
+confirms the id exists and turns the surface into an oracle for enumerating nomination ids), and
+privileged operations have no route there at all rather than a guard a later edit could weaken.
+Gated on bare `[Authorize]`, because holding no awards permission is the normal case for the people
+it serves.
+
+One deliberate asymmetry: **the employee candidate list returns eligible names only, with no
+reasons.** The awards desk sees the ineligible names and why — that is how HR checks its own
+criteria — but an employee choosing somebody to nominate has no business reading why a colleague
+failed a rule.
+
+**Self-nomination became a setting, on the user's decision, after asking what practice actually
+does.** The first cut allowed it on the grounds that TDC's note states no rule and inventing a
+prohibition would be a developer setting policy. That reasoning was right about not inventing and
+wrong about the default: allowing is the permissive choice, and the awards the note describes — a
+best employee award, staff voting, nominating managers — are exactly the kind enterprise practice
+bars. Self-nomination is normal for innovation, suggestion and improvement awards, where the
+achievement is one the nominee can evidence; it is barred for behavioural awards, where being chosen
+by somebody else is the substance of the award.
+
+So `AwardType.AllowSelfNomination` exists and **defaults to false**. Verified in SQL: no existing
+award permits it. The harness asserts all three cases — a voted award refuses, a configured
+Innovation award accepts, and an award nobody configured comes back `false`, which is the assertion
+that actually protects the default. The TDC question narrowed from *"what should the rule be"* to
+*"which awards should have it enabled"*, which is a catalogue answer rather than a policy debate.
+
+**⚠ Slice 4's rules invalidated slices 1 and 2 — and that is the right way round.** Both create
+nominations, neither knew about cycles, and both aborted the moment the cycle requirement landed.
+Three separate repairs, each worth noting:
+
+1. **A shared `openCycleFor` helper**, rather than the same fixture copied into four harnesses.
+2. **It reads the award type first**, because slice 3 made the required windows depend on how the
+   award is decided — a `StaffVote` award must carry a voting window and anything else must not.
+   Working that out in the helper means no harness has to know how its own fixture is decided in
+   order to open a cycle for it. The first version did not, and slice 2 failed on exactly that.
+3. **Slice 1's exploit re-run got its own cycle.** It nominates the same subject twice on purpose,
+   which slice 4's duplicate rule now refuses — so the assertion about *attribution* was being
+   answered by a rule about *duplication*. A test that passes for the wrong reason is worse than one
+   that fails.
+
+The general point: **a new rule reaches backwards through every harness that predates it.** Running
+only the new slice would have left three green-looking files that no longer execute.

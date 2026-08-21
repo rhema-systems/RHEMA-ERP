@@ -54,6 +54,30 @@ public class AwardType : TenantEntity
     /// <summary>How this award's winner is chosen. See <see cref="AwardWinnerDecision"/>.</summary>
     public AwardWinnerDecision WinnerDecision { get; set; } = AwardWinnerDecision.CommitteeScore;
 
+    /// <summary>
+    /// Whether an employee may put their own name forward for this award.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Defaults to false, which is the enterprise norm.</b> Peer or manager nomination is
+    /// the default in practice and self-nomination is an exception granted per award, because the
+    /// two kinds of award ask different questions. An innovation or cost-saving award rests on an
+    /// achievement the nominee can evidence themselves; an employee-of-the-month or values award is
+    /// a judgement about how somebody is seen by others, which is not a claim one can sensibly make
+    /// about oneself. Awards decided by a staff vote are barred almost everywhere, for the obvious
+    /// reason.</para>
+    ///
+    /// <para>The fairness argument HR usually gives is about participation rather than judgement:
+    /// self-nomination over-represents people comfortable promoting themselves, which varies by
+    /// personality, seniority and culture in ways unrelated to the work. The counter-argument is
+    /// that a nomination-only scheme leaves recognition dependent on having an attentive manager.
+    /// Per-award configuration is how both are usually satisfied.</para>
+    ///
+    /// <para>TDC's note does not state a rule. This makes the position a visible setting rather
+    /// than a hidden default, so their answer becomes a data change. See
+    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
+    /// </remarks>
+    public bool AllowSelfNomination { get; set; }
+
 
 	[MaxLength(1000)]
     public string? Notes { get; set; }

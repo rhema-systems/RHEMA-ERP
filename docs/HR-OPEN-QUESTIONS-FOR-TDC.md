@@ -286,3 +286,46 @@ The first is the blocker: a long-service report cannot see 62% of staff, because
 date to measure from. The second means the feature is being built and tested against fixtures — it
 has almost no live subjects to act on, which is expected for a young employee record set but should
 not be mistaken for the engine failing. Both are data-migration dependencies, not development ones.
+
+---
+
+## Which awards should accept a nomination from the nominee themselves? (raised 2026-08-21)
+
+**Requirement:** TDC's *Staff Awards Changes* note describes employees nominating each other —
+*"employees nominating through staff portal"*, *"if the employees themselves must choose or nominate
+people for the best employee award"*, and explicitly *"nominate managers for awards"*. It does not
+say whether somebody may put their **own** name forward.
+
+**What the system does:** self-nomination is a **setting on each award type**, and it is **off by
+default**. Nobody can nominate themselves unless HR has enabled it for that particular award.
+
+**Why a setting rather than one rule.** In practice this is not a single policy question — it splits
+by what the award is measuring:
+
+| Normally **not** self-nominated | Normally **open** to self-nomination |
+|---|---|
+| Employee of the Month / Year | Innovation awards |
+| Values and behaviour awards | Suggestion and improvement schemes |
+| Peer recognition | Project or technical achievement awards |
+| Leadership awards | Cost-saving submissions |
+| Customer service awards | Patents, publications, certifications |
+| **Anything decided by a staff vote** | |
+
+The distinction is whether the achievement is something the nominee can evidence themselves — an
+innovation, a measurable saving — or a judgement about how they are seen by others, which is not a
+claim one can sensibly make about oneself. Long service is a third case: it is computed from service
+records with no nomination step at all.
+
+**Why the default is "off".** The awards TDC's note actually describes are the first kind. Defaulting
+to "on" would have let every unconfigured award quietly accept self-nominations, including ones
+going to a staff vote.
+
+⚠ Worth knowing: the usual objection to open self-nomination is about *participation* rather than
+fairness of judgement — it over-represents employees comfortable promoting themselves, which varies
+by personality, seniority and culture in ways unrelated to the work. The counter-argument is equally
+real: a nomination-only scheme leaves recognition dependent on having an attentive manager, so good
+work goes unrecognised when a supervisor simply never submits anything.
+
+**Question for TDC:** which awards in the catalogue should have self-nomination enabled? Our
+expectation is the Innovation award and any suggestion scheme, and nothing else — but it is a
+setting per award, so any answer is a configuration change rather than a development one.

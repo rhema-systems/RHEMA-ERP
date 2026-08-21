@@ -37,6 +37,7 @@ public static class AwardsMappingExtensions
             MinRequiredReviewers = entity.MinRequiredReviewers,
             NominationSource = entity.NominationSource,
             WinnerDecision = entity.WinnerDecision,
+            AllowSelfNomination = entity.AllowSelfNomination,
             Notes = entity.Notes,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
@@ -96,6 +97,7 @@ public static class AwardsMappingExtensions
             MinRequiredReviewers = dto.MinRequiredReviewers,
             NominationSource = dto.NominationSource,
             WinnerDecision = dto.WinnerDecision,
+            AllowSelfNomination = dto.AllowSelfNomination,
             Notes = dto.Notes,
             IsActive = dto.IsActive,
             CreatedBy = userId.ToString()
@@ -127,6 +129,7 @@ public static class AwardsMappingExtensions
         entity.MinRequiredReviewers = dto.MinRequiredReviewers;
         entity.NominationSource = dto.NominationSource;
         entity.WinnerDecision = dto.WinnerDecision;
+        entity.AllowSelfNomination = dto.AllowSelfNomination;
         entity.Notes = dto.Notes;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -334,6 +337,8 @@ public static class AwardsMappingExtensions
             NominationNumber = entity.NominationNumber,
             AwardTypeId = entity.AwardTypeId,
             AwardTypeName = entity.AwardType?.Name ?? string.Empty,
+            AwardCycleId = entity.AwardCycleId,
+            AwardCycleName = entity.AwardCycle?.Name,
             AwardLevelId = entity.AwardLevelId,
             AwardLevelName = entity.AwardLevel?.Name,
             NomineeId = entity.NomineeId,
@@ -396,6 +401,7 @@ public static class AwardsMappingExtensions
             TenantId = tenantId,
             NominationNumber = nominationNumber,
             AwardTypeId = dto.AwardTypeId,
+            AwardCycleId = dto.AwardCycleId,
             AwardLevelId = dto.AwardLevelId,
             NomineeId = dto.NomineeId,
             NominatedById = nominatedById,

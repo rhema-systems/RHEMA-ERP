@@ -120,6 +120,18 @@ public interface IAwardNominationService
     Task<AwardNominationDto> UpdateAsync(Guid id, Guid userId, UpdateAwardNominationDto dto);
     Task DeleteAsync(Guid id);
     Task<AwardNominationDto> SubmitAsync(Guid id, Guid userId);
+
+    /// <summary>
+    /// An employee taking back their own nomination before it has been submitted.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <c>DeleteAsync</c> on purpose. That one is the awards desk removing a record
+    /// and is gated on <c>HR.Awards.Admin</c>; this one is the nominator changing their mind, is
+    /// available to any employee, and therefore has to prove ownership and refuse anything that has
+    /// already left draft. Sharing a method between the two would mean one guard standing for two
+    /// very different acts.
+    /// </remarks>
+    Task WithdrawOwnAsync(Guid id, Guid employeeId);
     Task<AwardNominationDto> AssignToCommitteeAsync(Guid id, Guid committeeId, Guid userId);
     Task<AwardNominationDto> SetOutcomeAsync(Guid id, Guid userId, SetNominationOutcomeDto dto);
 }

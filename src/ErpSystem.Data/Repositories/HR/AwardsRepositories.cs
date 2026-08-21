@@ -614,6 +614,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -626,6 +627,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -648,6 +650,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.NominatedBy)
             .Where(an => an.NomineeId == nomineeId && !an.IsDeleted)
@@ -659,6 +662,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Where(an => an.NominatedById == nominatedById && !an.IsDeleted)
@@ -681,6 +685,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -693,6 +698,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         var query = _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -713,6 +719,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -725,6 +732,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.AwardLevel)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
@@ -737,6 +745,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.Nominee)
             .Include(an => an.NominatedBy)
             .Include(an => an.Committee)
@@ -752,6 +761,7 @@ public class AwardNominationRepository : GenericRepository<AwardNomination>, IAw
     {
         return await _context.Set<AwardNomination>()
             .Include(an => an.AwardType)
+            .Include(an => an.AwardCycle)
             .Include(an => an.Nominee)
             .Where(an => an.TenantId == tenantId 
                 && an.Status == AwardNominationStatus.Approved

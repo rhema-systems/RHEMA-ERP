@@ -4369,6 +4369,10 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.NominationSource);
             entity.HasIndex(x => x.WinnerDecision);
 
+            // False is both the CLR default and the intended value for every existing row: an award
+            // nobody classified should not silently permit self-nomination.
+            entity.Property(x => x.AllowSelfNomination).HasDefaultValue(false);
+
             entity.HasMany(x => x.Awards)
                 .WithOne(x => x.AwardType)
                 .HasForeignKey(x => x.AwardTypeId)

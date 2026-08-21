@@ -55,6 +55,9 @@ public class AwardTypeDto : BaseDto
     public AwardWinnerDecision WinnerDecision { get; set; }
     public string WinnerDecisionName => WinnerDecision.ToString();
 
+    /// <summary>Whether an employee may nominate themselves. Off by default; see the entity.</summary>
+    public bool AllowSelfNomination { get; set; }
+
     public string? Notes { get; set; }
     public bool IsActive { get; set; }
 }
@@ -161,6 +164,13 @@ public class CreateAwardTypeDto : CreateDtoBase
     /// </summary>
     public AwardWinnerDecision WinnerDecision { get; set; } = AwardWinnerDecision.CommitteeScore;
 
+    /// <summary>
+    /// Whether an employee may put their own name forward. Defaults to <c>false</c>, matching the
+    /// enterprise norm: peer or manager nomination is the default and self-nomination is granted
+    /// per award, typically to innovation and improvement awards rather than to behavioural ones.
+    /// </summary>
+    public bool AllowSelfNomination { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
@@ -236,6 +246,13 @@ public class UpdateAwardTypeDto : UpdateDtoBase
     /// scoring — there is no candidate list — and the service refuses that combination.
     /// </summary>
     public AwardWinnerDecision WinnerDecision { get; set; } = AwardWinnerDecision.CommitteeScore;
+
+    /// <summary>
+    /// Whether an employee may put their own name forward. Defaults to <c>false</c>, matching the
+    /// enterprise norm: peer or manager nomination is the default and self-nomination is granted
+    /// per award, typically to innovation and improvement awards rather than to behavioural ones.
+    /// </summary>
+    public bool AllowSelfNomination { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -769,6 +786,11 @@ public class AwardNominationDto : BaseDto
     public string NominationNumber { get; set; } = string.Empty;
     public Guid AwardTypeId { get; set; }
     public string AwardTypeName { get; set; } = string.Empty;
+
+    /// <summary>The run this belongs to. Null for a nomination raised before cycles existed.</summary>
+    public Guid? AwardCycleId { get; set; }
+    public string? AwardCycleName { get; set; }
+
     public Guid? AwardLevelId { get; set; }
     public string? AwardLevelName { get; set; }
     public Guid? NomineeId { get; set; }
@@ -823,6 +845,13 @@ public class CreateAwardNominationDto : CreateDtoBase
 {
     [Required]
     public Guid AwardTypeId { get; set; }
+
+    /// <summary>
+    /// The run this nomination belongs to. Optional on the DTO but required in practice for any
+    /// award that has a nomination stage — the cycle is what says whether nominations are open at
+    /// all, so a nomination without one cannot be timed, listed for voting, or closed.
+    /// </summary>
+    public Guid? AwardCycleId { get; set; }
 
     public Guid? AwardLevelId { get; set; }
 

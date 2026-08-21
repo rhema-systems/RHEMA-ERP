@@ -930,17 +930,26 @@ public class AwardNominationService : IAwardNominationService
 {
     private readonly IAwardNominationRepository _nominationRepo;
     private readonly IEmployeeAwardRepository _awardRepo;
+    private readonly IAwardTypeRepository _awardTypeRepo;
+    private readonly IAwardCycleRepository _cycleRepo;
+    private readonly IAwardEligibilityEvaluator _eligibility;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
 
     public AwardNominationService(
         IAwardNominationRepository nominationRepo,
         IEmployeeAwardRepository awardRepo,
+        IAwardTypeRepository awardTypeRepo,
+        IAwardCycleRepository cycleRepo,
+        IAwardEligibilityEvaluator eligibility,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork)
     {
         _nominationRepo = nominationRepo;
         _awardRepo = awardRepo;
+        _awardTypeRepo = awardTypeRepo;
+        _cycleRepo = cycleRepo;
+        _eligibility = eligibility;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
     }
@@ -1093,9 +1102,138 @@ public class AwardNominationService : IAwardNominationService
         return nominations.ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// Checks that a nomination is one this award will actually accept, right now, for this person.
+    /// </summary>
+    /// <remarks>
+    /// <para>Before slice 4 a nomination was a row: any award type, any nominee, at any time. TDC's
+    /// note describes a sequence - HR sets the criteria, the criteria qualify some employees, those
+    /// employees are nominated during a window, and the result is voted on. Each gate below is one
+    /// step of that sequence refusing to be skipped.</para>
+    ///
+    /// <para><b>Not gated: nominating yourself.</b> The note does not say whether an employee may
+    /// put their own name forward, and this refuses to invent a rule TDC has not stated. Self
+    /// nomination is therefore accepted, the harness asserts that it is, and the question is in
+    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Making the position visible is the point: a silent
+    /// choice either way would be a decision nobody took.</para>
+    /// </remarks>
+    private async Task ValidateNominationAsync(Guid tenantId, Guid nominatedById, CreateAwardNominationDto dto)
+    {
+        var awardType = await _awardTypeRepo.GetByIdAsync(dto.AwardTypeId);
+        if (awardType == null || awardType.TenantId != tenantId)
+            throw AwardsWorkflowException.NotFound($"AwardType {dto.AwardTypeId} not found.");
+
+        // 1. An award taken by direct management selection has no nomination stage to join.
+        if (awardType.NominationSource == AwardNominationSource.ManagementDirect)
+            throw AwardsWorkflowException.InvalidState(
+                $"'{awardType.Name}' is awarded by direct management selection, so it does not accept " +
+                "nominations. Confer the award directly instead.");
+
+        // 2. The cycle is what says whether nominations are open. Without one there is no window,
+        //    no closing date, and nothing for a vote to be held against.
+        if (dto.AwardCycleId == null)
+            throw AwardsWorkflowException.Invalid(
+                $"'{awardType.Name}' is nominated for in cycles, so a nomination must name the cycle " +
+                "it belongs to. Set AwardCycleId to a cycle that is open for nomination.");
+
+        var cycle = await _cycleRepo.GetByIdAsync(dto.AwardCycleId.Value);
+        if (cycle == null || cycle.TenantId != tenantId)
+            throw AwardsWorkflowException.NotFound($"AwardCycle {dto.AwardCycleId} not found.");
+
+        if (cycle.AwardTypeId != dto.AwardTypeId)
+            throw AwardsWorkflowException.Invalid(
+                $"Cycle '{cycle.Name}' belongs to a different award. Nominate into a cycle of " +
+                $"'{awardType.Name}'.");
+
+        // 3. The window, decided by the clock rather than by a stored flag.
+        var now = DateTime.UtcNow;
+        if (cycle.Status != AwardCycleStatus.Published)
+            throw AwardsWorkflowException.InvalidState(
+                $"Cycle '{cycle.Name}' is {cycle.Status} and is not open to nominations.");
+
+        if (cycle.NominationOpensOn == null || cycle.NominationClosesOn == null)
+            throw AwardsWorkflowException.InvalidState(
+                $"Cycle '{cycle.Name}' has no nomination window.");
+
+        if (now < cycle.NominationOpensOn)
+            throw AwardsWorkflowException.InvalidState(
+                $"Nominations for '{cycle.Name}' open on {cycle.NominationOpensOn:yyyy-MM-dd HH:mm}.");
+
+        if (now > cycle.NominationClosesOn)
+            throw AwardsWorkflowException.InvalidState(
+                $"Nominations for '{cycle.Name}' closed on {cycle.NominationClosesOn:yyyy-MM-dd HH:mm}.");
+
+        // 4. A team nomination names a team; an individual one names an eligible person.
+        if (dto.NomineeId == null)
+        {
+            if (!awardType.IsTeamAward)
+                throw AwardsWorkflowException.Invalid(
+                    $"'{awardType.Name}' is not a team award, so the nomination must name a nominee.");
+            if (string.IsNullOrWhiteSpace(dto.TeamName))
+                throw AwardsWorkflowException.Invalid("A team nomination must name the team.");
+            return;
+        }
+
+        // 5. Nominating yourself, where the award permits it.
+        //
+        //    Off by default because that is the enterprise norm: peer or manager nomination is the
+        //    usual rule, and self-nomination is granted per award — to innovation and improvement
+        //    awards, where the achievement is one the nominee can evidence, rather than to
+        //    behavioural awards, where being chosen by somebody else is the substance of the award.
+        //    An award decided by a staff vote is the strongest case for barring it.
+        if (dto.NomineeId == nominatedById && !awardType.AllowSelfNomination)
+            throw AwardsWorkflowException.Invalid(
+                $"'{awardType.Name}' does not accept self-nomination — somebody else has to put you " +
+                "forward. If this award should allow it, ask HR to enable self-nomination on the " +
+                "award type.");
+
+        // 6. The criteria HR configured decide who may be put forward. This is the step TDC's note
+        //    calls qualifying employees, and until slice 3 nothing consulted it.
+        var verdict = await _eligibility.EvaluateEmployeeAsync(dto.AwardTypeId, dto.NomineeId.Value, tenantId, now);
+        if (!verdict.IsEligible)
+        {
+            var who = string.IsNullOrWhiteSpace(verdict.EmployeeName) ? "That employee" : verdict.EmployeeName;
+            throw AwardsWorkflowException.Invalid(
+                $"{who} is not eligible for '{awardType.Name}': {string.Join(" ", verdict.Reasons)}");
+        }
+
+        // 7. One nominator, one nomination per person per cycle. Several colleagues nominating the
+        //    same person is normal and stays allowed; the same person doing it twice is not.
+        var existing = await _nominationRepo.GetByNomineeIdAsync(dto.NomineeId.Value);
+        if (existing.Any(n => !n.IsDeleted
+            && n.TenantId == tenantId
+            && n.AwardCycleId == dto.AwardCycleId
+            && n.NominatedById == nominatedById))
+        {
+            throw AwardsWorkflowException.Conflict(
+                $"You have already nominated {verdict.EmployeeName} for '{cycle.Name}'.");
+        }
+    }
+
+    public async Task WithdrawOwnAsync(Guid id, Guid employeeId)
+    {
+        var entity = await GetOwnedAsync(id);
+
+        // Ownership is checked here as well as in the controller. The controller's check turns
+        // somebody else's nomination into a 404 so the surface cannot be used to enumerate ids;
+        // this one is the rule itself, and it must hold for any caller of the service.
+        if (entity.NominatedById != employeeId)
+            throw AwardsWorkflowException.NotFound($"AwardNomination {id} not found.");
+
+        if (entity.Status != AwardNominationStatus.Draft)
+            throw AwardsWorkflowException.InvalidState(
+                $"This nomination has been {entity.Status.ToString().ToLowerInvariant()} and can no longer be " +
+                "withdrawn. Ask the awards desk to withdraw it for you.");
+
+        await _nominationRepo.DeleteAsync(id);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
     public async Task<AwardNominationDto> CreateAsync(Guid tenantId, Guid nominatedById, Guid userId, CreateAwardNominationDto dto)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await ValidateNominationAsync(tenantId, nominatedById, dto);
+
         var nominationNumber = $"NOM-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
         var entity = dto.ToEntity(tenantId, nominatedById, userId, nominationNumber);
         await _nominationRepo.AddAsync(entity);

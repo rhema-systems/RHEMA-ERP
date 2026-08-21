@@ -89,6 +89,7 @@ public sealed class AwardDataSeeder
                     // rather than inherit a default. See HrSeedOrchestrator.DeferredSteps.
                     NominationSource = AwardNominationSource.OpenNomination,
                     WinnerDecision = AwardWinnerDecision.CommitteeScore,
+                    AllowSelfNomination = false,
 
                     CreatedAt = now,
                     CreatedBy = string.Empty
