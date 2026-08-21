@@ -65,6 +65,7 @@ public class AwardsController : HrControllerBase
     private readonly IAwardEligibilityService _eligibilityService;
     private readonly IAwardVotingService _votingService;
     private readonly IAwardCommitteeScoringService _scoringService;
+    private readonly IAwardCandidateGenerationService _generationService;
 
     public AwardsController(
         IAwardTypeService awardTypeService,
@@ -85,6 +86,7 @@ public class AwardsController : HrControllerBase
         IAwardEligibilityService eligibilityService,
         IAwardVotingService votingService,
         IAwardCommitteeScoringService scoringService,
+        IAwardCandidateGenerationService generationService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -106,6 +108,7 @@ public class AwardsController : HrControllerBase
         _eligibilityService = eligibilityService;
         _votingService = votingService;
         _scoringService = scoringService;
+        _generationService = generationService;
     }
 
     #region Award Types
@@ -1336,6 +1339,32 @@ public class AwardsController : HrControllerBase
     [HttpGet("cycles/{cycleId:guid}/committee-result")]
     public async Task<ActionResult<AwardCommitteeResultDto>> GetCommitteeResult(Guid cycleId)
         => Ok(await _scoringService.GetResultAsync(cycleId));
+
+    #endregion
+
+
+    #region Candidate Generation
+
+    /// <summary>
+    /// Put forward everybody this award's performance triggers match (AWD-08).
+    /// </summary>
+    /// <remarks>
+    /// <para>TDC's note: <i>"some of the nomination will be due to performance or target
+    /// reached"</i>. A generated nomination is a nomination — it passes the same eligibility rules,
+    /// belongs to the same cycle, and is submitted rather than approved. The trigger decides who
+    /// stands; the vote or the committee still decides who wins.</para>
+    ///
+    /// <para>The response reports every count, including the zeros, because a run that creates
+    /// nothing has several very different causes — no trigger set, nobody appraised, everybody
+    /// ineligible, everybody already nominated — and they call for different responses.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.AwardsAdminPolicy)]
+    [HttpPost("cycles/{cycleId:guid}/generate-candidates")]
+    public async Task<ActionResult<AwardGenerationResultDto>> GenerateCandidates(Guid cycleId)
+    {
+        if (TryGetWriteContext(out _, out var userId) is { } error) return error;
+        return Ok(await _generationService.GenerateAsync(cycleId, userId));
+    }
 
     #endregion
 

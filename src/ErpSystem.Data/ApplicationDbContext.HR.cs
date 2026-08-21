@@ -4374,6 +4374,9 @@ private void ConfigureHREntities(ModelBuilder builder)
             // nobody classified should not silently permit self-nomination.
             entity.Property(x => x.AllowSelfNomination).HasDefaultValue(false);
 
+            // A score out of 100 to two places - the same shape the appraisal module stores.
+            entity.Property(x => x.MinPerformanceScore).HasColumnType("decimal(5,2)");
+
             entity.HasMany(x => x.Awards)
                 .WithOne(x => x.AwardType)
                 .HasForeignKey(x => x.AwardTypeId)

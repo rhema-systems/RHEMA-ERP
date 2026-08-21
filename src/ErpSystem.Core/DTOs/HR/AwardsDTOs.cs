@@ -58,6 +58,12 @@ public class AwardTypeDto : BaseDto
     /// <summary>Whether an employee may nominate themselves. Off by default; see the entity.</summary>
     public bool AllowSelfNomination { get; set; }
 
+    /// <summary>Minimum appraisal score for automatic candidacy. See the entity for the data caveat.</summary>
+    public decimal? MinPerformanceScore { get; set; }
+
+    /// <summary>Minimum completed goals for automatic candidacy.</summary>
+    public int? MinGoalsAchieved { get; set; }
+
     public string? Notes { get; set; }
     public bool IsActive { get; set; }
 }
@@ -171,6 +177,18 @@ public class CreateAwardTypeDto : CreateDtoBase
     /// </summary>
     public bool AllowSelfNomination { get; set; }
 
+    /// <summary>
+    /// Minimum appraisal score for automatic candidacy, when the award's candidates are
+    /// performance-triggered. Combines with <see cref="MinGoalsAchieved"/>: set both and a candidate
+    /// must satisfy both.
+    /// </summary>
+    [Range(0, 100)]
+    public decimal? MinPerformanceScore { get; set; }
+
+    /// <summary>Minimum completed goals for automatic candidacy.</summary>
+    [Range(1, 100)]
+    public int? MinGoalsAchieved { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
@@ -253,6 +271,18 @@ public class UpdateAwardTypeDto : UpdateDtoBase
     /// per award, typically to innovation and improvement awards rather than to behavioural ones.
     /// </summary>
     public bool AllowSelfNomination { get; set; }
+
+    /// <summary>
+    /// Minimum appraisal score for automatic candidacy, when the award's candidates are
+    /// performance-triggered. Combines with <see cref="MinGoalsAchieved"/>: set both and a candidate
+    /// must satisfy both.
+    /// </summary>
+    [Range(0, 100)]
+    public decimal? MinPerformanceScore { get; set; }
+
+    /// <summary>Minimum completed goals for automatic candidacy.</summary>
+    [Range(1, 100)]
+    public int? MinGoalsAchieved { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -1772,6 +1802,54 @@ public class AwardCommitteeScoreDto
     /// outstanding — but it cannot win.
     /// </summary>
     public bool MeetsReviewerMinimum { get; set; }
+}
+
+#endregion
+
+
+#region Award Generation DTOs
+
+/// <summary>What a generation run did, and what it found to work with.</summary>
+public class AwardGenerationResultDto
+{
+    public Guid AwardCycleId { get; set; }
+    public string CycleName { get; set; } = string.Empty;
+    public string AwardTypeName { get; set; } = string.Empty;
+
+    public decimal? MinPerformanceScore { get; set; }
+    public int? MinGoalsAchieved { get; set; }
+
+    /// <summary>
+    /// How much evidence existed to judge against. Reported so that a run finding nobody can be
+    /// told apart from a rule that is wrong — measured 2026-08-21, only 18 of 4,328 appraisals
+    /// carry a score at all.
+    /// </summary>
+    public int AppraisalsExamined { get; set; }
+    public int GoalsExamined { get; set; }
+
+    /// <summary>Employees the triggers matched, before eligibility is applied.</summary>
+    public int MatchedByPerformance { get; set; }
+
+    /// <summary>Of those, how many the award's eligibility criteria then excluded.</summary>
+    public int ExcludedByEligibility { get; set; }
+
+    /// <summary>Of those, how many already had a nomination in this cycle.</summary>
+    public int AlreadyNominated { get; set; }
+
+    public int NominationsCreated { get; set; }
+
+    public List<AwardGeneratedNomineeDto> Created { get; set; } = new();
+
+    /// <summary>Set when nothing could be generated, and why.</summary>
+    public string? Note { get; set; }
+}
+
+public class AwardGeneratedNomineeDto
+{
+    public Guid NominationId { get; set; }
+    public string NominationNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
 }
 
 #endregion

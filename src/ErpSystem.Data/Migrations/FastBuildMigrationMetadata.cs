@@ -200,3 +200,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821151343_AddAwardSelfNomination")] partial class AddAwardSelfNomination { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821155443_AddAwardVoting")] partial class AddAwardVoting { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821162315_AddAwardCommitteeScore")] partial class AddAwardCommitteeScore { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260821181549_AddAwardPerformanceTriggers")] partial class AddAwardPerformanceTriggers { }

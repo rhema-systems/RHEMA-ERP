@@ -322,7 +322,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 4 | Nomination | ✅ **Done.** AWD-02, AWD-09; the gates, the employee surface, and self-nomination as a per-award setting. |
 | 5 | The vote | ✅ **Done.** AWD-04/05/06/10 — the ballot, the electorate, one-vote-per-voter, the window, and the tally withheld until close. |
 | 6 | Committee scoring | ✅ **Done.** D-2, AWD-12/13 — score replaces verdict, highest average wins, membership is the gate. |
-| 7 | Direct and automatic selection | AWD-07, AWD-08 — management selection, and nomination derived from performance/targets. |
+| 7 | Automatic selection | ✅ **Done.** AWD-08 — candidates derived from performance and targets. *(AWD-07 was already delivered by slices 2–4; its remaining half is conferring, in slice 8.)* |
 | 8 | The award is conferred | Nomination → `EmployeeAward`; presentation; certificate; the payment record (D-7). |
 | 9 | Long service | AWD-14 milestones, AWD-15 disqualification (D-6), the sweep — asserted empty on live data. |
 | 10 | FR-HR-113 | The eligibility report, on the catalogue+service+seeder pattern used by procurement and inventory. |
@@ -880,3 +880,56 @@ nomination to `UnderReview`, so it must be submitted first) silently **deleted**
 The file then passed 31/31 while testing less than it had before. Restored, and it is now 32/32.
 *A harness that goes green after an edit has not necessarily kept doing what it did — count the
 assertions, not just the failures.*
+
+---
+
+### Slice 7 — performance-triggered candidates. 2026-08-21, **27/27**, run twice. Migration `AddAwardPerformanceTriggers`.
+
+Harness: `run-slice7.mjs`. Whole area re-run: **32 / 49 / 51 / 6 / 44 / 49 / 42 / 27 = 300
+assertions**, all green.
+
+**⚠ The slice was re-cut, and the honest version is smaller than the plan said.** Slice 7 was written
+as *"direct and automatic selection — AWD-07 and AWD-08"*. Working through it, **AWD-07 was already
+delivered** across earlier slices: slice 2 made `ManagementDirect` a real value of the selection
+model, slice 3 refuses such an award a nomination window, and slice 4 refuses it nominations
+outright. All that remains of AWD-07 is *conferring* the award, which is slice 8's subject. So slice
+7 is AWD-08 alone. Recorded rather than padded — a slice that claims two requirements and delivers
+one is the sort of bookkeeping that makes a plan stop being trustworthy.
+
+**AWD-08 delivered.** *"Some of the nomination will be due to performance or target reached"* — two
+triggers, so two nullable columns on `AwardType`: `MinPerformanceScore` (read from the appraisal
+store) and `MinGoalsAchieved` (from completed goals). Both set means both must be satisfied: an award
+asking for performance **and** targets should not settle for one. Neither set means the award
+generates nobody **and says so**, rather than quietly finding nothing — there is no sensible default,
+because a threshold is a policy TDC has not stated and any number would look authoritative.
+
+**A generated nomination is a nomination, not a shortcut past the rules.** It passes the same
+eligibility criteria, belongs to a cycle, obeys the nomination window, and is **Submitted rather than
+Approved**: the trigger decides who *stands*, and the vote or committee still decides who *wins*.
+Generating straight to a winner would let an appraisal score award a prize.
+
+Two details worth keeping:
+
+- **Only the most recent scored appraisal counts.** An employee with three appraisals is judged on
+  their latest scored one, not their best ever — an award for current performance should not be won
+  on a result from four years ago.
+- **The nominee is recorded as their own nominator.** Nobody put them forward, and `NominatedById` is
+  a required Employee foreign key — the very shape that made this area's slice-0 nomination endpoint
+  fail with a 500. Leaving it blank was never an option; recording the employee says truthfully that
+  the nomination arose from their own performance.
+
+**⚠ The data, measured 2026-08-21, and why the harness is written the way it is.** The live store
+holds **4,328 appraisals of which 18 carry an `OverallScore`**, and **16 employees** have a goal at
+100%. This is the fourth appearance of the unmaintained-column shape, after `DateEmployed` (38%),
+`ExpectedHeadcount` and `HeadEmployeeId`.
+
+That shaped the assertions rather than the rule. The harness deliberately does **not** assert "a
+candidate was found" — with 18 scored appraisals, a run matching nobody could be the truthful answer,
+so such an assertion would fail for a reason that is not a defect. What it asserts instead is that
+**a zero is attributable**: the run reports how much evidence it examined, and *"no trigger set"*,
+*"nobody met the trigger"*, *"eligibility excluded them"* and *"already nominated"* are four
+distinct notes, each checked in the case that produces it. A bare count of zero would make them
+indistinguishable, and a screen showing `0 candidates` would blame the rule for the data.
+
+It did in fact run on real data: **18 examined, 4 above a threshold of 80, 4 nominations created** —
+and a second run created none, attributing them to `alreadyNominated` instead.

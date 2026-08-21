@@ -78,6 +78,31 @@ public class AwardType : TenantEntity
     /// </remarks>
     public bool AllowSelfNomination { get; set; }
 
+    /// <summary>
+    /// Minimum appraisal score that puts an employee forward automatically, for an award whose
+    /// candidates are <see cref="AwardNominationSource.PerformanceTriggered"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>TDC's note: <i>"some of the nomination will be due to performance or target
+    /// reached"</i> — two triggers, not one, which is why there are two fields. They combine: set
+    /// both and a candidate must satisfy both.</para>
+    ///
+    /// <para>⚠ Measured on the live database 2026-08-21: <b>4,328 appraisals exist and 18 carry an
+    /// OverallScore.</b> A score trigger can therefore see 18 of 5,579 employees today. That is not
+    /// a reason to build it differently — it is the same unmaintained-column shape as
+    /// <c>DateEmployed</c> and <c>ExpectedHeadcount</c>, and the rule is correct whether or not the
+    /// data has caught up — but a generation run that returns almost nobody is the data speaking,
+    /// not the feature failing, and the service says so out loud.</para>
+    /// </remarks>
+    public decimal? MinPerformanceScore { get; set; }
+
+    /// <summary>
+    /// Minimum number of goals completed (100% progress) that puts an employee forward
+    /// automatically. The "target reached" half of the same sentence.
+    /// </summary>
+    /// <remarks>Measured 2026-08-21: 16 employees hold a goal at 100%.</remarks>
+    public int? MinGoalsAchieved { get; set; }
+
 
 	[MaxLength(1000)]
     public string? Notes { get; set; }

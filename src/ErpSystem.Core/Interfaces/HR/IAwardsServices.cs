@@ -287,3 +287,16 @@ public interface IAwardVotingService
 }
 
 #endregion
+
+
+#region Award Candidate Generation
+
+public interface IAwardCandidateGenerationService
+{
+    /// <summary>
+    /// Puts forward everybody the award's performance triggers match, as nominations on the cycle.
+    /// </summary>
+    Task<AwardGenerationResultDto> GenerateAsync(Guid cycleId, Guid userId);
+}
+
+#endregion

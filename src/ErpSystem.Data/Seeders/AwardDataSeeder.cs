@@ -91,6 +91,12 @@ public sealed class AwardDataSeeder
                     WinnerDecision = AwardWinnerDecision.CommitteeScore,
                     AllowSelfNomination = false,
 
+                    // Performance triggers are left unset: TDC has not said what score or how many
+                    // goals should put somebody forward automatically, and a generated candidate
+                    // list built on an invented threshold would look authoritative.
+                    MinPerformanceScore = null,
+                    MinGoalsAchieved = null,
+
                     CreatedAt = now,
                     CreatedBy = string.Empty
                 };

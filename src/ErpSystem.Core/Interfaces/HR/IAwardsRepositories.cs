@@ -300,3 +300,40 @@ public interface IAwardElectorateEvaluator
 }
 
 #endregion
+
+
+#region Award Performance Triggers
+
+/// <summary>Finds who an award should put forward automatically, from performance records.</summary>
+public interface IAwardPerformanceTriggerEvaluator
+{
+    Task<AwardPerformanceTriggerResult> EvaluateAsync(AwardType awardType, Guid tenantId);
+}
+
+/// <summary>
+/// Who the triggers matched, and how much evidence there was to match against.
+/// </summary>
+/// <remarks>
+/// The <c>Examined</c> counts exist so a caller can tell "almost nobody qualified" from "almost
+/// nobody has been appraised". Measured 2026-08-21, the live store holds 4,328 appraisals of which
+/// 18 carry a score, so the second explanation is currently the true one and a screen that reported
+/// only "0 candidates" would be blaming the rule for the data.
+/// </remarks>
+public sealed class AwardPerformanceTriggerResult
+{
+    public decimal? MinPerformanceScore { get; init; }
+    public int? MinGoalsAchieved { get; init; }
+
+    /// <summary>Appraisals carrying a score that were considered.</summary>
+    public int AppraisalsExamined { get; set; }
+
+    /// <summary>Completed goals that were considered.</summary>
+    public int GoalsExamined { get; set; }
+
+    public List<Guid> EmployeeIds { get; set; } = new();
+
+    /// <summary>True when the award has no trigger configured, so nothing can be generated.</summary>
+    public bool NoTriggerConfigured => MinPerformanceScore == null && MinGoalsAchieved == null;
+}
+
+#endregion

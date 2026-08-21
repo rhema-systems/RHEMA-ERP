@@ -95,6 +95,8 @@ public static class HrModuleServiceRegistration
         // Applies every criterion an award type carries - service years, age, target scoping and
         // the per-employee cap - not just the target scoping the old check looked at.
         services.AddScoped<IAwardEligibilityEvaluator, AwardEligibilityEvaluator>();
+        // Reads the appraisal and goal stores to decide who an award puts forward automatically.
+        services.AddScoped<IAwardPerformanceTriggerEvaluator, AwardPerformanceTriggerEvaluator>();
         services.AddScoped<ICompanyEventRepository, CompanyEventRepository>();
         services.AddScoped<IEventParticipantRepository, EventParticipantRepository>();
         services.AddScoped<IEventAttendanceRepository, EventAttendanceRepository>();
@@ -495,6 +497,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();
         services.AddScoped<IAwardVotingService, AwardVotingService>();
         services.AddScoped<IAwardCommitteeScoringService, AwardCommitteeScoringService>();
+        services.AddScoped<IAwardCandidateGenerationService, AwardCandidateGenerationService>();
         services.AddScoped<IAwardLevelService, AwardLevelService>();
         services.AddScoped<IAwardBudgetService, AwardBudgetService>();
         services.AddScoped<IEmployeeAwardService, EmployeeAwardService>();

@@ -38,6 +38,8 @@ public static class AwardsMappingExtensions
             NominationSource = entity.NominationSource,
             WinnerDecision = entity.WinnerDecision,
             AllowSelfNomination = entity.AllowSelfNomination,
+            MinPerformanceScore = entity.MinPerformanceScore,
+            MinGoalsAchieved = entity.MinGoalsAchieved,
             Notes = entity.Notes,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
@@ -98,6 +100,8 @@ public static class AwardsMappingExtensions
             NominationSource = dto.NominationSource,
             WinnerDecision = dto.WinnerDecision,
             AllowSelfNomination = dto.AllowSelfNomination,
+            MinPerformanceScore = dto.MinPerformanceScore,
+            MinGoalsAchieved = dto.MinGoalsAchieved,
             Notes = dto.Notes,
             IsActive = dto.IsActive,
             CreatedBy = userId.ToString()
@@ -130,6 +134,8 @@ public static class AwardsMappingExtensions
         entity.NominationSource = dto.NominationSource;
         entity.WinnerDecision = dto.WinnerDecision;
         entity.AllowSelfNomination = dto.AllowSelfNomination;
+        entity.MinPerformanceScore = dto.MinPerformanceScore;
+        entity.MinGoalsAchieved = dto.MinGoalsAchieved;
         entity.Notes = dto.Notes;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
