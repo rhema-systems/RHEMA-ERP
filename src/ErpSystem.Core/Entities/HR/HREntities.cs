@@ -237,10 +237,19 @@ public class Employee : TenantEntity
     [NotMapped]
     public string DisplayName => $"{FullName} ({EmployeeNumber})";
 
+    /// <summary>
+    /// Completed years of service, counting only anniversaries that have actually come round.
+    /// </summary>
+    /// <remarks>
+    /// Corrected in area 14 slice 3b. This previously read
+    /// <c>DateTime.Today.Year - DateEmployed.Value.Year</c>, which reports a completed year on
+    /// 1 January for someone whose anniversary falls in December — overstating service by up to a
+    /// year for anyone whose start date has not yet come round. It fell on exactly the rules that
+    /// turn on a threshold, and it disagreed with <c>HrPolicyCalculations.Age</c>, which had always
+    /// done the check correctly. Both now share one implementation.
+    /// </remarks>
     [NotMapped]
-    public int? YearsOfService => DateEmployed.HasValue
-        ? DateTime.Today.Year - DateEmployed.Value.Year
-        : null;
+    public int? YearsOfService => ErpSystem.Core.Services.HR.HrPolicyCalculations.CompletedYears(DateEmployed);
 
     [NotMapped]
     public bool IsOnProbation => StaffStatus == StaffStatus.Probation;

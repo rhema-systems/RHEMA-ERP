@@ -2,6 +2,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -126,7 +127,7 @@ public class AwardEligibilityEvaluator : IAwardEligibilityEvaluator
             }
             else
             {
-                var years = CompletedYears(employee.DateEmployed.Value, asOf);
+                var years = HrPolicyCalculations.CompletedYears(employee.DateEmployed, DateOnly.FromDateTime(asOf)) ?? 0;
                 if (awardType.MinServiceYears.HasValue && years < awardType.MinServiceYears)
                     reasons.Add($"Requires {awardType.MinServiceYears} years' service; this employee has {years}.");
                 if (awardType.MaxServiceYears.HasValue && years > awardType.MaxServiceYears)
@@ -144,7 +145,7 @@ public class AwardEligibilityEvaluator : IAwardEligibilityEvaluator
             }
             else
             {
-                var age = CompletedYears(employee.DateOfBirth.Value, asOf);
+                var age = HrPolicyCalculations.CompletedYears(employee.DateOfBirth, DateOnly.FromDateTime(asOf)) ?? 0;
                 if (awardType.MinAge.HasValue && age < awardType.MinAge)
                     reasons.Add($"Requires age {awardType.MinAge}; this employee is {age}.");
                 if (awardType.MaxAge.HasValue && age > awardType.MaxAge)
@@ -201,7 +202,7 @@ public class AwardEligibilityEvaluator : IAwardEligibilityEvaluator
 
         if ((target.MinAge.HasValue || target.MaxAge.HasValue) && employee.DateOfBirth.HasValue)
         {
-            var age = CompletedYears(employee.DateOfBirth.Value, asOf);
+            var age = HrPolicyCalculations.CompletedYears(employee.DateOfBirth, DateOnly.FromDateTime(asOf)) ?? 0;
             if (target.MinAge.HasValue && age < target.MinAge) return false;
             if (target.MaxAge.HasValue && age > target.MaxAge) return false;
         }
@@ -209,20 +210,4 @@ public class AwardEligibilityEvaluator : IAwardEligibilityEvaluator
         return true;
     }
 
-    /// <summary>
-    /// Whole years between two dates.
-    /// </summary>
-    /// <remarks>
-    /// The previous age check subtracted calendar years (<c>Now.Year - DateOfBirth.Year</c>), which
-    /// is wrong for anyone whose birthday has not yet come round — it reports 40 for someone who is
-    /// still 39 for another eleven months. On a minimum-age rule that admits people a year early.
-    /// </remarks>
-    private static int CompletedYears(DateOnly from, DateTime asOf)
-    {
-        var to = DateOnly.FromDateTime(asOf);
-        var years = to.Year - from.Year;
-        if (to.Month < from.Month || (to.Month == from.Month && to.Day < from.Day))
-            years--;
-        return Math.Max(0, years);
-    }
 }

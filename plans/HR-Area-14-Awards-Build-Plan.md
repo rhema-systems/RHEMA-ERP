@@ -605,3 +605,70 @@ published-only read for the open-lists) and `GetCountsByCycleAsync` (one grouped
 
 **Open, per decision D-9:** `GET types/{id}/eligible` judges every active employee and returns both
 lists in full. Correct for now; slice 11 adds paging and filters and keeps the reasons.
+
+---
+
+### Slice 3b — one answer to "how long has this person worked here". 2026-08-21, **6/6**.
+
+Harness: `run-slice3b.mjs`. Slices 1–3 re-run at 30/30, 49/49, 51/51.
+
+**The change.** The HR module held three implementations of "whole years since a date" and only one
+was right. `HrPolicyCalculations.Age` did the anniversary check correctly;
+`Employee.YearsOfService` subtracted calendar years (`Today.Year - DateEmployed.Year`), reporting a
+completed year on 1 January for somebody whose anniversary falls in December; and slice 3's
+eligibility evaluator had grown a private fourth copy while fixing the second. All now call
+`HrPolicyCalculations.CompletedYears(from, asOf)`, which takes an `asOf` because award eligibility
+must re-check a rule as it stood on some other day.
+
+**Why now rather than later — measured, not argued.** Computing both formulas across every employee
+with a `DateEmployed`: **0 of 2,140 differ today.** The seeded dates cluster in January, so the
+correction is a provable no-op on current data. That window is temporary: real employment dates
+spread across twelve months, so roughly a third of employees would shift once migration lands, and
+the change would then be entangled with the migration that caused it.
+
+The deciding argument was not the arithmetic but the **inconsistency slice 3 had opened**: since
+that slice, `/api/hr/Employees/{id}` and `/api/Awards/types/{id}/eligible/{employeeId}` could give
+different service figures for the same person on the same day. Fixing only the evaluator had created
+the two-sources-of-one-fact shape this area has spent three slices removing.
+
+**A no-op cannot demonstrate itself**, so the harness builds the boundary deliberately: two
+employees with the **same start year** (2016), one whose anniversary has passed and one whose has
+not. The old formula reported 10 for both; the correct one reports 10 and 9. A 10-year eligibility
+rule then admits the first and refuses the second, quoting the same figure the employee record
+shows.
+
+**⚠ Cross-area finding: area 14's harness fixtures have been failing area 13's harness since slice 1
+— and it is not the arithmetic.** `hr-succession/run-slice9.mjs` asserts `fitScore === 0` for
+`results[0]` of `candidate-search`. Measured today:
+
+| candidates | score |
+|---|---|
+| every non-area-14 employee (52 of 100) | **0**, `yearsOfService: null` — no `DateEmployed` on record |
+| area-14 fixtures at 2020-01-06 (44) | **60** — minted from **slice 1** |
+| the slice-3b boundary pair (4) | **90 / 100** |
+
+`SuccessionFitScoring.Score` averages only the signals that are non-null. With no performance, no
+competency requirements and no potential, **tenure is the only signal**, so the score is simply
+tenure ÷ 10 × 100. Area 14's `setup.mjs` mints employees with `dateEmployed` — so the moment slice 1
+ran, the top of a score-ordered list stopped being a zero-scoring employee.
+
+Under the *old* arithmetic those 2020 fixtures also scored 60 (`2026 − 2020 = 6`), so **slice 3b did
+not cause this**. It has been failing for days and nobody looked.
+
+The real fault is the assertion's shape: `results[0]` on a list ordered by score over the whole
+workforce is owned by whichever area last created an employee. That is precisely the lesson area 13
+recorded in its own plan — *demand a known row by id* — applied everywhere in that harness except
+here.
+
+**Re-anchored with the user's agreement, 2026-08-21.** `hr-succession/run-slice9.mjs` now selects
+its sample by the property the assertions are actually about — a candidate with **no employment date
+on record**, whose every fit signal is absent — instead of trusting whatever sorts first. The block
+also gained its converse, which the old shape could never state: a candidate *with* a start date
+scores above zero on tenure alone. **66/66**, up from 63; the fix added assertions rather than
+deleting the failing one.
+
+⚠ **The transferable point, and it is about harnesses rather than code.** Every area's fixtures
+share one tenant and one database. An assertion anchored on "the first row of an ordered list" is
+therefore owned by every other area, and it fails silently in the sense that nobody re-runs a closed
+area's harness. Two habits follow: anchor on a row you created or can identify, and re-run the
+harnesses of any area whose data your fixtures could reach.
