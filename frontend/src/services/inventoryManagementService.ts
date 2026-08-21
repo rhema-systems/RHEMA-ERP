@@ -95,7 +95,6 @@ export interface UpdateItemUnitIdentifierDto {
   isBaseUnit: boolean;
   isPurchaseUnit: boolean;
   isSalesUnit: boolean;
-  isStockingUnit?: boolean;
   isStockingUnit: boolean;
   barcode?: string;
 }

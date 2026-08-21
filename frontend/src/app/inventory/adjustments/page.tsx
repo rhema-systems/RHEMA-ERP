@@ -21,6 +21,8 @@ import {
 import { InventoryReceiptDialog } from '@/components/inventory/InventoryReceiptDialog';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import { currencyService } from '@/services/financeCommonService';
+import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
 
 export default function StockAdjustmentsPage() {
   const { toast } = useToast();
@@ -45,6 +47,7 @@ export default function StockAdjustmentsPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [decisionApproved, setDecisionApproved] = useState(true);
   const [actionComment, setActionComment] = useState('');
+  const [currencyCode, setCurrencyCode] = useState('GHS');
 
   const fetchData = async () => {
     try {
@@ -62,6 +65,24 @@ export default function StockAdjustmentsPage() {
 
   useEffect(() => {
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Inventory adjustment values post in the tenant's functional currency. Resolve that
+    // canonical currency instead of embedding a symbol in this Inventory-owned screen.
+    currencyService.getBaseCurrency()
+      .then((currency) => {
+        if (!cancelled) setCurrencyCode(normalizeInventoryCurrency(currency?.code));
+      })
+      .catch(() => {
+        if (!cancelled) setCurrencyCode(normalizeInventoryCurrency());
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -266,7 +287,7 @@ export default function StockAdjustmentsPage() {
         </CardContent></Card>
         <Card><CardContent className="pt-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-2xl font-bold text-green-600">${totalReceiptValue.toFixed(2)}</p><p className="text-sm text-muted-foreground">Posted Absolute Value</p></div>
+            <div><p className="text-2xl font-bold text-green-600">{formatInventoryMoney(totalReceiptValue, currencyCode)}</p><p className="text-sm text-muted-foreground">Posted Absolute Value</p></div>
             <ArrowUpCircle className="h-8 w-8 text-green-500" />
           </div>
         </CardContent></Card>
@@ -341,7 +362,7 @@ export default function StockAdjustmentsPage() {
                       <td className="py-3 px-2 max-w-[200px] truncate">{receipt.description || '-'}</td>
                       <td className="py-3 px-2 text-right">{receipt.itemCount}</td>
                       <td className="py-3 px-2 text-right font-medium text-green-600">
-                        +${Math.abs(receipt.totalAdjustmentValue).toFixed(2)}
+                        +{formatInventoryMoney(Math.abs(receipt.totalAdjustmentValue), currencyCode)}
                       </td>
                       <td className="py-3 px-2">{getStatusBadge(receipt.status)}</td>
                       <td className="py-3 px-2">
@@ -384,6 +405,7 @@ export default function StockAdjustmentsPage() {
         mode={dialogMode}
         receiptId={selectedReceipt?.id}
         onSuccess={fetchData}
+        currencyCode={currencyCode}
       />
 
       {/* Approve Confirmation */}
