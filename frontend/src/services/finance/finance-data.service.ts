@@ -30,11 +30,15 @@ import type {
     CreateJournalEntryDto,
     CreateOpeningBalanceBatchDto,
     CreateFixedAssetOpeningBalanceBatchDto,
+    CreateBankAccountOpeningBalanceDto,
+    CreateResidualGlEquityOpeningBalanceDto,
     CreateSupplierAdvanceOpeningBalanceDto,
     CreateCustomerAdvanceOpeningBalanceDto,
     CreateApWithholdingOpeningBalanceDto,
     CreateArWithholdingOpeningBalanceDto,
     SpecializedOpeningBalanceOptions,
+    GovernedOpeningBalanceOptions,
+    GovernedOpeningBalanceOptionsRequest,
     UpdateOpeningBalanceBatchDto,
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
@@ -64,6 +68,11 @@ import type {
     TrialBalanceReportDto,
     TrialBalanceRequestDto,
 } from '@/types/finance';
+import type {
+    CreateOpeningStockAdjustmentDto,
+    GovernedInventoryOpeningResult,
+    OpeningStockOptions,
+} from '@/lib/finance/opening-balance-governance';
 import { appendFinanceSegmentFilters } from '@/lib/finance/report-segment-filters';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
@@ -534,6 +543,33 @@ class FinanceDataService {
 
     async createFixedAssetOpeningBalanceBatch(dto: CreateFixedAssetOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
         return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/fixed-assets', dto);
+    }
+
+    async createBankAccountOpeningBalance(dto: CreateBankAccountOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/bank-accounts', dto);
+    }
+
+    async createResidualGlEquityOpeningBalance(dto: CreateResidualGlEquityOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/residual-gl-equity', dto);
+    }
+
+    async getGovernedOpeningBalanceOptions(request: GovernedOpeningBalanceOptionsRequest): Promise<GovernedOpeningBalanceOptions> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('openingDate', request.openingDate);
+        queryParams.append('fiscalPeriodId', request.fiscalPeriodId);
+        queryParams.append('bookClassification', request.bookClassification);
+
+        return apiService.get<GovernedOpeningBalanceOptions>(`/finance/opening-balances/governed-options?${queryParams}`);
+    }
+
+    async getOpeningStockOptions(): Promise<OpeningStockOptions> {
+        // Inventory owns opening-stock masters, readiness and workflow. Finance consumes this
+        // typed boundary only; it does not duplicate Inventory lookups or accept account IDs.
+        return apiService.get<OpeningStockOptions>('/inventory/adjustments/opening-stock/options');
+    }
+
+    async createOpeningStockAdjustment(dto: CreateOpeningStockAdjustmentDto): Promise<GovernedInventoryOpeningResult> {
+        return apiService.post<GovernedInventoryOpeningResult>('/inventory/adjustments/opening-stock', dto);
     }
 
     // These specialised cutover endpoints create canonical AP/AR facts and a controlled

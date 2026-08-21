@@ -29,6 +29,18 @@ public sealed class OpeningBalancesController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _openingBalanceService.CreateFixedAssetBatchAsync(dto, cancellationToken));
 
+    [HttpPost("bank-accounts")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateBankAccountOpening(
+        [FromBody] CreateBankAccountOpeningBalanceDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateBankAccountOpeningBatchAsync(dto, cancellationToken));
+
+    [HttpPost("residual-gl-equity")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateResidualGlEquityOpening(
+        [FromBody] CreateResidualGlEquityOpeningBalanceDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateResidualGlEquityOpeningBatchAsync(dto, cancellationToken));
+
     [HttpPost("supplier-advances")]
     public async Task<ActionResult<OpeningBalanceBatchDto>> CreateSupplierAdvance([FromBody] CreateSupplierAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken)
         => Ok(await _openingBalanceService.CreateSupplierAdvanceBatchAsync(dto, cancellationToken));
@@ -48,6 +60,12 @@ public sealed class OpeningBalancesController : ControllerBase
     [HttpGet("specialized-options")]
     public async Task<ActionResult<SpecializedOpeningBalanceOptionsDto>> GetSpecializedOptions(CancellationToken cancellationToken)
         => Ok(await _openingBalanceService.GetSpecializedOptionsAsync(cancellationToken));
+
+    [HttpGet("governed-options")]
+    public async Task<ActionResult<GovernedOpeningBalanceOptionsDto>> GetGovernedOptions(
+        [FromQuery] GovernedOpeningBalanceOptionsRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.GetGovernedOptionsAsync(dto, cancellationToken));
 
     [HttpGet("subledger-readiness")]
     public async Task<ActionResult<SubledgerOpeningBalanceReadinessDto>> GetSubledgerReadiness(

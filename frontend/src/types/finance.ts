@@ -1107,6 +1107,33 @@ export interface CreateFixedAssetOpeningBalanceBatchDto {
     fixedAssetBookValueIds: string[];
 }
 
+export interface CreateBankAccountOpeningBalanceDto {
+    batchNumber?: string;
+    sourceReference: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    bankAccountId: string;
+    amount: number;
+}
+
+export interface CreateResidualGlEquityOpeningBalanceDto {
+    batchNumber?: string;
+    sourceReference: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    accruedExpensesAccountId: string;
+    accruedExpensesAmount: number;
+    shareCapitalAccountId: string;
+    shareCapitalAmount: number;
+    retainedEarningsAmount: number;
+}
+
 export interface CreateSpecializedOpeningBalanceDto {
     batchNumber?: string;
     sourceReference?: string;
@@ -1149,6 +1176,53 @@ export interface SpecializedOpeningBalanceOptions {
     suppliers: OpeningBalancePartyOption[];
     customers: OpeningBalancePartyOption[];
     withholdingTaxes: OpeningBalanceWhtOption[];
+}
+
+export interface GovernedOpeningBalanceOptions {
+    functionalCurrencyCode: string;
+    bankAccounts: BankAccountOpeningOption[];
+    accruedExpensesAccounts: ResidualOpeningAccountOption[];
+    shareCapitalAccounts: ResidualOpeningAccountOption[];
+    migrationClearingAccount?: GovernedOpeningDerivedAccount;
+    retainedEarningsAccount?: GovernedOpeningDerivedAccount;
+    blockers: string[];
+}
+
+export interface GovernedOpeningBalanceOptionsRequest {
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+}
+
+export interface BankAccountOpeningOption {
+    id: string;
+    accountNumber: string;
+    accountName: string;
+    bankName: string;
+    currencyCode: string;
+    glAccountId?: string;
+    glAccountCode?: string;
+    glAccountName?: string;
+    postingDirection: 'Debit' | string;
+    isEligible: boolean;
+    blockers: string[];
+}
+
+export interface ResidualOpeningAccountOption {
+    id: string;
+    accountCode: string;
+    accountName: string;
+    accountType: string;
+    postingDirection: 'Credit' | string;
+}
+
+export interface GovernedOpeningDerivedAccount {
+    accountId: string;
+    accountCode: string;
+    accountName: string;
+    postingDirection: string;
+    isEligible: boolean;
+    blockers: string[];
 }
 
 export interface OpeningBalancePartyOption {
@@ -1239,6 +1313,9 @@ export interface OpeningBalanceBatch {
     fiscalPeriodCode: string;
     bookClassification: string;
     status: string;
+    sourceKind: string;
+    isSystemGenerated: boolean;
+    isEditable: boolean;
     idempotencyKey: string;
     totalDebit: number;
     totalCredit: number;
