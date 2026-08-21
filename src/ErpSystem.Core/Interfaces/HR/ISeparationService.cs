@@ -46,12 +46,26 @@ public interface ISeparationService
         Guid id, SubmitEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sign off a separation awaiting approval (FR-HR-092), settling how any unserved notice is
-    /// dealt with. Throws <see cref="UnauthorizedAccessException"/> when the caller is not entitled
-    /// to decide this particular record — the MD may decide any, HR only a procedural one.
+    /// Sign off a separation awaiting approval (FR-HR-092). Throws
+    /// <see cref="UnauthorizedAccessException"/> when the caller is not entitled to decide this
+    /// particular record — the MD may decide any, HR only a procedural one.
     /// </summary>
+    /// <remarks>
+    /// ⚠ This no longer settles the notice. See <see cref="RecordNoticeDecisionAsync"/>: approval
+    /// is a yes/no plus a comment, which is all the generic workflow engine's approve action can
+    /// carry, and a decision that changes what somebody is paid needed a home of its own.
+    /// </remarks>
     Task<EmployeeSeparationDetailDto> ApproveAsync(
         Guid id, ApproveEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Record what happens to any unserved notice — waived, paid in lieu, or neither. Taken by
+    /// whoever may sign the separation, while it is awaiting approval or once approved, and always
+    /// before the settlement is prepared.
+    /// </summary>
+    Task<EmployeeSeparationDetailDto> RecordNoticeDecisionAsync(
+        Guid id, RecordSeparationNoticeDecisionDto dto, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Refuse a separation awaiting approval. Same entitlement rule as approving.</summary>
     Task<EmployeeSeparationDetailDto> RejectAsync(

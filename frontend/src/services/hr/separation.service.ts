@@ -8,6 +8,7 @@ import type {
   UpdateSeparation,
   SubmitSeparation,
   ApproveSeparation,
+  RecordNoticeDecision,
   RejectSeparation,
   CancelSeparation,
   SeparationDocument,
@@ -105,6 +106,14 @@ class SeparationService {
 
   approve(id: string, payload: ApproveSeparation = {}) {
     return apiService.post<SeparationDetail>(`${this.baseUrl}/${id}/approve`, payload);
+  }
+
+  /**
+   * Record what happens to unserved notice. Same entitlement as approving — the service reads it
+   * off the record — and an empty payload means "neither applies", which is a real answer.
+   */
+  recordNoticeDecision(id: string, payload: RecordNoticeDecision = {}) {
+    return apiService.post<SeparationDetail>(`${this.baseUrl}/${id}/notice-decision`, payload);
   }
 
   reject(id: string, payload: RejectSeparation) {

@@ -228,6 +228,41 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Record what happens to any unserved notice — waived, paid in lieu, or neither.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Plain <c>[Authorize]</c>, like approve and reject, and for the same reason:</b> the
+    /// entitlement depends on the RECORD. Whoever may sign this separation may settle its notice,
+    /// and that is the MD for most exits and HR for a procedural one. No attribute can express
+    /// "may decide this one but not that one", so the service reads it off the record.
+    ///
+    /// <para>Separate from approval because approval now runs on the generic workflow engine, whose
+    /// approve action carries a comment and nothing else. A decision that changes what the leaver
+    /// is paid does not belong in a comment.</para>
+    /// </remarks>
+    [Authorize]
+    [HttpPost("{id:guid}/notice-decision")]
+    [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSeparationDetailDto>> RecordNoticeDecision(
+        Guid id, [FromBody] RecordSeparationNoticeDecisionDto? dto, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.RecordNoticeDecisionAsync(
+                id, dto ?? new RecordSeparationNoticeDecisionDto(), ActorEmployeeId(), cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     /// <summary>Refuse a separation awaiting approval. Same entitlement rule as approving.</summary>
     [Authorize]
     [HttpPost("{id:guid}/reject")]

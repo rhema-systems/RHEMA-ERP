@@ -110,6 +110,11 @@ export interface SeparationDetail extends SeparationListItem {
   isNoticeWaived: boolean;
   noticeWaiverReason?: string | null;
   isNoticePaidInLieu: boolean;
+  noticeDecisionOn?: string | null;
+  noticeDecidedById?: string | null;
+  noticeDecidedByName?: string | null;
+  /** Notice was left unserved and nobody has decided what happens to it — blocks the settlement. */
+  requiresNoticeDecision: boolean;
 
   isEligibleForRehire: boolean;
   eligibleForRehireDate?: string | null;
@@ -181,11 +186,26 @@ export interface SubmitSeparation {
   notes?: string | null;
 }
 
-/** FR-HR-092. Who may send this depends on the record, not on a permission. */
+/**
+ * FR-HR-092. Who may send this depends on the record, not on a permission.
+ *
+ * ⚠ The notice settlement is NOT here any more — see {@link RecordNoticeDecision}. Approval is a
+ * yes/no plus a comment, which is all the generic workflow engine's approve action carries.
+ */
 export interface ApproveSeparation {
   notes?: string | null;
+}
+
+/**
+ * What happens to notice that was not served: waive the balance, pay it instead of working it, or
+ * neither. Taken by whoever may sign the separation, and always before the settlement is prepared.
+ *
+ * ⚠ Sending an empty payload records "neither applies", which is a real decision and clears the
+ * settlement block. That is not the same as never calling this at all.
+ */
+export interface RecordNoticeDecision {
   waiveNotice?: boolean;
-  noticeWaiverReason?: string | null;
+  reason?: string | null;
   payNoticeInLieu?: boolean;
 }
 

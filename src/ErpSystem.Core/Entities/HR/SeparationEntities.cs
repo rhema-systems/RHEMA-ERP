@@ -191,6 +191,28 @@ public class EmployeeSeparation : TenantEntity
     /// </summary>
     public bool IsNoticePaidInLieu { get; set; }
 
+    /// <summary>
+    /// When the notice decision was taken — and the only thing that can tell "we decided neither
+    /// applies" from "nobody has decided yet".
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Two bools cannot express this. <c>IsNoticeWaived == false &amp;&amp; IsNoticePaidInLieu
+    /// == false</c> is both the ordinary outcome (the notice was served, so there is nothing to
+    /// settle) and the dangerous one (nobody has looked). FR-HR-184 needs the difference: a
+    /// settlement prepared with an unserved notice and no decision recorded silently omits notice
+    /// pay the leaver may be owed, and omission is invisible in a way a wrong figure is not.
+    ///
+    /// <para>Null until somebody with the authority to sign this separation records the decision.
+    /// Preparing the settlement is refused while it is null AND notice was left unserved.</para>
+    /// </remarks>
+    public DateTime? NoticeDecisionOn { get; set; }
+
+    /// <summary>Who took the notice decision — the same authority that may sign the separation.</summary>
+    public Guid? NoticeDecidedById { get; set; }
+
+    [ForeignKey(nameof(NoticeDecidedById))]
+    public virtual Employee? NoticeDecidedBy { get; set; }
+
     /// <summary>Set when the approval runs through the workflow engine (slice 4).</summary>
     public Guid? WorkflowInstanceId { get; set; }
 

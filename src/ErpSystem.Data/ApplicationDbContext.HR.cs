@@ -7992,6 +7992,11 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.RejectedById)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(x => x.NoticeDecidedBy)
+                .WithMany()
+                .HasForeignKey(x => x.NoticeDecidedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasMany(x => x.Documents)
                 .WithOne(x => x.Separation)
                 .HasForeignKey(x => x.SeparationId)

@@ -104,6 +104,8 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
   const [lineSource, setLineSource] = useState('');
   const [newLineDescription, setNewLineDescription] = useState('');
   const [newLineCategory, setNewLineCategory] = useState<SettlementLineCategory>('OtherEarning');
+  const [noticeChoice, setNoticeChoice] = useState<'waive' | 'payInLieu' | 'neither'>('neither');
+  const [noticeReason, setNoticeReason] = useState('');
 
   const { data: separation, isLoading } = useQuery({
     queryKey: ['separation', id],
@@ -328,6 +330,60 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                   <p className="text-xs text-muted-foreground">
                     Refusing needs grounds — a refusal nobody can explain cannot be acted on.
                   </p>
+                </div>
+              )}
+
+              {/*
+                ⚠ The notice settlement is its own act, not part of approving. It decides money —
+                waived notice costs nothing, notice paid in lieu is paid — and the approval it used
+                to ride on now runs on the generic workflow engine, whose approve action carries a
+                comment and nothing else. Recording "neither" is a real answer and is what clears
+                the block; never deciding is what the block is for.
+              */}
+              {s.requiresNoticeDecision && (
+                <div className="space-y-3 rounded-md border border-amber-300 p-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {s.noticeShortfallDays} day{s.noticeShortfallDays === 1 ? '' : 's'} of notice
+                      were not served
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Say what happens to them before the settlement is prepared. Left undecided,
+                      the statement simply omits notice pay that may be owed.
+                    </p>
+                  </div>
+                  <Select
+                    value={noticeChoice}
+                    onValueChange={(v) => setNoticeChoice(v as typeof noticeChoice)}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="neither">Neither — nothing is settled</SelectItem>
+                      <SelectItem value="waive">Waive the balance</SelectItem>
+                      <SelectItem value="payInLieu">Pay it in lieu</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {noticeChoice === 'waive' && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="noticeReason">Why the notice is being waived</Label>
+                      <Textarea
+                        id="noticeReason"
+                        rows={2}
+                        value={noticeReason}
+                        onChange={(e) => setNoticeReason(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  <Button
+                    onClick={() => run(() => separationService.recordNoticeDecision(id, {
+                      waiveNotice: noticeChoice === 'waive',
+                      payNoticeInLieu: noticeChoice === 'payInLieu',
+                      reason: noticeChoice === 'waive' ? noticeReason : null,
+                    }))}
+                    disabled={act.isPending || (noticeChoice === 'waive' && !noticeReason.trim())}
+                  >
+                    Record the notice decision
+                  </Button>
                 </div>
               )}
 

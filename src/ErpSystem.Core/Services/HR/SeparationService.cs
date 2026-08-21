@@ -80,6 +80,7 @@ public class SeparationService : ISeparationService
             .Include(s => s.CancelledBy)
             .Include(s => s.SubmittedBy)
             .Include(s => s.RejectedBy)
+            .Include(s => s.NoticeDecidedBy)
             .Where(s => s.TenantId == tenantId && !s.IsDeleted);
 
     // ── Reads ─────────────────────────────────────────────────────────────────
@@ -535,34 +536,12 @@ public class SeparationService : ISeparationService
 
         RequireDecisionAuthority(entity);
 
-        if (dto.WaiveNotice && dto.PayNoticeInLieu)
-            throw new InvalidOperationException(
-                "Notice cannot be both waived and paid in lieu — waived notice costs nothing, "
-                + "notice paid in lieu is money.");
-
-        if (dto.WaiveNotice && string.IsNullOrWhiteSpace(dto.NoticeWaiverReason))
-            throw new InvalidOperationException("Give a reason for waiving the notice period.");
-
-        if (dto.WaiveNotice || dto.PayNoticeInLieu)
-        {
-            // Nothing to waive or pay where the notice was served in full — and nothing to reason
-            // about where no notice period was ever counted, as on a retirement or a death.
-            var (_, served, shortfall) = Notice(entity);
-            if (served is null)
-                throw new InvalidOperationException(
-                    "This separation has no notice period to settle, so notice cannot be waived or paid in lieu.");
-            if (shortfall is 0)
-                throw new InvalidOperationException(
-                    "The full notice period was served, so there is no notice to waive or pay in lieu.");
-        }
-
+        // ⚠ The notice decision no longer rides here — see RecordNoticeDecisionAsync. Approval is a
+        // yes/no plus a comment, which is all the generic workflow engine's approve action carries.
         entity.Status = SeparationStatus.Approved;
         entity.ApprovedById = actorEmployeeId;
         entity.ApprovedOn = DateTime.UtcNow;
         entity.ApprovalNotes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
-        entity.IsNoticeWaived = dto.WaiveNotice;
-        entity.NoticeWaiverReason = dto.WaiveNotice ? dto.NoticeWaiverReason!.Trim() : null;
-        entity.IsNoticePaidInLieu = dto.PayNoticeInLieu;
 
         await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -572,6 +551,106 @@ public class SeparationService : ISeparationService
             entity.SeparationNumber, entity.IsProcedural);
 
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSeparationDetailDto> RecordNoticeDecisionAsync(
+        Guid id, RecordSeparationNoticeDecisionDto dto, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var entity = await RequireAsync(tenantId, id, cancellationToken);
+
+        // ⚠ The real constraint is BEFORE THE SETTLEMENT EXISTS, not a particular status. The first
+        // version of this allowed only PendingApproval and Approved, and deadlocked: a separation
+        // that reached ClearanceCompleted with the notice undecided could not prepare its settlement
+        // (the gate below refuses) and could not record the decision either (this check refused).
+        // Nothing could move it. Caught by run-slice14 on its first run.
+        //
+        // It opens at PendingApproval because the signatory should be able to settle the notice at
+        // the moment they sign — the decision left approval so the ENGINE could carry the approval,
+        // not so the decision would have to wait for it.
+        // ⚠ The SETTLEMENT is asked about FIRST, before the status. Once it exists it is too late to
+        // change the decision: the notice-pay line was computed from the decision in force when the
+        // settlement was prepared, so changing it afterwards would leave a statement disagreeing
+        // with the decision behind it. Amending the line is the way to correct that.
+        //
+        // Asked second, this loses to the status check — a separation at SettlementPending is
+        // outside the status window too, and answers "the decision is taken up until the settlement
+        // is prepared" when the truthful answer is "it already was". Order the questions so the more
+        // specific one answers first; StartClearanceAsync carries the same note for the same reason.
+        var settlementExists = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .AnyAsync(x => x.TenantId == tenantId && !x.IsDeleted && x.SeparationId == entity.Id,
+                cancellationToken);
+        if (settlementExists)
+            throw new InvalidOperationException(
+                "The settlement has already been prepared for this separation, and its notice pay "
+                + "was computed from the decision in force at the time. Amend the settlement line "
+                + "rather than the decision behind it.");
+
+        if (entity.Status is not (SeparationStatus.PendingApproval
+                                  or SeparationStatus.Approved
+                                  or SeparationStatus.ClearanceInProgress
+                                  or SeparationStatus.ClearanceCompleted))
+            throw new InvalidOperationException(
+                $"This separation is {entity.Status}. The notice decision is taken from the point it "
+                + "is awaiting approval up until the settlement is prepared.");
+
+        // The same authority that may sign this separation, and for the same reason: waiving notice
+        // or paying it in lieu is the organisation giving something up or paying it out.
+        RequireDecisionAuthority(entity);
+
+        if (dto.WaiveNotice && dto.PayNoticeInLieu)
+            throw new InvalidOperationException(
+                "Notice cannot be both waived and paid in lieu — waived notice costs nothing, "
+                + "notice paid in lieu is money.");
+
+        if (dto.WaiveNotice && string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException("Give a reason for waiving the notice period.");
+
+        var (_, served, shortfall) = Notice(entity);
+
+        if (dto.WaiveNotice || dto.PayNoticeInLieu)
+        {
+            // Nothing to waive or pay where the notice was served in full — and nothing to reason
+            // about where no notice period was ever counted, as on a retirement or a death.
+            if (served is null)
+                throw new InvalidOperationException(
+                    "This separation has no notice period to settle, so notice cannot be waived or paid in lieu.");
+            if (shortfall is 0)
+                throw new InvalidOperationException(
+                    "The full notice period was served, so there is no notice to waive or pay in lieu.");
+        }
+
+        entity.IsNoticeWaived = dto.WaiveNotice;
+        entity.NoticeWaiverReason = dto.WaiveNotice ? dto.Reason!.Trim() : null;
+        entity.IsNoticePaidInLieu = dto.PayNoticeInLieu;
+
+        // ⚠ The stamp is the whole point of the record: it is what tells "neither applies" from
+        // "nobody has looked". Recording neither is a decision, and it is stamped like any other.
+        entity.NoticeDecisionOn = DateTime.UtcNow;
+        entity.NoticeDecidedById = actorEmployeeId;
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Notice decision recorded on separation {Number}: waived={Waived} paidInLieu={Paid} shortfall={Shortfall}",
+            entity.SeparationNumber, dto.WaiveNotice, dto.PayNoticeInLieu, shortfall);
+
+        return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    /// <summary>
+    /// Notice was left unserved and nobody has said what happens to it — the state FR-HR-184 must
+    /// not be computed through.
+    /// </summary>
+    private static bool NoticeDecisionOutstanding(EmployeeSeparation separation)
+    {
+        if (separation.NoticeDecisionOn is not null) return false;
+        var (_, served, shortfall) = Notice(separation);
+        return served is not null && shortfall is > 0;
     }
 
     /// <inheritdoc />
@@ -1712,6 +1791,19 @@ public class SeparationService : ISeparationService
             throw new InvalidOperationException(
                 $"This separation is {separation.Status}. A settlement is prepared once clearance is "
                 + "complete — FR-HR-091 requires the clearance form before entitlements are computed.");
+
+        // ⚠ The notice decision must exist before the money is computed, not merely be absent. An
+        // unserved notice with nobody's decision against it produces a settlement with NO notice pay
+        // line at all — and a missing line is invisible on a statement in a way a wrong figure is
+        // not. Recording "neither" clears this; refusing to look does not.
+        if (NoticeDecisionOutstanding(separation))
+        {
+            var (_, _, owed) = Notice(separation);
+            throw new InvalidOperationException(
+                $"{owed} day(s) of notice were not served and no decision has been recorded. Say "
+                + "whether the notice is waived, paid in lieu, or neither, before the settlement is "
+                + "prepared — otherwise the statement silently omits pay that may be owed.");
+        }
 
         var settings = await _policyProvider.GetAsync(cancellationToken);
         var currency = await ResolveCurrencyAsync(settings, cancellationToken);
@@ -3002,6 +3094,10 @@ public class SeparationService : ISeparationService
         IsNoticeWaived = s.IsNoticeWaived,
         NoticeWaiverReason = s.NoticeWaiverReason,
         IsNoticePaidInLieu = s.IsNoticePaidInLieu,
+        NoticeDecisionOn = s.NoticeDecisionOn,
+        NoticeDecidedById = s.NoticeDecidedById,
+        NoticeDecidedByName = s.NoticeDecidedBy == null ? null : FullName(s.NoticeDecidedBy),
+        RequiresNoticeDecision = NoticeDecisionOutstanding(s),
         IsEligibleForRehire = s.IsEligibleForRehire,
         EligibleForRehireDate = s.EligibleForRehireDate,
         RehireRestrictions = s.RehireRestrictions,

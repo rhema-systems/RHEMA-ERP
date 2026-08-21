@@ -1047,3 +1047,142 @@ run. Staging also has no user-secrets, so the JWT key must be passed in.
 
 **Area regression after slice 13: 67 + 44 + 50 + 64 + 75 + 37 + 46 + 47 + 36 + 18 + 37 + 62 + 136 =
 719 assertions**, all green, twice.
+
+---
+
+## Slice 13 — the content audit
+
+`run-audit.mjs`, **136 assertions**, green on two consecutive runs. Every one of the area's **14 GET
+endpoints** is read against a record that really has something to say, and every field that should
+have resolved is checked for having resolved. Status codes prove the gate; this proves the feature.
+
+### The second trap: a green that proves nothing
+
+An endpoint returning `[]` passes `Array.isArray` forever. So where a collection can legitimately be
+empty, the audit records the read as **UNPROVEN** and prints the list at the end rather than passing
+it. An audit that cannot tell "verified" from "did not fail" is not an audit.
+
+Both initial unproven reads were then closed rather than left: the analytics window counts
+*completed* exits by effective date, and slice 12's fixtures exit in June 2025 — outside the default
+twelve months. A second fixture that completes *inside* the window makes `byRoute` and the interview
+averages real.
+
+### Three vacuous greens in my own audit, found and fixed
+
+- **`isRecovery` was a field I invented rather than read from the DTO.** Every line returned
+  `undefined`, deductions summed to zero, and "the net is earnings less recoveries" quietly reduced
+  to "the net is the sum". It is `isDeduction`. *A field name guessed from a concept rather than
+  read from the DTO is exactly the fiction that type-checks.*
+- **Even fixed, the fixture cleared every clearance line**, so the settlement had no deduction at
+  all and the arithmetic still proved nothing. One line is now deliberately left owing.
+- **The property-line rejection was asserted after the settlement was prepared**, where it still
+  returned 400 — but for an unrelated reason ("clearance lines can only be answered while clearance
+  is in progress"). A bare status-code assertion would have passed on the wrong rule.
+
+### The per-type coverage grep
+
+Every enum member greped against every assertion in the harness directory. Most misses are
+pick-list values with no behaviour and are left alone deliberately. Four carried behaviour:
+
+- **`ClearanceItemStatus.NotApplicable`** is one of the three answers `IsSettled()` accepts, so it
+  satisfies a *mandatory* clearance line. Remove it from that list and nothing would have failed.
+- **The clearance-kind to settlement-category mapping** decides what a recovery is *called* on a
+  final statement. Only one of its branches was exercised. Three are now, each by a distinct
+  amount so a crossed mapping shows up as the wrong number, not merely the wrong label.
+- **`PropertyRecovery` is unreachable** — only loans, salary advances and payroll recoveries carry
+  money, and a property line is refused an amount outright. It is a defensive default, not a route.
+  The honest test is the rule that makes it unreachable, which is what is asserted.
+- **`TravelAdvanceRecovery`**, the one cross-module generator, had never been produced. It is now,
+  including the branch where a USD advance on a GHS settlement is left **unvalued with the figure
+  in the text** rather than converted at a rate this module invented — and blocks finalisation.
+
+### The defect the audit found
+
+`BenefitPayment` and `TaxDeduction` had no assertion anywhere. Probing them turned up a real one: a
+manually added settlement line took `IsDeduction` **from the caller**, unchecked against its
+category.
+
+```
+ACCEPTED  category=TaxDeduction isDeduction=false   netPayable 0 -> 5000
+```
+
+A line categorised as tax **raised the leaver's final pay by its amount** — they would have been
+paid their PAYE. The update path was worse: `UpdateSettlementLineDto` carries no category, so a
+*system-generated* travel-advance recovery could be flipped into an earning after the fact.
+
+Fixed by deriving the permitted direction from the category. `PensionRelated` is deliberately left
+to the caller — a pension line can be a payout owed to the leaver or a contribution owed by them,
+and the category alone cannot say.
+
+---
+
+## Slice 14 — the notice decision becomes its own act
+
+**The blocker the engine wiring hit.** W1 forbids a module-specific approval UI, so the FR-HR-092
+approval belongs on the generic workflow engine — but that engine's approve action is
+`onApprove(comments, checklistResponses, signature)`. This area's approval also settled the
+**notice**: waive the balance, or pay it instead of working it. That is money, and there is nowhere
+in a comment to put it.
+
+*Decision taken with the user:* the notice decision becomes **its own act**, gated before the
+settlement. Approval becomes a clean yes/no the engine can carry; the money decision stays explicit,
+separately audited, and correctable without re-approving.
+
+### Why a date, and not just the two bools that already existed
+
+`IsNoticeWaived == false && IsNoticePaidInLieu == false` is **two different facts wearing the same
+clothes**: "we looked, and neither applies" and "nobody has looked". FR-HR-184 turns on the
+difference, because a settlement prepared against an unserved notice with no decision recorded does
+not produce a *wrong figure* — it produces **no notice-pay line at all**, and a missing line on a
+final statement is invisible in a way a wrong number is not.
+
+So `NoticeDecisionOn` is the stamp that makes "neither" sayable, `RequiresNoticeDecision` says it
+the way a screen needs to hear it, and `PrepareSettlementAsync` refuses while it is null and notice
+was left unserved, naming the days owed. Both columns are nullable, which is also the back-fill
+answer: every existing separation is correctly described as "no decision recorded".
+
+### The deadlock the harness found on its first run
+
+The gate refuses the settlement at `ClearanceCompleted`. The first version of the new rule allowed
+the decision only at `PendingApproval` or `Approved`. So a separation that reached clearance still
+undecided could **neither settle nor decide** — nothing could move it, ever. And clearance is
+exactly where such a record naturally ends up, because nothing forces the decision earlier.
+
+The real constraint was never a status: it is **before the settlement exists**, because notice pay
+is computed when the settlement is prepared. The window now runs from `PendingApproval` through
+`ClearanceCompleted` and closes on the settlement existing — with a second rule saying so out loud:
+once prepared, amend the settlement *line*, not the decision behind it, or the statement ends up
+disagreeing with the decision it was computed from.
+
+**And the order of the two questions matters.** Asked second, the settlement check lost to the
+status check, so a separation at `SettlementPending` answered "the decision is taken up until the
+settlement is prepared" when the truthful answer was "it already was". `StartClearanceAsync` carries
+the same note for the same reason: order the questions so the more specific one answers first.
+
+### One diagnosis worth not repeating
+
+Two 403 assertions failed as 500s and looked like authorization defects. They were the **run
+environment**: `dotnet run` applies `launchSettings.json`, which overrides `ASPNETCORE_ENVIRONMENT`,
+so the API came up in Development where the developer exception page turns every uncaught
+`UnauthorizedAccessException` into a 500 with a stack trace. Controller-caught exceptions give clean
+400s in any environment, which is why only the record-dependent authority checks failed and the rest
+of the run looked healthy. `--no-launch-profile` plus the JWT key fixes it — both already recorded
+in [[hr-harness-run-environment]], and not followed.
+
+### Delivered
+
+- `NoticeDecisionOn` / `NoticeDecidedById` on `EmployeeSeparation`; migration
+  `20260820235451_AddSeparationNoticeDecision`, guarded and listed
+- `POST {id}/notice-decision`, plain `[Authorize]` with `RequireDecisionAuthority` in the service —
+  whoever may sign this separation may settle its notice
+- `ApproveAsync` reduced to a yes/no plus a comment
+- The settlement gate, and `RequiresNoticeDecision` on the detail DTO
+- The detail screen's notice panel; slice 3 and slice 5's assertions moved with the rule
+- `run-slice14.mjs` — **35 assertions**
+
+**Area regression after slice 14: 67 + 44 + 58 + 64 + 75 + 37 + 46 + 47 + 36 + 18 + 37 + 62 + 35 +
+136 (audit) = 762 assertions**, all green.
+
+**Still owed:** the engine wiring itself (slice 15) — entity type, adapter, entity context, display
+resolver, the definition, and swapping the detail page onto `<WorkflowApprovalActions>`. The blocker
+that stopped it is now cleared.

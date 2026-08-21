@@ -106,6 +106,19 @@ public class EmployeeSeparationDetailDto : EmployeeSeparationListDto
     public string? NoticeWaiverReason { get; set; }
     public bool IsNoticePaidInLieu { get; set; }
 
+    /// <summary>When the notice decision was taken, or null if nobody has taken it.</summary>
+    public DateTime? NoticeDecisionOn { get; set; }
+
+    public Guid? NoticeDecidedById { get; set; }
+    public string? NoticeDecidedByName { get; set; }
+
+    /// <summary>
+    /// True where notice was left unserved and no decision has been recorded — the state that
+    /// blocks FR-HR-184. Said the way a screen needs to hear it, so it does not have to re-derive
+    /// the rule from a shortfall and two bools.
+    /// </summary>
+    public bool RequiresNoticeDecision { get; set; }
+
     public bool IsEligibleForRehire { get; set; }
     public DateOnly? EligibleForRehireDate { get; set; }
     public string? RehireRestrictions { get; set; }
@@ -226,7 +239,25 @@ public class ApproveEmployeeSeparationDto
 {
     [MaxLength(2000)]
     public string? Notes { get; set; }
+}
 
+/// <summary>
+/// The notice settlement decision: release the balance of the notice, or pay it instead of working
+/// it. Either changes what the leaver is paid, so it is its own act with its own actor and date.
+/// </summary>
+/// <remarks>
+/// ⚠ This used to ride on the approval payload. It was moved out when the FR-HR-092 approval went
+/// onto the generic workflow engine, whose approve action carries a comment and nothing else —
+/// there is nowhere in it to put a decision that changes money. Keeping it on approval would have
+/// meant keeping a separate place for the Managing Director to sign exits, which is what W1 exists
+/// to prevent.
+///
+/// <para>Recording "neither" is a real answer, and the reason it must be recorded rather than
+/// assumed: a settlement prepared with notice unserved and no decision taken silently omits pay
+/// the leaver may be owed, and an omission is invisible in a way a wrong figure is not.</para>
+/// </remarks>
+public class RecordSeparationNoticeDecisionDto
+{
     /// <summary>
     /// Release the employee without requiring the balance of their notice, and without recovering
     /// it. Requires a reason, and is refused where no notice is outstanding.
@@ -234,7 +265,7 @@ public class ApproveEmployeeSeparationDto
     public bool WaiveNotice { get; set; }
 
     [MaxLength(1000)]
-    public string? NoticeWaiverReason { get; set; }
+    public string? Reason { get; set; }
 
     /// <summary>
     /// Pay the unserved notice instead of working it — money the FR-HR-184 settlement will add.
