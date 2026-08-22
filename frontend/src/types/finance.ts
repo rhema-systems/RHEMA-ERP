@@ -1116,7 +1116,10 @@ export interface CreateBankAccountOpeningBalanceDto {
     bookClassification: string;
     idempotencyKey?: string;
     bankAccountId: string;
+    /** Opening amount in the bank account's own currency. */
     amount: number;
+    /** Server-selected approved historical rate; required only for a foreign-currency bank. */
+    exchangeRateId?: string;
 }
 
 export interface CreateResidualGlEquityOpeningBalanceDto {
@@ -1204,6 +1207,12 @@ export interface BankAccountOpeningOption {
     glAccountCode?: string;
     glAccountName?: string;
     postingDirection: 'Debit' | string;
+    exchangeRateId?: string;
+    exchangeRate: number;
+    exchangeRateDate?: string;
+    exchangeRateType?: string;
+    exchangeRateQuoteSide?: string;
+    exchangeRateSource?: string;
     isEligible: boolean;
     blockers: string[];
 }

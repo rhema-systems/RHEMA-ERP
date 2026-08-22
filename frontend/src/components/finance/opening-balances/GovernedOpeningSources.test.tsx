@@ -19,6 +19,7 @@ const financeOptions: GovernedOpeningBalanceOptions = {
       glAccountCode: '1000',
       glAccountName: 'Operating Bank GL',
       postingDirection: 'Debit',
+      exchangeRate: 1,
       isEligible: true,
       blockers: [],
     },
@@ -206,6 +207,70 @@ describe('GovernedOpeningSources', () => {
     expect(
       screen.getByRole('button', { name: 'Prepare immutable opening stock' })
     ).toBeDisabled();
+  });
+
+  it('shows approved foreign-rate evidence and submits native amount with the rate id', () => {
+    handlers.onPrepareBank.mockClear();
+    render(
+      <GovernedOpeningSources
+        openingDate="2025-01-01"
+        fiscalPeriodId="period-1"
+        fiscalPeriodCode="2025-01"
+        bookClassification="IFRS"
+        periodOptions={periodOptions}
+        bookOptions={bookOptions}
+        financeOptions={{
+          ...financeOptions,
+          bankAccounts: [
+            {
+              ...financeOptions.bankAccounts[0],
+              currencyCode: 'USD',
+              exchangeRateId: 'rate-usd-1',
+              exchangeRate: 15,
+              exchangeRateDate: '2025-01-01T00:00:00Z',
+              exchangeRateType: 'Daily',
+              exchangeRateQuoteSide: 'Mid',
+              exchangeRateSource: 'Bank of Ghana',
+            },
+          ],
+        }}
+        openingStockOptions={blockedInventoryOptions}
+        canPrepareFinance
+        canPrepareInventory
+        busyAction={null}
+        {...handlers}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Bank account' }));
+    fireEvent.click(
+      screen.getByRole('option', { name: /Operating Bank.*001.*USD/ })
+    );
+    fireEvent.change(screen.getByLabelText('Opening amount'), {
+      target: { value: '50000' },
+    });
+    fireEvent.change(
+      screen.getByLabelText('Source schedule reference', {
+        selector: '#bank-source-reference',
+      }),
+      { target: { value: 'USD-BANK-SCHEDULE-2025' } }
+    );
+
+    expect(screen.getByText(/Approved Daily Mid rate:/)).toBeInTheDocument();
+    expect(screen.getByText(/Bank of Ghana/)).toBeInTheDocument();
+    expect(screen.getByText(/USD.*50,000\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/GHS.*750,000\.00/)).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Prepare immutable bank batch' })
+    );
+    expect(handlers.onPrepareBank).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bankAccountId: 'bank-1',
+        amount: 50000,
+        exchangeRateId: 'rate-usd-1',
+      })
+    );
   });
 
   it('requires source schedules and positive source values before any governed action', () => {

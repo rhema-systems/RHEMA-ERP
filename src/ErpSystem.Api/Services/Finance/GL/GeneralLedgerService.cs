@@ -1828,6 +1828,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     BankAccountId = bankAccount.Id,
                     BankAccountNumber = bankAccount.AccountNumber,
                     BankAccountName = bankAccount.AccountName,
+                    BankCurrencyCode = bankAccount.Currency,
                     GlAccountId = glAccount.Id,
                     GlAccountNumber = glAccount.AccountNumber,
                     GlAccountName = glAccount.AccountName,
@@ -1876,6 +1877,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ledgerAccount.Receipts = ledgerAccount.Lines.Sum(l => l.DebitAmount);
                 ledgerAccount.Payments = ledgerAccount.Lines.Sum(l => l.CreditAmount);
                 ledgerAccount.ClosingBalance = runningBalance;
+                ledgerAccount.SnapshotComparisonAvailable = string.Equals(
+                    bankAccount.Currency,
+                    report.CurrencyCode,
+                    StringComparison.OrdinalIgnoreCase);
                 report.Accounts.Add(ledgerAccount);
             }
 

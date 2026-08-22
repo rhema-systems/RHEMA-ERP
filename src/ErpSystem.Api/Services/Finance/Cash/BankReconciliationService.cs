@@ -995,7 +995,7 @@ public class BankReconciliationService : IBankReconciliationService
         }
 
         var throughDate = reconciliationDate.Date.AddDays(1).AddTicks(-1);
-        var postedMovement = await _context.AccountTransactions
+        var postedLines = await _context.AccountTransactions
             .Where(t =>
                 t.TenantId == tenantId &&
                 t.AccountId == bankAccount.GLAccountId.Value &&
@@ -1007,7 +1007,37 @@ public class BankReconciliationService : IBankReconciliationService
                     j.Id == t.JournalEntryId &&
                     j.PostingStatus == "Posted" &&
                     !j.IsDeleted))
-            .SumAsync(t => t.DebitAmount - t.CreditAmount);
+            .Select(t => new
+            {
+                t.DebitAmount,
+                t.CreditAmount,
+                t.FunctionalCurrencyCode,
+                t.TransactionCurrency,
+                t.TransactionDebitAmount,
+                t.TransactionCreditAmount
+            })
+            .ToListAsync();
+
+        var bankCurrency = bankAccount.Currency.Trim().ToUpperInvariant();
+        decimal postedMovement = 0m;
+        foreach (var line in postedLines)
+        {
+            if (string.Equals(line.TransactionCurrency, bankCurrency, StringComparison.OrdinalIgnoreCase) &&
+                line.TransactionDebitAmount.HasValue && line.TransactionCreditAmount.HasValue)
+            {
+                postedMovement += line.TransactionDebitAmount.Value - line.TransactionCreditAmount.Value;
+                continue;
+            }
+
+            if (string.Equals(line.FunctionalCurrencyCode, bankCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                postedMovement += line.DebitAmount - line.CreditAmount;
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                $"Posted bank GL movement is missing {bankCurrency} transaction-currency evidence required for reconciliation.");
+        }
 
         return RoundMoney(bankAccount.OpeningBalance + postedMovement);
     }

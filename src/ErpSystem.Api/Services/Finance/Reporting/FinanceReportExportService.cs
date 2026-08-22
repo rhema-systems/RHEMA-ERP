@@ -423,7 +423,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
 
         var rows = new List<string[]>
         {
-            new[] { "BankAccountNumber", "BankAccountName", "GlAccountNumber", "JournalEntryNumber", "TransactionDate", "Description", "Reference", "SourceDocumentType", "Debit", "Credit", "RunningBalance", "StoredSnapshotBalance", "SnapshotVariance" }
+            new[] { "BankAccountNumber", "BankAccountName", "BankCurrency", "GlAccountNumber", "JournalEntryNumber", "TransactionDate", "Description", "Reference", "SourceDocumentType", "Debit", "Credit", "RunningBalance", "StoredSnapshotBalance", "SnapshotVariance" }
         };
         foreach (var account in report.Accounts)
         {
@@ -431,6 +431,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             {
                 account.BankAccountNumber,
                 account.BankAccountName,
+                account.BankCurrencyCode,
                 account.GlAccountNumber,
                 line.JournalEntryNumber,
                 Date(line.TransactionDate),
