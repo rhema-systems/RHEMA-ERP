@@ -838,9 +838,17 @@ public class TeamAwardNomineeRepository : GenericRepository<TeamAwardNominee>, I
             .ToListAsync();
     }
 
+    /// <summary>
+    /// The team nominations an employee is named in.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Employee</c> was not loaded, so <c>employeeName</c> was blank - the same shape as the
+    /// committee-membership read above, in a different repository.
+    /// </remarks>
     public async Task<IEnumerable<TeamAwardNominee>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Set<TeamAwardNominee>()
+            .Include(tan => tan.Employee)
             .Include(tan => tan.Nomination)
                 .ThenInclude(n => n.AwardType)
             .Where(tan => tan.EmployeeId == employeeId && !tan.IsDeleted)
@@ -995,30 +1003,52 @@ public class AwardCommitteeMemberRepository : GenericRepository<AwardCommitteeMe
             .FirstOrDefaultAsync(acm => acm.Id == id && !acm.IsDeleted);
     }
 
+    /// <summary>A committee's members, ordered by role then by name.</summary>
+    /// <remarks>
+    /// ⚠ <b>This threw on every call until the slice-12 content audit.</b> It ordered by
+    /// <c>Employee.FullName</c>, which is a computed property with no column behind it, so EF could
+    /// not translate the query and raised <c>InvalidOperationException</c> - surfacing as a 400 on
+    /// the one endpoint whose entire purpose is listing a committee's members. The same mistake is
+    /// already documented at the top of this file, fixed there and left standing here.
+    /// Ordering by the two mapped columns gives the same result and can actually run.
+    /// </remarks>
     public async Task<IEnumerable<AwardCommitteeMember>> GetByCommitteeIdAsync(Guid committeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
             .Include(acm => acm.Employee)
+            .Include(acm => acm.Committee)
             .Where(acm => acm.CommitteeId == committeeId && !acm.IsDeleted)
             .OrderBy(acm => acm.Role)
-            .ThenBy(acm => acm.Employee.FullName)
+            .ThenBy(acm => acm.Employee.FirstName)
+            .ThenBy(acm => acm.Employee.LastName)
             .ToListAsync();
     }
 
+    /// <summary>The active members only. Same untranslatable ordering as its sibling above.</summary>
     public async Task<IEnumerable<AwardCommitteeMember>> GetActiveByCommitteeIdAsync(Guid committeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
             .Include(acm => acm.Employee)
+            .Include(acm => acm.Committee)
             .Where(acm => acm.CommitteeId == committeeId && acm.IsActive && !acm.IsDeleted)
             .OrderBy(acm => acm.Role)
-            .ThenBy(acm => acm.Employee.FullName)
+            .ThenBy(acm => acm.Employee.FirstName)
+            .ThenBy(acm => acm.Employee.LastName)
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Which committees an employee sits on.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Employee</c> was not loaded, so <c>employeeName</c> and <c>employeeNumber</c> came back
+    /// blank on every row - on a list whose rows are about that very employee.
+    /// </remarks>
     public async Task<IEnumerable<AwardCommitteeMember>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Set<AwardCommitteeMember>()
             .Include(acm => acm.Committee)
+            .Include(acm => acm.Employee)
             .Where(acm => acm.EmployeeId == employeeId && !acm.IsDeleted)
             .OrderByDescending(acm => acm.StartDate)
             .ToListAsync();
@@ -1069,18 +1099,35 @@ public class AwardNominationReviewRepository : GenericRepository<AwardNomination
             .FirstOrDefaultAsync(acr => acr.Id == id && !acr.IsDeleted);
     }
 
+    /// <summary>
+    /// The scores given on one nomination.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>AwardNomination</c> was not loaded, so <c>nominationNumber</c> was blank on every row.
+    /// A committee reading its own scores could not tell which case each belonged to.
+    /// </remarks>
     public async Task<IEnumerable<AwardNominationReview>> GetByNominationIdAsync(Guid nominationId)
     {
         return await _context.Set<AwardNominationReview>()
             .Include(acr => acr.Reviewer)
+            .Include(acr => acr.AwardNomination)
             .Where(acr => acr.AwardNominationId == nominationId && !acr.IsDeleted)
             .OrderBy(acr => acr.ReviewDate)
             .ToListAsync();
     }
 
+    /// <summary>
+    /// The scores one reviewer has given.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Three navigations were loaded and <c>Reviewer</c> - the one the query is keyed on - was
+    /// not, so <c>reviewerName</c> was blank on every row. This backs both the desk's
+    /// <c>reviews/reviewer/{id}</c> and the member's own <c>api/awards/me/reviews</c>.
+    /// </remarks>
     public async Task<IEnumerable<AwardNominationReview>> GetByReviewerIdAsync(Guid reviewerId)
     {
         return await _context.Set<AwardNominationReview>()
+            .Include(acr => acr.Reviewer)
             .Include(acr => acr.AwardNomination)
                 .ThenInclude(an => an.AwardType)
             .Include(acr => acr.AwardNomination)
@@ -1128,16 +1175,35 @@ public class LongServiceAwardRepository : GenericRepository<LongServiceAward>, I
             .ToListAsync();
     }
 
+    /// <summary>
+    /// One long-service award, with everything its detail view names.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>AwardType</c> was not loaded, so <c>awardTypeName</c> was blank on the detail read -
+    /// the screen could show the milestone and the money but not which award it was.
+    /// </remarks>
     public async Task<LongServiceAward?> GetWithDetailsAsync(Guid id)
     {
         return await _context.Set<LongServiceAward>()
             .Include(lsa => lsa.Employee)
+                .ThenInclude(e => e.Department)
+            .Include(lsa => lsa.AwardType)
+            .Include(lsa => lsa.EmployeeAward)
             .FirstOrDefaultAsync(lsa => lsa.Id == id && !lsa.IsDeleted);
     }
 
+    /// <summary>
+    /// An employee's long-service milestones, highest first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ No navigation was loaded at all, so every name on every row was blank. This backs the
+    /// employee's own <c>api/awards/me/awards/long-service</c> as well as the desk's read.
+    /// </remarks>
     public async Task<IEnumerable<LongServiceAward>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Set<LongServiceAward>()
+            .Include(lsa => lsa.Employee)
+            .Include(lsa => lsa.AwardType)
             .Where(lsa => lsa.EmployeeId == employeeId && !lsa.IsDeleted)
             .OrderByDescending(lsa => lsa.YearsOfService)
             .ToListAsync();

@@ -1,6 +1,6 @@
 # HR Area 14 — Staff Awards & Recognition: Build Plan
 
-**Opened 2026-08-21.** Area chosen by the user after the post-9b survey. The area is unusual in
+**Opened 2026-08-21. ✅ COMPLETE 2026-08-22 — 13 slices, 618 assertions, 29 defects.** Area chosen by the user after the post-9b survey. The area is unusual in
 this module: it inherits ~4,950 lines of ported code that has **never once executed**, and its
 requirements come almost entirely from a TDC change document rather than from the FRD.
 
@@ -28,9 +28,12 @@ decision — record the change where it happened.
 | **FRD requirements** | **FR-HR-113** (M) — "report on long-service-award eligibility". That is all of them. |
 | **Primary requirement source** | `D:\Rhema\TDC ERPS\Staff Awards Changes.pdf` — see section 4 |
 | **Backend today** | 15 entities, 100 endpoints, 1,852 lines of service, 1,355 lines of DTOs |
-| **Backend proven** | **Nothing.** Every awards table holds 0 rows |
-| **Frontend today** | none |
-| **Status** | plan written, no code |
+| **Backend proven** | *(at survey)* **Nothing.** Every awards table holds 0 rows |
+| **Frontend today** | *(at survey)* none |
+| **Status** | ✅ **COMPLETE 2026-08-22.** 13 slices, **618 assertions**, 29 defects |
+| **Harness** | `dev-harness/hr-awards/` — `run-slice0..12`, plus `probe-ui-payloads.mjs` |
+| **Frontend** | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards` — registered in all three navigation surfaces |
+| **Owed to TDC** | what a long-service rung is worth (AWD-14); whether severity gates the disciplinary exemption (AWD-15, needs a schema change to discipline first) |
 
 ---
 
@@ -180,36 +183,39 @@ notes, so the requirements below are the extraction; each is given an ID so slic
 
 ### 4.1 Nomination
 
-| ID | Requirement | Exists? |
-|---|---|---|
-| **AWD-01** | HR sets up the eligibility criteria **first**; the criteria then qualify a set of employees | ✅ model exists (`AwardType` + `AwardTypeTarget`), never executed |
-| **AWD-02** | Employees **or** management nominate — including employees nominating managers | ⚠ `NominatedById` exists; no employee-facing route, and the id is caller-supplied |
-| **AWD-03** | Employees nominate **through the staff portal** | ❌ no self-service surface for awards |
-| **AWD-04** | Qualified/shortlisted nominees are **displayed on the portal** for voting | ❌ |
-| **AWD-05** | Staff **vote** on the nominees; the winner is decided by the vote | ❌ **nothing exists** |
-| **AWD-06** | The electorate is configurable — "a section of the employees **or all of them**" | ❌ |
-| **AWD-07** | **Not every award goes to a vote.** Some are a direct management selection | ❌ no selection-method discriminator |
-| **AWD-08** | Some nominations arise from **performance or a target reached** | ⚠ `AutoGenerateNominees` flag exists, no engine |
-| **AWD-09** | A nominator states a **justification or reason** | ✅ `AwardNomination.Justification` |
-| **AWD-10** | A **voter** may also state a justification or reason | ❌ part of the missing vote model |
-| **AWD-11** | Awards are **listed on the portal for nomination before voting opens** — i.e. a nomination window, then a voting window | ❌ no dated cycle; only `Year`/`Quarter`/`Month` ints on the nomination |
+| ID | Requirement | Exists? (at survey) | Delivered |
+|---|---|---|---|
+| **AWD-01** | HR sets up the eligibility criteria **first**; the criteria then qualify a set of employees | ✅ model exists (`AwardType` + `AwardTypeTarget`), never executed | ✅ slice 3 — six criteria were applied by nothing; now an evaluator that returns the qualified set **and the reasons anyone else failed** |
+| **AWD-02** | Employees **or** management nominate — including employees nominating managers | ⚠ `NominatedById` exists; no employee-facing route, and the id is caller-supplied | ✅ slice 1 removed 60 forgeable ids; slice 4 built the employee route |
+| **AWD-03** | Employees nominate **through the staff portal** | ❌ no self-service surface for awards | ✅ slice 4 `api/awards/me`; slice 11 the screen |
+| **AWD-04** | Qualified/shortlisted nominees are **displayed on the portal** for voting | ❌ | ✅ slice 5 ballot |
+| **AWD-05** | Staff **vote** on the nominees; the winner is decided by the vote | ❌ **nothing exists** | ✅ slice 5 — one vote per voter, results withheld until close, ties reported not broken |
+| **AWD-06** | The electorate is configurable — "a section of the employees **or all of them**" | ❌ | ✅ slice 5 — an award with no electorate target is voted on by everyone, which is the "or all of them" half |
+| **AWD-07** | **Not every award goes to a vote.** Some are a direct management selection | ❌ no selection-method discriminator | ✅ slices 2 + 8 — D-3's two independent axes, and direct conferral restricted to `ManagementDirect` |
+| **AWD-08** | Some nominations arise from **performance or a target reached** | ⚠ `AutoGenerateNominees` flag exists, no engine | ✅ slice 7 — the flag was replaced by real triggers; the result reports every count including the zeros |
+| **AWD-09** | A nominator states a **justification or reason** | ✅ `AwardNomination.Justification` | ✅ already present, asserted slice 4 |
+| **AWD-10** | A **voter** may also state a justification or reason | ❌ part of the missing vote model | ✅ slice 5 |
+| **AWD-11** | Awards are **listed on the portal for nomination before voting opens** — i.e. a nomination window, then a voting window | ❌ no dated cycle; only `Year`/`Quarter`/`Month` ints on the nomination | ✅ slice 3 — `AwardCycle` with both windows, and voting cannot open before nominations close |
 
 ### 4.2 Award committee
 
-| ID | Requirement | Exists? |
-|---|---|---|
-| **AWD-12** | Committee members **score** a nomination | ❌ `Approved` is `bool?` |
-| **AWD-13** | The winner is the nominee with the **highest average score** | ❌ |
+| ID | Requirement | Exists? (at survey) | Delivered |
+|---|---|---|---|
+| **AWD-12** | Committee members **score** a nomination | ❌ `Approved` is `bool?` | ✅ slice 6 — `Approved` became `Score`; the desk's score-write endpoints were **removed**, because a member scores from their own surface and never on someone else's behalf |
+| **AWD-13** | The winner is the nominee with the **highest average score** | ❌ | ✅ slice 6 — average, `MinRequiredReviewers` honoured, ties reported rather than broken |
 
 ### 4.3 Long service
 
-| ID | Requirement | Exists? |
-|---|---|---|
-| **AWD-14** | Define the **basis** for long-service awards (the milestones and what each carries) | ⚠ `MinServiceYears`, `YearsOfService`, `MilestoneDate` exist; TDC's actual values **not supplied** |
-| **AWD-15** | **Any negative record — such as disciplinary action — exempts an employee** | ❌ no link to area 9 |
-| **FR-HR-113** | Report on long-service-award eligibility (FRD, Mandatory) | ❌ no report definition |
+| ID | Requirement | Exists? (at survey) | Delivered |
+|---|---|---|---|
+| **AWD-14** | Define the **basis** for long-service awards (the milestones and what each carries) | ⚠ `MinServiceYears`, `YearsOfService`, `MilestoneDate` exist; TDC's actual values **not supplied** | ✅ slice 9 — the ladder is rows HR owns, seeded at D-8's 10/15/20/25/30. ⚠ **Only the years are seeded**; what each rung is *worth* still needs TDC — see the open-questions doc |
+| **AWD-15** | **Any negative record — such as disciplinary action — exempts an employee** | ❌ no link to area 9 | ✅ slice 9 — a per-award switch, **off by default** because TDC stated the rule under Long Service only. ⚠ "Which outcomes disqualify" cannot be built: `StaffDisciplinaryActions` has **no severity column** |
+| **FR-HR-113** | Report on long-service-award eligibility (FRD, Mandatory) | ❌ no report definition | ✅ slice 10 — on the catalogue + provider + seeder + **migration** pattern, reading the sweep's own calculation so the report cannot promise what the button refuses |
 
-**Six requirements need new model. Three need engines. One (AWD-14) still needs TDC data.**
+**All fifteen change-document requirements and FR-HR-113 are delivered.** Two carry a residue that is
+TDC's to answer rather than ours to build: what a long-service rung is worth (AWD-14), and whether
+severity should matter to the disciplinary exemption (AWD-15, which needs a schema change to the
+discipline module before it is even expressible).
 
 ---
 
@@ -327,7 +333,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 9 | Long service | ✅ **Done.** The ladder as data (AWD-14, D-8), the disciplinary exemption as a per-award switch (AWD-15), and the sweep — preview and run sharing one calculation. |
 | 10 | FR-HR-113 | ✅ **Done.** The long-service eligibility report, on the catalogue + provider + seeder + **migration** pattern, reading the sweep's own calculation. |
 | 11 | Screens | ✅ **Done.** The three screens, the payload probe that preceded them, D-9's paging, and the two employee routes the probe found missing. |
-| 12 | Content audit | Every GET asserted for content, not status. **Run it twice.** |
+| 12 | Content audit | ✅ **Done.** All 76 GETs asserted for content; 11 defects found, every one behind a 200 or a plausible 4xx. |
 
 ---
 
@@ -1241,3 +1247,94 @@ stops being a gate, so the twentieth error lands unnoticed. Written up in
 `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` with the two worth looking at first: a duplicated
 `isStockingUnit` whose two declarations disagree about optionality, and a dialog that renders three
 fields its item type does not declare.
+
+---
+
+### Slice 12 — the content audit. 2026-08-22, **78/78**, run twice. No migration.
+
+Harness: `run-slice12-audit.mjs`, **76 routes**, every one asserted for content rather than status.
+Whole area re-run: **32 / 49 / 63 / 6 / 48 / 49 / 42 / 27 / 35 / 91 / 65 / 33 / 78 = 618
+assertions**, all green.
+
+**The first pass failed 19 of 78, and every failure sat behind a 200 or a plausible 4xx.** That is
+the whole argument for this slice, and it is area 11's lesson arriving on schedule: a status-code
+harness proves the *gate*, not the *feature*.
+
+**⚠ Defect 22 — two endpoints that had never returned a row.** `committees/{id}/members` and its
+`/active` twin ordered by `Employee.FullName`, a **computed property with no column behind it**. EF
+cannot translate it, so both threw `InvalidOperationException` on every call and answered 400 — on
+the endpoint whose entire purpose is listing a committee's members. The identical mistake is
+documented in a comment at the top of that same repository file: found once, fixed there, left
+standing here.
+
+Sweeping the whole data layer afterwards found **four** uses of `FullName` inside `OrderBy`/`ThenBy`:
+the two above, one in Procurement (recorded as cross-module defect #5, not fixed — not ours), and two
+that are perfectly safe because `EmployeeReferee.FullName` and `JobCandidateReferee.FullName` are
+real mapped columns. **The name alone does not tell you which kind you have.** That is why this class
+survives review.
+
+**⚠ Defects 23–28 — six missing `.Include`s, all the same shape:** a `*Name` that exists, serialises,
+and is always blank.
+
+| endpoint | blank | cause |
+|---|---|---|
+| `committee-members/employee/{id}` | `employeeName` | `Employee` not loaded on a list *about* that employee |
+| `nominations/{id}/reviews` | `nominationNumber` | `AwardNomination` not loaded |
+| `reviews/reviewer/{id}` + `me/reviews` | `reviewerName` | three navigations loaded, **not the one the query is keyed on** |
+| `team-nominees/employee/{id}` | `employeeName` | `Employee` not loaded |
+| `long-service/{id}` | `awardTypeName` | `AwardType` not loaded |
+| `long-service/employee/{id}` | every name | no navigation loaded at all |
+
+**⚠ Defect 29 — `budgetCode` was minted by nothing.** Not `[Required]` on the create DTO and
+generated nowhere, so every budget carried an empty string: blank on four list endpoints, and
+invisible to `GetByBudgetCodeAsync`, which is the only lookup built for it. Every other numbered
+record in this area mints its own identifier; this one was left to the caller and then never asked
+for. The service now generates `AWB-{year}-{6 hex}`.
+
+**Four of the nineteen failures were the audit's own, not the product's**, and separating them
+mattered more than fixing them: I sent `Eligibility` to a route parameter that binds `AwardScope`
+(the wrong enum entirely), checked `isActive` where the payload says `isActiveMember`, called two
+lookups with a made-up GUID and recorded the correct 404 as a failure, and treated "you have not
+voted" — also a 404 — as a fault. *An audit that cannot tell "this endpoint is broken" from "I asked
+for something that does not exist" is measuring itself.*
+
+**⚠ I reached for a migration to make a red assertion green.** The last failure was
+`budgets/year-range` reporting a blank code — from rows created before the generation fix. I wrote a
+backfill migration for it. The user asked whether it was necessary, and it was not: `rebuild-db`
+stamps migrations as applied **without executing them**, an empty table makes it a no-op, and — the
+decisive fact — **the awards module has never been usable**, so no real budget exists anywhere to
+backfill. The blank rows were my own harness fixtures.
+
+The assertion was the thing that was wrong. It checked `rows()[0]` — whichever row happened to sort
+first, which on a shared tenant is some other run's leftover. It now finds the budget *this run
+created* and checks that. **Asserting on data the harness did not create proves as little as
+asserting on an empty list**, which is a rule stated at the top of the very file that broke it.
+
+**One list is exempt, and named rather than silently passed.** `nominations/{id}/attachments` needs a
+real file through the upload gate and this harness has no clamd stub; its row shape is proved by the
+attachment slice. An unproven shape nobody names becomes a shape nobody checks.
+
+---
+
+## Area 14 — complete
+
+**13 slices, 618 assertions, 29 defects.** All fifteen change-document requirements (AWD-01 to
+AWD-15) and FR-HR-113 delivered; see the tables in section 4 for what each slice closed.
+
+**The area's signature defect, stated once for whoever reads this next.** Twenty-nine defects, and
+the largest single group — more than half — is one shape: *a field that exists, type-checks,
+serialises, and carries nothing.* It is written correctly, stored correctly, and quietly missing from
+the payload. The write succeeds, the status code is right, the database is correct, and **nothing
+fails.** Every instance was found by asserting content; not one would have been found by asserting
+status.
+
+The second group is its sibling: *whole features that had never once executed* — `AssignToCommitteeAsync`,
+`CreateFromNominationAsync`, `GetPendingReviewsAsync`, the FR-HR-113 report, and two committee reads
+that threw on every call. Declared, implemented, wired, and unreachable.
+
+**What is still owed, and by whom.** Two answers are TDC's rather than ours: what each long-service
+rung is worth, and whether severity should matter to the disciplinary exemption — the latter needs a
+severity column on `StaffDisciplinaryActions` before it is even expressible. Both are in
+`docs/HR-OPEN-QUESTIONS-FOR-TDC.md`. Every money event is registered in
+`docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-module sweep; **nothing in this area posts to a
+ledger.** `LongServiceAward.LeaveId` remains a hook with no writer.

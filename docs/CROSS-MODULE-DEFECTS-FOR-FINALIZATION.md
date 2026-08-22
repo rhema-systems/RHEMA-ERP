@@ -326,6 +326,55 @@ noticed. That is the real cost — not the 19, but the twentieth.
 
 ---
 
+## 5. Procurement — `GetActiveByBusinessPartnerIdAsync` orders by an unmapped property, so it throws on every call
+
+**Found:** 2026-08-22, sweeping the data layer after HR area 14's content audit found the identical
+bug in two award repositories.
+
+### What is broken
+
+`src/ErpSystem.Data/Repositories/Procurement/BusinessPartnerUserRepository.cs:58`
+
+```csharp
+    .OrderBy(bpu => bpu.User!.FullName)
+```
+
+`ApplicationUser.FullName` is a **computed property** — `=> $"{FirstName} {LastName}"` — with no
+column behind it. EF Core cannot translate it, so the query raises
+`InvalidOperationException: The LINQ expression … could not be translated` **before any SQL runs**.
+
+The method therefore returns a result **never**. Not sometimes, not for some tenants: every call
+throws.
+
+### What was proven
+
+The identical construct in `AwardCommitteeMemberRepository` was ordered by `Employee.FullName` and
+did exactly this — `committees/{id}/members` and `committees/{id}/members/active` answered 400 on
+every request, and had never once returned a row. It was caught by asserting **content** rather than
+status; a status-only check sees a 4xx and reads it as a refusal working correctly.
+
+The Procurement instance is the same expression against the same kind of property. It has not been
+executed here — HR has no fixtures for business-partner users — so it is reported rather than
+claimed as reproduced.
+
+### What it blocks
+
+Nothing in HR. It blocks whatever screen lists the active users attached to a business partner.
+
+### What a fix needs
+
+1. Order by the mapped columns instead: `.OrderBy(bpu => bpu.User!.FirstName).ThenBy(bpu => bpu.User!.LastName)`.
+   Same result, and it can run.
+2. **Then look for the others.** A sweep of `src/ErpSystem.Data` for `FullName` inside `OrderBy` /
+   `ThenBy` / `Where` found four uses: two in HR (now fixed), this one, and two that are safe
+   because `EmployeeReferee.FullName` and `JobCandidateReferee.FullName` are real mapped columns
+   rather than computed ones. **The name alone does not tell you which kind you have** — that is
+   what makes this class of bug survive review.
+3. Whatever test covers it must assert the **rows**, not the status code. This bug's whole signature
+   is an endpoint that answers, consistently, with an error.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

@@ -545,6 +545,16 @@ public class AwardBudgetService : IAwardBudgetService
             throw AwardsWorkflowException.Conflict($"Budget for award type {dto.AwardTypeId} and year {dto.Year} already exists.");
 
         var entity = dto.ToEntity(tenantId, userId);
+
+        // ⚠ BudgetCode is not [Required] on the create DTO and nothing generated it, so a budget
+        // created without one carried an empty string forever - blank in every list, and invisible
+        // to GetByBudgetCodeAsync, which is the only way to look a budget up by code. Every other
+        // numbered record in this area mints its own identifier; this one was left to the caller and
+        // then never asked for. Found by the slice-12 content audit, which is the first thing that
+        // ever read the field back.
+        if (string.IsNullOrWhiteSpace(entity.BudgetCode))
+            entity.BudgetCode = $"AWB-{entity.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
         await _budgetRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
