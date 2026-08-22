@@ -186,6 +186,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             .Select(t => new FinancePostingLineDto
             {
                 AccountId = t.AccountId,
+                SourceDocumentLineId = t.SourceDocumentLineId,
                 Description = $"Reversal: {t.Description}",
                 DebitAmount = t.CreditAmount,
                 CreditAmount = t.DebitAmount,
@@ -324,6 +325,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             transaction.TransactionDate = validation.PostingDate;
             transaction.SourceModule = validation.SourceModule;
             transaction.SourceDocumentId = validation.SourceDocumentId;
+            transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
             transaction.SourceDocumentType = validation.SourceDocumentType;
             transaction.BookClassification = validation.BookClassification;
             transaction.FunctionalCurrencyCode = validation.FunctionalCurrencyCode;
@@ -397,6 +399,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 AccountId = line.AccountId,
+                SourceDocumentLineId = line.SourceDocumentLineId,
                 JournalEntryId = journalEntry.Id,
                 TransactionDate = validation.PostingDate,
                 Description = line.Description ?? validation.Description,
@@ -1074,6 +1077,7 @@ WHERE [Id] = {delta.AccountId}
 
             normalizedLines.Add(new ValidatedPostingLine(
                 line.AccountId,
+                line.SourceDocumentLineId,
                 NormalizeOptional(line.Description, 500, "Line description"),
                 debit,
                 credit,
@@ -1425,6 +1429,22 @@ WHERE [Id] = {delta.AccountId}
     {
         ExchangeRate? rate;
         var policyOverrideUsed = policy.IsOverride;
+        var preservesHistoricalSourceMeasurement =
+            request.PreserveHistoricalExchangeRateSnapshot &&
+            string.Equals(request.SourceModule, "AP", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(request.SourceDocumentType, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase) &&
+            exchangeRateId.HasValue &&
+            suppliedRate.HasValue;
+        if (request.PreserveHistoricalExchangeRateSnapshot && !preservesHistoricalSourceMeasurement)
+            throw new InvalidOperationException(
+                "Historical exchange-rate preservation is restricted to an AP supplier debit note with explicit source-rate evidence.");
+        if (preservesHistoricalSourceMeasurement)
+        {
+            // A supplier debit note corrects the approved source invoice at its immutable rate;
+            // this is not a user-entered current-period FX override.
+            EnsureExchangeRateOverrideApproval(request, requireApproval: true);
+            policyOverrideUsed = true;
+        }
         if (exchangeRateId.HasValue)
         {
             rate = await _context.ExchangeRates
@@ -1484,7 +1504,8 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Exchange rate currency pair does not match the posting currency pair.");
         }
 
-        if (rate.EffectiveDate.Date > postingDate.Date || (rate.EndDate.HasValue && rate.EndDate.Value.Date < postingDate.Date))
+        if (!preservesHistoricalSourceMeasurement &&
+            (rate.EffectiveDate.Date > postingDate.Date || (rate.EndDate.HasValue && rate.EndDate.Value.Date < postingDate.Date)))
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
                 tenantId,
@@ -1495,7 +1516,8 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Exchange rate is not effective for the posting date.");
         }
 
-        if (!rate.IsActive || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved))
+        if (!preservesHistoricalSourceMeasurement &&
+            (!rate.IsActive || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved)))
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
                 tenantId,
@@ -1510,7 +1532,7 @@ WHERE [Id] = {delta.AccountId}
         {
             // A reversal must reproduce the original immutable rate snapshot even
             // when the tenant's current policy has since changed.
-            if (!request.ReversalOfJournalEntryId.HasValue)
+            if (!request.ReversalOfJournalEntryId.HasValue && !preservesHistoricalSourceMeasurement)
             {
                 EnsureExchangeRateOverrideApproval(request, requireOverrideApproval);
                 policyOverrideUsed = true;
@@ -2094,6 +2116,7 @@ WHERE [Id] = {delta.AccountId}
 
     private sealed record ValidatedPostingLine(
         Guid AccountId,
+        Guid? SourceDocumentLineId,
         string? Description,
         decimal DebitAmount,
         decimal CreditAmount,

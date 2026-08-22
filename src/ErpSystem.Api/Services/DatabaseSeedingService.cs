@@ -821,6 +821,8 @@ namespace ErpSystem.Web.Services
                 var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
                 foreach (var tenant in tenants)
                 {
+                    var tenantId = tenant.Id;
+                    await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
@@ -868,6 +870,62 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogError(ex, "Failed to seed finance workflows");
             }
+        }
+
+        private async Task RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(Guid tenantId)
+        {
+            // Finance owns SupplierDebitNote commercial/AP approval only. FIN-INT-012/013 remain
+            // quarantined, so historical SupplierReturn definitions must not authorize a Procurement/
+            // Inventory return dispatch or imply that Finance owns the producer transaction.
+            var activeDefinitions = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.IsActive)
+                .ToListAsync();
+
+            var retiredAt = DateTime.UtcNow;
+            var retiredCount = RetireQuarantinedSupplierReturnWorkflowDefinitions(activeDefinitions, retiredAt);
+            if (retiredCount == 0)
+                return;
+
+            await _context.SaveChangesAsync();
+            _logger.LogWarning(
+                "Retired {WorkflowDefinitionCount} active SupplierReturn workflow definition(s) for tenant {TenantId}; FIN-INT-012/013 remain quarantined.",
+                retiredCount,
+                tenantId);
+        }
+
+        private static int RetireQuarantinedSupplierReturnWorkflowDefinitions(
+            IEnumerable<WorkflowDefinition> definitions,
+            DateTime retiredAt)
+        {
+            var retiredCount = 0;
+            foreach (var definition in definitions.Where(item =>
+                         item.IsActive &&
+                         !item.IsDeleted &&
+                         item.EntityType != null &&
+                         item.EntityType.TenantId == item.TenantId &&
+                         !item.EntityType.IsDeleted &&
+                         (WorkflowEntityTypeKeyMatches(item.EntityType.Code, "SupplierReturn") ||
+                          WorkflowEntityTypeKeyMatches(item.EntityType.Name, "SupplierReturn") ||
+                          string.Equals(
+                              item.EntityType.EntityClassName,
+                              typeof(SupplierReturn).FullName,
+                              StringComparison.Ordinal))))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt = retiredAt;
+                definition.RetiredById = null;
+                definition.UpdatedAt = retiredAt;
+                definition.UpdatedBy = "System";
+                definition.LastModifiedById = null;
+                retiredCount++;
+            }
+
+            return retiredCount;
         }
 
         private async Task EnsureVendorPaymentControlWorkflowSeededAsync(Guid tenantId)
@@ -1166,8 +1224,11 @@ namespace ErpSystem.Web.Services
                     "Manual supplier payment authorization before posting, clearing, or settlement finalization."),
                 new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
                     "Bulk supplier payment batch approval before processing."),
-                new("SupplierReturn", "Supplier Return", typeof(SupplierReturn).FullName, "Supplier Return Approval",
-                    "Supplier return approval before goods are shipped back, debit notes are issued, or refunds are tracked."),
+                // Finance owns the buyer-side commercial credit/AP correction only. This does
+                // not lift the SupplierReturn integration quarantine or authorize stock dispatch.
+                new("SupplierDebitNote", "Supplier Debit Note", typeof(SupplierDebitNote).FullName,
+                    "Supplier Debit Note Approval",
+                    "Independent Finance approval of the buyer-side AP debit note before central posting and settlement application."),
 
                 // Accounts Receivable
                 new("Quote", "Quotation", typeof(Quote).FullName, "Quotation Approval",
@@ -8080,6 +8141,41 @@ namespace ErpSystem.Web.Services
                 },
                 new
                 {
+                    Name = FinancePermissions.ManageApSupplierDebitNotes,
+                    DisplayName = "Manage AP Supplier Debit Notes",
+                    Description = "Create, edit, and cancel controlled supplier debit notes",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.SubmitApSupplierDebitNotes,
+                    DisplayName = "Submit AP Supplier Debit Notes",
+                    Description = "Submit supplier debit notes for independent approval",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.ApproveApSupplierDebitNotes,
+                    DisplayName = "Approve AP Supplier Debit Notes",
+                    Description = "Approve or reject submitted supplier debit notes",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.PostApSupplierDebitNotes,
+                    DisplayName = "Post AP Supplier Debit Notes",
+                    Description = "Post approved supplier debit notes through the Finance engine",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.ReverseApSupplierDebitNotes,
+                    DisplayName = "Reverse AP Supplier Debit Notes",
+                    Description = "Reverse posted supplier debit notes with compensating evidence",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
                     Name = "Finance.AR.Invoices.Create",
                     DisplayName = "Create AR Invoices",
                     Description = "Create customer invoices",
@@ -8325,6 +8421,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
@@ -8360,6 +8459,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Process",
                     "Finance.CashBank.Documents.Issue",
                     "Finance.JournalEntries.Create",
@@ -8409,6 +8511,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Process",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
@@ -8451,6 +8556,7 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalBatches.Export",
                     "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Approve",
                     "Finance.AR.Invoices.ApprovePost",
                     "Finance.AR.Invoices.Void",
@@ -8505,6 +8611,8 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodClose.Waivers.Approve",
                     "Finance.PeriodReopen.Approve",
                     "Finance.AP.Payments.Approve",
+                    FinancePermissions.PostApSupplierDebitNotes,
+                    FinancePermissions.ReverseApSupplierDebitNotes,
                     "Finance.Workflow.Submit",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",

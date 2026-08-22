@@ -29,7 +29,15 @@ import type {
     VendorInvoiceMatchExceptionStatus,
     ProcurementFinanceReconciliationReport,
     ProcurementAcceptedSupplyOptions,
-    ApInvoiceSupplier
+    ApInvoiceSupplier,
+    SupplierDebitNote,
+    SupplierDebitNoteCreateRequest,
+    SupplierDebitNoteUpdateRequest,
+    SupplierDebitNoteStatus,
+    SupplierDebitNoteApplication,
+    SupplierDebitNoteApplicationRequest,
+    SupplierDebitNoteApplicationResult,
+    ApSupplierIdentity
 } from '../types/ap';
 
 // Re-using the PagedResult structure from ar-service
@@ -84,6 +92,16 @@ export interface PaymentBatchQuery {
     toDate?: string;
     sortBy?: string;
     sortDescending?: boolean;
+}
+
+export interface SupplierDebitNoteQuery {
+    vendorId?: string;
+    supplierId?: string;
+    originalVendorInvoiceId?: string;
+    status?: SupplierDebitNoteStatus;
+    fromDate?: string;
+    toDate?: string;
+    search?: string;
 }
 
 class AccountsPayableService {
@@ -293,6 +311,29 @@ class AccountsPayableService {
         return apiService.get<InvoicePaymentSodReadiness>(`${this.baseUrl}/payments/${id}/sod-readiness`);
     }
 
+    public async getSupplierDebitNoteApplications(paymentId: string): Promise<SupplierDebitNoteApplication[]> {
+        return apiService.get<SupplierDebitNoteApplication[]>(
+            `${this.baseUrl}/payments/${paymentId}/supplier-debit-note-applications`
+        );
+    }
+
+    public async applySupplierDebitNotes(
+        paymentId: string,
+        applications: SupplierDebitNoteApplicationRequest[],
+    ): Promise<SupplierDebitNoteApplicationResult> {
+        return apiService.post<SupplierDebitNoteApplicationResult>(
+            `${this.baseUrl}/payments/${paymentId}/supplier-debit-note-applications`,
+            applications,
+        );
+    }
+
+    public async reverseSupplierDebitNoteApplication(applicationId: string, reason: string): Promise<void> {
+        return apiService.post<void>(
+            `${this.baseUrl}/payments/supplier-debit-note-applications/${applicationId}/reverse`,
+            reason,
+        );
+    }
+
     // --- Payment Batches ---
 
     public async getBatches(query: PaymentBatchQuery = {}): Promise<PagedResult<PaymentBatch>> {
@@ -460,7 +501,69 @@ class AccountsPayableService {
         });
     }
 
-    // --- Supplier Returns & Debit Notes ---
+    // --- Finance-owned Supplier Debit Notes ---
+
+    public async getApSupplierIdentity(id: string): Promise<ApSupplierIdentity> {
+        return apiService.get<ApSupplierIdentity>(
+            `${this.baseUrl}/supplier-identities/${encodeURIComponent(id)}`,
+        );
+    }
+
+    public async getSupplierDebitNotes(query: SupplierDebitNoteQuery = {}): Promise<SupplierDebitNote[]> {
+        return apiService.get<SupplierDebitNote[]>(`${this.baseUrl}/supplier-debit-notes`, { ...query });
+    }
+
+    public async getSupplierDebitNote(id: string): Promise<SupplierDebitNote> {
+        return apiService.get<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}`);
+    }
+
+    public async createSupplierDebitNote(data: SupplierDebitNoteCreateRequest): Promise<SupplierDebitNote> {
+        return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes`, data);
+    }
+
+    public async updateSupplierDebitNote(
+        id: string,
+        data: SupplierDebitNoteUpdateRequest,
+    ): Promise<SupplierDebitNote> {
+        return apiService.put<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}`, data);
+    }
+
+    public async submitSupplierDebitNote(id: string): Promise<SupplierDebitNote> {
+        return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/submit`, {});
+    }
+
+    public async decideSupplierDebitNote(
+        id: string,
+        approve: boolean,
+        comments?: string,
+    ): Promise<SupplierDebitNote> {
+        return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/approval`, {
+            approve,
+            comments,
+            rejectionReason: approve ? undefined : comments,
+        });
+    }
+
+    public async postSupplierDebitNote(id: string): Promise<SupplierDebitNote> {
+        return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/post`, {});
+    }
+
+    public async cancelSupplierDebitNote(id: string, reason: string): Promise<SupplierDebitNote> {
+        return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/cancel`, { reason });
+    }
+
+    public async reverseSupplierDebitNote(
+        id: string,
+        reason: string,
+        reversalDate?: string,
+    ): Promise<SupplierDebitNote> {
+        return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/reverse`, {
+            reason,
+            reversalDate,
+        });
+    }
+
+    // --- Quarantined historical Supplier Returns (read-only in the UI) ---
 
     public async getSupplierReturns(): Promise<any[]> {
         return apiService.get<any[]>(`${this.baseUrl}/supplier-returns`);

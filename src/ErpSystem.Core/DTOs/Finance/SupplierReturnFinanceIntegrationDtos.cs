@@ -188,6 +188,12 @@ public sealed record SupplierReturnFinanceOutcomeDto
     public Guid? PostingEventId { get; init; }
     public Guid? JournalEntryId { get; init; }
     public Guid? SupplierDebitNoteId { get; init; }
+    /// <summary>
+    /// Reserved for a future, explicitly non-executable Finance preview. FIN-INT-013 v0.1 always leaves
+    /// this null: the existing SupplierDebitNote line model would reverse Inventory twice instead of
+    /// clearing a governed return-to-vendor balance.
+    /// </summary>
+    public CreateSupplierDebitNoteDto? PreparedSupplierDebitNote { get; init; }
     public bool RequiresCashSettlement { get; init; }
     public string Message { get; init; } = string.Empty;
     public IReadOnlyList<string> DecisionCodes { get; init; } = Array.Empty<string>();

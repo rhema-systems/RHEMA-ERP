@@ -8516,6 +8516,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("SourceDocumentId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("SourceDocumentLineId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("SourceDocumentType")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -8576,6 +8579,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("OriginalTransactionId");
 
                     b.HasIndex("ReversalTransactionId");
+
+                    b.HasIndex("TenantId", "SourceDocumentId", "SourceDocumentLineId");
 
                     b.HasIndex("TenantId", "TransactionCurrency", "ExchangeRateId");
 
@@ -9039,6 +9044,79 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("AllocationTargets", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ApSupplierIdentityLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BusinessPartnerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsVerified")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MappingSource")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("VerifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessPartnerId");
+
+                    b.HasIndex("SupplierId");
+
+                    b.HasIndex("TenantId", "BusinessPartnerId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ApSupplierIdentityLinks_Tenant_BusinessPartner");
+
+                    b.HasIndex("TenantId", "SupplierId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ApSupplierIdentityLinks_Tenant_Supplier");
+
+                    b.ToTable("ApSupplierIdentityLinks", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BankAccount", b =>
@@ -20865,7 +20943,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<decimal>("ExchangeRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -21512,17 +21590,149 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("VendorId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId");
 
                     b.HasIndex("OriginalVendorInvoiceId");
 
-                    b.HasIndex("SupplierReturnId");
+                    b.HasIndex("PostingEventId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("ReversalPostingEventId");
+
+                    b.HasIndex("SupplierId");
+
+                    b.HasIndex("SupplierReturnId");
 
                     b.HasIndex("VendorId");
 
+                    b.HasIndex("WorkflowInstanceId");
+
+                    b.HasIndex("TenantId", "DebitNoteNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SupplierDebitNotes_Tenant_DebitNoteNumber");
+
+                    b.HasIndex("TenantId", "Status", "DebitNoteDate")
+                        .HasDatabaseName("IX_SupplierDebitNotes_Tenant_Status_Date");
+
+                    b.HasIndex("TenantId", "VendorId", "SupplierCreditNoteReference")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference")
+                        .HasFilter("[SupplierCreditNoteReference] IS NOT NULL AND [IsDeleted] = 0");
+
                     b.ToTable("SupplierDebitNotes", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("ApplicationAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("ApplicationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("ExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("FunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReversal")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("OriginalApplicationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PaymentJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PaymentPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SupplierDebitNoteId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("VendorInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("VendorPaymentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentJournalEntryId");
+
+                    b.HasIndex("PaymentPostingEventId");
+
+                    b.HasIndex("SupplierDebitNoteId");
+
+                    b.HasIndex("VendorInvoiceId");
+
+                    b.HasIndex("VendorPaymentId");
+
+                    b.HasIndex("TenantId", "OriginalApplicationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SupplierDebitNoteApplication_Tenant_Original_Reversal")
+                        .HasFilter("[IsReversal] = 1 AND [OriginalApplicationId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "SupplierDebitNoteId", "VendorPaymentId", "VendorInvoiceId")
+                        .HasDatabaseName("IX_SupplierDebitNoteApplications_Tenant_Note_Payment_Invoice");
+
+                    b.ToTable("SupplierDebitNoteApplications", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SupplierDebitNoteApplications_Amount", "([IsReversal] = 0 AND [ApplicationAmount] > 0) OR ([IsReversal] = 1 AND [ApplicationAmount] < 0)");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteLineItem", b =>
@@ -21557,17 +21767,37 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiscountPercentage")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("GLAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("LineItemType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<decimal>("LineTotal")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<Guid?>("OriginalAccountTransactionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginalFinancePurchaseOrderItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginalVendorInvoiceLineItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal>("Quantity")
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid?>("ResolvedCreditAccountId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("SupplierDebitNoteId")
                         .HasColumnType("uniqueidentifier");
@@ -21595,11 +21825,114 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("GLAccountId");
+
+                    b.HasIndex("OriginalAccountTransactionId");
+
+                    b.HasIndex("OriginalFinancePurchaseOrderItemId");
+
+                    b.HasIndex("OriginalVendorInvoiceLineItemId");
+
+                    b.HasIndex("ResolvedCreditAccountId");
+
                     b.HasIndex("SupplierDebitNoteId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "SupplierDebitNoteId")
+                        .HasDatabaseName("IX_SupplierDebitNoteLineItems_Tenant_Note");
 
                     b.ToTable("SupplierDebitNoteLineItems", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteTaxComponent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("BaseAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("CalculationOrder")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CompoundBasis")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginalAccountTransactionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginalTaxCalculationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ResolvedCreditAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SupplierDebitNoteLineItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("TaxAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid?>("TaxGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TaxId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("TaxRate")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("TaxableAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OriginalAccountTransactionId");
+
+                    b.HasIndex("OriginalTaxCalculationId");
+
+                    b.HasIndex("ResolvedCreditAccountId");
+
+                    b.HasIndex("SupplierDebitNoteLineItemId");
+
+                    b.HasIndex("TaxGroupId");
+
+                    b.HasIndex("TaxId");
+
+                    b.HasIndex("TenantId", "SupplierDebitNoteLineItemId", "CalculationOrder", "TaxId")
+                        .IsUnique();
+
+                    b.ToTable("SupplierDebitNoteTaxComponents", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierReturn", b =>
@@ -21950,11 +22283,14 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("PostingAccountId");
+
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TaxId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "DocumentType", "DocumentId", "DocumentLineId", "TaxId", "TaxGroupId")
+                        .HasDatabaseName("IX_TaxCalculations_Document_Line_Tax");
 
                     b.ToTable("TaxCalculations");
                 });
@@ -156426,6 +156762,33 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ApSupplierIdentityLink", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
+                        .WithMany()
+                        .HasForeignKey("BusinessPartnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BusinessPartner");
+
+                    b.Navigation("Supplier");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BankDepositAllocation", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Finance.BankDepositBatch", "BankDepositBatch")
@@ -159907,9 +160270,34 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNote", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoice", "OriginalVendorInvoice")
                         .WithMany()
                         .HasForeignKey("OriginalVendorInvoiceId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("PostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.SupplierReturn", "SupplierReturn")
                         .WithMany()
@@ -159936,8 +160324,78 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Vendor");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteApplication", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.SupplierDebitNote", "SupplierDebitNote")
+                        .WithMany("Applications")
+                        .HasForeignKey("SupplierDebitNoteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoice", "VendorInvoice")
+                        .WithMany("SupplierDebitNoteApplications")
+                        .HasForeignKey("VendorInvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorPayment", "VendorPayment")
+                        .WithMany("SupplierDebitNoteApplications")
+                        .HasForeignKey("VendorPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("SupplierDebitNote");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("VendorInvoice");
+
+                    b.Navigation("VendorPayment");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteLineItem", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("GLAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalAccountTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderItem", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalFinancePurchaseOrderItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoiceLineItem", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalVendorInvoiceLineItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedCreditAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.SupplierDebitNote", "SupplierDebitNote")
                         .WithMany("LineItems")
                         .HasForeignKey("SupplierDebitNoteId")
@@ -159951,6 +160409,52 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("SupplierDebitNote");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteTaxComponent", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalAccountTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.TaxCalculation", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalTaxCalculationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedCreditAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.SupplierDebitNoteLineItem", "SupplierDebitNoteLineItem")
+                        .WithMany("TaxComponents")
+                        .HasForeignKey("SupplierDebitNoteLineItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.TaxGroup", null)
+                        .WithMany()
+                        .HasForeignKey("TaxGroupId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Tax", null)
+                        .WithMany()
+                        .HasForeignKey("TaxId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("SupplierDebitNoteLineItem");
 
                     b.Navigation("Tenant");
                 });
@@ -197641,7 +198145,14 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNote", b =>
                 {
+                    b.Navigation("Applications");
+
                     b.Navigation("LineItems");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteLineItem", b =>
+                {
+                    b.Navigation("TaxComponents");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierReturn", b =>
@@ -197691,6 +198202,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("LineItems");
 
                     b.Navigation("PaymentAllocations");
+
+                    b.Navigation("SupplierDebitNoteApplications");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorInvoiceMatchException", b =>
@@ -197705,6 +198218,8 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPayment", b =>
                 {
                     b.Navigation("Allocations");
+
+                    b.Navigation("SupplierDebitNoteApplications");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.WithholdingTaxRemittance", b =>
