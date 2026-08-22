@@ -332,7 +332,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 var idempotency = await ResolveGovernedIdempotencyAsync(header.IdempotencyKey, token);
                 if (idempotency.Existing != null)
                 {
-                    EnsureBankOpeningRetryMatches(idempotency.Existing, dto.BankAccountId, amount, header);
+                    EnsureBankOpeningRetryMatches(idempotency.Existing, dto.BankAccountId, amount, dto.ExchangeRateId, header);
                     return await MapBatchAsync(idempotency.Existing.Id, token)
                         ?? throw new InvalidOperationException("The existing bank opening batch could not be reloaded.");
                 }
@@ -342,9 +342,14 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                     tenantId,
                     dto.BankAccountId,
                     header.OpeningDate,
+                    dto.ExchangeRateId,
+                    allowDerivedRate: false,
                     excludeBatchId: null,
                     requireUnusedState: true,
                     cancellationToken: token);
+
+                var nativeAmount = amount;
+                var functionalAmount = RoundMoney(nativeAmount * context.ExchangeRate.Rate);
 
                 return await CreateBatchCoreAsync(new CreateOpeningBalanceBatchDto
                 {
@@ -360,11 +365,13 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                         new CreateOpeningBalanceLineDto
                         {
                             AccountId = context.BankGl.Id,
-                            DebitAmount = amount,
-                            TransactionDebitAmount = amount,
+                            DebitAmount = functionalAmount,
+                            TransactionDebitAmount = nativeAmount,
                             TransactionCreditAmount = 0m,
-                            TransactionCurrencyCode = header.FunctionalCurrency,
+                            TransactionCurrencyCode = context.BankCurrency,
                             FunctionalCurrencyCode = header.FunctionalCurrency,
+                            ExchangeRateId = context.ExchangeRate.ExchangeRateId,
+                            ExchangeRateDate = context.ExchangeRate.EffectiveDate,
                             BankAccountId = context.Bank.Id,
                             CounterpartyType = BankAccountOpening,
                             CounterpartyId = context.Bank.Id,
@@ -375,9 +382,9 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                         {
                             AccountId = context.MigrationClearing.Id,
                             DebitAmount = 0m,
-                            CreditAmount = amount,
+                            CreditAmount = functionalAmount,
                             TransactionDebitAmount = 0m,
-                            TransactionCreditAmount = amount,
+                            TransactionCreditAmount = functionalAmount,
                             TransactionCurrencyCode = header.FunctionalCurrency,
                             FunctionalCurrencyCode = header.FunctionalCurrency,
                             BankAccountId = context.Bank.Id,
@@ -890,11 +897,22 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         BankAccount Bank,
         Account BankGl,
         Account MigrationClearing,
-        FinanceSettings Settings);
+        FinanceSettings Settings,
+        string BankCurrency,
+        BankExchangeRateSnapshot ExchangeRate);
     private sealed record BankOpeningInspection(
         Account? BankGl,
         Account? MigrationClearing,
+        string BankCurrency,
+        BankExchangeRateSnapshot? ExchangeRate,
         IReadOnlyList<string> Errors);
+    private sealed record BankExchangeRateSnapshot(
+        Guid? ExchangeRateId,
+        decimal Rate,
+        DateTime? EffectiveDate,
+        ExchangeRateType RateType,
+        ExchangeRateQuoteSide QuoteSide,
+        string Source);
     private sealed record GovernedIdempotencyResolution(
         OpeningBalanceBatch? Existing,
         string EffectiveKey);
@@ -1176,12 +1194,15 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             if (!string.Equals(line.TransactionCurrencyCode, tenantFunctionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 // Freehand GL imports still cannot invent an original foreign amount. The only
-                // exception is a server-generated specialised advance line: its canonical payment,
-                // approved rate ID, native amount, and functional amount are revalidated below.
-                if (!IsSpecializedOpeningLine(line) || !line.ExchangeRateId.HasValue ||
+                // exceptions are server-generated specialised advances and the primary governed
+                // bank line. Both carry canonical source linkage, an approved rate ID, native
+                // amount and functional amount which are revalidated below and again at posting.
+                var isControlledForeignSource = IsSpecializedOpeningLine(line) ||
+                    IsBankAccountOpeningPrimaryLine(line);
+                if (!isControlledForeignSource || !line.ExchangeRateId.HasValue ||
                     (!line.TransactionDebitAmount.HasValue && !line.TransactionCreditAmount.HasValue))
                 {
-                    errors.Add($"Line {line.LineNumber}: foreign-currency opening balances are not supported outside controlled specialised source and approved FX evidence.");
+                    errors.Add($"Line {line.LineNumber}: foreign-currency opening balances require a controlled source and approved FX evidence.");
                 }
             }
 
@@ -2019,7 +2040,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         if (primary.DebitAmount <= 0m || primary.CreditAmount != 0m ||
             clearing.DebitAmount != 0m || clearing.CreditAmount != primary.DebitAmount)
             errors.Add("Governed bank opening amounts or debit/credit directions changed after preparation.");
-        if (primary.TransactionDebitAmount != primary.DebitAmount || primary.TransactionCreditAmount != 0m ||
+        if (primary.TransactionDebitAmount.GetValueOrDefault() <= 0m || primary.TransactionCreditAmount != 0m ||
             clearing.TransactionDebitAmount != 0m || clearing.TransactionCreditAmount != clearing.CreditAmount)
             errors.Add("Governed bank opening native/functional amount evidence changed after preparation.");
         if (string.IsNullOrWhiteSpace(batch.SourceReference) ||
@@ -2036,16 +2057,29 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 batch.TenantId,
                 primary.BankAccountId.Value,
                 batch.OpeningDate.Date,
-                batch.Id,
+                primary.ExchangeRateId,
+                allowDerivedRate: false,
+                excludeBatchId: batch.Id,
                 requireUnusedState: !isPosted,
                 cancellationToken: cancellationToken);
             if (primary.AccountId != context.BankGl.Id || clearing.AccountId != context.MigrationClearing.Id)
                 errors.Add("Governed bank opening GL mapping changed after batch preparation.");
+            var expectedFunctionalAmount = RoundMoney(
+                primary.TransactionDebitAmount.GetValueOrDefault() * context.ExchangeRate.Rate);
+            if (primary.DebitAmount != expectedFunctionalAmount || clearing.CreditAmount != expectedFunctionalAmount ||
+                !string.Equals(primary.TransactionCurrencyCode, context.BankCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(primary.FunctionalCurrencyCode, NormalizeCurrency(context.Settings.BaseCurrency, "GHS"), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(clearing.TransactionCurrencyCode, NormalizeCurrency(context.Settings.BaseCurrency, "GHS"), StringComparison.OrdinalIgnoreCase) ||
+                primary.ExchangeRateId != context.ExchangeRate.ExchangeRateId ||
+                primary.ExchangeRateDate?.Date != context.ExchangeRate.EffectiveDate?.Date ||
+                clearing.ExchangeRateId.HasValue || clearing.ExchangeRateDate.HasValue)
+                errors.Add("Governed bank opening currency or approved exchange-rate evidence changed after preparation.");
             if (isPosted)
             {
+                var nativeAmount = primary.TransactionDebitAmount.GetValueOrDefault();
                 if (context.Bank.OpeningBalance != 0m ||
-                    context.Bank.CurrentBalance != primary.DebitAmount ||
-                    context.Bank.AvailableBalance != primary.DebitAmount)
+                    context.Bank.CurrentBalance != nativeAmount ||
+                    context.Bank.AvailableBalance != nativeAmount)
                     errors.Add("Posted governed bank opening no longer reconciles to the bank read-side snapshot.");
                 var postedBankMovement = await _db.AccountTransactions.AsNoTracking()
                     .Where(item =>
@@ -2055,7 +2089,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                         item.PostingStatus == "Posted" &&
                         !item.IsDeleted)
                     .SumAsync(item => item.DebitAmount - item.CreditAmount, cancellationToken);
-                if (RoundMoney(postedBankMovement) != primary.DebitAmount)
+                if (RoundMoney(postedBankMovement) != expectedFunctionalAmount)
                     errors.Add("Posted governed bank opening journal no longer matches its canonical bank amount.");
             }
         }
@@ -2362,8 +2396,10 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 // BankAccount.OpeningBalance deliberately stays zero: bank reconciliation already
                 // adds that legacy field to posted GL movement. The controlled journal is the sole
                 // opening ledger fact, while Current/Available are exact Finance read-side snapshots.
-                bank.CurrentBalance = primary.DebitAmount;
-                bank.AvailableBalance = primary.DebitAmount;
+                // BankAccount balances are maintained in the bank's own currency; the journal line
+                // carries the separately derived functional amount used by GL and reporting.
+                bank.CurrentBalance = primary.TransactionDebitAmount!.Value;
+                bank.AvailableBalance = primary.TransactionDebitAmount.Value;
                 bank.OpeningDate = batch.OpeningDate.Date;
                 bank.UpdatedAt = DateTime.UtcNow;
                 bank.UpdatedBy = _currentUser.UserName ?? "system";
@@ -2643,7 +2679,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         var idempotency = await ResolveGovernedIdempotencyAsync(header.IdempotencyKey, cancellationToken);
         if (idempotency.Existing != null)
         {
-            EnsureBankOpeningRetryMatches(idempotency.Existing, dto.BankAccountId, amount, header);
+            EnsureBankOpeningRetryMatches(idempotency.Existing, dto.BankAccountId, amount, dto.ExchangeRateId, header);
             return await MapBatchAsync(idempotency.Existing.Id, cancellationToken)
                 ?? throw new InvalidOperationException("The existing bank opening batch could not be reloaded.");
         }
@@ -2824,6 +2860,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         OpeningBalanceBatch existing,
         Guid bankAccountId,
         decimal amount,
+        Guid? exchangeRateId,
         GovernedOpeningHeader header)
     {
         var primary = existing.Lines.SingleOrDefault(IsBankAccountOpeningPrimaryLine);
@@ -2831,8 +2868,9 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             existing.Lines.Count != 2 ||
             primary.BankAccountId != bankAccountId ||
             primary.CounterpartyId != bankAccountId ||
-            primary.DebitAmount != amount ||
+            primary.TransactionDebitAmount != amount ||
             primary.CreditAmount != 0m ||
+            primary.ExchangeRateId != exchangeRateId ||
             existing.OpeningDate.Date != header.OpeningDate ||
             existing.FiscalPeriodId != header.FiscalPeriodId ||
             !string.Equals(existing.BookClassification, header.BookClassification, StringComparison.OrdinalIgnoreCase) ||
@@ -2871,6 +2909,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         Guid tenantId,
         Guid bankAccountId,
         DateTime openingDate,
+        Guid? exchangeRateId,
+        bool allowDerivedRate,
         Guid? excludeBatchId,
         bool requireUnusedState,
         CancellationToken cancellationToken)
@@ -2888,6 +2928,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             bank,
             settings,
             openingDate,
+            exchangeRateId,
+            allowDerivedRate,
             excludeBatchId,
             requireUnusedState,
             cancellationToken);
@@ -2897,7 +2939,9 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             bank,
             inspection.BankGl!,
             inspection.MigrationClearing!,
-            settings);
+            settings,
+            inspection.BankCurrency,
+            inspection.ExchangeRate!);
     }
 
     private async Task<BankOpeningInspection> InspectBankOpeningContextAsync(
@@ -2905,16 +2949,17 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         BankAccount bank,
         FinanceSettings settings,
         DateTime openingDate,
+        Guid? exchangeRateId,
+        bool allowDerivedRate,
         Guid? excludeBatchId,
         bool requireUnusedState,
         CancellationToken cancellationToken)
     {
         var errors = new List<string>();
         var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var bankCurrency = NormalizeCurrency(bank.Currency, functionalCurrency);
         if (!bank.IsActive)
             errors.Add("Bank account is inactive.");
-        if (!string.Equals(NormalizeCurrency(bank.Currency, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
-            errors.Add($"Bank account must use the functional currency {functionalCurrency}.");
 
         Account? bankGl = null;
         if (!bank.GLAccountId.HasValue)
@@ -2928,7 +2973,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 cancellationToken);
             errors.AddRange(ValidateDerivedOpeningAccount(
                 bankGl,
-                functionalCurrency,
+                bankCurrency,
                 "Bank GL",
                 AccountType.Asset,
                 requireDirectPosting: false,
@@ -2958,6 +3003,28 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
         if (bankGl != null && migrationClearing != null && bankGl.Id == migrationClearing.Id)
             errors.Add("Bank GL and migration clearing must be different accounts.");
+
+        BankExchangeRateSnapshot? exchangeRate = null;
+        if (bankGl != null)
+        {
+            try
+            {
+                exchangeRate = await ResolveBankOpeningExchangeRateAsync(
+                    tenantId,
+                    bankGl,
+                    settings,
+                    bankCurrency,
+                    functionalCurrency,
+                    openingDate,
+                    exchangeRateId,
+                    allowDerivedRate,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                errors.Add(ex.Message);
+            }
+        }
         if (bank.GLAccountId.HasValue && await _db.BankAccounts.AsNoTracking().AnyAsync(other =>
                 other.TenantId == tenantId &&
                 other.Id != bank.Id &&
@@ -3006,7 +3073,92 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 errors.Add("Mapped bank GL already has posted movement.");
         }
 
-        return new BankOpeningInspection(bankGl, migrationClearing, errors);
+        return new BankOpeningInspection(bankGl, migrationClearing, bankCurrency, exchangeRate, errors);
+    }
+
+    private async Task<BankExchangeRateSnapshot> ResolveBankOpeningExchangeRateAsync(
+        Guid tenantId,
+        Account bankGl,
+        FinanceSettings settings,
+        string bankCurrency,
+        string functionalCurrency,
+        DateTime openingDate,
+        Guid? requestedRateId,
+        bool allowDerivedRate,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(bankCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (requestedRateId.HasValue)
+                throw new InvalidOperationException("Functional-currency bank openings must not supply exchange-rate evidence.");
+            return new BankExchangeRateSnapshot(null, 1m, null, ExchangeRateType.Daily, ExchangeRateQuoteSide.Mid, "Functional currency");
+        }
+
+        var rateType = ExchangeRateType.Daily;
+        var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
+            ? settings.DefaultTransactionQuoteSide
+            : ExchangeRateQuoteSide.Mid;
+        var currencyLink = await _db.AccountCurrencyLinks.AsNoTracking().FirstOrDefaultAsync(link =>
+            link.TenantId == tenantId &&
+            link.AccountId == bankGl.Id &&
+            link.LinkedCurrencyCode == bankCurrency &&
+            !link.IsDeleted &&
+            link.IsActive &&
+            link.EffectiveDate.Date <= openingDate.Date &&
+            (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value.Date >= openingDate.Date),
+            cancellationToken);
+        if (settings.DirectionalExchangeRatePolicyEnabled && currencyLink != null)
+        {
+            rateType = ParseOpeningExchangeRateType(currencyLink.TransactionRateType);
+            quoteSide = currencyLink.TransactionQuoteSide;
+        }
+
+        var query = _db.ExchangeRates.AsNoTracking().Where(rate =>
+            rate.TenantId == tenantId &&
+            !rate.IsDeleted &&
+            rate.BaseCurrencyCode == functionalCurrency &&
+            rate.TargetCurrencyCode == bankCurrency &&
+            rate.RateType == rateType &&
+            rate.QuoteSide == quoteSide &&
+            rate.IsActive &&
+            rate.Rate > 0m &&
+            (rate.ApprovalStatus == RateApprovalStatus.Approved || rate.ApprovalStatus == RateApprovalStatus.AutoApproved) &&
+            rate.EffectiveDate.Date <= openingDate.Date &&
+            (!rate.EndDate.HasValue || rate.EndDate.Value.Date >= openingDate.Date));
+        if (!requestedRateId.HasValue && !allowDerivedRate)
+            throw new InvalidOperationException("Foreign-currency bank openings require the approved exchange rate selected by the dated options contract.");
+
+        ExchangeRate? approvedRate;
+        if (requestedRateId.HasValue)
+            approvedRate = await query.FirstOrDefaultAsync(rate => rate.Id == requestedRateId.Value, cancellationToken);
+        else
+            approvedRate = await query
+                .OrderByDescending(rate => rate.EffectiveDate)
+                .ThenByDescending(rate => rate.Priority)
+                .ThenByDescending(rate => rate.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        if (approvedRate == null)
+        {
+            throw new InvalidOperationException(
+                $"No active approved {rateType} {quoteSide} exchange rate exists for {bankCurrency} to {functionalCurrency} on {openingDate:yyyy-MM-dd}.");
+        }
+
+        return new BankExchangeRateSnapshot(
+            approvedRate.Id,
+            RoundRate(approvedRate.Rate),
+            approvedRate.EffectiveDate.Date,
+            approvedRate.RateType,
+            approvedRate.QuoteSide,
+            approvedRate.RateSource);
+    }
+
+    private static ExchangeRateType ParseOpeningExchangeRateType(string? value)
+    {
+        var normalized = value?.Trim().Replace("-", string.Empty).Replace("_", string.Empty).Replace(" ", string.Empty);
+        return Enum.TryParse<ExchangeRateType>(normalized, ignoreCase: true, out var rateType)
+            ? rateType
+            : throw new InvalidOperationException("Bank GL transaction exchange-rate type is invalid.");
     }
 
     private async Task<ResidualOpeningContext> ResolveResidualOpeningContextAsync(
@@ -3315,16 +3467,22 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         var bankOptions = new List<BankAccountOpeningOptionDto>(bankMasters.Count);
         foreach (var bank in bankMasters)
         {
-            var optionBlockers = settings == null
-                ? new List<string> { "Finance Settings are not configured." }
-                : (await InspectBankOpeningContextAsync(
+            BankOpeningInspection? inspection = null;
+            if (settings != null)
+            {
+                inspection = await InspectBankOpeningContextAsync(
                     tenantId,
                     bank,
                     settings,
                     openingDate,
+                    exchangeRateId: null,
+                    allowDerivedRate: true,
                     excludeBatchId: null,
                     requireUnusedState: true,
-                    cancellationToken: cancellationToken)).Errors.ToList();
+                    cancellationToken: cancellationToken);
+            }
+            var optionBlockers = inspection?.Errors.ToList()
+                ?? new List<string> { "Finance Settings are not configured." };
             var gl = bank.GLAccountId.HasValue
                 ? await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(item =>
                     item.TenantId == tenantId && item.Id == bank.GLAccountId.Value && !item.IsDeleted,
@@ -3341,6 +3499,12 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 GlAccountCode = gl?.AccountCode,
                 GlAccountName = gl?.AccountName,
                 PostingDirection = "Debit",
+                ExchangeRateId = inspection?.ExchangeRate?.ExchangeRateId,
+                ExchangeRate = inspection?.ExchangeRate?.Rate ?? 1m,
+                ExchangeRateDate = inspection?.ExchangeRate?.EffectiveDate,
+                ExchangeRateType = inspection?.ExchangeRate?.RateType.ToString(),
+                ExchangeRateQuoteSide = inspection?.ExchangeRate?.QuoteSide.ToString(),
+                ExchangeRateSource = inspection?.ExchangeRate?.Source,
                 IsEligible = optionBlockers.Count == 0,
                 Blockers = optionBlockers
             });

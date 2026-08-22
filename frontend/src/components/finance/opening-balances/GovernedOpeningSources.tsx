@@ -122,10 +122,12 @@ function ReadOnlyPostingLine({
   direction,
   account,
   amount,
+  currencyCode,
 }: {
   direction: string;
   account: string;
   amount?: number;
+  currencyCode?: string;
 }) {
   return (
     <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
@@ -135,7 +137,13 @@ function ReadOnlyPostingLine({
       <span className="min-w-0 break-words font-medium">{account}</span>
       {amount !== undefined && (
         <span className="tabular-nums">
-          {amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          {currencyCode
+            ? new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency: currencyCode,
+                currencyDisplay: 'code',
+              }).format(amount)
+            : amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
         </span>
       )}
     </div>
@@ -223,6 +231,9 @@ export function GovernedOpeningSources({
   const selectedBank = financeOptions?.bankAccounts.find(
     (option) => option.id === bankAccountId
   );
+  const bankNativeAmount = positiveNumber(bankAmount);
+  const bankFunctionalAmount =
+    bankNativeAmount * (selectedBank?.exchangeRate ?? 1);
   const selectedWarehouse = openingStockOptions?.warehouses.find(
     (option) => option.id === warehouseId
   );
@@ -459,9 +470,13 @@ export function GovernedOpeningSources({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="bank-opening-amount">Opening amount</Label>
+              <Label htmlFor="bank-opening-amount">
+                Opening amount
+                {selectedBank ? ` (${selectedBank.currencyCode})` : ''}
+              </Label>
               <Input
                 id="bank-opening-amount"
+                aria-label="Opening amount"
                 type="number"
                 min="0.01"
                 step="0.01"
@@ -501,13 +516,28 @@ export function GovernedOpeningSources({
                 <ReadOnlyPostingLine
                   direction={selectedBank.postingDirection}
                   account={`${selectedBank.glAccountCode ?? 'Mapped GL'} — ${selectedBank.glAccountName ?? selectedBank.accountName}`}
-                  amount={positiveNumber(bankAmount)}
+                  amount={bankNativeAmount}
+                  currencyCode={selectedBank.currencyCode}
                 />
                 <ReadOnlyPostingLine
                   direction="Credit"
                   account={`${financeOptions?.migrationClearingAccount?.accountCode ?? 'Configured'} — ${financeOptions?.migrationClearingAccount?.accountName ?? 'Migration Clearing'}`}
-                  amount={positiveNumber(bankAmount)}
+                  amount={bankFunctionalAmount}
+                  currencyCode={financeOptions?.functionalCurrencyCode}
                 />
+                {selectedBank.exchangeRateId && (
+                  <p className="text-xs text-muted-foreground">
+                    Approved {selectedBank.exchangeRateType}{' '}
+                    {selectedBank.exchangeRateQuoteSide} rate:{' '}
+                    {selectedBank.exchangeRate.toLocaleString(undefined, {
+                      maximumFractionDigits: 6,
+                    })}{' '}
+                    on {selectedBank.exchangeRateDate?.slice(0, 10)}
+                    {selectedBank.exchangeRateSource
+                      ? ` · ${selectedBank.exchangeRateSource}`
+                      : ''}
+                  </p>
+                )}
               </div>
             )}
             <Button
@@ -529,7 +559,8 @@ export function GovernedOpeningSources({
                   fiscalPeriodId,
                   bookClassification,
                   bankAccountId,
-                  amount: positiveNumber(bankAmount),
+                  amount: bankNativeAmount,
+                  exchangeRateId: selectedBank?.exchangeRateId,
                 })
               }
             >

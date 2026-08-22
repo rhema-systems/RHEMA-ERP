@@ -26,6 +26,7 @@ const options: GovernedOpeningBalanceOptions = {
       glAccountCode: '1000',
       glAccountName: 'Bank',
       postingDirection: 'Debit',
+      exchangeRate: 1,
       isEligible: true,
       blockers: [],
     },
