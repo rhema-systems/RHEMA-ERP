@@ -25,6 +25,7 @@ public static class CompanyHrPolicyMappingExtensions
             DefaultProbationMonths         = entity.DefaultProbationMonths,
             DefaultResignationNoticeDays   = entity.DefaultResignationNoticeDays,
             DefaultTerminationNoticeDays   = entity.DefaultTerminationNoticeDays,
+            ProceduralAbsenceDays          = entity.ProceduralAbsenceDays,
 
             VacancyAlertLeadDays           = entity.VacancyAlertLeadDays,
             ReviewDueLeadDays              = entity.ReviewDueLeadDays,
@@ -39,6 +40,13 @@ public static class CompanyHrPolicyMappingExtensions
             MinimumWorkingAge              = entity.MinimumWorkingAge,
 
             BudgetEnforcementMode          = entity.BudgetEnforcementMode,
+
+            // ⚠ This line was missing too, and on the read side it was worse than a lost value.
+            // `BudgetEnforcementMode` has no zero member (Off=1, Warn=2, Block=3), so an unassigned
+            // property left the DTO carrying `(BudgetEnforcementMode)0` — an enum value that does
+            // not exist, serialised as a bare `0` that maps to no member name. The database said
+            // Block; every reader of this endpoint was told 0.
+            EstablishmentEnforcementMode   = entity.EstablishmentEnforcementMode,
 
             FitWeightPerformance           = entity.FitWeightPerformance,
             FitWeightCompetency            = entity.FitWeightCompetency,
@@ -61,6 +69,7 @@ public static class CompanyHrPolicyMappingExtensions
         entity.DefaultProbationMonths         = dto.DefaultProbationMonths;
         entity.DefaultResignationNoticeDays   = dto.DefaultResignationNoticeDays;
         entity.DefaultTerminationNoticeDays   = dto.DefaultTerminationNoticeDays;
+        entity.ProceduralAbsenceDays          = dto.ProceduralAbsenceDays;
 
         entity.VacancyAlertLeadDays           = dto.VacancyAlertLeadDays;
         entity.ReviewDueLeadDays              = dto.ReviewDueLeadDays;
@@ -75,6 +84,13 @@ public static class CompanyHrPolicyMappingExtensions
         entity.MinimumWorkingAge              = dto.MinimumWorkingAge;
 
         entity.BudgetEnforcementMode          = dto.BudgetEnforcementMode;
+
+        // ⚠ This line was missing. `EstablishmentEnforcementMode` sat on BOTH DTOs and was simply
+        // never assigned, so FR-HR-136's enforcement posture accepted every value and kept none —
+        // the write succeeded, the status was 200, and the setting never moved. Area 14's signature
+        // defect, in the one place where it decides whether exceeding an authorised establishment
+        // blocks a vacancy or merely warns about it.
+        entity.EstablishmentEnforcementMode   = dto.EstablishmentEnforcementMode;
 
         entity.FitWeightPerformance           = dto.FitWeightPerformance;
         entity.FitWeightCompetency            = dto.FitWeightCompetency;

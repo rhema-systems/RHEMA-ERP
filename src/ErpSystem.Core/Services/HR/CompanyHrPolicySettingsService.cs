@@ -69,6 +69,7 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
     public async Task<CompanyHrPolicySettingsDto> UpdateAsync(UpdateCompanyHrPolicySettingsDto dto, CancellationToken cancellationToken = default)
     {
         ValidateRetirementAges(dto);
+        ValidateConsistency(dto);
 
         var tenantId = GetTenantId();
         var entity = await _repository.GetQueryable()
@@ -103,5 +104,46 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
             dto.MaleRetirementAge is null && dto.FemaleRetirementAge is null)
             throw new InvalidOperationException(
                 "Gender-specific retirement is enabled but no male/female retirement age was provided.");
+    }
+
+    /// <summary>
+    /// The three rules that stop a saved setting meaning something other than what it says.
+    /// </summary>
+    /// <remarks>
+    /// Each of these was reachable before: the value saved cleanly, the screen read it back, and the
+    /// engine behaved as though a different value had been set.
+    /// </remarks>
+    private static void ValidateConsistency(UpdateCompanyHrPolicySettingsDto dto)
+    {
+        // All four weights at zero saves fine and then silently loses to FitScoreWeights.Default in
+        // SuccessionCandidateSearchService — so the screen would show 0/0/0/0 while succession ranked
+        // candidates on 35/30/20/15. The weights are relative and need not sum to anything; they
+        // just cannot all be nothing.
+        if (dto.FitWeightPerformance + dto.FitWeightCompetency
+            + dto.FitWeightPotential + dto.FitWeightTenure <= 0)
+            throw new InvalidOperationException(
+                "At least one succession fit weight must be greater than zero, "
+                + "otherwise candidate ranking silently falls back to the built-in weights.");
+
+        // Free text with a length cap and nothing else. The long-service reader drops unparseable
+        // entries rather than throwing — correct of it — but that means "ten,fifteen" saves happily
+        // and reads back as no milestones at all.
+        if (!string.IsNullOrWhiteSpace(dto.LongServiceMilestoneYears))
+        {
+            var parts = dto.LongServiceMilestoneYears
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (parts.Length == 0 || parts.Any(p => !int.TryParse(p, out var n) || n is <= 0 or > 100))
+                throw new InvalidOperationException(
+                    "Long-service milestone years must be a comma-separated list of whole years "
+                    + "between 1 and 100, for example \"5,10,15,20,25\".");
+        }
+
+        // Stored uppercased and used wherever no explicit currency is set. A two- or four-character
+        // value is not an ISO 4217 code, and the column would truncate a longer one.
+        var currency = (dto.DefaultCurrencyCode ?? string.Empty).Trim();
+        if (currency.Length != 3 || !currency.All(char.IsLetter))
+            throw new InvalidOperationException(
+                "Default currency code must be a three-letter ISO 4217 code, for example \"GHS\".");
     }
 }

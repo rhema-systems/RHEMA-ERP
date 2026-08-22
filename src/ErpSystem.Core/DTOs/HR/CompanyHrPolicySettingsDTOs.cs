@@ -20,6 +20,18 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int DefaultResignationNoticeDays { get; set; }
     public int DefaultTerminationNoticeDays { get; set; }
 
+    /// <summary>
+    /// FR-HR-092's trust boundary: unauthorised absence, in days, beyond which a termination is
+    /// <b>procedural</b> and HR may approve it without the Managing Director's signature.
+    /// </summary>
+    /// <remarks>
+    /// Added here in areas 19-23 slice 2. The entity has carried this field since area 9b and
+    /// `SeparationService` reads it live, but it was on neither DTO — so it could not be seen and
+    /// could not be changed, and the setting the entity describes as "a configuration change and
+    /// not a new trust boundary" was in practice a constant of 10.
+    /// </remarks>
+    public int ProceduralAbsenceDays { get; set; }
+
     // Alert / reminder lead times
     public int VacancyAlertLeadDays { get; set; }
     public int ReviewDueLeadDays { get; set; }
@@ -68,6 +80,12 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 60)]  public int DefaultProbationMonths { get; set; } = 6;
     [Range(0, 365)] public int DefaultResignationNoticeDays { get; set; } = 30;
     [Range(0, 365)] public int DefaultTerminationNoticeDays { get; set; } = 30;
+
+    /// <summary>
+    /// FR-HR-092: days of unauthorised absence beyond which HR may approve a termination without
+    /// the Managing Director's signature. <b>0 sends every termination to the MD.</b>
+    /// </summary>
+    [Range(0, 365)] public int ProceduralAbsenceDays { get; set; } = 10;
 
     // Alert / reminder lead times
     [Range(0, 3650)] public int VacancyAlertLeadDays { get; set; } = 90;

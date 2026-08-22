@@ -374,3 +374,61 @@ Screens: `/administration/hr/settings` (landing) and `/administration/hr/setting
 
 **Verification:** frontend `tsc` clean for every touched file (the only errors repository-wide are
 the pre-existing Inventory ones — cross-module defect #4); `next lint` clean on all six files.
+
+### Slice 2 — HR policy settings. 2026-08-22, **100/100**, run twice. No migration.
+
+Harness `run-slice2.mjs`; payloads probed first with `SLICE=2 node probe-ui-payloads.mjs`.
+Screen: `/administration/hr/settings/policy`. Slice 1 re-run green (69/69) alongside.
+
+**Two defects the plan did not predict, both in the DTO layer, both worse than D-5**
+
+- **D-13 · FR-HR-092's trust boundary was unreachable in both directions.**
+  `ProceduralAbsenceDays` — the days of unauthorised absence beyond which HR may terminate someone
+  **without the Managing Director's signature** — has been on the entity since area 9b and is read
+  live by `SeparationService.cs:468`. It was on **neither DTO** and in neither mapping direction, so
+  it could not be seen and could not be changed. The entity's own remark says it is a setting rather
+  than a constant "so widening the exception later is a configuration change and not a new trust
+  boundary". It was neither: a constant of 10 wearing a setting's clothes.
+
+- **D-14 · `EstablishmentEnforcementMode` was decoupled from its entity in both directions.** It sits
+  on both DTOs and was assigned by **neither** `ToDto` nor `ApplyUpdate`. The write half is area 14's
+  signature defect exactly — accepted every value, kept none, answered 200. The read half is worse:
+  `BudgetEnforcementMode` has **no zero member** (Off=1, Warn=2, Block=3), so the unassigned property
+  left the DTO carrying `(BudgetEnforcementMode)0` — *a value the enum does not define* — serialised
+  as a bare `0` that maps to no member name. The database said `3` (Block); every reader of the
+  endpoint was told `0`. This is the setting that decides whether exceeding an authorised
+  establishment blocks a vacancy or merely warns — the requirement area 17/18 added
+  `EstablishmentApprovedOn` specifically to make enforceable.
+
+  ⚠ **The generalisation worth keeping: when an enum has no zero member, an unassigned property is
+  not "the default" — it is a value outside the type.** A round-trip probe cannot find it, because
+  writing back what you read reproduces the same wrong value on both sides. Slice 0's `PUT {...s}`
+  did exactly that and passed.
+
+**Three consistency rules added**, each of which was reachable and each of which let a saved setting
+mean something other than what it said:
+
+- **All four succession fit weights at zero** saved cleanly and then lost to `FitScoreWeights.Default`
+  inside `SuccessionCandidateSearchService` — the screen would show 0/0/0/0 while succession ranked
+  on 35/30/20/15. The weights are relative and need not sum to anything; they just cannot all be
+  nothing.
+- **`LongServiceMilestoneYears` is free text** with only a length cap. `"ten,fifteen"` saved happily
+  and read back as no milestones at all, because the consumer drops unparseable entries rather than
+  throwing — correct of it, but it means junk is silent. Now validated as whole years 1–100; **blank
+  is still legal** and means "no tenant-wide milestones".
+- **`DefaultCurrencyCode`** had a 3-character cap and no check, so `"GH"` was accepted.
+
+**The gate, and a decision to revisit if TDC disagrees.** Read = SuperAdmin/TenantAdmin/HR;
+**write = SuperAdmin/TenantAdmin**. HR works inside these numbers daily and must see them, but three
+knobs here are the trust boundaries the settings exist to hold (FR-HR-092, and the two FR-HR-136
+enforcement modes) — and moving a boundary should not belong to the function it constrains. Adding
+`Constants.Roles.Hr` to `WriteRoles` is the whole change if TDC wants HR to hold the write; the
+controller says so in place.
+
+**The screen groups by the area that reads each knob**, not by data type — the only framing in which
+the consequence of a change is visible. Termination authority and establishment enforcement each get
+their own card with the reasoning; the fit weights render their effective normalised share, because
+relative weights are meaningless as raw numbers; and the long-service field says plainly that it does
+**not** govern the awards ladder ([[hr-awards-area-survey]] D-8), which lives in its own rows.
+
+**Verification:** frontend `tsc` and `next lint` clean on all five touched files.

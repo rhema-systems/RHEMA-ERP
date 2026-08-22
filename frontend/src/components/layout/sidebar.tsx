@@ -1810,6 +1810,11 @@ export const navigationItems: NavItem[] = [
                 href: '/administration/hr/settings/company-profile',
                 icon: Building2,
               },
+              {
+                title: 'Policy Settings',
+                href: '/administration/hr/settings/policy',
+                icon: SlidersHorizontal,
+              },
             ],
           },
         ],
