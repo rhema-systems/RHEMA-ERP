@@ -1798,6 +1798,20 @@ export const navigationItems: NavItem[] = [
             href: '/administration/hr/payroll',
             icon: CreditCard,
           },
+          {
+            // Tenant-wide HR configuration. The company profile is the letterhead every offer and
+            // confirmation letter is written on; policy settings follows in the next slice.
+            title: 'HR Settings',
+            href: '/administration/hr/settings',
+            icon: Settings,
+            children: [
+              {
+                title: 'Company Profile',
+                href: '/administration/hr/settings/company-profile',
+                icon: Building2,
+              },
+            ],
+          },
         ],
       },
       {

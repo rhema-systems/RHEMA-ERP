@@ -149,6 +149,11 @@ public sealed class ProbationLetterService : IProbationLetterService
             ["SignatoryTitle"] = string.IsNullOrWhiteSpace(company.DefaultSignatoryTitle)
                 ? "Head of Human Resources"
                 : company.DefaultSignatoryTitle,
+
+            // See the note in OfferLetterService: these two profile fields had no token anywhere, so
+            // no template could reach them. Emitted here for the same reason and on the same terms.
+            ["SignatureImageUrl"]   = NullIfBlank(company.SignatureImageUrl),
+            ["CompanySealImageUrl"] = NullIfBlank(company.CompanySealImageUrl),
         };
 
         var rendered = await _templatedEmail.RenderAsync(

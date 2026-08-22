@@ -87,6 +87,12 @@ public class CompanyProfileService : ICompanyProfileService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the provider rather than mapping the entity we just wrote. `CompanyProfileDto`
+        // carries `CountryName` and `CountryOfIncorporationName`, both read off navigations — and on
+        // this path those navigations are either absent (a first save creates the entity in memory) or
+        // stale (a save that CHANGES the country still holds the old one). Either way the caller gets a
+        // country id with a blank or wrong name beside it, which is exactly the shape the screen renders.
+        return await GetAsync(cancellationToken);
     }
 }

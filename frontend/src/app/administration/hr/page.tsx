@@ -21,6 +21,7 @@ import {
   LayoutList,
   ClipboardCheck,
   Medal,
+  Settings,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -229,6 +230,13 @@ export default function HrAdministrationPage() {
               description: 'Grades, components, tax tables and parameters.',
               href: '/administration/hr/payroll',
               icon: CreditCard,
+            },
+            {
+              title: 'HR Settings',
+              description:
+                'Company profile and the tenant-wide HR rules that letters, reminders and enforcement read.',
+              href: '/administration/hr/settings',
+              icon: Settings,
             },
           ]}
         />

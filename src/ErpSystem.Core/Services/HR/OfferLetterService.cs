@@ -138,6 +138,14 @@ public sealed class OfferLetterService : IOfferLetterService
                 ?? "To accept this offer, please sign and return one copy of this letter, or record your acceptance through the candidate portal.",
             ["SignatoryName"]  = company.DefaultSignatoryName,
             ["SignatoryTitle"] = string.IsNullOrWhiteSpace(company.DefaultSignatoryTitle) ? "Head of Human Resources" : company.DefaultSignatoryTitle,
+
+            // `SignatureImageUrl` and `CompanySealImageUrl` are stored on CompanyProfile and were
+            // editable in principle, but neither ever became a token — so no template could reference
+            // them however it was written, and the only image any letter could render was the logo.
+            // Emitting them here is what makes the two fields mean something; a template that does not
+            // use them is unaffected, because an unused token is simply not substituted.
+            ["SignatureImageUrl"]   = NullIfBlank(company.SignatureImageUrl),
+            ["CompanySealImageUrl"] = NullIfBlank(company.CompanySealImageUrl),
         };
 
         var rendered = await _templatedEmail.RenderAsync(

@@ -321,3 +321,56 @@ create; run the content audit twice.
 **Ground established.** Nothing in the bundle is unreachable through a routing or wiring fault: 68
 of 71 calls answered, and the three 500s are the two D-1 writers plus the D-9 collision. The work
 ahead is content, gates and screens — not resurrection.
+
+### Slice 1 — the company profile. 2026-08-22, **69/69**, run twice. No migration.
+
+Harness `run-slice1.mjs`; UI payloads probed first with `SLICE=1 node probe-ui-payloads.mjs`.
+Screens: `/administration/hr/settings` (landing) and `/administration/hr/settings/company-profile`.
+
+**What changed**
+
+1. **The gate.** `CompanyProfileController` moved off its bare `[Authorize]` onto
+   `SuperAdmin,TenantAdmin,HR`, **read as well as write**. Slice 0's four D-8 assertions for this
+   surface flip here from 200 to 403, and the flip is the proof. Gating it touches no document:
+   the letter and email services read the profile through `ICompanyProfileProvider`, never the route.
+2. **The write response could not name its own country.** `UpdateAsync` mapped the entity it had
+   just written, whose `Country` / `CountryOfIncorporation` navigations are absent on a first save
+   and **stale** when the country changes — so `countryName` came back blank or wrong beside a
+   correct id. It now re-reads through the provider. The harness asserts the harder half: change the
+   country, and the response must carry the *new* name.
+3. **Two fields no template could reach.** `SignatureImageUrl` and `CompanySealImageUrl` are
+   persisted, mapped both ways and were editable in principle — but neither ever entered the token
+   dictionary, so no letter template could reference them however it was written, and the only image
+   a letter could render was the logo. Both are now tokens in `OfferLetterService` and
+   `ProbationLetterService`. An unused token is not substituted, so no existing template changes.
+   **Building an editor for two fields that provably go nowhere would have shipped this area's own
+   signature defect.**
+
+**Found while building, recorded not fixed**
+
+- **`legalFormName` is redundant.** It returns `LegalForm.ToString()`, so it repeats the member name
+  the client already has, and it does **not** carry the `[Description]` label ("Limited Liability
+  Company", "Non-Governmental Organisation"). Nothing in the repository reads `[Description]` on any
+  enum in any module, so adding a resolver here would set a cross-module precedent this slice has no
+  mandate for. Labels live client-side in `COMPANY_LEGAL_FORMS`.
+- **The tenant's persisted legal name is `"Default Tenant"`.** Slice 0's round-trip probe created
+  the profile row from the provider's fallback, so what was previously an unsaved default is now a
+  saved one. Behaviour is unchanged — letters said "Default Tenant" before too — but it is now
+  visible and editable, and **TDC should set the real legal name and registered address**. The screen
+  shows a banner while nothing has been authored.
+
+⚠ **Two harness lessons, both mine before they were the product's**
+
+- **A DataAnnotations refusal is not mute.** `rejects(..., 400, 'legal name')` failed against
+  *"One or more validation errors occurred."* — because a ModelState 400 puts the sentence in
+  `errors`, keyed by field, and leaves `title` fixed. The rule fired correctly and said exactly the
+  right thing; the probe looked in one of the three places it could be. `api.mjs` now searches all
+  three, which every later slice inherits.
+- **A TypeScript union of plausible enum members compiles and matches nothing.** The first draft of
+  `company-profile.ts` invented `CompanyLimitedByGuarantee`, `Cooperative` and
+  `NonGovernmentalOrganisation`, and missed the two real members `Ngo` and `StatutoryBody`. `tsc`
+  had nothing to say about any of it. **Read the enum, never the endpoint name** — the area-12 rule,
+  earned again.
+
+**Verification:** frontend `tsc` clean for every touched file (the only errors repository-wide are
+the pre-existing Inventory ones — cross-module defect #4); `next lint` clean on all six files.
