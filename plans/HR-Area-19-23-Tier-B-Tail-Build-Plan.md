@@ -29,7 +29,7 @@ the JWT key passed; every harness runs **twice**.
 | **19** | `api/hr/teams` | — | — | **added in slice 4b**: 12 endpoints. `Team`/`TeamMember`/`TeamMemberHistory` had tables and EF config but no writer of any kind |
 | **19** | `api/OrganizationUnitHistory` | 6 GET | 2 | **done**: slice 3 made it writable, slice 5 rendered it and found six more defects |
 | **20** | `api/external-associates` | 11 | 1 of 11 (a picker) | register never built |
-| **20** | `api/hr/employee-relievers` | 4 | 0 | **0 rows; zero readers anywhere** |
+| **20** | `api/hr/employee-relievers` | 5 | 2 | **done in slice 7**: roster tab, the leave-form seeding Decision 3 required, and the filtered unique index |
 | **20** | `api/facility-services` | 5 | 0 | medical-owned, 2 rows |
 | **20** | `api/employee-certificates` | 9 | ✅ area 7 | **done, out of scope** |
 | **20** | `api/probations` | — | ✅ area 15b | **done, out of scope** |
@@ -258,7 +258,7 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. | all |
 | 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
 
-Migrations so far: **two.** `IX_EmployeeRelievers_EmployeeId_Priority` (slice 7, pending) and `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b, applied). Both are the same defect — a unique index over a soft-deleting store — which is now the most reliably recurring shape in this bundle.
+Migrations: **two, both applied.** `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b) and `20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete` (slice 7). Both are the same defect — a unique index over a soft-deleting store — which was the most reliably recurring shape in this bundle, four occurrences in all. Slice 8 may owe a third for `AssociateNumber`, depending on whether D-10 is fixed by filtering the generator or by making the column genuinely unique.
 
 Expected migrations: **at least one, contrary to the first draft of this plan.** Slice 0 found D-9,
 and a unique index that must exclude soft-deleted rows is a schema change:
@@ -919,3 +919,113 @@ slice 6's, and it is recorded here because slice 6 is what makes it bite.
 
 **Residue on live data:** none. The harness deletes its unions, agreements and job description, and
 asserts the register ends on the count it started with.
+
+### Slice 7 — the reliever roster. 2026-08-22, **63/63**, run twice. Migration `20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete`.
+
+Harness `run-slice7.mjs`; payloads probed first with `SLICE=7 node probe-ui-payloads.mjs`. Screens: a
+**Relievers** tab on the employee profile, and the seeding on the leave request form. Full regression
+alongside: slice 0 **17/17** (its last open assertion flipped), 1 **69/69**, 2 **100/100**,
+3 **49/49**, 4 **60/60**, 4b **88/88**, 5 **111/111**, 6 **77/77**. Bundle total: **634 assertions**.
+
+**D-9, the migration this bundle has owed since slice 0.** `IX_EmployeeRelievers_EmployeeId_Priority`
+was UNIQUE and unfiltered over a soft-deleting store, so a removed reliever held their priority slot
+for ever. Reproduced by execution before the fix:
+
+```
+    deleted the priority-1 row; roster now: 1 row(s)
+    re-creating priority 1 -> 500
+```
+
+The service's duplicate check reads live rows, sees nothing, approves the write, and SQL rejects it
+— an opaque 500 in place of the sentence the service was written to give. **Fourth occurrence of one
+trap in this bundle**, after D-10 and D-29. The migration is guarded SQL rather than the scaffolded
+`DropIndex`/`CreateIndex` pair, for the reason slice 4b recorded: an `IF NOT EXISTS … CREATE` on its
+own finds the *unfiltered* index under the same name, skips, and records the migration as applied.
+`Down` can legitimately fail once the filter has been live, and says so in place.
+
+⚠ **The reproduction is the part that had to be right.** The plan warned that slice 0's first attempt
+changed the value before deleting, so nothing clashed and it reported the defect absent. This probe
+deletes the priority-1 row and re-creates the **identical** `(EmployeeId, Priority)` pair.
+
+**D-59 · The service validated almost nothing, and the probe is what said so.** Reading it suggested
+one weak spot; running it produced a list:
+
+```
+    priority 0                                    ACCEPTED
+    priority -1                                   ACCEPTED
+    the SAME person as both priority 3 and 4      ACCEPTED
+    an employee id that does not exist            refused 500   (a raw FK violation)
+    a reliever id that does not exist             refused 500
+```
+
+Priority is ordinal and the leave form reads the roster in priority order, so a zero silently jumps
+the queue. One person holding two slots describes a roster with no backup at all. And an id that
+names nobody reached the database and came back as a foreign-key violation with no body.
+
+**D-60 · Neither id was scoped to the tenant.** A caller could name *another tenant's* employee as a
+reliever: the row is stamped with the caller's tenant while pointing at a stranger, and the roster
+then renders that stranger's name, position and unit. **The FK cannot catch this** — `Employees` is
+one table for every tenant, so the constraint is satisfied. Both ids are now loaded and checked
+against the caller's tenant before anything is written.
+
+**D-61 · A bare `[Authorize]`.** Any authenticated user could read *anyone's* roster and write one
+for *anyone*. Now **self-or-HR**, the [[hr-area-authz-pattern]] shape: a role check plus an ownership
+check, rather than a new per-area permission. Two details that had to be right:
+
+- **The ownership question is asked of the stored row, not of the body.** On update and delete the
+  question is "whose roster is this row on", and only the row knows — checking anything the caller
+  sent would let the caller answer it. That is what `GetOwnerEmployeeIdAsync` is for.
+- **An account with no employee link is nobody's owner, not everybody's.** HR passes on the role
+  alone; anyone else must *be* the employee.
+
+⚠ **The claim is `employee_id`, not `EmployeeId`** — checked rather than guessed. `JwtTokenService`
+issues it under that name and nine call sites read it that way. A guessed `EmployeeId` parses to
+nothing, so `MayTouch` would have fallen through to the role check and **silently forbidden every
+non-HR employee from their own roster**, while reading perfectly correctly and passing any test
+written by an HR actor.
+
+**D-62 · The update path held weaker rules than the create path.** `UpdateAsync` re-checked the
+priority clash only *when the priority changed*, so an update could install a leaver, a stranger from
+another tenant, or a duplicate reliever as long as the number stayed put. Both paths now run one
+`ValidateAsync`. This is slice 3's two-doors-one-store shape in a new place.
+
+**The leaver rule, from the predicate the rest of HR uses.** Neither party to a cover arrangement may
+have left: a leaver cannot cover for anybody, and nobody arranges cover for a leaver, because the
+roster feeds the leave form and a leaver takes no leave. Stated the way `TeamService` states it
+rather than restated afresh.
+
+**Decision 3's reader, and the promise that was already in the code.** The roster now seeds the leave
+request form: priority 1 fills `RelieverEmployeeId`, priority 2 fills `SecondRelieverEmployeeId`.
+⚠ **Both of those fields carry the comment *"pre-defined relievers populate both slots by priority"*
+in `LeaveEntities.cs`, and have since the port** — the behaviour was specified, documented on the
+entity, and implemented by nothing, because nothing read `EmployeeReliever` at all. Three rules the
+seeding must not break, each of which would turn a convenience into a defect:
+
+- **Never on an edit.** A saved request's relievers are what was agreed; re-seeding would silently
+  rewrite the record from master data that has moved on since.
+- **Never over a value already in the field**, including one the user has just cleared on purpose.
+- **Never twice for the same subject.** Switching employee re-seeds; re-rendering does not.
+
+And it **says on screen that it did it**, naming who was filled in and from which priority. Filling a
+field without saying so is how a form starts lying to the person using it.
+
+⚠ **A harness bug worth keeping, because the rule caught it.** The first run died on
+*"T19Rel A770001 is already a reliever for this employee"* — the gate's positive half reused a
+fixture already on the roster, and slice 7's own one-person-one-slot rule refused it. The harness was
+wrong and the product was right; a fourth fixture employee exists solely so the positive half of the
+gate has someone free to add.
+
+**Also asserted: the other half of the gate.** Four refusals prove a stranger is kept out; a fifth
+assertion proves the employee can still add to their **own** roster, because a "fix" that refused
+everybody would pass all four and take the roster away from the person whose cover it describes.
+Same reasoning as slice 4's split organogram gate.
+
+**Slice 0's last open assertion is flipped, not deleted** — and its own failure message had named the
+outcome in advance: *"200 would mean the index IS released"*. Slice 0 is 17/17 and now asserts the
+fixed state for every defect it originally recorded.
+
+**Residue on live data:** five fixture employees per run, one terminated on purpose (`Employees` has
+no delete, and terminating is the only honest way to prove the leaver rule). The roster itself ends
+each run empty. ⚠ The two soft-deleted reliever rows against real employee `88e6cc67…` left by slice
+0's first buggy probe **no longer hold priority slots 1 and 2** — the migration released them, which
+is the first live consequence of this slice outside its own fixtures.

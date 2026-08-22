@@ -2258,8 +2258,18 @@ private void ConfigureHREntities(ModelBuilder builder)
         builder.Entity<EmployeeReliever>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.EmployeeId });
-            // One reliever slot per (employee, priority).
-            entity.HasIndex(x => new { x.EmployeeId, x.Priority }).IsUnique();
+
+            // One reliever slot per (employee, priority) — among LIVE rows.
+            //
+            // ⚠ The filter is the fix for D-9, the fourth occurrence of one trap in the areas 19-23
+            // bundle. EmployeeRelievers soft-deletes, so without it a removed reliever held its
+            // priority slot for ever: EmployeeRelieverService's own duplicate check reads live rows,
+            // sees nothing, approves the write, and SQL then rejects it. Measured 2026-08-22 —
+            // deleting the priority-1 row and re-creating it answered **500**, with no body, in
+            // place of the sentence the service was written to give.
+            entity.HasIndex(x => new { x.EmployeeId, x.Priority })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
 
             entity.HasOne(x => x.Employee)
                 .WithMany()

@@ -29,6 +29,7 @@ import { ExpatriateTab } from '@/components/hr/employee/tabs/ExpatriateTab';
 import { PositionHistoryTab } from '@/components/hr/employee/tabs/PositionHistoryTab';
 import { SalaryAssignmentsTab } from '@/components/hr/employee/tabs/SalaryAssignmentsTab';
 import { RefereesTab } from '@/components/hr/employee/tabs/RefereesTab';
+import { RelieversTab } from '@/components/hr/employee/tabs/RelieversTab';
 import { GuarantorsTab } from '@/components/hr/employee/tabs/GuarantorsTab';
 import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
 
@@ -176,6 +177,9 @@ export default function EmployeeDetailPage() {
             <TabsTrigger value="contracts">Contracts</TabsTrigger>
             <TabsTrigger value="expatriate">Expatriate</TabsTrigger>
             <TabsTrigger value="position-history">Position History</TabsTrigger>
+            {/* Slice 7. Who covers for this employee while they are away — read by the
+                leave request form to seed its two reliever slots by priority. */}
+            <TabsTrigger value="relievers">Relievers</TabsTrigger>
             <TabsTrigger value="salary">Salary</TabsTrigger>
             <TabsTrigger value="referees">Referees</TabsTrigger>
             <TabsTrigger value="guarantors">Guarantors</TabsTrigger>
@@ -268,6 +272,9 @@ export default function EmployeeDetailPage() {
         </TabsContent>
         <TabsContent value="salary" className="pt-4">
           <SalaryAssignmentsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="relievers" className="pt-4">
+          <RelieversTab employeeId={id} />
         </TabsContent>
         <TabsContent value="referees" className="pt-4">
           <RefereesTab employeeId={id} />
