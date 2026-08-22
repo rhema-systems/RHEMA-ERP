@@ -248,7 +248,14 @@ public interface IAwardCycleService
 
 public interface IAwardEligibilityService
 {
-    Task<AwardEligibilityResultDto> EvaluateAsync(Guid awardTypeId, DateTime? asOf);
+    /// <summary>Who qualifies, one page at a time, with the ineligible and their reasons (D-9).</summary>
+    Task<AwardEligibilityResultDto> EvaluateAsync(
+        Guid awardTypeId, DateTime? asOf, string? filter = null, int page = 1, int pageSize = 50,
+        string? search = null);
+
+    /// <summary>Who an employee may nominate: the qualified only, paged, and without reasons.</summary>
+    Task<PagedResult<AwardEligibilityVerdictDto>> GetCandidatesAsync(
+        Guid awardTypeId, string? search = null, int page = 1, int pageSize = 25);
     Task<AwardEligibilityVerdictDto> EvaluateEmployeeAsync(Guid awardTypeId, Guid employeeId, DateTime? asOf);
 }
 

@@ -1758,14 +1758,48 @@ public class AwardEligibilityResultDto
     public int EligibleCount { get; set; }
     public int IneligibleCount { get; set; }
 
-    public List<AwardEligibilityVerdictDto> Eligible { get; set; } = new();
+    /// <summary>
+    /// One page of verdicts, filtered by <see cref="Filter"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This was two unbounded lists until decision D-9.</b> Every active employee got a
+    /// verdict and both lists came back whole — measured on the live tenant that is <b>5,579</b>
+    /// rows, most of them ineligible and each carrying its own reasons, on an endpoint a screen calls
+    /// as soon as somebody picks an award. Paging is not a nicety here.</para>
+    ///
+    /// <para><b>The ineligible are still in it, with their reasons</b>, which was the other half of
+    /// D-9. TDC's note has management <i>"set the criteria and then it will qualify some
+    /// employees"</i>; whoever sets them needs to see why an expected name is missing, or a mis-set
+    /// rule and a correct one produce the same screen. Filtering them out is the reader's choice, not
+    /// the endpoint's.</para>
+    ///
+    /// <para>The two lists became one because a screen shows one table. Paging two lists against a
+    /// single page number would have meant a page 3 that held the third page of one list beside the
+    /// third page of the other — a shape with no reading.</para>
+    /// </remarks>
+    public List<AwardEligibilityVerdictDto> Items { get; set; } = new();
+
+    /// <summary><c>all</c>, <c>eligible</c> or <c>ineligible</c> — what <see cref="Items"/> holds.</summary>
+    public string Filter { get; set; } = "all";
+
+    public int Page { get; set; }
+    public int PageSize { get; set; }
 
     /// <summary>
-    /// Included on purpose. TDC's note has management "set the criteria and then it will qualify
-    /// some employees"; whoever sets them needs to see why an expected name is missing, or a
-    /// mis-set rule looks identical to a correct one.
+    /// Verdicts matching <see cref="Filter"/> - what the pages divide.
     /// </summary>
-    public List<AwardEligibilityVerdictDto> Ineligible { get; set; } = new();
+    /// <remarks>
+    /// Named to match <c>PagedResult&lt;T&gt;</c>, which every other paged HR endpoint returns:
+    /// <c>totalCount</c> / <c>hasNext</c> / <c>hasPrevious</c>. This DTO cannot BE a
+    /// <c>PagedResult</c> because it carries the three unfiltered counts as well, but it can at
+    /// least speak the same language. The frontend already carries a warning comment about HR and
+    /// Finance disagreeing on these names; a third dialect inside one module would be worse than
+    /// either.
+    /// </remarks>
+    public int TotalCount { get; set; }
+    public int TotalPages { get; set; }
+    public bool HasNext { get; set; }
+    public bool HasPrevious { get; set; }
 }
 
 public class AwardEligibilityVerdictDto

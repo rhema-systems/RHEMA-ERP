@@ -326,7 +326,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 8 | The award is conferred | ✅ **Done.** Nomination → `EmployeeAward`, direct conferral (AWD-07), budget reserve/spend, presentation, and the money events registered (D-7). |
 | 9 | Long service | ✅ **Done.** The ladder as data (AWD-14, D-8), the disciplinary exemption as a per-award switch (AWD-15), and the sweep — preview and run sharing one calculation. |
 | 10 | FR-HR-113 | ✅ **Done.** The long-service eligibility report, on the catalogue + provider + seeder + **migration** pattern, reading the sweep's own calculation. |
-| 11 | Screens | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards`. UI-payload probe mandatory. **Also D-9: page the eligibility endpoint.** |
+| 11 | Screens | ✅ **Done.** The three screens, the payload probe that preceded them, D-9's paging, and the two employee routes the probe found missing. |
 | 12 | Content audit | Every GET asserted for content, not status. **Run it twice.** |
 
 ---
@@ -1160,3 +1160,84 @@ measured at all.
 **One harness lesson.** The first draft looked for fixtures in page one. `pageSize` caps at 1000, the
 tenant has ~5,600 serving employees, and `ServiceUnknown` sorts **last on purpose** — so the
 "missing" row was the report being right and the harness reading it wrong. Fixture lookups now page.
+
+---
+
+### Slice 11 — the screens. 2026-08-22, **33/33**, run twice. No migration.
+
+Harness: `run-slice11.mjs`. Whole area re-run: **32 / 49 / 63 / 6 / 48 / 49 / 42 / 27 / 35 / 91 / 65
+/ 33 = 540 assertions**, all green. Frontend: `tsc --noEmit` **0 errors in awards**, ESLint clean,
+all three routes registered in all three navigation surfaces.
+
+**The probe came first, and it paid for itself before a line of TypeScript existed.**
+`probe-ui-payloads.mjs` prints the real key set and value type of all 20 payloads the screens bind
+to, building fixtures first so no list comes back empty — an empty array proves nothing about its
+element shape, which is the difference between a probe and a guess. What it caught:
+
+| | |
+|---|---|
+| **Four of my routes were fiction** | `levels/award-type/{id}`, `budgets/award-type/{id}`, `me/cycles`, `me/awards`. The service layer would have encoded the same guesses and compiled. |
+| **Enums serialise as STRINGS** | with a parallel `*Name`. A type written from the C# enum would have been `number` and every filter would have matched nothing, silently. |
+| **`AwardCommitteeMember.role` is free text** | max 100, not an enum. Passing `1` is a 400; a TS union would have type-checked. |
+| **⚠ Defect 21** | `AwardCommitteeMemberDto.EmployeeNumber` on the DTO since the port, **never set by the mapper**. Every committee membership list showed names beside a blank column. The navigation is loaded — the name next to it proves that — so nothing ever failed. |
+
+**⚠ A gap the probe found that no user had reported: `GET /api/awards/me/awards` did not exist.**
+Every route on the employee surface was about *taking part* — nominating, voting, scoring — and there
+was no way to see what you had actually **won**. It is the first thing anyone opens an awards screen
+for. Added, along with `me/awards/long-service`, kept separate because a long-service record carries
+a milestone and a service start date that a conferred award does not; merging them would produce a
+table half of whose columns are blank on half the rows.
+
+**D-9 delivered, and it turned out to have two halves.** `GET .../eligible` returned **two unbounded
+lists** — every active employee gets a verdict, so 5,579 rows with reason arrays on a call a screen
+makes the moment somebody picks an award. It is now one paged `items` list with a filter, and the
+**ineligible keep their reasons**: filtering them out is the reader's choice, not the endpoint's,
+because without them a mis-set rule and a correct one produce the same screen. The counts stay
+computed over everybody — *"12 eligible"* beside a page of 12 rows says nothing, *"12 of 5,579"*
+says everything.
+
+The second half was found by a build error. `AwardsMeController` called the same service for the
+**employee's candidate picker** — the one endpoint the entire workforce touches, opened the moment
+anyone starts a nomination, returning most of 5,579 names. Now paged **and searchable**: nobody
+scrolls five thousand names to find a colleague, they type one. It returns a plain
+`PagedResult<AwardEligibilityVerdictDto>` rather than the desk's result DTO, because the desk's shape
+carries `IneligibleCount` and this surface promises an employee never learns anything about why a
+colleague failed — a plain list has nothing on it to leak by accident.
+
+**⚠ My own grep hid that caller.** Sweeping for users of the removed lists I wrote
+`grep -v "result.Eligible"` to drop the definition site, and it removed `return Ok(result.Eligible);`
+— the one real caller. *An exclusion written to hide noise hid the signal.*
+
+**⚠ I invented a third paging vocabulary and caught it in the probe output.** The new envelope said
+`totalItems` / `hasNextPage` / `hasPreviousPage`; every other paged HR endpoint says `totalCount` /
+`hasNext` / `hasPrevious`. The frontend already carries a warning comment about HR and Finance
+disagreeing on exactly these names — a third dialect *inside one module* would be worse than either.
+Renamed, with an assertion pinning it.
+
+**Two claims of mine that were wrong, corrected in place.** I said the probe left *zero* unproven
+shapes; it had left two — both review lists returned empty arrays, and "it returned 200" is not the
+same as "I know what it returns". They are now probed after seating the actor on a committee and
+scoring a nomination. And the slice-11 harness itself shipped a **vacuous assertion**: "each with a
+reason" ran `[].every(...)` against an award nobody could fail, which returns true. A rule needs
+somebody it refuses before it can be shown to explain itself.
+
+**Also removed: a `.catch()` fallback that was hiding a 403.** The candidate-picker fixture was
+wrapped in `.catch(() => login().then(retry))` because the previous block had left the winner's token
+set — a fallback that would have swallowed any other refusal too. Slice 6 was caught doing this. Say
+what the actor is instead of catching being wrong.
+
+**Design notes.** `/hr/awards/me` is behind **no HR permission**, deliberately: nominating, voting
+and scoring are acts every employee performs, entitlement read off the record rather than granted,
+and gating it would lock the workforce out of the feature the area exists for — the area-15b trap.
+The sidebar entry carries that note so nobody "fixes" it later. HR's nav entry is **"Awards &
+Recognition" with a `Medal` glyph** because `/procurement/awards` already exists using `Award`, and
+two indistinguishable sidebar rows is its own defect. Screens render an unpriced long-service rung as
+**"not set"**, never `0.00`: a null there is a question TDC has not answered, and a zero answers it
+for them.
+
+**Recorded, not fixed: cross-module defect #4.** `tsc --noEmit` reports **19 errors, all in
+Inventory**, none touched by HR. The cost is not the 19 — it is that a gate which is never green
+stops being a gate, so the twentieth error lands unnoticed. Written up in
+`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` with the two worth looking at first: a duplicated
+`isStockingUnit` whose two declarations disagree about optionality, and a dialog that renders three
+fields its item type does not declare.

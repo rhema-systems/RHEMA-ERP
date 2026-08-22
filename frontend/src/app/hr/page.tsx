@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import {
+  Medal,
   Users,
   UserCheck,
   CreditCard,
@@ -160,6 +161,13 @@ export default function HrHomePage() {
                 'Misconduct cases from report through investigation and hearing to decision, sanction and appeal.',
               href: '/hr/discipline',
               icon: Gavel,
+            },
+            {
+              title: 'Awards & Recognition',
+              description:
+                'Nominate a colleague, vote, and see the awards and long-service milestones you have received.',
+              href: '/hr/awards',
+              icon: Medal,
             },
             {
               title: 'Grievances',

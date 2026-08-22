@@ -698,6 +698,23 @@ export const navigationItems: NavItem[] = [
         // expiry, redundancy, dismissal, death. Before it, the only way to leave was a disciplinary
         // case, so the other routes had enum members and nothing that could reach them. The
         // disciplinary route writes here too: area 9 keeps the decision, the exit lives here.
+        // Area 14. NOTE the title: '/procurement/awards' already exists and also uses the Award
+        // icon, so a bare "Awards" here would give the sidebar two entries a user cannot tell
+        // apart. Medal is deliberately a different glyph for the same reason.
+        title: 'Awards & Recognition',
+        href: '/hr/awards',
+        icon: Medal,
+        children: [
+          { title: 'Register', href: '/hr/awards', icon: Medal },
+          // Deliberately its own entry, and deliberately NOT permission-gated. Nominating a
+          // colleague, voting and scoring as a committee member are acts every employee performs -
+          // entitlement is read off the record, not granted - so this is the one awards screen most
+          // of its users will ever open. Gating it on HR.Awards.Read would lock the whole workforce
+          // out of the feature the area exists for.
+          { title: 'My Awards', href: '/hr/awards/me', icon: Award },
+        ],
+      },
+      {
         title: 'Separations & Exit',
         href: '/hr/separations',
         icon: DoorOpen,

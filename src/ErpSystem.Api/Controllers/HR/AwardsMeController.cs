@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -47,6 +48,8 @@ public class AwardsMeController : HrControllerBase
     private readonly IAwardVotingService _votingService;
     private readonly IAwardCommitteeReviewService _reviewService;
     private readonly IAwardCommitteeScoringService _scoringService;
+    private readonly IEmployeeAwardService _employeeAwardService;
+    private readonly ILongServiceAwardService _longServiceAwardService;
 
     public AwardsMeController(
         IAwardCycleService cycleService,
@@ -55,6 +58,8 @@ public class AwardsMeController : HrControllerBase
         IAwardVotingService votingService,
         IAwardCommitteeReviewService reviewService,
         IAwardCommitteeScoringService scoringService,
+        IEmployeeAwardService employeeAwardService,
+        ILongServiceAwardService longServiceAwardService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -64,6 +69,8 @@ public class AwardsMeController : HrControllerBase
         _votingService = votingService;
         _reviewService = reviewService;
         _scoringService = scoringService;
+        _employeeAwardService = employeeAwardService;
+        _longServiceAwardService = longServiceAwardService;
     }
 
     /// <summary>
@@ -92,20 +99,68 @@ public class AwardsMeController : HrControllerBase
     }
 
     /// <summary>
+    /// Awards the caller has received.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This route did not exist until slice 11</b>, and its absence was found by the
+    /// UI payload probe rather than by anyone using the system. Every other surface here is about
+    /// taking part in the process — nominating a colleague, casting a vote, scoring as a committee
+    /// member — and there was no way for an employee to see what they had actually <i>won</i>. It is
+    /// the first thing somebody opens an awards screen to look at.</para>
+    ///
+    /// <para>The actor is the token. No route or query parameter carries an employee id, so this
+    /// cannot be turned into a way of reading a colleague's award history.</para>
+    /// </remarks>
+    [HttpGet("awards")]
+    public async Task<ActionResult<IEnumerable<EmployeeAwardSummaryDto>>> GetMyAwards()
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+            "Listing your awards") is { } error) return error;
+
+        return Ok(await _employeeAwardService.GetByEmployeeIdAsync(employeeId));
+    }
+
+    /// <summary>
+    /// Long-service milestones the caller has been granted.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="GetMyAwards"/> because a long-service award is a different record
+    /// with different fields — it carries the milestone reached and the service start date, which a
+    /// conferred award does not. Merging them would mean a list where half the columns are blank on
+    /// half the rows.
+    /// </remarks>
+    [HttpGet("awards/long-service")]
+    public async Task<ActionResult<IEnumerable<LongServiceAwardSummaryDto>>> GetMyLongServiceAwards()
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+            "Listing your long-service awards") is { } error) return error;
+
+        return Ok(await _longServiceAwardService.GetByEmployeeIdAsync(employeeId));
+    }
+
+    /// <summary>
     /// Who the caller may put forward for an award.
     /// </summary>
     /// <remarks>
-    /// Only the qualified list is returned here. The awards desk sees the ineligible names and the
-    /// reasons — that is how HR checks its own criteria — but an employee choosing somebody to
-    /// nominate has no business reading why a colleague failed a rule.
+    /// <para>Only the qualified list is returned here. The awards desk sees the ineligible names and
+    /// the reasons — that is how HR checks its own criteria — but an employee choosing somebody to
+    /// nominate has no business reading why a colleague failed a rule. It returns a plain paged list
+    /// rather than the desk's result, so there is no ineligible count on it to leak by accident.</para>
+    ///
+    /// <para><b>Paged and searchable (D-9).</b> Every employee opens this the moment they start a
+    /// nomination, and the qualified set can be most of the 5,579-strong workforce. Nobody scrolls
+    /// five thousand names looking for a colleague — they type one.</para>
     /// </remarks>
     [HttpGet("awards/{awardTypeId:guid}/candidates")]
-    public async Task<ActionResult<IEnumerable<AwardEligibilityVerdictDto>>> GetCandidates(Guid awardTypeId)
+    public async Task<ActionResult<PagedResult<AwardEligibilityVerdictDto>>> GetCandidates(
+        Guid awardTypeId,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25)
     {
         if (TryGetWriteContext(out _, out _) is { } error) return error;
 
-        var result = await _eligibilityService.EvaluateAsync(awardTypeId, null);
-        return Ok(result.Eligible);
+        return Ok(await _eligibilityService.GetCandidatesAsync(awardTypeId, search, page, pageSize));
     }
 
     /// <summary>Nominations the caller has raised.</summary>

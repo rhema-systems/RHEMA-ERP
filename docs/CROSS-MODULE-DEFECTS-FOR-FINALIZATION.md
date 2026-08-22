@@ -279,6 +279,53 @@ sees exits in their queue that the service will refuse them.
 
 ---
 
+## 4. Inventory — the frontend does not type-check (19 errors, `tsc --noEmit`)
+
+**Found:** 2026-08-22, running `npx tsc --noEmit` as the verification step for HR area 14 slice 11.
+Nothing in HR touches these files; they were already failing.
+
+### What is broken
+
+`npx tsc --noEmit` in `frontend/` reports **19 errors, all in Inventory**. Three distinct causes:
+
+| Cause | Where | Errors |
+|---|---|---|
+| `isStockingUnit` declared **twice** on `ItemUnitOfMeasureDto`, with different optionality | `src/services/inventoryManagementService.ts:98-99` | 5 |
+| Fields read that the DTO does not declare — `lotNumber`, `batchNumber`, `serialNumber` on a requisition item union, `isStockingUnit` on a UoM | `src/components/inventory/RequisitionDialog.tsx:760`, `src/app/inventory/item-identifiers/page.tsx:330` | 6 |
+| A shorthand property with no value in scope, a bad `SetStateAction` cast, a possible-null deref, and four test mocks typed against the real axios signature | `project-reservations/page.tsx`, `ShipTransferDialog.tsx`, `inventoryManagementService.identifiers.test.ts` | 8 |
+
+### Why it matters more than the count suggests
+
+The duplicate `isStockingUnit` (TS2717) means **the two declarations disagree about whether the
+field can be undefined**. Whichever one wins, half the call sites are typed against the other. This
+is the frontend twin of the shape this repo keeps producing server-side: a field that exists, that
+compiles, and that carries something other than what the reader believes.
+
+The `lotNumber` / `batchNumber` / `serialNumber` errors are the more serious ones for a user:
+`RequisitionDialog` **reads and renders** three fields the item type does not declare. Either the
+DTO is missing them — in which case the dialog has been showing blanks — or the union is wrong. Both
+readings are defects, and the compiler cannot tell them apart from the outside.
+
+### What it blocks
+
+Nothing in HR. It is recorded because it makes `tsc` a **useless gate for everyone**: a clean run is
+impossible, so any new type error in any module lands in a wall of 19 pre-existing ones and is not
+noticed. That is the real cost — not the 19, but the twentieth.
+
+### What a fix needs
+
+1. Delete one of the two `isStockingUnit` declarations. Decide first whether it is optional; the
+   call sites will tell you.
+2. For `lotNumber` / `batchNumber` / `serialNumber`: check a live requisition-item payload before
+   changing either side. If the API sends them, add them to the DTO; if it does not, the dialog has
+   been rendering empty cells and the fix is in the dialog. **Do not guess from the field names** —
+   that is how the wrong half gets changed.
+3. Type the axios mocks in `inventoryManagementService.identifiers.test.ts` as
+   `vi.mocked(...)` / `jest.Mock` rather than against the real client signature.
+4. Then keep it at zero. A gate that is never green is not a gate.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

@@ -873,9 +873,14 @@ public static class AwardsMappingExtensions
             CommitteeId = entity.CommitteeId,
             CommitteeName = entity.Committee?.Name!,
             EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee != null 
-                ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
+            EmployeeName = entity.Employee != null
+                ? $"{entity.Employee.FirstName} {entity.Employee.LastName}"
                 : string.Empty,
+            // ⚠ The DTO has carried this field since the area was ported and the mapper never set
+            // it, so every committee membership list showed names beside a blank number column. The
+            // navigation is loaded already — the name next to it proves that — which is why nothing
+            // ever failed. Found by the slice-11 payload probe, not by a symptom.
+            EmployeeNumber = entity.Employee?.EmployeeNumber,
             Role = entity.Role,
             StartDate = entity.StartDate,
             EndDate = entity.EndDate,

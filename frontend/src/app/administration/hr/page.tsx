@@ -20,6 +20,7 @@ import {
   HelpCircle,
   LayoutList,
   ClipboardCheck,
+  Medal,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -201,6 +202,13 @@ export default function HrAdministrationPage() {
         </h2>
         <NavCardGrid
           items={[
+            {
+              title: 'Awards',
+              description:
+                'Award catalogue, levels, budgets, committees and the long-service milestone ladder.',
+              href: '/administration/hr/awards',
+              icon: Medal,
+            },
             {
               title: 'Orientation & Onboarding Setup',
               description:

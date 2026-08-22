@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Enums;
@@ -418,7 +419,21 @@ public class AwardEligibilityService : IAwardEligibilityService
         return tenantId;
     }
 
-    public async Task<AwardEligibilityResultDto> EvaluateAsync(Guid awardTypeId, DateTime? asOf)
+    /// <summary>
+    /// Who qualifies for an award, one page at a time (D-9).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The counts are always over everybody</b>, never over the page or the filter. A screen
+    /// showing "12 eligible" beside a filtered page of 12 rows would be telling the reader nothing;
+    /// the useful sentence is "12 of 5,579", and it has to survive whatever filter is applied.</para>
+    ///
+    /// <para><b>Eligible first, then ineligible</b>, each by name. The reader is looking for who
+    /// qualifies; making them page past four thousand refusals to find twelve names would be a
+    /// strange way to answer the question they asked.</para>
+    /// </remarks>
+    public async Task<AwardEligibilityResultDto> EvaluateAsync(
+        Guid awardTypeId, DateTime? asOf, string? filter = null, int page = 1, int pageSize = 50,
+        string? search = null)
     {
         var tenantId = GetTenantId();
         var awardType = await _awardTypeRepo.GetByIdAsync(awardTypeId);
@@ -426,6 +441,25 @@ public class AwardEligibilityService : IAwardEligibilityService
             throw AwardsWorkflowException.NotFound($"AwardType {awardTypeId} not found.");
 
         var result = await _evaluator.EvaluateAsync(awardTypeId, tenantId, asOf ?? DateTime.UtcNow);
+
+        // An unrecognised filter widens rather than fails: the verdict is on every row, so a reader
+        // can see at a glance that nothing was filtered.
+        var normalised = (filter ?? "all").Trim().ToLowerInvariant();
+        if (normalised is not ("eligible" or "ineligible")) normalised = "all";
+
+        var selected = normalised switch
+        {
+            "eligible" => result.Eligible,
+            "ineligible" => result.Ineligible,
+            _ => result.Eligible.Concat(result.Ineligible).ToList(),
+        };
+
+        selected = Search(selected, search);
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 500);
+        var totalItems = selected.Count;
+        var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
 
         return new AwardEligibilityResultDto
         {
@@ -435,9 +469,65 @@ public class AwardEligibilityService : IAwardEligibilityService
             ConsideredCount = result.ConsideredCount,
             EligibleCount = result.Eligible.Count,
             IneligibleCount = result.Ineligible.Count,
-            Eligible = result.Eligible.Select(Map).ToList(),
-            Ineligible = result.Ineligible.Select(Map).ToList()
+            Filter = normalised,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalItems,
+            TotalPages = totalPages,
+            HasNext = page < totalPages,
+            HasPrevious = page > 1 && totalPages > 0,
+            Items = selected.Skip((page - 1) * pageSize).Take(pageSize).Select(Map).ToList(),
         };
+    }
+
+    /// <summary>
+    /// Who an employee may put forward, paged and searchable.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Only the qualified, and never the reasons.</b> The awards desk sees the ineligible
+    /// names and why each failed — that is how HR checks its own criteria — but an employee choosing
+    /// somebody to nominate has no business reading why a colleague failed a rule. This returns a
+    /// plain paged list rather than the desk's result, so there is no ineligible count on it to leak
+    /// by accident.</para>
+    ///
+    /// <para><b>Paged and searchable because of who calls it.</b> Every employee hits this the moment
+    /// they open the nominate form, and on the live tenant the qualified set can be most of 5,579
+    /// people. Nobody scrolls five thousand names to find a colleague — they type one. Returning the
+    /// whole list would be the same unbounded payload D-9 was raised about, on the one endpoint the
+    /// entire workforce touches.</para>
+    /// </remarks>
+    public async Task<PagedResult<AwardEligibilityVerdictDto>> GetCandidatesAsync(
+        Guid awardTypeId, string? search = null, int page = 1, int pageSize = 25)
+    {
+        var tenantId = GetTenantId();
+        var awardType = await _awardTypeRepo.GetByIdAsync(awardTypeId);
+        if (awardType == null || awardType.TenantId != tenantId)
+            throw AwardsWorkflowException.NotFound($"AwardType {awardTypeId} not found.");
+
+        var result = await _evaluator.EvaluateAsync(awardTypeId, tenantId, DateTime.UtcNow);
+        var matches = Search(result.Eligible, search);
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        return new PagedResult<AwardEligibilityVerdictDto>
+        {
+            TotalCount = matches.Count,
+            Page = page,
+            PageSize = pageSize,
+            Items = matches.Skip((page - 1) * pageSize).Take(pageSize).Select(Map).ToList(),
+        };
+    }
+
+    /// <summary>Name or employee-number match. Blank means everybody.</summary>
+    private static List<AwardEligibilityVerdict> Search(List<AwardEligibilityVerdict> source, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return source;
+        var term = search.Trim();
+        return source
+            .Where(v => v.EmployeeName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (v.EmployeeNumber ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     public async Task<AwardEligibilityVerdictDto> EvaluateEmployeeAsync(Guid awardTypeId, Guid employeeId, DateTime? asOf)

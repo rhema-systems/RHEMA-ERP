@@ -1306,16 +1306,25 @@ public class AwardsController : HrControllerBase
     /// Who qualifies for this award, and why anyone else does not.
     /// </summary>
     /// <remarks>
-    /// This is the "management will set the criteria and then it will qualify some employees" step
-    /// of TDC's note. The ineligible list is returned deliberately: without it, a mis-set rule and a
-    /// correct one produce the same screen.
+    /// <para>This is the "management will set the criteria and then it will qualify some employees"
+    /// step of TDC's note. The ineligible are returned deliberately, with their reasons: without
+    /// them, a mis-set rule and a correct one produce the same screen.</para>
+    ///
+    /// <para><b>Paged (D-9).</b> Every active employee gets a verdict, which on the live tenant is
+    /// 5,579 of them — an unbounded payload on an endpoint a screen calls the moment somebody picks
+    /// an award. <c>filter</c> takes <c>all</c> (default), <c>eligible</c> or <c>ineligible</c>; the
+    /// counts are computed over everybody regardless, because "12 eligible" beside a page of 12 rows
+    /// tells the reader nothing and "12 of 5,579" tells them everything.</para>
     /// </remarks>
     [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
     [HttpGet("types/{awardTypeId:guid}/eligible")]
     public async Task<ActionResult<AwardEligibilityResultDto>> GetEligible(
         Guid awardTypeId,
-        [FromQuery] DateTime? asOf = null)
-        => Ok(await _eligibilityService.EvaluateAsync(awardTypeId, asOf));
+        [FromQuery] DateTime? asOf = null,
+        [FromQuery] string? filter = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+        => Ok(await _eligibilityService.EvaluateAsync(awardTypeId, asOf, filter, page, pageSize));
 
     [Authorize(Policy = HrPermissions.AwardsReadPolicy)]
     [HttpGet("types/{awardTypeId:guid}/eligible/{employeeId:guid}")]
