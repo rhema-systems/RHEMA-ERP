@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'Verify')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -554,9 +554,10 @@ function Invoke-Backup {
     )
     Invoke-RobocopyChecked @(
         $FrontendRoot, $frontendBackup, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
-        '/NJH', '/NJS', '/NP',
+        '/NJH', '/NJS', '/NP', '/XJ',
         '/XD', (Join-Path $FrontendRoot 'node_modules'),
-        (Join-Path $FrontendRoot 'logs')
+        (Join-Path $FrontendRoot 'logs'),
+        '/XF', (Join-Path $FrontendRoot 'let')
     )
     Copy-Item -LiteralPath $ApiServiceXml -Destination `
         (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
@@ -650,11 +651,13 @@ function Wait-ApiReady {
 }
 
 function Wait-FrontendReady {
-    $deadline = (Get-Date).AddMinutes(2)
+    param([int]$TimeoutSeconds = 600)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
             $response = Invoke-WebRequest 'http://127.0.0.1:3001/login' `
-                -UseBasicParsing -TimeoutSec 5
+                -UseBasicParsing -TimeoutSec 30
             if ($response.StatusCode -eq 200) {
                 Write-Output 'FRONTEND_READY|200'
                 return
@@ -663,7 +666,31 @@ function Wait-FrontendReady {
         catch { }
         Start-Sleep -Seconds 3
     }
-    throw 'Frontend readiness exceeded two minutes.'
+    throw "Frontend readiness exceeded $TimeoutSeconds seconds."
+}
+
+function Start-ApiWithControlledMigrations {
+    param([DateTime]$StartedAt)
+
+    $originalXml = Get-ApiConfigurationXml
+    $migrationXml = Get-ApiConfigurationXml
+    Set-ServiceEnvironmentValue $migrationXml 'SkipStartupInitialization' 'false'
+    Set-ServiceEnvironmentValue $migrationXml `
+        'StartupInitialization__SeedDevelopmentData' 'false'
+    Set-ServiceEnvironmentValue $migrationXml `
+        'StartupInitialization__SeedWorkflowDefinitions' 'false'
+    $migrationXml.Save($ApiServiceXml)
+
+    try {
+        Start-Service RhemaERPAPI
+        Wait-ApiReady $StartedAt
+    }
+    finally {
+        # The test VPS normally skips the expensive startup initializer. Enable it
+        # only for the controlled deployment restart, then restore the exact service
+        # configuration regardless of migration or readiness success.
+        $originalXml.Save($ApiServiceXml)
+    }
 }
 
 function Invoke-Apply {
@@ -736,8 +763,7 @@ function Invoke-Apply {
             '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'),
             (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
         )
-        Start-Service RhemaERPAPI
-        Wait-ApiReady $apiStartedAt
+        Start-ApiWithControlledMigrations $apiStartedAt
     }
     catch {
         Stop-Service RhemaERPAPI -Force -ErrorAction SilentlyContinue
@@ -811,6 +837,105 @@ function Invoke-Apply {
     Write-Output 'APPLY|PASS'
 }
 
+function Invoke-ResumeFrontend {
+    Assert-DeploymentId
+    foreach ($value in @($ExpectedCommit, $ExpectedBuildId, $ExpectedCacheVersion,
+            $ApiSha256, $FrontendSha256)) {
+        Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
+            'ResumeFrontend requires commit, build, cache, and package hashes.'
+    }
+
+    $stageFrontend = Join-Path $PackagesRoot "stage-$DeploymentId\frontend"
+    $failedFrontend = Join-Path $PackagesRoot "failed-$DeploymentId"
+    $rollbackFrontend = Join-Path $PackagesRoot "resume-old-$DeploymentId"
+    $retryFailed = Join-Path $PackagesRoot "resume-failed-$DeploymentId"
+    Assert-True (Test-Path (Join-Path $stageFrontend 'server.js')) `
+        'The staged frontend server is missing.'
+    Assert-True (Test-Path (Join-Path $failedFrontend '.next\BUILD_ID')) `
+        'The failed frontend build is unavailable for retry.'
+    Assert-True (-not (Test-Path $rollbackFrontend)) `
+        "Frontend retry rollback path already exists: $rollbackFrontend"
+
+    $candidateBuildId = (Get-Content `
+        (Join-Path $failedFrontend '.next\BUILD_ID') -Raw).Trim()
+    Assert-True ($candidateBuildId -eq $ExpectedBuildId) `
+        'The retry candidate build differs from the expected release.'
+    $candidateWorker = Get-Content `
+        (Join-Path $failedFrontend 'public\sw.js') -Raw
+    Assert-True ($candidateWorker -match [regex]::Escape($ExpectedCacheVersion)) `
+        'The retry candidate service-worker version differs from the release.'
+
+    $currentResponse = Invoke-WebRequest 'http://127.0.0.1:3001/login' `
+        -UseBasicParsing -TimeoutSec 30
+    Assert-True ($currentResponse.StatusCode -eq 200) `
+        'The current frontend is not healthy enough for a controlled retry.'
+
+    New-Item -ItemType Directory -Path $rollbackFrontend | Out-Null
+    $swapped = $false
+    try {
+        Stop-Service RhemaERPFrontend -Force
+        (Get-Service RhemaERPFrontend).WaitForStatus(
+            'Stopped', [TimeSpan]::FromMinutes(2))
+        foreach ($name in @('.next', 'public')) {
+            Move-Item (Join-Path $FrontendRoot $name) `
+                (Join-Path $rollbackFrontend $name)
+        }
+        Copy-Item (Join-Path $FrontendRoot 'server.js'), `
+            (Join-Path $FrontendRoot 'package.json') `
+            -Destination $rollbackFrontend -Force
+        foreach ($name in @('.next', 'public')) {
+            Move-Item (Join-Path $failedFrontend $name) `
+                (Join-Path $FrontendRoot $name)
+        }
+        Copy-Item (Join-Path $stageFrontend 'server.js'), `
+            (Join-Path $stageFrontend 'package.json') `
+            -Destination $FrontendRoot -Force
+        $swapped = $true
+        Start-Service RhemaERPFrontend
+        Wait-FrontendReady -TimeoutSeconds 600
+
+        $liveBuildId = (Get-Content `
+            (Join-Path $FrontendRoot '.next\BUILD_ID') -Raw).Trim()
+        Assert-True ($liveBuildId -eq $ExpectedBuildId) `
+            'The live frontend build differs from the expected release.'
+        $release = [ordered]@{
+            deploymentId = $DeploymentId
+            commit = $ExpectedCommit
+            buildId = $ExpectedBuildId
+            cacheVersion = $ExpectedCacheVersion
+            deployedUtc = [DateTime]::UtcNow.ToString('o')
+            apiSha256 = $ApiSha256
+            frontendSha256 = $FrontendSha256
+        }
+        [System.IO.File]::WriteAllText(
+            (Join-Path $LogsRoot 'current-release.json'),
+            ($release | ConvertTo-Json -Depth 4),
+            (New-Object System.Text.UTF8Encoding($false)))
+    }
+    catch {
+        $failure = $_.Exception.Message
+        if ($swapped) {
+            Stop-Service RhemaERPFrontend -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $retryFailed -Force | Out-Null
+            foreach ($name in @('.next', 'public')) {
+                $livePath = Join-Path $FrontendRoot $name
+                if (Test-Path $livePath) {
+                    Move-Item $livePath (Join-Path $retryFailed $name) -Force
+                }
+                $oldPath = Join-Path $rollbackFrontend $name
+                if (Test-Path $oldPath) { Move-Item $oldPath $livePath }
+            }
+            Copy-Item (Join-Path $rollbackFrontend 'server.js'), `
+                (Join-Path $rollbackFrontend 'package.json') `
+                -Destination $FrontendRoot -Force
+            Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
+        }
+        throw "Frontend retry failed and rollback was attempted: $failure"
+    }
+
+    Write-Output 'RESUME_FRONTEND|PASS'
+}
+
 function Invoke-Verify {
     Write-ServiceState
     $notRunning = @(Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
@@ -869,5 +994,6 @@ switch ($Action) {
     'Preflight' { Invoke-Preflight }
     'Backup' { Invoke-Backup }
     'Apply' { Invoke-Apply }
+    'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
 }
