@@ -73,6 +73,7 @@ import {
   Gavel,
   Network,
   Users2,
+  UserRoundCheck,
   Grid3x3,
   Award,
   Star,
@@ -1642,6 +1643,10 @@ export const navigationItems: NavItem[] = [
           // Slice 6. Master data behind the job description's bargaining-unit clause, which
           // until now could never be filled in: there was no register and no picker.
           { title: 'Unions', href: '/administration/hr/unions', icon: Users2 },
+          // Slice 8. Eleven endpoints that nothing had ever called; the panel picker in
+          // recruitment was the only reader, and it could only search a register no screen
+          // could add to.
+          { title: 'External Associates', href: '/administration/hr/external-associates', icon: UserRoundCheck },
           { title: 'Staff Levels', href: '/administration/hr/staff-levels', icon: ListTree },
           { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
           // Area 17 setup. A competency is what the organisation expects someone to be able to do;

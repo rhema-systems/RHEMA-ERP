@@ -205,3 +205,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260821224419_AddLongServiceMilestoneAndDisciplinaryCheck")] partial class AddLongServiceMilestoneAndDisciplinaryCheck { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete")] partial class FilterTeamCodeUniqueIndexOnSoftDelete { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete")] partial class FilterEmployeeRelieverPriorityIndexOnSoftDelete { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260822211432_FilterExternalAssociateNumberUniqueIndexOnSoftDelete")] partial class FilterExternalAssociateNumberUniqueIndexOnSoftDelete { }

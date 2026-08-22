@@ -23,10 +23,25 @@ public class ExternalAssociateDto : BaseDto
     public string? CompanyName     { get; set; }
     public string? Role            { get; set; }
     public string  PicturePath     { get; set; } = string.Empty;
+    /// <remarks>
+    /// ⚠ <b>Dormant.</b> Nothing anywhere reads either of these — grepped across every service,
+    /// template and screen in areas 19-23 slice 8, and the only hits are this DTO, the mapping and
+    /// the entity. They are carried so an existing value survives a round trip, and they are
+    /// deliberately absent from the register's form: an input that changes nothing is worse than a
+    /// missing one. See the slice-6 rule — find out what READS a field before deciding it is
+    /// peripheral — which is what settled this the other way for <c>JobDescription.UnionId</c>.
+    /// </remarks>
     public bool    HasFixedModule   { get; set; }
+    /// <inheritdoc cref="HasFixedModule"/>
     public int?    ModuleId         { get; set; }
     public bool    IsActive         { get; set; }
     public DateTime DateAdded       { get; set; }
+
+    /// <summary>
+    /// How many interview panels this associate sits on. Nonzero means the delete will be refused,
+    /// and the detail screen says so before the button is pressed rather than after.
+    /// </summary>
+    public int     InterviewPanelCount { get; set; }
 }
 
 /// <summary>Lightweight row for list and typeahead surfaces.</summary>

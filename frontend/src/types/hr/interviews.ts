@@ -652,10 +652,8 @@ export interface SendPanelistNotifications {
 
 // ── external associates (the external-panelist picker) ─────────────────────
 
-export interface ExternalAssociateSearchResult {
-  id: string;
-  fullName: string;
-  email?: string | null;
-  companyName?: string | null;
-  role?: string | null;
-}
+// ⚠ Re-exported, not restated. The local copy declared five of the seven keys the endpoint
+// actually returns — `associateNumber` and `phoneNumber` were simply missing, so the picker could
+// not have shown either even though both were on the wire. Transcribed from a live payload in
+// slice 8 and now kept in one place.
+export type { ExternalAssociateSearchResult } from './external-associate';

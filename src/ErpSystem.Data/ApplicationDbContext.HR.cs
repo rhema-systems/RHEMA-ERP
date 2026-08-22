@@ -9369,6 +9369,20 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<ExternalAssociate>(entity =>
         {
+            // ⚠ D-10, and the THIRD migration in this bundle for one trap: a uniqueness claim over a
+            // soft-deleting store. `AssociateNumber` was indexed but NOT unique, and the generator
+            // read the highest EXT-nnnn through the soft-delete filter, so a removed associate's
+            // number was invisible and was minted again — 38 rows on DEFAULT carried EXT-0008, every
+            // one of them deleted, and `GET number/{n}` resolved with a FirstOrDefault.
+            //
+            // The filter is `IsDeleted = 0` rather than none at all, for a reason the data settles:
+            // those 38 duplicates are real rows and a full unique index cannot be built over them.
+            // Uniqueness among LIVE rows is the claim the register actually makes; the generator not
+            // reissuing is what keeps a dead number out of circulation.
+            entity.HasIndex(x => new { x.TenantId, x.AssociateNumber })
+                  .HasDatabaseName("IX_ExternalAssociates_Tenant_Number")
+                  .IsUnique()
+                  .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(x => x.AssociateNumber);
             entity.HasIndex(x => x.Email);
             entity.HasIndex(x => x.IsActive);

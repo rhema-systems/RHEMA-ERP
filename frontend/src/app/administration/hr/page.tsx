@@ -5,6 +5,7 @@ import {
   MapPin,
   Users,
   Users2,
+  UserRoundCheck,
   ListTree,
   Wrench,
   GraduationCap,
@@ -78,6 +79,14 @@ export default function HrAdministrationPage() {
               description: 'Trade unions and the collective agreements negotiated with each.',
               href: '/administration/hr/unions',
               icon: Users2,
+            },
+            {
+              // Slice 8. The assessors and panellists brought in from outside; the recruitment
+              // panel picker draws from the active ones here.
+              title: 'External Associates',
+              description: 'Panellists, assessors and advisers who act for you without an ERP login.',
+              href: '/administration/hr/external-associates',
+              icon: UserRoundCheck,
             },
             {
               title: 'Skills',

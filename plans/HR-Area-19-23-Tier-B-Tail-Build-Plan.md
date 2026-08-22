@@ -28,7 +28,7 @@ the JWT key passed; every harness runs **twice**.
 | **19** | `api/Organogram` | 5 GET | 0 | engine looks sound, never rendered |
 | **19** | `api/hr/teams` | — | — | **added in slice 4b**: 12 endpoints. `Team`/`TeamMember`/`TeamMemberHistory` had tables and EF config but no writer of any kind |
 | **19** | `api/OrganizationUnitHistory` | 6 GET | 2 | **done**: slice 3 made it writable, slice 5 rendered it and found six more defects |
-| **20** | `api/external-associates` | 11 | 1 of 11 (a picker) | register never built |
+| **20** | `api/external-associates` | 11 | 1 of 11 (a picker) | **done in slice 8**: register, detail, the filtered unique index (D-10), and the delete that used to empty an interview panel |
 | **20** | `api/hr/employee-relievers` | 5 | 2 | **done in slice 7**: roster tab, the leave-form seeding Decision 3 required, and the filtered unique index |
 | **20** | `api/facility-services` | 5 | 0 | medical-owned, 2 rows |
 | **20** | `api/employee-certificates` | 9 | ✅ area 7 | **done, out of scope** |
@@ -252,13 +252,13 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 5 | **Unit history screens.** Register + the unit-detail tab. | 19 |
 | 6 | **Unions and CBAs.** Register, detail, agreement collection, D-6 fix. | 21 |
 | 7 | **Reliever roster.** D-9 (the unfiltered unique index), roster screen + the leave-form default (Decision 3). | 20 |
-| 8 | **External associates.** D-10 (the reissued number), register, detail, activate/deactivate — the 10 unreached endpoints. | 20 |
+| 8 | **External associates.** D-10 (the reissued number), register, detail, activate/deactivate — the 10 unreached endpoints. ✅ | 20 |
 | 9 | **Facility services** onto the area-11 facility detail. | 20 |
 | 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. | 23 |
 | 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. | all |
 | 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
 
-Migrations: **two, both applied.** `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b) and `20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete` (slice 7). Both are the same defect — a unique index over a soft-deleting store — which was the most reliably recurring shape in this bundle, four occurrences in all. Slice 8 may owe a third for `AssociateNumber`, depending on whether D-10 is fixed by filtering the generator or by making the column genuinely unique.
+Migrations: **three, all applied.** `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b), `20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete` (slice 7) and `20260822211432_FilterExternalAssociateNumberUniqueIndexOnSoftDelete` (slice 8). All three are the same defect — a uniqueness claim over a soft-deleting store — which was the most reliably recurring shape in this bundle. Slice 8 answered the open question in the third one's favour: D-10 needed **both** halves, the generator reading past the soft delete *and* the filtered index behind it, because the generator alone leaves nothing enforcing the claim and a plain unique index cannot be built over the 38 dead rows already carrying `EXT-0008`.
 
 Expected migrations: **at least one, contrary to the first draft of this plan.** Slice 0 found D-9,
 and a unique index that must exclude soft-deleted rows is a schema change:
@@ -1029,3 +1029,128 @@ no delete, and terminating is the only honest way to prove the leaver rule). The
 each run empty. ⚠ The two soft-deleted reliever rows against real employee `88e6cc67…` left by slice
 0's first buggy probe **no longer hold priority slots 1 and 2** — the migration released them, which
 is the first live consequence of this slice outside its own fixtures.
+
+### Slice 8 — the external-associate register. 2026-08-22, **82/82**, run twice. Migration `20260822211432_FilterExternalAssociateNumberUniqueIndexOnSoftDelete`.
+
+Harness `run-slice8.mjs`; payloads probed first with `SLICE=8 node probe-ui-payloads.mjs`, plus a
+standalone panel probe. Screens: the register under `/administration/hr/external-associates`, a new
+form and a detail/edit screen. Full regression alongside: slice 0 **17/17**, 1 **69/69**,
+2 **100/100**, 3 **49/49**, 4 **60/60**, 4b **88/88**, 5 **111/111**, 6 **77/77**, 7 **63/63**.
+Bundle total: **716 assertions**.
+
+**D-10, the last of the three soft-delete uniqueness defects this bundle found.** Reproduced by
+execution before the fix: create an associate, delete it, create another — the same `EXT-0008` came
+back. SQL then gave the scale the API could not:
+
+```
+    TenantId  AssociateNumber  rows  deleted
+    …0001     EXT-0008           38       38     <- every one a dead fixture
+    …0001     EXT-0001..0007      1        0     <- the seven live associates
+```
+
+`GenerateAssociateNumberAsync` read the highest `EXT-nnnn` through `GetQueryable()`, which welds
+`!IsDeleted` in, so a retired number was invisible to the generator and came back around; `GET
+number/{n}` then resolved with a `FirstOrDefault` and answered with whichever of the 38 the engine
+reached. The generator now reads `GetQueryableIncludingDeleted`, and the migration puts a **filtered
+unique index** behind it. Proven twice, with the numbers printed:
+`held=EXT-0010 deleted=EXT-0011 next=EXT-0012`, then `0014 / 0015 / 0016` on the second run — the
+sequence never turns back.
+
+⚠ **The index cannot be exercised from the API, and the harness says so on screen rather than
+implying otherwise.** Slices 4b and 7 could reproduce their collisions because the caller supplies
+the key; here the number is minted server-side and no endpoint accepts one. What is provable through
+the API is the generator. The index is what stops a second writer inventing a number — it is a
+guard, not a behaviour, and an assertion that pretended to cover it would be the vacuous kind this
+bundle has been catching since slice 5.
+
+⚠ **A plain unique index was not an option, and the data is what settled it.** Those 38 duplicates
+are real rows; `WHERE IsDeleted = 0` is the only filter under which the index builds. Checked
+immediately before handing the migration over: 48 rows, 41 deleted, no two live rows sharing a
+number.
+
+⚠ **EF's diff also dropped `IX_ExternalAssociates_TenantId`** — a convention index is removed once a
+declared index leads with the same column, and the snapshot confirms the model no longer carries it.
+Kept rather than hand-restored, because a database ahead of its model is a permanent pending change.
+The one read it served that the new index cannot is the generator's include-deleted sweep, which the
+filter excludes by definition; at 48 rows that is a scan of one page. Recorded in the migration so it
+is a known trade rather than a later discovery.
+
+**D-63 · Deleting an associate silently emptied the interview panels they sat on — and this one was
+found by executing, not by reading.** `JobInterviewExternalPanelist.AssociateId` is configured
+`OnDelete.Restrict`, which reads like protection and is not: the delete is a **soft** delete, so the
+constraint never fires. The panel read then `.Include`s a **required** navigation whose principal
+carries the global `!IsDeleted` filter, and the panelist row drops out of the answer. Measured:
+
+```
+    panel after add:    2  (listed: true)
+    DELETED the associate (a soft delete; the FK is OnDelete.Restrict)
+    panel after delete: 1  (listed: false)
+    could not remove the panelist row: 404 — it is unreachable through the API now
+```
+
+The last line is the part that makes it more than a display bug: the orphan cannot be reached by any
+route that could tidy it up, and its scorecards go with it. **This is lesson 2 of this bundle
+recurring in a third place**, after slice 5's org-unit change log — the required-nav INNER JOIN that
+deletes rows from an answer. `DeleteAsync` now refuses with a 409 naming the count and pointing at
+deactivate; **six of the seven live associates on DEFAULT sit on a panel today**, so the refusal is
+about real data. The harness asserts the whole shape: the refusal, that the panel is untouched by the
+attempt, that deactivating is allowed and leaves the panel exactly as it was, and that the count
+falls back to zero once the seat is given up.
+
+**D-64 · `pageNumber=0` and `pageNumber=-1` were a bare 500** — a negative SQL `OFFSET`, from a
+register no screen had ever paged. `pageSize=0` answered 200 with a page that could never hold a row;
+`pageSize=100000` was served in full. All three are clamped.
+
+**D-65 · `isActive` did not exist.** A register with an activate/deactivate pair and no way to page
+the inactive half. ⚠ The assertion prints all three counts (`all=9 active=8 inactive=1`) and checks
+they add up, because slice 5's lesson applies exactly: the defect this filter class produces is
+returning the *unfiltered* total, which a screen cannot tell from a filter that matched everything.
+
+**D-66 · `GET number/{unknown}` answered 200 with a null body.** "Not found" as a payload the caller
+has to inspect for — and every generated client reads it as a successful empty record. Now a 404 with
+a sentence.
+
+**D-67 · A bare `[Authorize]`, and the probe measured what that meant**: a plain `Employee` could list
+every associate with their email and phone number, and create one. Now **SuperAdmin / TenantAdmin /
+HR across the whole surface, reads included** — tighter than the union register three slices ago, and
+deliberately so: a union is a noticeboard, this is a directory of named third parties' personal
+contact details. ⚠ **The gate was checked against its consumer before being chosen, not after.** The
+only endpoint anything calls is `search`, behind `PanelMemberPicker`, and that picker only ever
+renders inside an action `JobInterviewService` already restricts to HR
+(`EnsureHr("change an interview panel")`). Eleven refusals are asserted — D-7's full count — and so
+is the other half of the gate, because a "fix" that closed the controller to everybody would pass all
+eleven and take the picker away from the only people who use it.
+
+**Two dead statements of live rules, removed.** `IExternalAssociateRepository` carried seven bespoke
+members — including a **second copy of the reissuing number generator** — and nothing called any of
+them; none took a tenant, so every one read across all tenants. The interface is now empty and the
+repository is the generic one. The copy of the generator mattered most: it preserved D-10 in a form
+no caller could reach, ready to hand the defect back to the first person who used it. Separately,
+`ExternalAssociateDataSeeder` minted `EXT-001` while the service minted `EXT-0001` — **two formats for
+one series**, so a seeded row and a minted row would sit in the register looking like the same
+reference on two different people. Normalised to D4; nothing had to be migrated, because that seeder
+has never run on DEFAULT.
+
+**`HasFixedModule` and `ModuleId` are dormant, and that was established by grepping, not by
+assuming.** Slice 6's rule — find out what READS a field before deciding it is peripheral — is what
+turned `JobDescription.UnionId` from an afterthought into that slice's point. Applied here it gives
+the opposite answer: the only hits are the entity, the mapping and the DTO. They stay on the DTO so a
+round trip does not wipe an existing value, they are off the form, and the edit screen passes them
+back explicitly — `HasFixedModule` is a non-nullable bool, so omitting it would write `false`.
+
+**Frontend.** One register with server-side search, the `isActive` filter and paging; a create form;
+a detail screen whose **Use** panel shows the panel count and disables delete while it is nonzero, so
+the refusal is on screen before the button rather than only after it. The picker's own client and
+type were **de-duplicated rather than left alongside the new ones** — `interviews.service.ts` held a
+two-method copy whose `getActive()` was typed as search results while the endpoint answers summary
+rows, and `types/hr/interviews.ts` declared five of the seven keys the search endpoint actually
+returns, so `associateNumber` and `phoneNumber` were on the wire and unreachable. Both now re-export.
+
+**Slice 0's D-10 assertion is flipped, not deleted** — it asserted `===`, the broken state, and now
+asserts `!==` with a failure message naming what a regression would mean. Slice 0 stays 17/17.
+
+**Residue on live data:** soft-deleted fixture associates, each holding a retired `EXT` number, which
+is now the correct behaviour rather than the defect. ⚠ One orphaned `JobInterviewExternalPanelists`
+row was created against a **real** interview while proving D-63 and removed with SQL, because it
+could no longer be reached through the API — that was harness damage to TDC data, not a product fact,
+and the table is clean.

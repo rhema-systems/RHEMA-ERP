@@ -10,9 +10,10 @@ public interface IExternalAssociateService
 {
     // ── Queries ───────────────────────────────────────────────────────────────
     Task<ExternalAssociateDto> GetByIdAsync(Guid id, CancellationToken ct = default);
-    Task<ExternalAssociateDto?> GetByAssociateNumberAsync(string associateNumber, CancellationToken ct = default);
+    /// <summary>Throws <c>ArgumentException</c> when no associate carries the number — it used to answer a null.</summary>
+    Task<ExternalAssociateDto> GetByAssociateNumberAsync(string associateNumber, CancellationToken ct = default);
     Task<IEnumerable<ExternalAssociateSummaryDto>> GetAllAsync(CancellationToken ct = default);
-    Task<PagedResult<ExternalAssociateSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, string? searchTerm = null, CancellationToken ct = default);
+    Task<PagedResult<ExternalAssociateSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, string? searchTerm = null, bool? isActive = null, CancellationToken ct = default);
     Task<IEnumerable<ExternalAssociateSummaryDto>> GetActiveAsync(CancellationToken ct = default);
     Task<IEnumerable<ExternalAssociateSearchResultDto>> SearchAsync(string q, int limit = 20, CancellationToken ct = default);
 

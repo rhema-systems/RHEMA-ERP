@@ -11,7 +11,6 @@ import type {
   CreateJobInterview,
   CreateJobInterviewQuestionPlan,
   CreateJobInterviewScoreSummary,
-  ExternalAssociateSearchResult,
   InterviewQuestion,
   InterviewQuestionPreset,
   InterviewQuestionPresetSummary,
@@ -513,21 +512,16 @@ class InterviewQuestionPresetService {
   }
 }
 
-/** api/external-associates — the picker for external panel members, who have no ERP login. */
-class ExternalAssociateService {
-  private readonly baseUrl = '/external-associates';
-
-  /** Typeahead; needs at least 2 characters or it returns an empty list. */
-  search(q: string, limit = 20): Promise<ExternalAssociateSearchResult[]> {
-    return apiService.get<ExternalAssociateSearchResult[]>(`${this.baseUrl}/search`, { q, limit });
-  }
-
-  getActive(): Promise<ExternalAssociateSearchResult[]> {
-    return apiService.get<ExternalAssociateSearchResult[]>(`${this.baseUrl}/active`);
-  }
-}
+/**
+ * api/external-associates — the picker for external panel members, who have no ERP login.
+ *
+ * ⚠ Re-exported from `external-associate.service`, not declared again. This file used to hold its
+ * own two-method copy, and the copy was already wrong: its `getActive()` was typed
+ * `ExternalAssociateSearchResult[]` while the endpoint answers summary rows. Slice 8 built the full
+ * register, and one endpoint deserves one client.
+ */
+export { externalAssociateService } from './external-associate.service';
 
 export const jobInterviewService = new JobInterviewService();
 export const interviewQuestionBankService = new InterviewQuestionBankService();
 export const interviewQuestionPresetService = new InterviewQuestionPresetService();
-export const externalAssociateService = new ExternalAssociateService();
