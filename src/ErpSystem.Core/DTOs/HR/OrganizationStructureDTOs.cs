@@ -266,6 +266,19 @@ public class UpdateOrganizationUnitDto : UpdateDtoBase
     public int Sequence { get; set; }
 
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Why the unit was restructured or given a new head, recorded on the resulting
+    /// <c>OrganizationUnitHistory</c> row.
+    /// </summary>
+    /// <remarks>
+    /// Optional, and only consulted when this update actually changes the parent or the head —
+    /// renaming a unit writes no history and so has nothing to explain. The dedicated
+    /// <c>move</c> and <c>change-head</c> endpoints have always required a reason; this update path
+    /// recorded nothing at all before areas 19-23 slice 3, so a reason had nowhere to go.
+    /// </remarks>
+    [MaxLength(500)]
+    public string? ChangeReason { get; set; }
 }
 
 /// <summary>

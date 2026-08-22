@@ -672,12 +672,58 @@ public class OrganizationUnitService : IOrganizationUnitService
         if (await _repository.ExistsByNameInLevelAsync(entity.OrganizationLevelId, updateDto.Name, updateDto.Id))
             throw new InvalidOperationException($"Organization unit with name '{updateDto.Name}' already exists in this level.");
 
-        if (entity.OrganizationLevel.RequiresHead && !updateDto.HeadEmployeeId.HasValue)
-            throw new InvalidOperationException("This level requires a unit head.");
+        // ⚠ Narrowed in areas 19-23 slice 3: this fires only when the update REMOVES a head that a
+        // level requires, not whenever one happens to be absent.
+        //
+        // Measured on DEFAULT 2026-08-22: every level except Section carries RequiresHead, and
+        // **18 of 41 live units sit at such a level with no head at all** — because `CreateAsync`
+        // never checked this rule and `UpdateAsync` always did. The asymmetry made those 18 units
+        // permanently un-editable: renaming one, or moving it, was refused for a field the edit was
+        // not touching. (Until this slice's error-contract fix the refusal arrived as a canned 500,
+        // so the screen showed a server error rather than a reason.)
+        //
+        // The rule should constrain the operation it is about. Stripping a required head is still
+        // refused; inheriting an absent one no longer freezes the record. The create-side gap is
+        // recorded rather than closed — enforcing it there would block unit creation outright for a
+        // tenant that has no unit-head data at all, which is the org-authority gap, not this rule's
+        // to solve.
+        // `UpdateEntity` has not run yet, so `entity.HeadEmployeeId` still holds the current head.
+        if (entity.OrganizationLevel.RequiresHead
+            && entity.HeadEmployeeId.HasValue
+            && !updateDto.HeadEmployeeId.HasValue)
+            throw new InvalidOperationException(
+                "This level requires a unit head, so the existing head cannot be removed.");
+
+        // ⚠ The audit trail used to have two recording endpoints that could not save and one silent
+        // path that could — and the silent one is this, the path the units edit screen calls. Both
+        // operations the trail exists to record are assignable straight off `UpdateOrganizationUnitDto`
+        // (see UpdateEntity), so a reparent or a change of head through the ordinary form left no
+        // record at all. Capture the before-values and record the same rows the dedicated endpoints do.
+        var previousParentId = entity.ParentUnitId;
+        var previousHeadEmployeeId = entity.HeadEmployeeId;
+        var headChanged = previousHeadEmployeeId != updateDto.HeadEmployeeId;
 
         updateDto.UpdateEntity(entity);
 
+        if (parentChanged)
+            await RecordHistoryAsync(
+                entity.Id,
+                previousParentId: previousParentId, newParentId: entity.ParentUnitId,
+                previousHeadEmployeeId: null, newHeadEmployeeId: null,
+                changeReason: updateDto.ChangeReason);
+
+        if (headChanged)
+            await RecordHistoryAsync(
+                entity.Id,
+                previousParentId: null, newParentId: null,
+                previousHeadEmployeeId: previousHeadEmployeeId, newHeadEmployeeId: entity.HeadEmployeeId,
+                changeReason: updateDto.ChangeReason);
+
         await _repository.UpdateAsync(entity);
+
+        if (parentChanged)
+            await CascadePathToDescendantsAsync(entity);
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Organization unit updated: {Id}", updateDto.Id);
@@ -733,9 +779,17 @@ public class OrganizationUnitService : IOrganizationUnitService
             if (parent.OrganizationLevel.StructureId != unit.OrganizationLevel.StructureId)
                 throw new InvalidOperationException("Parent unit must belong to the same organization structure.");
 
-            var expectedChildLevelNumber = parent.OrganizationLevel.LevelNumber + 1;
-            if (unit.OrganizationLevel.LevelNumber != expectedChildLevelNumber)
-                throw new InvalidOperationException($"Invalid hierarchy: unit level must be exactly one level below the parent (expected LevelNumber {expectedChildLevelNumber}).");
+            // ⚠ This rule used to demand the unit sit EXACTLY one level below its new parent, while
+            // `UpdateAsync` — the other way to perform the identical move — allowed level-skipping and
+            // only required the parent to be at a higher tier. The same operation gave different
+            // answers depending on which endpoint you reached it through.
+            //
+            // Reconciled onto the permissive rule, deliberately: it is the one the live data can
+            // satisfy. TDC's structure skips levels in places, so the strict rule would refuse moves
+            // the edit screen performs happily today, and "fixing" the divergence by tightening
+            // `UpdateAsync` would break a working path to make a dead one consistent with it.
+            if (unit.OrganizationLevel.LevelNumber <= parent.OrganizationLevel.LevelNumber)
+                throw new InvalidOperationException("Invalid hierarchy: a unit's level must be below its parent's level.");
         }
         else
         {
@@ -749,17 +803,11 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         var oldParentId = unit.ParentUnitId;
 
-        // Create history record
-        var history = new OrganizationUnitHistory
-        {
-            OrganizationUnitId = unitId,
-            PreviousParentId = oldParentId,
-            NewParentId = newParentId,
-            EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
-            ChangeReason = changeReason
-        };
-
-        await _historyRepository.AddAsync(history);
+        await RecordHistoryAsync(
+            unitId,
+            previousParentId: oldParentId, newParentId: newParentId,
+            previousHeadEmployeeId: null, newHeadEmployeeId: null,
+            changeReason: changeReason);
 
         // Update unit
         unit.ParentUnitId = newParentId;
@@ -779,6 +827,7 @@ public class OrganizationUnitService : IOrganizationUnitService
         }
 
         await _repository.UpdateAsync(unit);
+        await CascadePathToDescendantsAsync(unit);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Organization unit moved: {UnitId} from {OldParent} to {NewParent}", unitId, oldParentId, newParentId);
@@ -798,17 +847,11 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         var oldHeadEmployeeId = unit.HeadEmployeeId;
 
-        // Create history record
-        var history = new OrganizationUnitHistory
-        {
-            OrganizationUnitId = unitId,
-            PreviousHeadEmployeeId = oldHeadEmployeeId,
-            NewHeadEmployeeId = newHeadEmployeeId,
-            EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
-            ChangeReason = changeReason
-        };
-
-        await _historyRepository.AddAsync(history);
+        await RecordHistoryAsync(
+            unitId,
+            previousParentId: null, newParentId: null,
+            previousHeadEmployeeId: oldHeadEmployeeId, newHeadEmployeeId: newHeadEmployeeId,
+            changeReason: changeReason);
 
         // Update unit
         unit.HeadEmployeeId = newHeadEmployeeId;
@@ -820,80 +863,294 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         return true;
     }
+
+    /// <summary>
+    /// Queues one <see cref="OrganizationUnitHistory"/> row. The caller saves.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>The tenant stamp is the whole reason this helper exists.</b> Both writers used to
+    /// build the entity inline and neither stamped <c>TenantId</c>. <c>OrganizationUnitHistory</c> is a
+    /// <c>TenantEntity</c> and the DbContext auto-stamp is inert, so every save took a foreign-key
+    /// violation and answered 500 — which is why the table held zero rows against 41 live units, and
+    /// why all six read endpoints could only ever return nothing. Neither endpoint had a frontend
+    /// caller, so nobody ever saw the failure.</para>
+    ///
+    /// <para>Three call sites write history now rather than two. Building the row in one place is
+    /// what stops them drifting apart again.</para>
+    /// </remarks>
+    private async Task RecordHistoryAsync(
+        Guid unitId,
+        Guid? previousParentId,
+        Guid? newParentId,
+        Guid? previousHeadEmployeeId,
+        Guid? newHeadEmployeeId,
+        string? changeReason)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+
+        await _historyRepository.AddAsync(new OrganizationUnitHistory
+        {
+            TenantId = tenantId,
+            OrganizationUnitId = unitId,
+            PreviousParentId = previousParentId,
+            NewParentId = newParentId,
+            PreviousHeadEmployeeId = previousHeadEmployeeId,
+            NewHeadEmployeeId = newHeadEmployeeId,
+            EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
+            ChangeReason = string.IsNullOrWhiteSpace(changeReason) ? null : changeReason.Trim(),
+        });
+    }
+
+    /// <summary>
+    /// Rewrites <c>Path</c> for every descendant of a unit that has just moved.
+    /// </summary>
+    /// <remarks>
+    /// <para>Both writers recomputed <c>Path</c> for the moved node only, and <c>UpdateAsync</c> said
+    /// so in a comment — <i>"descendants are handled elsewhere if needed"</i> — where nothing, anywhere,
+    /// handled them.</para>
+    ///
+    /// <para>The blast radius is smaller than it looks and worth stating exactly, so nobody later
+    /// mistakes this for a hierarchy fix: <c>GetDescendantsAsync</c> and <c>GetAncestorsAsync</c> walk
+    /// <c>ParentUnitId</c> recursively and never consult <c>Path</c>. <c>Path</c> feeds <c>Depth</c> on
+    /// the read models and nothing else. So a stale descendant path made a unit report the wrong depth,
+    /// not the wrong parent.</para>
+    /// </remarks>
+    private async Task CascadePathToDescendantsAsync(OrganizationUnit moved)
+    {
+        var descendants = (await _repository.GetDescendantsAsync(moved.Id)).ToList();
+        if (descendants.Count == 0)
+            return;
+
+        // Index by parent so each node is repathed from its own parent's new path, breadth-first
+        // from the moved node. Recomputing from the moved node's path alone would flatten the tree.
+        var byParent = descendants
+            .Where(d => d.ParentUnitId.HasValue)
+            .GroupBy(d => d.ParentUnitId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var queue = new Queue<OrganizationUnit>();
+        queue.Enqueue(moved);
+
+        while (queue.Count > 0)
+        {
+            var parent = queue.Dequeue();
+            if (!byParent.TryGetValue(parent.Id, out var children))
+                continue;
+
+            foreach (var child in children)
+            {
+                child.Path = $"{parent.Path}/{child.Id}";
+                await _repository.UpdateAsync(child);
+                queue.Enqueue(child);
+            }
+        }
+
+        _logger.LogInformation(
+            "Repathed {Count} descendant unit(s) after moving {UnitId}", descendants.Count, moved.Id);
+    }
 }
 
 #endregion
 
 #region Organization Unit History Service
 
+/// <summary>
+/// Reads the organisation-unit change log.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>Rewritten in areas 19-23 slice 3, and the reason is worth keeping.</b> Every method
+/// here except <c>GetByDateRangeAsync</c> was tenant-blind — <c>GetPagedAsync</c> in particular took
+/// <c>GetQueryable()</c> whole, counted every row in the table and paged across all tenants. That was
+/// invisible while the table was empty, and the table was empty because the two writers could not
+/// save (D-1). <b>Making the writes work is what would have turned these reads into a live
+/// cross-tenant leak</b>, so the two changes belong in the same slice: the area-13 lesson running in
+/// the other direction, where fixing a writer turns its readers into defects.</para>
+///
+/// <para>The four <c>*Name</c> fields on the DTO were also hardcoded to <c>null</c> with the comment
+/// "Would need to load separately if needed". They are needed: this is a change log whose whole job is
+/// to say <i>moved from A to B</i> and <i>head changed from X to Y</i>, and without them it is a list
+/// of GUIDs. They are resolved here in two batched lookups rather than per row.</para>
+/// </remarks>
 public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
 {
     private readonly IOrganizationUnitHistoryRepository _repository;
+    private readonly IGenericRepository<OrganizationUnit> _units;
+    private readonly IGenericRepository<Employee> _employees;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<OrganizationUnitHistoryService> _logger;
 
     public OrganizationUnitHistoryService(
         IOrganizationUnitHistoryRepository repository,
+        IGenericRepository<OrganizationUnit> units,
+        IGenericRepository<Employee> employees,
         ICurrentUserProvider currentUserProvider,
         ILogger<OrganizationUnitHistoryService> logger)
     {
         _repository = repository;
+        _units = units;
+        _employees = employees;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter is
+    // inert. Following the RHEMA convention, this service scopes every read to the authenticated
+    // tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private IQueryable<OrganizationUnitHistory> Scoped(Guid tenantId) =>
+        _repository.GetQueryable()
+            .Include(h => h.OrganizationUnit)
+            .Where(h => h.TenantId == tenantId && !h.IsDeleted);
+
     public async Task<OrganizationUnitHistoryDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
+        var tenantId = GetTenantId();
+        var entity = await Scoped(tenantId).FirstOrDefaultAsync(h => h.Id == id, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Organization unit history with ID '{id}' not found.");
 
-        return entity.ToDto();
+        return (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
     }
 
     public async Task<IEnumerable<OrganizationUnitHistoryDto>> GetByUnitIdAsync(Guid unitId, CancellationToken cancellationToken = default)
     {
-        var entities = await _repository.GetByUnitIdAsync(unitId);
-        return entities.ToDtoList();
+        var tenantId = GetTenantId();
+        var entities = await Scoped(tenantId)
+            .Where(h => h.OrganizationUnitId == unitId)
+            .OrderByDescending(h => h.EffectiveFrom)
+            .ThenByDescending(h => h.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return await ResolveNamesAsync(entities, tenantId, cancellationToken);
     }
 
     public async Task<IEnumerable<OrganizationUnitHistoryDto>> GetByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default)
     {
-        var entities = await _repository.GetRestructureHistoryAsync(_currentUserProvider.TenantId, startDate, endDate);
-        return entities.ToDtoList();
+        var tenantId = GetTenantId();
+        var entities = await Scoped(tenantId)
+            .Where(h => h.EffectiveFrom >= startDate && h.EffectiveFrom <= endDate)
+            .OrderByDescending(h => h.EffectiveFrom)
+            .ThenByDescending(h => h.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return await ResolveNamesAsync(entities, tenantId, cancellationToken);
     }
 
     public async Task<OrganizationUnitHistoryDto?> GetLatestByUnitIdAsync(Guid unitId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetLatestByUnitIdAsync(unitId);
-        return entity?.ToDto();
+        var tenantId = GetTenantId();
+        var entity = await Scoped(tenantId)
+            .Where(h => h.OrganizationUnitId == unitId)
+            .OrderByDescending(h => h.EffectiveFrom)
+            .ThenByDescending(h => h.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return entity is null ? null : (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
     }
 
     public async Task<OrganizationUnitHistoryDto?> GetActiveHistoryAsync(Guid unitId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetActiveHistoryAsync(unitId);
-        return entity?.ToDto();
+        var tenantId = GetTenantId();
+        var entity = await Scoped(tenantId)
+            .Where(h => h.OrganizationUnitId == unitId && h.EffectiveTo == null)
+            .OrderByDescending(h => h.EffectiveFrom)
+            .ThenByDescending(h => h.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return entity is null ? null : (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
     }
 
     public async Task<PagedResult<OrganizationUnitHistoryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = Scoped(tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var pagedEntities = await query
             .OrderByDescending(h => h.EffectiveFrom)
+            // EffectiveFrom is a date, so a day's worth of changes ties. Without a tiebreaker the
+            // engine is free to answer differently on different calls, and a row can appear on two
+            // pages or none — the area 17/18 lesson about an unordered FirstOrDefault, one page wider.
+            .ThenByDescending(h => h.CreatedAt)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<OrganizationUnitHistoryDto>
         {
-            Items = pagedEntities.ToDtoList(),
+            Items = (await ResolveNamesAsync(pagedEntities, tenantId, cancellationToken)).ToList(),
             TotalCount = totalCount,
             Page = pageNumber,
             PageSize = pageSize
         };
+    }
+
+    /// <summary>
+    /// Fills the four <c>*Name</c> fields the mapper leaves null, in two queries for the whole batch.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Employee.FullName</c> is <c>[NotMapped]</c> and cannot be translated to SQL — projecting it
+    /// server-side throws, as area 14 found the hard way. The name parts are selected and composed in
+    /// memory instead.
+    /// </remarks>
+    private async Task<List<OrganizationUnitHistoryDto>> ResolveNamesAsync(
+        IReadOnlyCollection<OrganizationUnitHistory> entities,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var dtos = entities.Select(e => e.ToDto()).ToList();
+        if (dtos.Count == 0)
+            return dtos;
+
+        var unitIds = entities
+            .SelectMany(e => new[] { e.PreviousParentId, e.NewParentId })
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+
+        var employeeIds = entities
+            .SelectMany(e => new[] { e.PreviousHeadEmployeeId, e.NewHeadEmployeeId })
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+
+        var unitNames = unitIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _units.GetQueryable()
+                .Where(u => u.TenantId == tenantId && unitIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Name })
+                .ToDictionaryAsync(u => u.Id, u => u.Name, cancellationToken);
+
+        var employeeNames = employeeIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await _employees.GetQueryable()
+                    .Where(e => e.TenantId == tenantId && employeeIds.Contains(e.Id))
+                    .Select(e => new { e.Id, e.FirstName, e.MiddleName, e.LastName })
+                    .ToListAsync(cancellationToken))
+                .ToDictionary(
+                    e => e.Id,
+                    e => string.IsNullOrWhiteSpace(e.MiddleName)
+                        ? $"{e.FirstName} {e.LastName}".Trim()
+                        : $"{e.FirstName} {e.MiddleName} {e.LastName}".Trim());
+
+        string? Unit(Guid? id) => id.HasValue && unitNames.TryGetValue(id.Value, out var n) ? n : null;
+        string? Person(Guid? id) => id.HasValue && employeeNames.TryGetValue(id.Value, out var n) ? n : null;
+
+        foreach (var dto in dtos)
+        {
+            dto.PreviousParentName = Unit(dto.PreviousParentId);
+            dto.NewParentName = Unit(dto.NewParentId);
+            dto.PreviousHeadEmployeeName = Person(dto.PreviousHeadEmployeeId);
+            dto.NewHeadEmployeeName = Person(dto.NewHeadEmployeeId);
+        }
+
+        return dtos;
     }
 }
 

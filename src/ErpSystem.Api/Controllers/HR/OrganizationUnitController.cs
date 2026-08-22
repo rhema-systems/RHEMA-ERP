@@ -37,6 +37,12 @@ public class OrganizationUnitController : ControllerBase
             var response = await _organizationUnitService.GetAllAsync();
             return Ok(response);
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving all organization units");
@@ -56,6 +62,12 @@ public class OrganizationUnitController : ControllerBase
             var response = await _organizationUnitService.GetPagedAsync(pageNumber, pageSize);
             return Ok(response);
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving paged organization units");
@@ -74,6 +86,12 @@ public class OrganizationUnitController : ControllerBase
         {
             var response = await _organizationUnitService.GetAllSummaryAsync();
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -99,6 +117,12 @@ public class OrganizationUnitController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving organization unit with ID {Id}", id);
@@ -123,6 +147,12 @@ public class OrganizationUnitController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving organization unit detail with ID {Id}", id);
@@ -141,6 +171,12 @@ public class OrganizationUnitController : ControllerBase
         {
             var response = await _organizationUnitService.GetByLevelIdAsync(levelId);
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -161,6 +197,12 @@ public class OrganizationUnitController : ControllerBase
             var response = await _organizationUnitService.GetChildUnitsAsync(parentUnitId);
             return Ok(response);
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving child units for parent {ParentUnitId}", parentUnitId);
@@ -180,6 +222,12 @@ public class OrganizationUnitController : ControllerBase
             var response = await _organizationUnitService.GetRootUnitsAsync();
             return Ok(response);
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving root organization units");
@@ -198,6 +246,12 @@ public class OrganizationUnitController : ControllerBase
         {
             var response = await _organizationUnitService.GetHierarchyTreeAsync();
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -223,6 +277,12 @@ public class OrganizationUnitController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving hierarchy from unit {UnitId}", unitId);
@@ -241,6 +301,12 @@ public class OrganizationUnitController : ControllerBase
         {
             var response = await _organizationUnitService.SearchAsync(searchTerm);
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -268,6 +334,12 @@ public class OrganizationUnitController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -302,6 +374,12 @@ public class OrganizationUnitController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating organization unit with ID {Id}", id);
@@ -325,6 +403,12 @@ public class OrganizationUnitController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -353,6 +437,12 @@ public class OrganizationUnitController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error moving organization unit {UnitId}", unitId);
@@ -379,6 +469,12 @@ public class OrganizationUnitController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. Without this the service's 42 rules all
+            // reached the caller as a canned 500 and said nothing.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {

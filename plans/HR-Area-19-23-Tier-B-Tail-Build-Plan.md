@@ -101,10 +101,14 @@ screen already calls. **The only working path is the silent one.**
 
 **D-2b · Reparenting leaves every descendant's `Path` stale.** Both `UpdateAsync` (`:652`) and
 `MoveUnitAsync` (`:773`) recompute `Path` for the moved node only. `UpdateAsync` even says so —
-*"descendants are handled elsewhere if needed"* — and nothing, anywhere, handles them. `Path` is
-what `Depth` is computed from (`…MappingExtensions.cs:266,286,308`), so after one reparent of a
-unit that has children, every descendant reports the wrong depth and a path that no longer
-resolves. 41 units live, so this is small today and unbounded later.
+*"descendants are handled elsewhere if needed"* — and nothing, anywhere, handles them.
+
+⚠ **Corrected in slice 3, and the correction matters: this is narrower than first written.** The
+first draft of this entry said a stale path "no longer resolves". Nothing resolves paths.
+`GetDescendantsAsync` and `GetAncestorsAsync` walk `ParentUnitId` recursively and never consult
+`Path`; `Path` feeds `Depth` on the read models and nothing else. So the defect is that a moved
+unit's descendants report the **wrong depth**, not that hierarchy queries break. Still worth fixing,
+and fixed — but the reader sweep the plan demanded is what kept the claim honest.
 
 **D-2c · The same operation obeys two contradictory hierarchy rules.** `MoveUnitAsync` requires the
 unit to sit **exactly one level** below its new parent (`:736`); `UpdateAsync` allows level-skipping
@@ -432,3 +436,83 @@ relative weights are meaningless as raw numbers; and the long-service field says
 **not** govern the awards ladder ([[hr-awards-area-survey]] D-8), which lives in its own rows.
 
 **Verification:** frontend `tsc` and `next lint` clean on all five touched files.
+
+### Slice 3 — the organisation-unit audit trail. 2026-08-22, **49/49**, run twice. No migration.
+
+Harness `run-slice3.mjs`. Full regression alongside: slice 0 **16/16**, slice 1 **69/69**,
+slice 2 **100/100**. Backend only — the screens are slice 5.
+
+**The four planned fixes**
+
+- **D-1** — one shared `RecordHistoryAsync` stamps `TenantId`. Three call sites write history now
+  rather than two, and building the row in one place is what stops them drifting apart again.
+- **D-2** — `UpdateAsync` records both operations it used to perform silently, via a new optional
+  `ChangeReason` on `UpdateOrganizationUnitDto`. A plain **rename writes nothing**: an audit trail
+  that logs everything is one nobody reads.
+- **D-2b** — breadth-first `Path` cascade to descendants. See the corrected entry in §3.3: the blast
+  radius is a wrong `Depth`, not a broken hierarchy query.
+- **D-2c** — reconciled onto the **permissive** rule (parent must be at a higher tier; level-skipping
+  allowed). Deliberately: TDC's structure skips levels, so adopting the strict rule would have broken
+  the path that works in order to agree with the one that was dead.
+
+**Three defects found while fixing those, each bigger than the one before**
+
+- **D-15 · Fixing the writes would have opened a cross-tenant leak.** Every read on
+  `OrganizationUnitHistoryService` except `GetByDateRangeAsync` was tenant-blind; `GetPagedAsync`
+  took `GetQueryable()` whole, counted every row in the table and paged across all tenants. **It was
+  invisible only because the table was empty, and the table was empty because D-1 stopped the
+  writers saving.** The two therefore had to land together — [[hr-succession-area-survey]]'s lesson
+  running in reverse: *fixing a writer turns its readers into defects.* Now explicitly tenant-scoped
+  throughout, with a `CreatedAt` tiebreaker so a day's worth of same-date changes cannot shuffle
+  between calls (area 17/18's unordered-`FirstOrDefault` lesson, one page wider).
+
+- **D-16 · The change log could not name anything.** All four `*Name` fields on
+  `OrganizationUnitHistoryDto` were hardcoded `null` behind the comment *"Would need to load
+  separately if needed"*. They are needed — this is a log whose entire job is to say *moved from A to
+  B* and *head changed from X to Y*. Resolved in two batched lookups, composing employee names in
+  memory because `Employee.FullName` is `[NotMapped]` and throws when projected server-side.
+
+- **D-18 · Every business rule on `OrganizationUnitController` answered 500 and said nothing.** No
+  action caught `InvalidOperationException`, and `OrganizationUnitService` throws it **42 times** —
+  one root per structure, no cycles, this level requires a head, cannot deactivate a unit with active
+  children, duplicate code, duplicate name in level. All of them arrived as
+  `500 "An error occurred while…"`. This is area 15b's mute-rule shape in a new place, and it was
+  slice 3's to fix because the two endpoints this slice resurrected throw `InvalidOperationException`
+  for every legitimate refusal. Sixteen handlers added.
+
+- **D-17 · A required head froze 18 of 41 live units against any edit at all.** `CreateAsync` never
+  enforced `RequiresHead`; `UpdateAsync` always did. Measured on DEFAULT 2026-08-22: every level
+  except Section carries `RequiresHead`, and **not one unit at those levels has a head** — so
+  renaming a Department was refused because of a field the edit never touched (and, until D-18, was
+  refused with a canned 500). Narrowed so the rule constrains its own operation: **removing** a
+  required head is still refused; inheriting an absent one no longer freezes the record. The
+  create-side gap is **recorded, not closed** — enforcing it there would block unit creation outright
+  for a tenant that has no unit-head data at all.
+
+  ⚠ **This puts a number on the org-authority gap in [[hr-deferred-modules]].** It was recorded as
+  "FR-HR-080/181 cannot derive authority because 0/41 units have a head". The missing data was also
+  silently freezing **44% of the org structure** against editing.
+
+⚠ **Harness lessons, all three mine before they were the product's**
+
+- **It tried to mint its own root unit.** Only one root is allowed per structure and TDC already has
+  it. Fixtures now hang off the real root — and cleanup never deletes it, because it is borrowed.
+- **A no-op cannot prove a cascade.** The D-2b section moved a unit to the parent it was already
+  under, then asserted its path had changed. The assertion correctly failed. Dedicated fixtures now
+  guarantee the mover genuinely moves and genuinely has something beneath it.
+- **A probe that is harmless because the feature is broken stops being harmless the moment you fix
+  it.** Slice 0 mutated a live TDC unit, which was safe while both writers 500'd. After this slice it
+  began stamping a real unit's audit trail every run — and an audit log has no delete, by design.
+  Slice 0 now creates and removes a throwaway unit instead.
+
+**Slice 0's assertions were flipped, not relaxed.** D-1, D-2 and two of the four D-8 holes now assert
+the *fixed* state, each labelled with the slice that closed it; the two still open (unions, the
+organogram) still assert the hole and are labelled with the slice that will close them. Slice 0 stays
+runnable as a regression guard.
+
+**Residue left on live data:** 9 history rows on the real `Administration` unit, all tagged
+`t19v_193041/193050/193060_*`, written by slice-0 runs between the D-1 fix and the throwaway-unit fix.
+They cannot be removed through the product — the change log deliberately has no delete endpoint.
+Removing them needs direct SQL, which is the user's call:
+`DELETE FROM OrganizationUnitHistories WHERE ChangeReason LIKE 't19v[_]%' OR ChangeReason IS NULL AND …`
+— better done by the nine ids listed in the session, since a NULL reason is also legitimate.

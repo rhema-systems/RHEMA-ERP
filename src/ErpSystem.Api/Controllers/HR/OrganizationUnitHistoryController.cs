@@ -1,19 +1,31 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Controller for managing organization unit history
+/// The organisation-unit change log: who a unit reported to, who headed it, and when each changed.
 /// </summary>
+/// <remarks>
+/// Read-only. Rows are written by <c>OrganizationUnitService</c> as a side effect of a restructure
+/// or a change of head — there is no endpoint that creates one directly, because an audit trail
+/// somebody can author by hand is not one.
+///
+/// Gated on the HR/admin roles rather than the bare <c>[Authorize]</c> it carried: the log names the
+/// employees who have led each unit, which is org-structure information about identifiable people.
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Roles = OrganizationUnitHistoryController.HrRoles)]
 public class OrganizationUnitHistoryController : ControllerBase
 {
+    internal const string HrRoles =
+        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
+
     private readonly IOrganizationUnitHistoryService _historyService;
     private readonly ILogger<OrganizationUnitHistoryController> _logger;
 
