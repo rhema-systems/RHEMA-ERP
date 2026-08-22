@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -19,6 +20,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
+import { unionService } from '@/services/hr/union.service';
 import { toast } from 'sonner';
 import type {
   CreateJobDescription,
@@ -54,6 +56,13 @@ export default function NewJobDescriptionPage() {
     jobSummary: '',
     effectiveDate: new Date().toISOString().slice(0, 10),
     reviewCycleMonths: 24,
+  });
+
+  // ⚠ Active unions only. An inactive union is one nobody bargains with any more; offering it here
+  // would let a new role be filed under a dead agreement.
+  const { data: unions } = useQuery({
+    queryKey: ['hr', 'unions', 'active'],
+    queryFn: () => unionService.getActive(),
   });
 
   const { data: positions } = useQuery({
@@ -306,6 +315,65 @@ export default function NewJobDescriptionPage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/*
+            ⚠ These two fields existed on the entity, the DTOs and the detail screen since the port,
+            and NOTHING could set them: the job-description detail renders a "Union" row, no form
+            carried a control for it, and the union register did not exist. Measured on DEFAULT
+            2026-08-22: 355 job descriptions, 0 with a union, 0 flagged bargaining-unit.
+
+            They are not decoration. `IsBargainingUnitRole` routes the approval
+            (SimpleWorkflowService) and both feed the offer letter's bargaining-unit clause
+            (OfferLetterService: ["IsBargainingUnit"], ["UnionName"]), so until now that clause could
+            never fire for any role.
+          */}
+          <div className="space-y-2">
+            <Label>Bargaining unit</Label>
+            <div className="flex h-10 items-center justify-between rounded-md border px-3">
+              <span className="text-sm text-muted-foreground">Role is covered by a CBA</span>
+              <Switch
+                checked={form.isBargainingUnitRole ?? false}
+                onCheckedChange={(v) => {
+                  set('isBargainingUnitRole', v);
+                  // Clearing the union with the flag keeps the pair honest: a role that is not in a
+                  // bargaining unit has no union, and a stale id would still print in the offer letter.
+                  if (!v) set('unionId', null);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 sm:col-span-2">
+            <Label>Union</Label>
+            <Select
+              value={form.unionId ?? ''}
+              onValueChange={(v) => set('unionId', v || null)}
+              disabled={!form.isBargainingUnitRole}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    form.isBargainingUnitRole
+                      ? (unions ?? []).length
+                        ? 'Choose the union'
+                        : 'No active unions on the register yet'
+                      : 'Not a bargaining-unit role'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {(unions ?? []).map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.code ? `${u.code} — ${u.name}` : u.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Printed in the offer letter&apos;s bargaining-unit clause. Unions are maintained under
+              Administration &rsaquo; HR &rsaquo; Unions.
+            </p>
           </div>
 
           <div className="space-y-2 sm:col-span-3">

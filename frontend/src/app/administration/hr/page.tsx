@@ -4,6 +4,7 @@ import {
   Building2,
   MapPin,
   Users,
+  Users2,
   ListTree,
   Wrench,
   GraduationCap,
@@ -69,6 +70,14 @@ export default function HrAdministrationPage() {
               description: 'Ranked staff tiers.',
               href: '/administration/hr/staff-levels',
               icon: ListTree,
+            },
+            {
+              // Slice 6. The union a role falls under is printed on its job description and
+              // in the bargaining-unit clause of the offer letter.
+              title: 'Unions',
+              description: 'Trade unions and the collective agreements negotiated with each.',
+              href: '/administration/hr/unions',
+              icon: Users2,
             },
             {
               title: 'Skills',

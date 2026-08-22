@@ -33,7 +33,7 @@ the JWT key passed; every harness runs **twice**.
 | **20** | `api/facility-services` | 5 | 0 | medical-owned, 2 rows |
 | **20** | `api/employee-certificates` | 9 | ✅ area 7 | **done, out of scope** |
 | **20** | `api/probations` | — | ✅ area 15b | **done, out of scope** |
-| **21** | `api/hr/unions` | 10 | 0 | **0 rows, 0 agreements** |
+| **21** | `api/hr/unions` | 10 | 3 | **done in slice 6**: register, detail + agreements, and the job-description picker that was the missing reader |
 | **22** | `api/hr/company-profile` | 2 | 0 | **0 rows**, read by 3 letter/email services |
 | **22** | `api/hr/policy-settings` | 2 | 0 | 1 row, ~25 knobs, read by 11 services |
 | **23** | `api/HRCycleDashboard` | 3 | ✅ area 5 | **done** |
@@ -163,7 +163,7 @@ infrastructure under requirements already delivered elsewhere:
 | Company profile | the letterhead behind FR-HR-046 offer letters and the FR-HR-032 confirmation letter |
 | Organogram | FRD §2.3.2 — the HR & Administration lines *are* defined "from the organogram" |
 | Unit history | the audit trail under FRD §A1.1 organisation management |
-| Unions | peripheral: CBA cited in §1 references, union dues in payroll, union consultation notes in discipline. **No requirement asks HR to compute anything.** |
+| Unions | peripheral for computation — nothing is calculated from them — but **not without a requirement**: slice 6 found `JobDescription.UnionId` feeding the FR-HR-046 offer letter's bargaining-unit clause (`OfferLetterService`) and the approval routing context (`SimpleWorkflowService`), with no way to set it. Union dues stay payroll's. |
 
 Consequence for scope: unions gets a **register**, not a module. Payroll owns dues.
 
@@ -810,3 +810,112 @@ behind on purpose — after D-30 a deleted unit no longer takes its history with
 point. One older fixture unit, `T19V130556OrgUnit`, is still live from an earlier slice's run; it is
 inert, but it is a 42nd unit in every unit listing, and removing it is a one-line delete whenever the
 user wants it gone.
+
+### Slice 6 — unions and collective bargaining agreements. 2026-08-22, **77/77**, run twice. No migration.
+
+Harness `run-slice6.mjs`; payloads probed first with `SLICE=6 node probe-ui-payloads.mjs`. Screens:
+`/administration/hr/unions`, `…/unions/new`, `…/unions/[id]`, plus the union picker on the
+job-description create form. Full regression alongside: slice 0 **17/17** (two assertions flipped,
+see below), 1 **69/69**, 2 **100/100**, 3 **49/49**, 4 **60/60**, 4b **88/88**, 5 **111/111**.
+Bundle total: **571 assertions**.
+
+**The plan predicted one defect here. The probe confirmed it and found seven more.**
+
+Both stores held zero rows, so nothing on this surface had ever executed. What the probe printed
+before a line of TypeScript was written:
+
+```
+D-6   PUT  -> agreementCount=0, agreements=0
+      GET  -> agreementCount=2, agreements=2
+D-45  GET /unions        -> agreementCount=2
+      GET /unions/active -> agreementCount=0        same DTO, same union, same field
+      agreement PUT -> unionName=null               the same shape, one level down
+D-51  Superseded agreement 2019-2021   isActive=true   actually expired=true
+```
+
+**D-6 · Confirmed, with a third face.** `UpdateAsync` mapped the entity from `GetOwnedUnionAsync`,
+which fetches without the agreements, so a screen re-rendering from its own save response emptied
+the agreements table in front of the user and a refresh brought them back. The agreement `PUT` did
+the same one level down and answered `unionName: null`. ⚠ **`AddAgreementAsync` escapes only by
+accident**: it loads the union first to check ownership, so EF's navigation fixup fills the nav for
+free — which is why slice 0 recorded "the predicted blank `unionName` does not occur". It does
+occur; it just occurs on the path slice 0 did not exercise. Both paths now load what they map.
+
+**D-45 · One DTO, two list endpoints, two answers.** `GetActiveAsync` had no `.Include`, so
+`agreementCount` came back 0 from `/unions/active` and 2 from `/unions` for the same union. Fixed in
+the repository — along with pushing the tenant predicate into all three reads, which were fetching
+every tenant's unions *with their entire agreement graphs* and discarding most of them in memory.
+Never a leak; the wrong place for the filter.
+
+**D-48 · A bare `[Authorize]`.** Any authenticated employee could create, rename or delete a union
+and its agreements. Split the way slice 4 split the organogram and slice 4b split teams: **reads
+open, writes SuperAdmin / TenantAdmin / HR.** A collective agreement is published to the members it
+binds and the union a role falls under is printed on a job description everyone can read — gating
+the reads would be gating the noticeboard.
+
+**D-49 · The controller caught nothing.** `UnionService` throws `ArgumentException` for a missing
+record and `InvalidOperationException` for every rule, and all of them arrived as a bare 500 with no
+body — so "a union with code 'ICU' already exists" was indistinguishable from a crash. One error
+contract now, the same shape slice 3 gave `OrganizationUnitController`.
+
+**D-50 · An agreement could expire before it took effect.** For a register whose whole job is to say
+which agreement is in force, a backwards pair makes the question unanswerable rather than merely
+wrong. Refused on create and update; a one-day agreement is still allowed, and asserted.
+
+**D-51 · `IsActive` answers a different question from the one every screen asks.** It is a flag
+somebody sets and nothing ever clears: the probe found an agreement running 2019-2021 still reading
+`isActive: true` five years after it lapsed. With nothing else on the payload, the register, the
+union detail and the job-description screen would each have re-derived "in force" from two dates,
+differently and eventually. Now derived once —
+`CollectiveBargainingAgreementStatuses.Classify` → `Inactive` | `Pending` | `Active` | `Expired`,
+plus `IsInForce` — and the union's `InForceAgreementCount` reads the same classifier, so a union's
+headline number and the rows beneath it cannot disagree. **Order matters and is deliberate:
+`Inactive` outranks the dates**, because switching something off is a deliberate act by a person and
+the calendar is not. An agreement with no expiry is open-ended and never reaches `Expired`.
+
+**D-52 · Deleting a union orphaned its agreements.** The delete is a soft delete and the cascade
+configured on the relationship only fires on a hard one, so the agreements stayed alive and
+unreachable — every read of them goes through the union, which no longer resolves. Refused now, with
+the count in the message, the same answer `OrganizationUnitService` gives for a unit with children.
+
+**D-47 · The defect that makes this register worth building, and the reason §4 was too modest.**
+`JobDescription.UnionId` and `IsBargainingUnitRole` have existed on the entity, the DTOs and the
+job-description **detail screen** since the port, and nothing anywhere could set them: no form
+carried a control, and the union register did not exist. They are not decoration —
+`OfferLetterService` renders `["IsBargainingUnit"]` and `["UnionName"]` into the offer letter's
+bargaining-unit clause (FR-HR-046), and `SimpleWorkflowService` puts `isBargainingUnitRole` into the
+approval routing context. Measured on DEFAULT 2026-08-22: **355 job descriptions, 0 with a union set,
+0 flagged bargaining-unit**, so that clause has never once fired for any role. The picker and the
+toggle are now on the job-description create form, and the harness proves the round trip: create
+with a union, re-read, `unionName` resolves.
+
+⚠ **This corrects §4.** The plan called unions "peripheral — no requirement asks HR to compute
+anything". Nothing computes, and that stands. But the register has a named reader in a **closed**
+area, and the reader was broken for want of it. Decision 3's rule applied unchanged: *a register
+without a reader is another empty store.*
+
+**Two things asserted because the bundle's reflex now points the wrong way**
+
+- **`IX_Union_Code` is NOT unique** (`ApplicationDbContext.HR.cs`: `HasIndex(x => x.Code)`, no
+  `IsUnique`), and the service's duplicate check reads live rows only. So the soft-delete/uniqueness
+  trap that hit three times in this bundle **does not recur here**, and a deleted union's code is
+  genuinely released. Asserted rather than assumed, in both directions.
+- **The route owns the union, not the body.** `AddAgreement` overwrites `dto.UnionId` from the route.
+  The harness posts a body naming a *different* union and asserts the agreement lands on the route's
+  — otherwise the overwrite is an untested line that reads like a comment.
+
+**Slice 0's two open union assertions were flipped, not deleted.** D-6 now asserts the PUT and the
+GET agree; D-8 asserts the plain Employee is refused the write **and still granted the read**,
+because asserting only the 403 would pass against a "fix" that closed the whole controller. Slice 0
+is 17/17 (one assertion added for the read half) and stays runnable as a regression guard.
+
+**Also removed:** `UnionService.RequireCurrentTenant`, a private method that reads like a
+cross-tenant guard and was called by nothing.
+
+**Left deliberately unbuilt:** there is still **no job-description edit screen** anywhere in the
+frontend, though the API has supported the update since the port. So a role's union can be set when
+the description is authored and never changed afterwards. That is area 17/18 residue rather than
+slice 6's, and it is recorded here because slice 6 is what makes it bite.
+
+**Residue on live data:** none. The harness deletes its unions, agreements and job description, and
+asserts the register ends on the count it started with.

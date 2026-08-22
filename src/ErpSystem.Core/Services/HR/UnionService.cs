@@ -41,14 +41,6 @@ public class UnionService : IUnionService
         return tenantId;
     }
 
-    private Guid RequireCurrentTenant(Guid tenantId)
-    {
-        var current = GetTenantId();
-        if (tenantId != Guid.Empty && tenantId != current)
-            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
-        return current;
-    }
-
     private async Task<Union> GetOwnedUnionAsync(Guid id)
     {
         var entity = await _unionRepository.GetByIdAsync(id);
@@ -57,36 +49,65 @@ public class UnionService : IUnionService
         return entity;
     }
 
-    private async Task<CollectiveBargainingAgreement> GetOwnedAgreementAsync(Guid id)
+    /// <summary>
+    /// The union with its agreements loaded — what every path that MAPS a union must use.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This is D-6, measured rather than argued. <c>UpdateAsync</c> mapped the entity returned by
+    /// <c>GetOwnedUnionAsync</c>, which fetches without the agreements, so the PUT response carried
+    /// <c>agreementCount: 0</c> and an empty list for a union the GET reported two agreements for. A
+    /// screen that re-renders from its own save response therefore emptied the agreements table in
+    /// front of the user, and a refresh brought them back. The plain <c>GetOwnedUnionAsync</c> stays
+    /// for the paths that only need to prove ownership.
+    /// </remarks>
+    private async Task<Union> LoadOwnedUnionWithAgreementsAsync(Guid id)
     {
-        var entity = await _agreementRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Agreement not found");
+        var entity = await _unionRepository.GetByIdWithAgreementsAsync(id, GetTenantId());
+        if (entity == null)
+            throw new ArgumentException($"Union with ID '{id}' not found.");
         return entity;
     }
 
-    public async Task<IEnumerable<UnionDto>> GetAllAsync(CancellationToken cancellationToken = default)
+    /// <summary>The agreement with its union loaded, so the mapped DTO can name it.</summary>
+    /// <remarks>
+    /// ⚠ The same shape as D-6, one level down. <c>AddAgreementAsync</c> gets away with the plain
+    /// fetch only by accident: it loads the union first to check ownership, so EF's navigation fixup
+    /// fills <c>entity.Union</c> for free. <c>UpdateAgreementAsync</c> loads no union, so its
+    /// response came back with <c>unionName: null</c> while the GET beside it carried the name.
+    /// </remarks>
+    private async Task<CollectiveBargainingAgreement> GetOwnedAgreementAsync(Guid id)
     {
-        var tenantId = GetTenantId();
-        var entities = await _unionRepository.GetAllWithCountsAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+        var entity = await _agreementRepository.GetByIdWithUnionAsync(id, GetTenantId());
+        if (entity == null)
+            throw new ArgumentException($"Collective bargaining agreement with ID '{id}' not found.");
+        return entity;
     }
+
+    /// <summary>
+    /// An agreement cannot expire before it takes effect.
+    /// </summary>
+    /// <remarks>
+    /// Nothing checked this, and the register's whole job is to say which agreement is in force —
+    /// a backwards pair makes that question unanswerable rather than merely wrong.
+    /// </remarks>
+    private static void ValidateAgreementDates(DateTime effectiveDate, DateTime? expiryDate)
+    {
+        if (expiryDate.HasValue && expiryDate.Value.Date < effectiveDate.Date)
+            throw new InvalidOperationException(
+                "The agreement's expiry date cannot be earlier than its effective date.");
+    }
+
+    // ⚠ The tenant predicate is now inside the query rather than applied to the result. All three
+    // reads used to fetch every tenant's unions WITH their whole agreement graphs and discard most of
+    // them in memory. Never a leak — the filter did run — but the wrong place for it.
+    public async Task<IEnumerable<UnionDto>> GetAllAsync(CancellationToken cancellationToken = default)
+        => (await _unionRepository.GetAllWithCountsAsync(GetTenantId())).ToDtoList();
 
     public async Task<IEnumerable<UnionDto>> GetActiveAsync(CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entities = await _unionRepository.GetActiveAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
-    }
+        => (await _unionRepository.GetActiveAsync(GetTenantId())).ToDtoList();
 
     public async Task<UnionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entity = await _unionRepository.GetByIdWithAgreementsAsync(id);
-        if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException($"Union with ID '{id}' not found.");
-        return entity.ToDto();
-    }
+        => (await LoadOwnedUnionWithAgreementsAsync(id)).ToDto();
 
     public async Task<UnionDto> CreateAsync(CreateUnionDto createDto, CancellationToken cancellationToken = default)
     {
@@ -125,12 +146,26 @@ public class UnionService : IUnionService
         await _unionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Union updated: {Name}", entity.Name);
-        return entity.ToDto();
+
+        // Re-read with the agreements so the write response says what the read says. See the remarks
+        // on LoadOwnedUnionWithAgreementsAsync.
+        return (await LoadOwnedUnionWithAgreementsAsync(entity.Id)).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedUnionAsync(id);
+        var entity = await LoadOwnedUnionWithAgreementsAsync(id);
+
+        // ⚠ Deleting a union is a soft delete, and the cascade configured on the relationship only
+        // fires on a hard one. So this used to leave the agreements alive and unreachable: every read
+        // of them goes through the union, which no longer resolves. Refusing is the same answer
+        // OrganizationUnitService gives for a unit with children, and it names the number so the
+        // caller knows what to clear first.
+        var agreementCount = entity.Agreements?.Count ?? 0;
+        if (agreementCount > 0)
+            throw new InvalidOperationException(
+                $"Cannot delete this union because it has {agreementCount} collective bargaining agreement(s). Remove them first.");
+
         await _unionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Union deleted: {Id}", id);
@@ -141,6 +176,7 @@ public class UnionService : IUnionService
     {
         var tenantId = GetTenantId();
         await GetOwnedUnionAsync(createDto.UnionId);
+        ValidateAgreementDates(createDto.EffectiveDate, createDto.ExpiryDate);
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
@@ -154,14 +190,13 @@ public class UnionService : IUnionService
     {
         var tenantId = GetTenantId();
         await GetOwnedUnionAsync(unionId);
-
-        var entities = await _agreementRepository.GetByUnionIdAsync(unionId);
-        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+        return (await _agreementRepository.GetByUnionIdAsync(unionId, tenantId)).ToDtoList();
     }
 
     public async Task<CollectiveBargainingAgreementDto> UpdateAgreementAsync(UpdateCollectiveBargainingAgreementDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAgreementAsync(updateDto.Id);
+        ValidateAgreementDates(updateDto.EffectiveDate, updateDto.ExpiryDate);
         updateDto.UpdateEntity(entity);
         await _agreementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

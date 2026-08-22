@@ -1639,6 +1639,9 @@ export const navigationItems: NavItem[] = [
             ],
           },
           { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
+          // Slice 6. Master data behind the job description's bargaining-unit clause, which
+          // until now could never be filled in: there was no register and no picker.
+          { title: 'Unions', href: '/administration/hr/unions', icon: Users2 },
           { title: 'Staff Levels', href: '/administration/hr/staff-levels', icon: ListTree },
           { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
           // Area 17 setup. A competency is what the organisation expects someone to be able to do;

@@ -3,6 +3,54 @@ using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Services.HR.Extensions;
 
+/// <summary>
+/// Where a collective agreement stands today, named once.
+/// </summary>
+/// <remarks>
+/// <para>Added in areas 19-23 slice 6, because <c>IsActive</c> answers a different question from the
+/// one every screen asks. It is a flag somebody sets and nothing ever clears; the probe found an
+/// agreement that ran 2019-2021 still reading <c>isActive: true</c>. "Is this agreement in force"
+/// depends on two dates as well, and if the payload does not answer it then the register, the union
+/// detail and the job-description screen each answer it themselves — differently, eventually.</para>
+///
+/// <para>Order matters and is deliberate: a switched-off agreement is <c>Inactive</c> whatever its
+/// dates say, because that is an explicit act by a person and outranks the calendar.</para>
+/// </remarks>
+public static class CollectiveBargainingAgreementStatuses
+{
+    /// <summary>Switched off by hand. Outranks the dates.</summary>
+    public const string Inactive = "Inactive";
+
+    /// <summary>Signed, but its effective date has not arrived.</summary>
+    public const string Pending = "Pending";
+
+    /// <summary>In force today.</summary>
+    public const string Active = "Active";
+
+    /// <summary>Its expiry date has passed.</summary>
+    public const string Expired = "Expired";
+
+    public static readonly IReadOnlyList<string> All = new[] { Inactive, Pending, Active, Expired };
+
+    /// <summary>
+    /// Classifies against a caller-supplied "today", so a screen, a report and a test can all ask
+    /// the same question about the same day rather than about whenever each of them ran.
+    /// </summary>
+    public static string Classify(CollectiveBargainingAgreement entity, DateTime asOf)
+    {
+        if (!entity.IsActive)
+            return Inactive;
+        if (entity.EffectiveDate.Date > asOf.Date)
+            return Pending;
+        if (entity.ExpiryDate.HasValue && entity.ExpiryDate.Value.Date < asOf.Date)
+            return Expired;
+        return Active;
+    }
+
+    public static bool IsInForce(CollectiveBargainingAgreement entity, DateTime asOf)
+        => Classify(entity, asOf) == Active;
+}
+
 public static class UnionMappingExtensions
 {
     #region Union
@@ -21,7 +69,14 @@ public static class UnionMappingExtensions
             ContactPhone = entity.ContactPhone,
             IsActive = entity.IsActive,
             AgreementCount = entity.Agreements?.Count ?? 0,
-            Agreements = entity.Agreements?.Select(a => a.ToDto()).ToList() ?? new List<CollectiveBargainingAgreementDto>(),
+            // Same classifier the agreements themselves are mapped through, so the union's headline
+            // number and the rows beneath it cannot disagree.
+            InForceAgreementCount = entity.Agreements?.Count(a =>
+                CollectiveBargainingAgreementStatuses.IsInForce(a, DateTime.UtcNow)) ?? 0,
+            Agreements = entity.Agreements?
+                .OrderByDescending(a => a.EffectiveDate)
+                .Select(a => a.ToDto())
+                .ToList() ?? new List<CollectiveBargainingAgreementDto>(),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -76,6 +131,8 @@ public static class UnionMappingExtensions
             Summary = entity.Summary,
             DocumentReference = entity.DocumentReference,
             IsActive = entity.IsActive,
+            Status = CollectiveBargainingAgreementStatuses.Classify(entity, DateTime.UtcNow),
+            IsInForce = CollectiveBargainingAgreementStatuses.IsInForce(entity, DateTime.UtcNow),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -110,7 +167,7 @@ public static class UnionMappingExtensions
     }
 
     public static List<CollectiveBargainingAgreementDto> ToDtoList(this IEnumerable<CollectiveBargainingAgreement> entities)
-        => entities.Select(e => e.ToDto()).ToList();
+        => entities.OrderByDescending(e => e.EffectiveDate).Select(e => e.ToDto()).ToList();
 
     #endregion
 }
