@@ -2,16 +2,32 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Award,
+  CalendarRange,
   CheckCircle2,
   Loader2,
   Medal,
   PlayCircle,
+  Plus,
   Sparkles,
+  Trash2,
   Users,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -49,6 +65,15 @@ const fmtMoney = (v?: number | null) =>
 export default function AwardsAdministrationPage() {
   const queryClient = useQueryClient();
   const [selectedTypeId, setSelectedTypeId] = useState<string>('');
+  const [rungForm, setRungForm] = useState<null | {
+    id?: string;
+    years: number;
+    name: string;
+    monetaryAmount: string;
+    leaveDaysBonus: string;
+    benefits: string;
+    isActive: boolean;
+  }>(null);
 
   const { data: types, isLoading: loadingTypes } = useQuery({
     queryKey: ['award-types'],
@@ -78,6 +103,42 @@ export default function AwardsAdministrationPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['long-service-ladder', activeTypeId] }),
   });
 
+  const saveRung = useMutation({
+    mutationFn: () => {
+      if (!rungForm) throw new Error('Nothing to save.');
+      const body = {
+        years: Number(rungForm.years),
+        name: rungForm.name.trim() || null,
+        // ⚠ Blank stays NULL rather than becoming 0. A rung with no amount is a question TDC has
+        // not answered; a zero would answer it for them.
+        monetaryAmount: rungForm.monetaryAmount === '' ? null : Number(rungForm.monetaryAmount),
+        leaveDaysBonus: rungForm.leaveDaysBonus === '' ? null : Number(rungForm.leaveDaysBonus),
+        benefits: rungForm.benefits.trim() || null,
+        isActive: rungForm.isActive,
+      };
+      return rungForm.id
+        ? awardsService.updateMilestone(rungForm.id, { id: rungForm.id, ...body })
+        : awardsService.createMilestone({ awardTypeId: activeTypeId, ...body });
+    },
+    onSuccess: () => {
+      toast.success('Saved.');
+      setRungForm(null);
+      queryClient.invalidateQueries({ queryKey: ['long-service-ladder', activeTypeId] });
+      queryClient.invalidateQueries({ queryKey: ['long-service-preview', activeTypeId] });
+    },
+    onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The rung was refused.'),
+  });
+
+  const removeRung = useMutation({
+    mutationFn: (rungId: string) => awardsService.deleteMilestone(rungId),
+    onSuccess: () => {
+      toast.success('Removed. Its year is free for a replacement.');
+      queryClient.invalidateQueries({ queryKey: ['long-service-ladder', activeTypeId] });
+      queryClient.invalidateQueries({ queryKey: ['long-service-preview', activeTypeId] });
+    },
+    onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The removal was refused.'),
+  });
+
   const runSweep = useMutation({
     mutationFn: () => awardsService.runLongServiceSweep(activeTypeId),
     onSuccess: () => {
@@ -95,6 +156,29 @@ export default function AwardsAdministrationPage() {
         title="Award setup"
         description="The award catalogue, the long-service ladder, and the sweep that grants against it."
         backHref="/administration/hr"
+      />
+
+      <NavCardGrid
+        items={[
+          {
+            title: 'Award catalogue',
+            description: 'The awards themselves, how they are nominated and how a winner is chosen.',
+            href: '/administration/hr/awards/types',
+            icon: Award,
+          },
+          {
+            title: 'Cycles',
+            description: 'Nomination and voting windows, publishing, and generated candidates.',
+            href: '/administration/hr/awards/cycles',
+            icon: CalendarRange,
+          },
+          {
+            title: 'Committees',
+            description: 'Who scores nominations. Membership is the entitlement.',
+            href: '/administration/hr/awards/committees',
+            icon: Users,
+          },
+        ]}
       />
 
       {loadingTypes ? (
@@ -135,6 +219,21 @@ export default function AwardsAdministrationPage() {
                 <Medal className="h-4 w-4" />
                 Long-service milestones
               </CardTitle>
+              <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!activeTypeId}
+                onClick={() =>
+                  setRungForm({
+                    years: 0, name: '', monetaryAmount: '', leaveDaysBonus: '',
+                    benefits: '', isActive: true,
+                  })
+                }
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add a rung
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -148,6 +247,7 @@ export default function AwardsAdministrationPage() {
                 )}
                 Seed the default ladder
               </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {seed.data && (
@@ -201,6 +301,7 @@ export default function AwardsAdministrationPage() {
                       <TableHead className="text-right">Leave days</TableHead>
                       <TableHead>Benefits</TableHead>
                       <TableHead>Active</TableHead>
+                      <TableHead />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -221,6 +322,33 @@ export default function AwardsAdministrationPage() {
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
+                        </TableCell>
+                        <TableCell className="space-x-1 text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              setRungForm({
+                                id: m.id,
+                                years: m.years,
+                                name: m.name ?? '',
+                                monetaryAmount: m.monetaryAmount === null ? '' : String(m.monetaryAmount),
+                                leaveDaysBonus: m.leaveDaysBonus === null ? '' : String(m.leaveDaysBonus),
+                                benefits: m.benefits ?? '',
+                                isActive: m.isActive,
+                              })
+                            }
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={removeRung.isPending}
+                            onClick={() => removeRung.mutate(m.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -363,6 +491,90 @@ export default function AwardsAdministrationPage() {
           </Card>
         </>
       )}
+
+      <Dialog open={Boolean(rungForm)} onOpenChange={(o) => !o && setRungForm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{rungForm?.id ? 'Edit rung' : 'Add a rung'}</DialogTitle>
+            <DialogDescription>
+              One rung per number of years. Leaving a value blank means &quot;not decided&quot;, not zero.
+            </DialogDescription>
+          </DialogHeader>
+          {rungForm && (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="years">Years of service</Label>
+                  <Input
+                    id="years"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={rungForm.years || ''}
+                    onChange={(e) => setRungForm({ ...rungForm, years: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rungName">Name</Label>
+                  <Input
+                    id="rungName"
+                    value={rungForm.name}
+                    onChange={(e) => setRungForm({ ...rungForm, name: e.target.value })}
+                    placeholder="Decade of Service"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rungAmount">Value</Label>
+                  <Input
+                    id="rungAmount"
+                    type="number"
+                    min={0}
+                    value={rungForm.monetaryAmount}
+                    onChange={(e) => setRungForm({ ...rungForm, monetaryAmount: e.target.value })}
+                    placeholder="Not decided"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rungLeave">Leave days</Label>
+                  <Input
+                    id="rungLeave"
+                    type="number"
+                    min={0}
+                    value={rungForm.leaveDaysBonus}
+                    onChange={(e) => setRungForm({ ...rungForm, leaveDaysBonus: e.target.value })}
+                    placeholder="Not decided"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="rungBenefits">Other benefits</Label>
+                  <Input
+                    id="rungBenefits"
+                    value={rungForm.benefits}
+                    onChange={(e) => setRungForm({ ...rungForm, benefits: e.target.value })}
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch
+                  checked={rungForm.isActive}
+                  onCheckedChange={(v) => setRungForm({ ...rungForm, isActive: v })}
+                />
+                Active — an inactive rung is not swept for
+              </label>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setRungForm(null)}>Cancel</Button>
+                <Button
+                  disabled={!rungForm.years || rungForm.years < 1 || saveRung.isPending}
+                  onClick={() => saveRung.mutate()}
+                >
+                  {saveRung.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

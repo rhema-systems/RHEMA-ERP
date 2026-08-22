@@ -513,3 +513,268 @@ export interface CreateAwardNomination {
   proposedMonetaryAmount?: number | null;
   proposedLeaveDays?: number | null;
 }
+
+// ─── ballot & voting ─────────────────────────────────────────────────────────
+
+export interface AwardBallotOption {
+  nominationId: string;
+  nominationNumber: string;
+  nomineeId: string | null;
+  nomineeName: string;
+  teamName: string | null;
+  justification: string;
+}
+
+/** What an employee sees when they come to vote. */
+export interface AwardBallot {
+  awardCycleId: string;
+  cycleName: string;
+  awardTypeId: string;
+  awardTypeName: string;
+  votingOpensOn: string | null;
+  votingClosesOn: string | null;
+  isVotingOpen: boolean;
+  /** Whether this employee is in the electorate. An award with no electorate target admits everyone. */
+  isInElectorate: boolean;
+  /** Null means they have not voted. */
+  myVoteNominationId: string | null;
+  options: AwardBallotOption[];
+}
+
+export interface AwardVote {
+  id: string;
+  awardCycleId: string;
+  awardNominationId: string;
+  voterId: string;
+  justification: string | null;
+  votedAt: string;
+}
+
+export interface CastAwardVote {
+  awardNominationId: string;
+  justification?: string | null;
+}
+
+/**
+ * The tally.
+ *
+ * ⚠ Withheld until the voting window closes — see the voting service. A screen must not treat a
+ * missing tally as "nobody voted".
+ */
+export interface AwardVoteResult {
+  awardCycleId: string;
+  cycleName: string;
+  isVotingOpen: boolean;
+  totalVotes: number;
+  winningNominationId: string | null;
+  winnerName: string | null;
+  isTied: boolean;
+  tally: { nominationId: string; nomineeName: string; votes: number }[];
+}
+
+/** The committee's average scores. Ties are reported, never broken. */
+export interface AwardCommitteeResult {
+  awardCycleId: string;
+  cycleName: string;
+  minRequiredReviewers: number | null;
+  winningNominationId: string | null;
+  winnerName: string | null;
+  isTied: boolean;
+  scores: {
+    nominationId: string;
+    nomineeName: string;
+    averageScore: number;
+    reviewerCount: number;
+    meetsMinimumReviewers: boolean;
+  }[];
+}
+
+export interface SubmitCommitteeReview {
+  score: number;
+  comments?: string | null;
+}
+
+// ─── write payloads: catalogue ───────────────────────────────────────────────
+
+export interface UpsertAwardType {
+  code: string;
+  name: string;
+  description: string;
+  category: AwardCategory;
+  frequency: AwardFrequency;
+  isTeamAward: boolean;
+  nominationSource: AwardNominationSource;
+  winnerDecision: AwardWinnerDecision;
+  allowSelfNomination: boolean;
+  disqualifyOnDisciplinaryRecord: boolean;
+  disqualifyingDisciplineMonths?: number | null;
+  minServiceYears?: number | null;
+  maxServiceYears?: number | null;
+  minAge?: number | null;
+  maxAge?: number | null;
+  maxAwardsPerPeriod?: number | null;
+  maxAwardsPerEmployee?: number | null;
+  hasMonetaryReward: boolean;
+  minMonetaryAmount?: number | null;
+  maxMonetaryAmount?: number | null;
+  hasCertificate: boolean;
+  hasTrophy: boolean;
+  leaveDaysBonus?: number | null;
+  hasLevels: boolean;
+  requiresFormalReview: boolean;
+  minRequiredReviewers?: number | null;
+  minPerformanceScore?: number | null;
+  minGoalsAchieved?: number | null;
+  notes?: string | null;
+  isActive: boolean;
+}
+
+export interface UpsertAwardLevel {
+  awardTypeId: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  rank: number;
+  monetaryAmount?: number | null;
+  leaveDaysBonus?: number | null;
+  benefits?: string | null;
+  isActive: boolean;
+}
+
+/** Who an award is scoped to. `targetType` is `AwardScope`; `purpose` says eligibility vs electorate. */
+export interface UpsertAwardTarget {
+  awardTypeId: string;
+  targetType: number;
+  targetId?: string | null;
+  isExclusion: boolean;
+  reason?: string | null;
+  purpose?: number;
+}
+
+export interface AwardTypeTarget {
+  id: string;
+  awardTypeId: string;
+  targetType: number;
+  targetTypeName: string;
+  targetId: string | null;
+  targetName: string | null;
+  isExclusion: boolean;
+  reason: string | null;
+  purpose: number;
+  purposeName: string | null;
+}
+
+export interface UpsertAwardBudget {
+  awardTypeId: string;
+  year: number;
+  budgetAmount: number;
+  /** Optional — the service mints `AWB-{year}-{hex}` when it is blank. */
+  budgetCode?: string | null;
+  notes?: string | null;
+}
+
+export interface UpsertAwardCycle {
+  awardTypeId: string;
+  cycleCode: string;
+  name: string;
+  year: number;
+  quarter?: number | null;
+  month?: number | null;
+  nominationOpensOn?: string | null;
+  nominationClosesOn?: string | null;
+  /** ⚠ Required iff the award is decided by `StaffVote`, and refused otherwise. */
+  votingOpensOn?: string | null;
+  votingClosesOn?: string | null;
+}
+
+export interface UpsertAwardCommittee {
+  name: string;
+  description?: string | null;
+  quorumRequired: number;
+  reviewDeadlineDays: number;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  isActive: boolean;
+}
+
+export interface AddCommitteeMember {
+  employeeId: string;
+  /** Free text, max 100 — not an enum. */
+  role?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  isActive: boolean;
+}
+
+// ─── write payloads: conferral ───────────────────────────────────────────────
+
+/** Confer from a nomination. The nominee, award and cycle all come from the nomination. */
+export interface ConferFromNomination {
+  awardDate: string;
+  monetaryAmount?: number | null;
+  awardLevelId?: string | null;
+  additionalCitation?: string | null;
+}
+
+/** ⚠ Only for a `ManagementDirect` award — anything else is refused (AWD-07). */
+export interface ConferDirectly {
+  employeeId: string;
+  awardTypeId: string;
+  awardLevelId?: string | null;
+  awardCycleId?: string | null;
+  awardDate: string;
+  reason: string;
+  citation?: string | null;
+  monetaryAmount?: number | null;
+}
+
+export interface EmployeeAward {
+  id: string;
+  tenantId: string;
+  awardNumber: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string | null;
+  awardTypeId: string;
+  awardTypeName: string;
+  awardLevelId: string | null;
+  awardLevelName: string | null;
+  awardCycleId: string | null;
+  awardCycleName: string | null;
+  awardNominationId: string | null;
+  awardDate: string;
+  reason: string | null;
+  citation: string | null;
+  monetaryAmount: number | null;
+  presentationDate: string | null;
+  presentationVenue: string | null;
+  paymentProcessed: boolean;
+  paymentDate: string | null;
+  paymentReference: string | null;
+  amountPaid: number | null;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface RecordAwardPayment {
+  awardId: string;
+  paymentReference: string;
+  /** Omit to pay the promised amount. What is released is the promise; what is booked is this. */
+  amountPaid?: number | null;
+}
+
+export interface RecordAwardPresentation {
+  awardId: string;
+  presentationDate: string;
+  presentationVenue?: string | null;
+  presentationNotes?: string | null;
+}
+
+export interface UpdateAwardNomination {
+  id: string;
+  justification: string;
+  proposedMonetaryAmount?: number | null;
+  proposedLeaveDays?: number | null;
+}

@@ -90,13 +90,40 @@ export default function MyAwardsPage() {
         title="My awards"
         description="What you have been awarded, who you have put forward, and what is open to you now."
         backHref="/hr"
+        actions={
+          <div className="flex gap-2">
+            {openForVoting.length > 0 && (
+              <Button variant="outline" asChild>
+                <Link href="/hr/awards/me/vote">
+                  <Vote className="mr-2 h-4 w-4" />
+                  Vote
+                </Link>
+              </Button>
+            )}
+            {owed.length > 0 && (
+              <Button variant="outline" asChild>
+                <Link href="/hr/awards/me/reviews">
+                  <ClipboardCheck className="mr-2 h-4 w-4" />
+                  Score ({owed.length})
+                </Link>
+              </Button>
+            )}
+            <Button asChild disabled={openForNomination.length === 0}>
+              <Link href="/hr/awards/me/nominate">
+                <UserPlus className="mr-2 h-4 w-4" />
+                Nominate a colleague
+              </Link>
+            </Button>
+          </div>
+        }
       />
 
       {/* ── things the employee can act on right now ────────────────────────── */}
       {(openForNomination.length > 0 || openForVoting.length > 0 || owed.length > 0) && (
         <div className="grid gap-4 md:grid-cols-3">
           {openForNomination.length > 0 && (
-            <Card>
+            <Card className="transition hover:border-primary">
+              <Link href="/hr/awards/me/nominate">
               <CardContent className="flex items-center gap-3 p-4">
                 <UserPlus className="h-5 w-5 text-sky-600" />
                 <div className="min-w-0">
@@ -109,11 +136,13 @@ export default function MyAwardsPage() {
                   </p>
                 </div>
               </CardContent>
+              </Link>
             </Card>
           )}
 
           {openForVoting.length > 0 && (
-            <Card>
+            <Card className="transition hover:border-primary">
+              <Link href="/hr/awards/me/vote">
               <CardContent className="flex items-center gap-3 p-4">
                 <Vote className="h-5 w-5 text-violet-600" />
                 <div className="min-w-0">
@@ -125,13 +154,15 @@ export default function MyAwardsPage() {
                   </p>
                 </div>
               </CardContent>
+              </Link>
             </Card>
           )}
 
           {/* ⚠ Committee members hold no HR permission. For most of them this is the only awards
               screen they will ever open. */}
           {owed.length > 0 && (
-            <Card>
+            <Card className="transition hover:border-primary">
+              <Link href="/hr/awards/me/reviews">
               <CardContent className="flex items-center gap-3 p-4">
                 <ClipboardCheck className="h-5 w-5 text-amber-600" />
                 <div className="min-w-0">
@@ -143,6 +174,7 @@ export default function MyAwardsPage() {
                   </p>
                 </div>
               </CardContent>
+              </Link>
             </Card>
           )}
         </div>
@@ -269,7 +301,11 @@ export default function MyAwardsPage() {
               <TableBody>
                 {nominations.map((n) => (
                   <TableRow key={n.id}>
-                    <TableCell className="font-medium">{n.nominationNumber}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link className="underline" href={`/hr/awards/me/nominations/${n.id}`}>
+                        {n.nominationNumber}
+                      </Link>
+                    </TableCell>
                     <TableCell>{n.nomineeName || n.teamName || '—'}</TableCell>
                     <TableCell>{n.awardTypeName}</TableCell>
                     <TableCell>{fmtDate(n.nominationDate)}</TableCell>

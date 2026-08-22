@@ -1,6 +1,6 @@
 # HR Area 14 — Staff Awards & Recognition: Build Plan
 
-**Opened 2026-08-21. ✅ COMPLETE 2026-08-22 — 13 slices, 618 assertions, 29 defects.** Area chosen by the user after the post-9b survey. The area is unusual in
+**Opened 2026-08-21. ✅ COMPLETE 2026-08-22 — 14 slices, 618 assertions, 29 defects, 17 screens.** Area chosen by the user after the post-9b survey. The area is unusual in
 this module: it inherits ~4,950 lines of ported code that has **never once executed**, and its
 requirements come almost entirely from a TDC change document rather than from the FRD.
 
@@ -30,9 +30,9 @@ decision — record the change where it happened.
 | **Backend today** | 15 entities, 100 endpoints, 1,852 lines of service, 1,355 lines of DTOs |
 | **Backend proven** | *(at survey)* **Nothing.** Every awards table holds 0 rows |
 | **Frontend today** | *(at survey)* none |
-| **Status** | ✅ **COMPLETE 2026-08-22.** 13 slices, **618 assertions**, 29 defects |
+| **Status** | ✅ **COMPLETE 2026-08-22.** 14 slices, **618 assertions**, 29 defects, **17 screens** |
 | **Harness** | `dev-harness/hr-awards/` — `run-slice0..12`, plus `probe-ui-payloads.mjs` |
-| **Frontend** | `/hr/awards`, `/hr/awards/me`, `/administration/hr/awards` — registered in all three navigation surfaces |
+| **Frontend** | **17 screens** across `/hr/awards`, `/hr/awards/me` and `/administration/hr/awards`, registered in all three navigation surfaces. Every meaningful write reachable; the attachment screens are deliberately absent (see the open defect) |
 | **Owed to TDC** | what a long-service rung is worth (AWD-14); whether severity gates the disciplinary exemption (AWD-15, needs a schema change to discipline first) |
 
 ---
@@ -334,6 +334,7 @@ Provisional — slices are re-cut as findings land, and the log records any chan
 | 10 | FR-HR-113 | ✅ **Done.** The long-service eligibility report, on the catalogue + provider + seeder + **migration** pattern, reading the sweep's own calculation. |
 | 11 | Screens | ✅ **Done.** The three screens, the payload probe that preceded them, D-9's paging, and the two employee routes the probe found missing. |
 | 12 | Content audit | ✅ **Done.** All 76 GETs asserted for content; 11 defects found, every one behind a 200 or a plausible 4xx. |
+| 13 | UI parity | ✅ **Done.** 17 screens. Every meaningful write reachable; 64 write endpoints had **2** reachable before this. |
 
 ---
 
@@ -1316,6 +1317,51 @@ attachment slice. An unproven shape nobody names becomes a shape nobody checks.
 
 ---
 
+
+---
+
+## ⚠ Open defect — award attachments bypass the upload gate (found 2026-08-22, slice 13)
+
+**Not fixed. No UI was built on it, deliberately.**
+
+`POST api/Awards/nominations/{id}/attachments` and `POST api/Awards/{id}/attachments` take
+`FileName` and **`FilePath`** as ordinary body fields on `CreateAwardNominationAttachmentDto` /
+`CreateAwardAttachmentDto`. The caller supplies the path; the server stores it. **No file is
+uploaded through these endpoints at all.**
+
+Compare an area that was fixed — separation posts multipart `FormData` at
+`{id}/documents`, so the file goes through the shared upload gate and is scanned before anything is
+recorded.
+
+### Why this is not merely untidy
+
+| | |
+|---|---|
+| **The path is caller-supplied** | A client can point an attachment row at any path the server can read. What comes back on download is whatever that path holds. |
+| **Nothing is scanned** | The upload gate is where virus scanning happens. These endpoints never reach it. |
+| **The record can lie** | An attachment can name a file that was never uploaded, or that belongs to another tenant's record. |
+
+### Why no screen was built
+
+An attachments panel here would be a form whose whole job is to submit a server file path. Building
+it would turn a dormant hole into a reachable one — the opposite of what the UI work is for. The
+shared `AttachmentsPanel` component is ready and the screens have a place for it; what is missing is
+the endpoint, not the front end.
+
+### What a fix needs
+
+1. Change both endpoints to accept `IFormFile` and route it through the same upload gate the
+   separation and probation attachments use — the one the HR attachment slice already wired four
+   other dead paths onto. Awards was ported afterwards and was not included.
+2. Drop `FilePath` from the create DTOs entirely. A path the caller can name is the defect; keeping
+   it as "optional" keeps the hole.
+3. Re-point the download route at the stored, server-generated path.
+4. Then build the attachments panel — it is a small screen once the endpoint is honest.
+
+Until then `nominations/{id}/attachments` and `{id}/attachments` remain read-only in the audit, which
+is why slice 12 records the attachment list as **exempt** from its empty-list rule rather than
+proving its row shape.
+
 ## Area 14 — complete
 
 **13 slices, 618 assertions, 29 defects.** All fifteen change-document requirements (AWD-01 to
@@ -1338,3 +1384,89 @@ severity column on `StaffDisciplinaryActions` before it is even expressible. Bot
 `docs/HR-OPEN-QUESTIONS-FOR-TDC.md`. Every money event is registered in
 `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-module sweep; **nothing in this area posts to a
 ledger.** `LongServiceAward.LeaveId` remains a hook with no writer.
+
+---
+
+### Slice 13 — UI parity. 2026-08-22. Frontend only — no migration, no backend change, 618 assertions unchanged.
+
+**17 awards screens.** `tsc --noEmit`: **0 errors in awards**; ESLint clean; every route registered
+in all three navigation surfaces. The whole harness suite re-run green.
+
+**⚠ This slice exists because slice 11 shipped read-only surfaces and reported "screens" as done.**
+The user asked *"so we're done with all the screens for area 14?"* — the honest count was **64 write
+endpoints, 2 of them reachable**. Nominating, voting, scoring and conferring — the four acts the area
+exists for — could not be performed from the UI at all. Slice 11's own log cites area 12's lesson
+that *"the create form is an actor audit"*; it then didn't build one.
+
+| surface | screens |
+|---|---|
+| Employee | landing, nominate, nomination detail, vote, score |
+| Desk | register, nomination detail, confer directly, award detail, who qualifies, results, long service |
+| Admin | setup, catalogue, award detail (levels/scope/budgets), cycles, committees |
+
+**The user asked twice more, and was right both times.**
+
+*Second ask.* Seven service methods had no caller, and the worst was structural: **after a vote
+closed or a committee scored, nobody could see who won.** `getVoteResults` and `getCommitteeResults`
+existed and no screen called either — the outcome of the entire process had no surface. Also found:
+the nominate screen told employees *"individual members are added afterwards by the awards desk"* and
+**the desk had no such UI** — a promise written into copy that the product could not keep; long-service
+awards were granted by the sweep and then had nowhere to go (`long-service/{id}/process` was reachable
+by nothing); a committee member could score and never see the result; and edit existed nowhere.
+
+*Third ask.* The check being run was **service → screen**, which structurally cannot see endpoints the
+service never wrapped. Switching to **endpoint → service → screen** found **24 unwrapped routes**,
+including **17 delete routes against one wrapper**. A whole verb was missing. Also missing: a vote
+could be *replaced* but never *withdrawn* (different acts — one moves a vote, the other removes a
+voter), `pending/presentations` (an award could be conferred, paid, and quietly never handed over),
+and `long-service/upcoming`.
+
+Sixteen routes remain unwrapped and both groups are deliberate: **7 attachment routes** (see the open
+defect above) and **9 convenience variants** of endpoints already wrapped — `committees/active`,
+`levels/active`, `types/category/{category}` and their kin, all filtered client-side from a list that
+already carries the flag.
+
+**⚠⚠ The enum trap, found by checking a comment I had written.** The scope picker's comment said
+"4 = Employee scope". It was correct **by luck** — the number came from a harness fixture, not from
+reading the enum:
+
+| value | `AwardTargetType` (the DTO field) | `AwardScope` (the route parameter) |
+|---|---|---|
+| 1 | OrganizationUnit | **Employee** |
+| 2 | Position | Position |
+| 3 | StaffLevel | StaffLevel |
+| 4 | **Employee** | OrganizationUnit |
+
+Same four members, **opposite order**, and the middle two coincide — so a mix-up is **right half the
+time**, which is the worst possible shape: it survives casual testing and mis-scopes only at the two
+ends. Reasoning it out from the parameter name (`scope`) would have produced 1 and scoped awards to
+org units while believing they were scoped to people. Now a named `TARGET_TYPE` map with that table
+beside it.
+
+**⚠ The probe was extended after the fact, and immediately proved the point.** The scope picker's
+three option sources were built from types read out of the frontend *source*, not from payloads read
+off the wire — the exact shortcut `probe-ui-payloads.mjs` exists to prevent. Adding them, **two of
+the three routes I wrote were wrong**: `/StaffLevels` is `/hr/staff-levels` and `/OrganizationUnits`
+is `/OrganizationUnit`, singular. Caught by reading `baseUrl` out of each service. The label fields
+are now confirmed against live payloads — `title`, `name`, `name` — rather than inferred.
+
+**Design decisions carried in the screens rather than left to be discovered.**
+
+- Cycles hide the voting-window fields unless the award is decided by a staff vote — the API refuses
+  one either way round, so the form states the rule before the refusal does.
+- An empty electorate scope means **everyone** votes, and the scope tab says so. An empty table would
+  otherwise read as an oversight.
+- Blank money stays **null**, never `0` — on a milestone rung and an award alike.
+- A team nomination shows **why** it cannot be conferred rather than offering a button whose write
+  would violate a foreign key.
+- Quorum is asked of the **server**, not counted client-side: a count that disagreed with the scoring
+  engine would tell HR a committee was ready when the engine thinks otherwise.
+- Only a **draft** cycle can be deleted; a published one is cancelled, because the nominations raised
+  against it must keep something to belong to.
+- Deleting an award type is gated on `isTypeInUse` asked of the server — not guessed from
+  `awardCount`, which counts only conferred awards while nominations, cycles, levels, targets and
+  budgets all reference a type too.
+
+**What UI verification here does and does not mean.** There is no browser automation in this
+environment, so "verified" means `tsc`, ESLint, route resolution and payload shapes proven against a
+running API. It does **not** mean anything has been seen to render.

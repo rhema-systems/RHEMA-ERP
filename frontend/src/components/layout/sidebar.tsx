@@ -12,6 +12,8 @@ import {
   Siren,
   LayoutDashboard,
   Users,
+  Trophy,
+  Vote,
   ShoppingCart,
   Package,
   CreditCard,
@@ -712,6 +714,14 @@ export const navigationItems: NavItem[] = [
           // of its users will ever open. Gating it on HR.Awards.Read would lock the whole workforce
           // out of the feature the area exists for.
           { title: 'My Awards', href: '/hr/awards/me', icon: Award },
+          // The three acts the area exists for. Deliberately NOT permission-gated, for the same
+          // reason as "My Awards": entitlement to nominate, vote and score is read off the record.
+          { title: 'Nominate', href: '/hr/awards/me/nominate', icon: UserPlus },
+          { title: 'Vote', href: '/hr/awards/me/vote', icon: Vote },
+          { title: 'Score Nominations', href: '/hr/awards/me/reviews', icon: ClipboardCheck },
+          { title: 'Who Qualifies', href: '/hr/awards/eligibility', icon: Users },
+          { title: 'Results', href: '/hr/awards/results', icon: Trophy },
+          { title: 'Long Service', href: '/hr/awards/long-service', icon: Medal },
         ],
       },
       {

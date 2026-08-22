@@ -92,6 +92,13 @@ export default function AwardsRegisterPage() {
     queryFn: () => awardsService.getTypes(),
   });
 
+  // Conferred and not yet handed over. ⚠ The route existed and nothing called it, so an award could
+  // be decided, paid, and then quietly never presented with nothing surfacing that.
+  const { data: awaitingPresentation } = useQuery({
+    queryKey: ['awards-pending-presentation'],
+    queryFn: () => awardsService.getPendingPresentations(),
+  });
+
   const visibleNominations = useMemo(() => {
     const rows = nominations ?? [];
     const term = nominationSearch.trim().toLowerCase();
@@ -130,9 +137,15 @@ export default function AwardsRegisterPage() {
               </Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link href="/administration/hr/awards">
+              <Link href="/hr/awards/eligibility">
+                <Users className="mr-2 h-4 w-4" />
+                Who qualifies
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/hr/awards/new">
                 <Trophy className="mr-2 h-4 w-4" />
-                Award setup
+                Confer an award
               </Link>
             </Button>
           </div>
@@ -152,6 +165,13 @@ export default function AwardsRegisterPage() {
             label: 'Awards conferred',
             value: awards?.totalCount ?? 0,
             icon: Trophy,
+          },
+          {
+            label: 'Awaiting presentation',
+            value: (awaitingPresentation ?? []).length,
+            hint: 'conferred, not yet handed over',
+            icon: CalendarRange,
+            tone: (awaitingPresentation ?? []).length > 0 ? 'warning' : 'default',
           },
           {
             label: 'Award types',
@@ -230,7 +250,11 @@ export default function AwardsRegisterPage() {
                   <TableBody>
                     {visibleNominations.map((n) => (
                       <TableRow key={n.id}>
-                        <TableCell className="font-medium">{n.nominationNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          <Link className="underline" href={`/hr/awards/nominations/${n.id}`}>
+                            {n.nominationNumber}
+                          </Link>
+                        </TableCell>
                         {/* A team nomination has no nominee — teamName carries the subject instead. */}
                         <TableCell>{n.nomineeName || n.teamName || '—'}</TableCell>
                         <TableCell>{n.awardTypeName}</TableCell>
@@ -280,7 +304,11 @@ export default function AwardsRegisterPage() {
                   <TableBody>
                     {awardRows.map((a) => (
                       <TableRow key={a.id}>
-                        <TableCell className="font-medium">{a.awardNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          <Link className="underline" href={`/hr/awards/${a.id}`}>
+                            {a.awardNumber}
+                          </Link>
+                        </TableCell>
                         <TableCell>
                           {a.employeeName}
                           <span className="ml-2 text-xs text-muted-foreground">
@@ -332,6 +360,10 @@ export default function AwardsRegisterPage() {
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
           <CalendarRange className="h-4 w-4 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
+            <Link className="underline" href="/hr/awards/results">Results</Link>
+            {' · '}
+            <Link className="underline" href="/hr/awards/long-service">Long-service awards</Link>
+            {' · '}
             Cycles, eligibility, committees and the long-service ladder are configured in{' '}
             <Link className="underline" href="/administration/hr/awards">
               Award setup
