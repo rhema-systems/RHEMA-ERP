@@ -214,6 +214,7 @@
          implicit compile items, so omitting the explicit entry would silently build the
          product code while reporting that no collection-follow-up tests were discovered. -->
     <Compile Include="Services\Finance\ArCollectionFollowUpServiceTests.cs" />
+    <Compile Include="Services\Finance\SupplierDebitNoteFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />

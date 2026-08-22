@@ -183,6 +183,7 @@ public sealed class SupplierReturnFinanceAdapter : ISupplierReturnFinanceAdapter
             ContractId = ResolutionContractId,
             ContractVersion = ContractVersion,
             Status = SupplierReturnFinanceOutcomeStatus.DecisionRequired,
+            PreparedSupplierDebitNote = null,
             RequiresCashSettlement =
                 resolution.ResolutionType == SupplierReturnCommercialResolutionType.CashRefund,
             Message = "The supplier resolution is validated as an integration envelope, but no executable AP/tax preview, subledger document or journal was created. Add a governed return-clearing line mode and durable return-resolution linkage first.",

@@ -46,6 +46,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
 import { workflowApiService } from '@/services/workflow-api.service';
 import { InvoicePaymentSodControl } from '@/components/finance/InvoicePaymentSodControl';
+import { SupplierDebitNoteApplicationsCard } from '@/components/finance/ap/SupplierDebitNoteApplicationsCard';
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
@@ -475,6 +476,12 @@ export default function VendorPaymentDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <SupplierDebitNoteApplicationsCard
+                payment={payment}
+                canProcess={canSubmitPayment}
+                onChanged={refetch}
+            />
 
             <Card className="no-print">
                 <CardHeader>

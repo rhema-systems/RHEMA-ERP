@@ -346,6 +346,12 @@ export const navigationItems: NavItem[] = [
             href: '/finance/ap/returns',
             icon: RotateCcw,
           },
+          {
+            title: 'Supplier Debit Notes',
+            href: '/finance/ap/supplier-debit-notes',
+            icon: Receipt,
+            permissions: ['Finance.Read'],
+          },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
           {
             title: 'Adjustment Journal',

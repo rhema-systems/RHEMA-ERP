@@ -38,6 +38,10 @@ namespace ErpSystem.Api.Services.Finance.AP
     {
         private const int DefaultOutstandingInvoicePageSize = 50;
         private const int MaximumOutstandingInvoicePageSize = 100;
+        // Kept local until the shared Finance audit catalogue is updated by its owner.
+        private const string SupplierDebitApplicationReservedEvent = "Finance.APSupplierDebitNote.ApplicationReserved";
+        private const string SupplierDebitApplicationReversedEvent = "Finance.APSupplierDebitNote.ApplicationReversed";
+        private const string SupplierDebitApplicationFinalizedEvent = "Finance.APSupplierDebitNote.ApplicationFinalized";
 
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
@@ -53,6 +57,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IWorkflowApprovalPolicyResolver? _approvalPolicyResolver;
         private readonly IWithholdingTaxCertificateService? _withholdingTaxService;
         private readonly IExchangeRateService? _exchangeRateService;
+        private readonly IApSupplierIdentityService? _apSupplierIdentityService;
 
         private static readonly JsonSerializerOptions PaymentControlJsonOptions = new()
         {
@@ -81,7 +86,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IVendorInvoiceService? vendorInvoiceService = null,
             IProcurementControlEventService? procurementControlEvents = null,
             IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
-            IExchangeRateService? exchangeRateService = null)
+            IExchangeRateService? exchangeRateService = null,
+            IApSupplierIdentityService? apSupplierIdentityService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -100,6 +106,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _procurementControlEvents = procurementControlEvents;
             _invoicePaymentSod = invoicePaymentSod;
             _exchangeRateService = exchangeRateService;
+            _apSupplierIdentityService = apSupplierIdentityService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -129,6 +136,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(p => p.Supplier)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
+                .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .ThenInclude(application => application.SupplierDebitNote)
+                        .ThenInclude(note => note.Vendor)
+                .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .ThenInclude(application => application.VendorInvoice)
                 .Include(p => p.BankAccount)
                 .Include(p => p.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -145,6 +157,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(item => item.ConfiguredPaymentMethod)
                 .Include(item => item.Allocations)
                     .ThenInclude(item => item.VendorInvoice)
+                .Include(item => item.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .ThenInclude(application => application.SupplierDebitNote)
+                        .ThenInclude(note => note.Vendor)
+                .Include(item => item.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .ThenInclude(application => application.VendorInvoice)
                 .FirstOrDefaultAsync(cancellationToken);
             if (payment == null)
                 return null;
@@ -974,7 +991,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             try
             {
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"tdc0506-payment:{TenantId:N}:{id:N}", cancellationToken);
+                    ApSettlementLockKeys.Payment(TenantId, id), cancellationToken);
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
                     .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
@@ -995,7 +1012,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 foreach (var allocation in effectiveAllocations.OrderBy(item => item.VendorInvoiceId))
                 {
                     await _unitOfWork.AcquireTransactionLockAsync(
-                        $"tdc0505-invoice:{TenantId:N}:{allocation.VendorInvoiceId:N}", cancellationToken);
+                        ApSettlementLockKeys.Invoice(TenantId, allocation.VendorInvoiceId), cancellationToken);
                     await RequirePaymentReadinessAsync(
                         allocation.VendorInvoiceId,
                         ProcurementPaymentReadinessRules.PostAction,
@@ -1036,7 +1053,13 @@ namespace ErpSystem.Api.Services.Finance.AP
         //  ALLOCATIONS
         // ═════════════════════════════════════════════════════════════════
 
-        public async Task<VendorPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<VendorPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default) =>
+            PostAsync(id, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorPaymentDto> PostAsync(
+            Guid id,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AP payment posting.");
@@ -1044,118 +1067,112 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new VendorPaymentControlException(
                     ProcurementInvoicePaymentSodRules.EvidenceCode,
                     "The authoritative invoice/payment SOD service is not configured.");
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => PostAsync(id, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
 
-            await _invoicePaymentSod.RevalidatePaymentAuthorizationAsync(id, cancellationToken);
-
-            var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
-            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
-                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
-                FinanceAccessLevel.Operate,
-                cancellationToken);
-            var wasAlreadyLinked = payment.JournalEntryId.HasValue;
-
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            VendorPayment? payment = null;
             try
             {
+                // Every payment mutation, supplier-credit reservation and posting uses this same
+                // lock. Invoice then debit-note locks are acquired in stable sorted order so the
+                // reload-to-finalize sequence is one atomic settlement boundary.
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.Payment(TenantId, id), cancellationToken);
+                payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+                var invoiceIds = payment.Allocations.Where(item => !item.IsDeleted)
+                    .Select(item => item.VendorInvoiceId)
+                    .Concat(payment.SupplierDebitNoteApplications.Where(item => !item.IsDeleted)
+                        .Select(item => item.VendorInvoiceId))
+                    .Distinct()
+                    .OrderBy(item => item)
+                    .ToList();
+                foreach (var invoiceId in invoiceIds)
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
+                foreach (var noteId in payment.SupplierDebitNoteApplications.Where(item => !item.IsDeleted)
+                             .Select(item => item.SupplierDebitNoteId)
+                             .Distinct()
+                             .OrderBy(item => item))
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        ApSettlementLockKeys.SupplierDebitNote(TenantId, noteId), cancellationToken);
+
+                await _invoicePaymentSod.RevalidatePaymentAuthorizationAsync(id, cancellationToken);
+                await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                    await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                    FinanceAccessLevel.Operate,
+                    cancellationToken);
+                var wasAlreadyLinked = payment.JournalEntryId.HasValue;
                 var postingRequest = await BuildApPaymentPostingRequestAsync(payment, cancellationToken);
                 var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
 
                 if (payment.JournalEntryId.HasValue && payment.JournalEntryId.Value != postingResult.JournalEntryId)
                     throw new InvalidOperationException("Vendor payment is linked to a different journal entry than the posting engine result.");
-
                 if (!payment.JournalEntryId.HasValue)
                 {
-                    await ApplyPostedPaymentAllocationsAsync(
-                        payment,
+                    await ApplyPostedPaymentAllocationsAsync(payment, postingResult.PostingEventId, postingResult.JournalEntryId, cancellationToken);
+                    await ApplyPostedSupplierDebitNoteApplicationsAsync(payment, postingResult.PostingEventId, postingResult.JournalEntryId, cancellationToken);
+                    payment.JournalEntryId = postingResult.JournalEntryId;
+                }
+                if (payment.Status is VendorPaymentStatus.Authorized or VendorPaymentStatus.PendingAuthorization or VendorPaymentStatus.Failed)
+                    payment.Status = VendorPaymentStatus.Processed;
+                payment.UpdatedAt = DateTime.UtcNow;
+                payment.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await RecordApPaymentAuditAsync(
+                    postingResult.WasDuplicate || wasAlreadyLinked
+                        ? FinanceAuditEvents.ApPaymentDuplicatePostingAttempt
+                        : FinanceAuditEvents.ApPaymentPosted,
+                    payment,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
                         postingResult.PostingEventId,
                         postingResult.JournalEntryId,
-                        cancellationToken);
-                    payment.JournalEntryId = postingResult.JournalEntryId;
-                    if (payment.Status == VendorPaymentStatus.Authorized || payment.Status == VendorPaymentStatus.PendingAuthorization)
-                    {
-                        payment.Status = VendorPaymentStatus.Processed;
-                    }
-                    payment.UpdatedAt = DateTime.UtcNow;
-                    payment.UpdatedBy = UserName;
-                    await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-                else if (payment.Status is VendorPaymentStatus.Authorized or
-                         VendorPaymentStatus.PendingAuthorization or
-                         VendorPaymentStatus.Failed)
-                {
-                    // A finance-engine journal link is the durable posting
-                    // outcome. Restore an operational status that may have
-                    // been reset by a safe batch retry before post-processing.
-                    payment.Status = VendorPaymentStatus.Processed;
-                    payment.UpdatedAt = DateTime.UtcNow;
-                    payment.UpdatedBy = UserName;
-                    await _unitOfWork.Repository<VendorPayment>()
-                        .UpdateAsync(payment);
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-
-                if (postingResult.WasDuplicate || wasAlreadyLinked)
-                {
-                    await RecordApPaymentAuditAsync(
-                        FinanceAuditEvents.ApPaymentDuplicatePostingAttempt,
-                        payment,
-                        postingEventId: postingResult.PostingEventId,
-                        journalEntryId: postingResult.JournalEntryId,
-                        afterValues: new
-                        {
-                            postingResult.PostingEventId,
-                            postingResult.JournalEntryId,
-                            postingResult.PostingAction,
-                            postingResult.WasDuplicate
-                        },
-                        comment: "Duplicate AP payment posting request returned the existing posting.",
-                        cancellationToken: cancellationToken);
-                }
-                else
-                {
-                    await RecordApPaymentAuditAsync(
-                        FinanceAuditEvents.ApPaymentPosted,
-                        payment,
-                        postingEventId: postingResult.PostingEventId,
-                        journalEntryId: postingResult.JournalEntryId,
-                        afterValues: new
-                        {
-                            postingResult.PostingEventId,
-                            postingResult.JournalEntryId,
-                            postingResult.JournalEntryNumber,
-                            postingResult.TotalDebitAmount,
-                            postingResult.TotalCreditAmount,
-                            postingResult.FunctionalCurrencyCode,
-                            postingResult.PostingDate
-                        },
-                        comment: "AP payment posted through the central finance posting engine.",
-                        cancellationToken: cancellationToken);
-                }
+                        postingResult.JournalEntryNumber,
+                        postingResult.TotalDebitAmount,
+                        postingResult.TotalCreditAmount,
+                        postingResult.FunctionalCurrencyCode,
+                        postingResult.PostingDate,
+                        postingResult.WasDuplicate
+                    },
+                    comment: postingResult.WasDuplicate || wasAlreadyLinked
+                        ? "Duplicate AP payment posting request returned the existing posting."
+                        : "AP payment posted through the central finance posting engine.",
+                    cancellationToken: cancellationToken);
+                await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
 
                 _logger.LogInformation(
                     "Posted AP payment {PaymentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
                     payment.PaymentNumber,
                     postingResult.JournalEntryId,
                     postingResult.WasDuplicate);
-
-                await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
-
                 return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
             }
             catch (Exception ex)
             {
-                await RecordApPaymentAuditAsync(
-                    FinanceAuditEvents.ApPaymentPostingFailed,
-                    payment,
-                    afterValues: new
-                    {
-                        payment.JournalEntryId,
-                        error = ex.Message
-                    },
-                    reason: ex.Message,
-                    cancellationToken: cancellationToken);
-
-                _logger.LogError(ex, "Failed to post AP payment {PaymentNumber}", payment.PaymentNumber);
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                if (payment != null && ownsTransaction)
+                {
+                    await RecordApPaymentAuditAsync(
+                        FinanceAuditEvents.ApPaymentPostingFailed,
+                        payment,
+                        afterValues: new { payment.JournalEntryId, error = ex.Message },
+                        reason: ex.Message,
+                        cancellationToken: cancellationToken);
+                }
+                _logger.LogError(ex, "Failed to post AP payment {PaymentId}", id);
                 throw;
             }
         }
@@ -1213,6 +1230,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
                 transactionStarted = true;
 
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.Payment(TenantId, id), cancellationToken);
+
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
                     .Include(item => item.Supplier)
@@ -1220,6 +1240,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .Include(item => item.ConfiguredPaymentMethod)
                     .Include(item => item.Allocations)
                         .ThenInclude(item => item.VendorInvoice)
+                    .Include(item => item.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                        .ThenInclude(application => application.SupplierDebitNote)
+                    .Include(item => item.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                        .ThenInclude(application => application.VendorInvoice)
                     .SingleOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
 
@@ -1250,6 +1274,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .OrderBy(item => item.AllocationDate)
                     .ThenBy(item => item.Id)
                     .ToList();
+                var activeSupplierDebitApplications = GetEffectiveSupplierDebitNoteApplications(
+                    payment.SupplierDebitNoteApplications);
 
                 // Ordinary invoice-settlement allocations are linked to the payment's own posting
                 // event for traceability. Only a posted supplier advance creates a later, separate
@@ -1403,6 +1429,32 @@ namespace ErpSystem.Api.Services.Finance.AP
                     });
                 }
 
+                foreach (var application in activeSupplierDebitApplications)
+                {
+                    var invoice = application.VendorInvoice;
+                    if (invoice == null || invoice.TenantId != TenantId)
+                        throw new InvalidOperationException(
+                            "Supplier debit-note application references an invoice from another tenant.");
+                    invoice.PaidAmount = Math.Max(
+                        0m,
+                        RoundMoney(invoice.PaidAmount - application.ApplicationAmount));
+                    invoice.Status = invoice.PaidAmount <= 0.01m
+                        ? VendorInvoiceStatus.Approved
+                        : VendorInvoiceStatus.PartiallyPaid;
+                    invoice.UpdatedAt = now;
+                    invoice.UpdatedBy = UserName;
+                    invoice.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                    await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+
+                    await _unitOfWork.Repository<SupplierDebitNoteApplication>().AddAsync(
+                        CreateSupplierDebitNoteApplicationReversal(
+                            application,
+                            now,
+                            $"Payment reversal: {reason}",
+                            reversalResult.PostingEventId,
+                            reversalResult.JournalEntryId));
+                }
+
                 payment.Status = VendorPaymentStatus.Reversed;
                 payment.AllocatedAmount = 0m;
                 payment.ReversalJournalEntryId = reversalResult.JournalEntryId;
@@ -1434,6 +1486,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         payment.ReversalPostingEventId,
                         payment.ReversalDate,
                         ReversedAllocationCount = activeAllocations.Count,
+                        ReversedSupplierDebitApplicationCount = activeSupplierDebitApplications.Count,
                         ReversedRealizedFxCount = realizedSettlements.Count
                     },
                     reason: reason,
@@ -1557,10 +1610,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             try
             {
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"tdc0505-payment:{TenantId:N}:{paymentId:N}", cancellationToken);
+                    ApSettlementLockKeys.Payment(TenantId, paymentId), cancellationToken);
                 foreach (var invoiceId in allocations.Select(item => item.VendorInvoiceId).Distinct().OrderBy(item => item))
                     await _unitOfWork.AcquireTransactionLockAsync(
-                        $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+                        ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
 
                 payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
@@ -1867,10 +1920,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     transactionStarted = true;
                 }
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"tdc0505-payment:{TenantId:N}:{paymentId:N}", cancellationToken);
+                    ApSettlementLockKeys.Payment(TenantId, paymentId), cancellationToken);
                 foreach (var invoiceId in requestedAllocations.Select(item => item.VendorInvoiceId).Distinct().OrderBy(item => item))
                     await _unitOfWork.AcquireTransactionLockAsync(
-                        $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+                        ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
 
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
@@ -2185,6 +2238,23 @@ namespace ErpSystem.Api.Services.Finance.AP
                                                allocation.WithholdingTaxAmount),
                     cancellationToken) ?? 0m;
 
+            var supplierDebitApplications = _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                .GetQueryable(application =>
+                    application.TenantId == TenantId &&
+                    application.VendorInvoiceId == invoice.Id &&
+                    !application.IsDeleted);
+            var liveSupplierDebitReservation = await supplierDebitApplications
+                .Where(application =>
+                    !application.IsReversal &&
+                    !application.VendorPayment.IsDeleted &&
+                    !application.VendorPayment.JournalEntryId.HasValue &&
+                    application.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    application.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !supplierDebitApplications.Any(reversal =>
+                        reversal.IsReversal &&
+                        reversal.OriginalApplicationId == application.Id))
+                .SumAsync(application => (decimal?)application.ApplicationAmount, cancellationToken) ?? 0m;
+
             var reservingBatchStatuses = new[]
             {
                 PaymentBatchStatus.Draft,
@@ -2215,6 +2285,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 invoice.TotalAmount -
                 invoice.PaidAmount -
                 liveAllocationReservation -
+                liveSupplierDebitReservation -
                 batchSelectionReservation,
                 0m));
         }
@@ -2275,6 +2346,32 @@ namespace ErpSystem.Api.Services.Finance.AP
                     item => item.Amount,
                     cancellationToken);
 
+            var supplierDebitApplications = _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                .GetQueryable(application =>
+                    application.TenantId == TenantId &&
+                    invoiceIds.Contains(application.VendorInvoiceId) &&
+                    !application.IsDeleted);
+            var liveSupplierDebitReservations = await supplierDebitApplications
+                .Where(application =>
+                    !application.IsReversal &&
+                    !application.VendorPayment.IsDeleted &&
+                    !application.VendorPayment.JournalEntryId.HasValue &&
+                    application.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    application.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !supplierDebitApplications.Any(reversal =>
+                        reversal.IsReversal &&
+                        reversal.OriginalApplicationId == application.Id))
+                .GroupBy(application => application.VendorInvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Amount = group.Sum(application => application.ApplicationAmount)
+                })
+                .ToDictionaryAsync(
+                    item => item.InvoiceId,
+                    item => item.Amount,
+                    cancellationToken);
+
             var reservingBatchStatuses = new[]
             {
                 PaymentBatchStatus.Draft,
@@ -2318,6 +2415,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.TotalAmount -
                     invoice.PaidAmount -
                     liveAllocationReservations.GetValueOrDefault(invoice.Id) -
+                    liveSupplierDebitReservations.GetValueOrDefault(invoice.Id) -
                     batchSelectionReservations.GetValueOrDefault(invoice.Id),
                     0m)));
         }
@@ -2360,9 +2458,17 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             try
             {
+                var allocationIdentity = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == allocationId && !item.IsDeleted)
+                    .Select(item => new { item.VendorPaymentId, item.VendorInvoiceId })
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Allocation with Id '{allocationId}' not found.");
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"tdc0505-allocation-reversal:{TenantId:N}:{allocationId:N}",
-                    cancellationToken);
+                    ApSettlementLockKeys.Payment(TenantId, allocationIdentity.VendorPaymentId), cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.Invoice(TenantId, allocationIdentity.VendorInvoiceId), cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0505-allocation-reversal:{TenantId:N}:{allocationId:N}", cancellationToken);
 
                 var allocation = await _unitOfWork.Repository<VendorPaymentAllocation>()
                     .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
@@ -2631,6 +2737,374 @@ namespace ErpSystem.Api.Services.Finance.AP
             }).ToList();
         }
 
+        public Task<SupplierDebitNoteApplicationResultDto> ApplySupplierDebitNotesAsync(
+            Guid paymentId,
+            List<SupplierDebitNoteApplicationCreateDto> applications,
+            CancellationToken cancellationToken = default) =>
+            ApplySupplierDebitNotesAsync(
+                paymentId,
+                applications,
+                cancellationToken,
+                executionStrategyScope: false);
+
+        private async Task<SupplierDebitNoteApplicationResultDto> ApplySupplierDebitNotesAsync(
+            Guid paymentId,
+            IReadOnlyCollection<SupplierDebitNoteApplicationCreateDto> applications,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
+        {
+            ArgumentNullException.ThrowIfNull(applications);
+            if (applications.Count == 0)
+                throw new ArgumentException("At least one supplier debit-note application is required.", nameof(applications));
+            if (applications.Any(item => item.SupplierDebitNoteId == Guid.Empty ||
+                                         item.VendorInvoiceId == Guid.Empty ||
+                                         item.ApplicationAmount <= 0m))
+                throw new ArgumentException("Every supplier debit-note application requires a note, invoice, and positive amount.", nameof(applications));
+            if (applications.GroupBy(item => new { item.SupplierDebitNoteId, item.VendorInvoiceId })
+                .Any(group => group.Count() > 1))
+                throw new InvalidOperationException("Each supplier debit note and invoice pair may appear only once in an application request.");
+
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => ApplySupplierDebitNotesAsync(
+                        paymentId,
+                        applications,
+                        cancellationToken,
+                        executionStrategyScope: true),
+                    cancellationToken);
+            }
+
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.Payment(TenantId, paymentId), cancellationToken);
+                foreach (var invoiceId in applications.Select(item => item.VendorInvoiceId).Distinct().OrderBy(item => item))
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
+                foreach (var noteId in applications.Select(item => item.SupplierDebitNoteId).Distinct().OrderBy(item => item))
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        ApSettlementLockKeys.SupplierDebitNote(TenantId, noteId), cancellationToken);
+
+                var payment = await _unitOfWork.Repository<VendorPayment>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == paymentId && !item.IsDeleted)
+                    .Include(item => item.Supplier)
+                    .Include(item => item.PaymentBatch)
+                    .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
+                    .Include(item => item.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Vendor payment with Id '{paymentId}' not found.");
+
+                await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                    await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                    FinanceAccessLevel.Operate,
+                    cancellationToken);
+                if (payment.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("Posted vendor-payment settlements cannot accept new supplier debit-note applications.");
+                EnsureAllocationMutationAllowed(payment, batchProcessorScope: false);
+
+                var created = new List<SupplierDebitNoteApplication>();
+                var invoiceConsumedInRequest = new Dictionary<Guid, decimal>();
+                var noteConsumedInRequest = new Dictionary<Guid, decimal>();
+                var now = DateTime.UtcNow;
+
+                foreach (var request in applications)
+                {
+                    var note = await _unitOfWork.Repository<SupplierDebitNote>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.Id == request.SupplierDebitNoteId &&
+                            !item.IsDeleted)
+                        .Include(item => item.Vendor)
+                        .Include(item => item.Supplier)
+                        .Include(item => item.Applications.Where(application => !application.IsDeleted))
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new KeyNotFoundException($"Supplier debit note with Id '{request.SupplierDebitNoteId}' was not found.");
+                    if (note.Status != SupplierDebitNoteStatus.Posted ||
+                        !note.PostingEventId.HasValue ||
+                        !note.JournalEntryId.HasValue)
+                        throw new InvalidOperationException($"Supplier debit note '{note.DebitNoteNumber}' must be posted before application.");
+                    if (!note.SupplierId.HasValue || note.SupplierId.Value != payment.SupplierId)
+                        throw new InvalidOperationException($"Supplier debit note '{note.DebitNoteNumber}' does not belong to this payment's supplier.");
+                    if (payment.PaymentDate.Date < note.DebitNoteDate.Date)
+                        throw new InvalidOperationException(
+                            $"Payment date cannot precede supplier debit note '{note.DebitNoteNumber}'.");
+                    if (note.ExchangeRate <= 0m)
+                        throw new InvalidOperationException(
+                            $"Supplier debit note '{note.DebitNoteNumber}' has no valid frozen carrying rate and cannot be applied.");
+
+                    var invoice = await _unitOfWork.Repository<VendorInvoice>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.Id == request.VendorInvoiceId &&
+                            !item.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new KeyNotFoundException($"Vendor invoice with Id '{request.VendorInvoiceId}' was not found.");
+                    if (invoice.SupplierId != payment.SupplierId)
+                        throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
+                    if (!invoice.JournalEntryId.HasValue)
+                        throw new InvalidOperationException($"Supplier debit note cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
+                    if (invoice.Status == VendorInvoiceStatus.Voided)
+                        throw new InvalidOperationException($"Supplier debit note cannot be applied to voided invoice '{invoice.InvoiceNumber}'.");
+                    await EnsureSupplierCreditSourceJournalsActiveAsync(note, invoice, cancellationToken);
+
+                    var noteCurrency = NormalizeCurrency(note.CurrencyCode, "GHS");
+                    var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, "GHS");
+                    if (!string.Equals(noteCurrency, invoiceCurrency, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException(
+                            $"Supplier debit-note application currently requires the note and invoice to share a currency; '{note.DebitNoteNumber}' is {noteCurrency} and '{invoice.InvoiceNumber}' is {invoiceCurrency}.");
+                    if (RoundRate(note.ExchangeRate) != RoundRate(invoice.ExchangeRate))
+                        throw new InvalidOperationException(
+                            "Supplier debit-note application requires the note and invoice to share the same frozen carrying rate until a controlled AP/realized-FX reclassification is implemented.");
+                    var noteControlAccountId = await ResolvePostedApControlAccountAsync(
+                        note.JournalEntryId!.Value, debitSide: true, cancellationToken);
+                    var invoiceControlAccountId = await ResolvePostedApControlAccountAsync(
+                        invoice.JournalEntryId.Value, debitSide: false, cancellationToken);
+                    if (noteControlAccountId != invoiceControlAccountId)
+                        throw new InvalidOperationException(
+                            "Supplier debit-note application requires the note and invoice to use the same immutable AP-control account.");
+
+                    var requestedAmount = RoundMoney(request.ApplicationAmount);
+                    // Relationship fix-up may attach earlier unsaved rows from this request to the
+                    // tracked note. Exclude them here because requestNoteUsed accounts for those
+                    // rows exactly once.
+                    var noteUsed = RoundMoney(GetEffectiveSupplierDebitNoteApplications(
+                            note.Applications.Where(item => !created.Contains(item)))
+                        .Sum(item => item.ApplicationAmount));
+                    var requestNoteUsed = noteConsumedInRequest.GetValueOrDefault(note.Id);
+                    var noteAvailable = RoundMoney(note.TotalAmount - noteUsed - requestNoteUsed);
+                    if (requestedAmount > noteAvailable + 0.01m)
+                        throw new InvalidOperationException(
+                            $"Application exceeds the {noteAvailable:N2} remaining balance on supplier debit note '{note.DebitNoteNumber}'.");
+
+                    var invoiceAvailable = await GetInvoiceUnreservedBalanceAsync(invoice, payment.Id, cancellationToken);
+                    invoiceAvailable = RoundMoney(invoiceAvailable - invoiceConsumedInRequest.GetValueOrDefault(invoice.Id));
+                    if (requestedAmount > invoiceAvailable + 0.01m)
+                        throw new InvalidOperationException(
+                            $"Application exceeds the {invoiceAvailable:N2} unreserved balance on invoice '{invoice.InvoiceNumber}'.");
+
+                    var application = new SupplierDebitNoteApplication
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        SupplierDebitNoteId = note.Id,
+                        VendorPaymentId = payment.Id,
+                        VendorInvoiceId = invoice.Id,
+                        ApplicationAmount = requestedAmount,
+                        // A posted supplier debit note must carry immutable measurement evidence.
+                        // Never convert missing/invalid evidence to 1.0 at settlement time.
+                        FunctionalAmount = RoundMoney(requestedAmount * note.ExchangeRate),
+                        CurrencyCode = noteCurrency,
+                        ExchangeRate = note.ExchangeRate,
+                        ApplicationDate = payment.PaymentDate,
+                        Notes = request.Notes?.Trim(),
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId,
+                        SupplierDebitNote = note,
+                        VendorPayment = payment,
+                        VendorInvoice = invoice
+                    };
+                    await _unitOfWork.Repository<SupplierDebitNoteApplication>().AddAsync(application);
+                    created.Add(application);
+                    noteConsumedInRequest[note.Id] = RoundMoney(requestNoteUsed + requestedAmount);
+                    invoiceConsumedInRequest[invoice.Id] = RoundMoney(
+                        invoiceConsumedInRequest.GetValueOrDefault(invoice.Id) + requestedAmount);
+                }
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await RecordApPaymentAuditAsync(
+                    SupplierDebitApplicationReservedEvent,
+                    payment,
+                    afterValues: new
+                    {
+                        ApplicationIds = created.Select(item => item.Id),
+                        DebitNoteIds = created.Select(item => item.SupplierDebitNoteId).Distinct(),
+                        InvoiceIds = created.Select(item => item.VendorInvoiceId).Distinct(),
+                        Total = created.Sum(item => item.FunctionalAmount)
+                    },
+                    comment: "Reserved posted supplier credits against this draft AP payment; no additional GL entry was created.",
+                    cancellationToken: cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                var all = await GetSupplierDebitNoteApplicationsAsync(payment.Id, cancellationToken);
+                return new SupplierDebitNoteApplicationResultDto
+                {
+                    PaymentId = payment.Id,
+                    TotalSupplierCreditsApplied = RoundMoney(
+                        GetEffectiveSupplierDebitNoteApplicationDtos(all).Sum(item => item.ApplicationAmount)),
+                    Applications = all
+                };
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        public async Task<List<SupplierDebitNoteApplicationDto>> GetSupplierDebitNoteApplicationsAsync(
+            Guid paymentId,
+            CancellationToken cancellationToken = default)
+        {
+            var payment = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == paymentId && !item.IsDeleted)
+                .Select(item => new { item.Id, item.BankAccountId })
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException($"Vendor payment with Id '{paymentId}' not found.");
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Read,
+                cancellationToken);
+
+            var rows = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.VendorPaymentId == paymentId &&
+                    !item.IsDeleted)
+                .Include(item => item.SupplierDebitNote)
+                .Include(item => item.VendorInvoice)
+                .Include(item => item.VendorPayment)
+                .OrderBy(item => item.ApplicationDate)
+                .ThenBy(item => item.Id)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            return rows.Select(MapSupplierDebitNoteApplication).ToList();
+        }
+
+        public Task ReverseSupplierDebitNoteApplicationAsync(
+            Guid applicationId,
+            string reason,
+            CancellationToken cancellationToken = default) =>
+            ReverseSupplierDebitNoteApplicationAsync(
+                applicationId,
+                reason,
+                cancellationToken,
+                executionStrategyScope: false);
+
+        private async Task ReverseSupplierDebitNoteApplicationAsync(
+            Guid applicationId,
+            string reason,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
+        {
+            var trimmedReason = reason?.Trim();
+            if (string.IsNullOrWhiteSpace(trimmedReason))
+                throw new ArgumentException("A reason is required to reverse a supplier debit-note application.", nameof(reason));
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                await _unitOfWork.ExecuteInStrategyAsync(async () =>
+                {
+                    await ReverseSupplierDebitNoteApplicationAsync(
+                        applicationId,
+                        trimmedReason,
+                        cancellationToken,
+                        executionStrategyScope: true);
+                    return true;
+                }, cancellationToken);
+                return;
+            }
+
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var applicationIdentity = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == applicationId && !item.IsDeleted)
+                    .Select(item => new
+                    {
+                        item.VendorPaymentId,
+                        item.VendorInvoiceId,
+                        item.SupplierDebitNoteId
+                    })
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Supplier debit-note application with Id '{applicationId}' was not found.");
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.Payment(TenantId, applicationIdentity.VendorPaymentId), cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.Invoice(TenantId, applicationIdentity.VendorInvoiceId), cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ApSettlementLockKeys.SupplierDebitNote(TenantId, applicationIdentity.SupplierDebitNoteId), cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"ap-supplier-debit-application:{TenantId:N}:{applicationId:N}", cancellationToken);
+                var application = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == applicationId && !item.IsDeleted)
+                    .Include(item => item.SupplierDebitNote)
+                    .Include(item => item.VendorInvoice)
+                    .Include(item => item.VendorPayment)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Supplier debit-note application with Id '{applicationId}' was not found.");
+
+                await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                    await ResolveBankAccountIdForScopeAsync(application.VendorPayment.BankAccountId, cancellationToken),
+                    FinanceAccessLevel.Operate,
+                    cancellationToken);
+                if (application.IsReversal)
+                    throw new InvalidOperationException("A supplier debit-note application reversal cannot itself be reversed.");
+                if (application.PaymentPostingEventId.HasValue || application.VendorPayment.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("A posted supplier debit-note application must be reversed with its containing payment.");
+                EnsureAllocationMutationAllowed(application.VendorPayment, batchProcessorScope: false);
+                if (await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryableIncludingDeleted(item =>
+                        item.TenantId == TenantId &&
+                        item.IsReversal &&
+                        item.OriginalApplicationId == application.Id)
+                    .AnyAsync(cancellationToken))
+                    throw new InvalidOperationException("This supplier debit-note application already has an immutable reversal.");
+
+                var now = DateTime.UtcNow;
+                await _unitOfWork.Repository<SupplierDebitNoteApplication>().AddAsync(new SupplierDebitNoteApplication
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    SupplierDebitNoteId = application.SupplierDebitNoteId,
+                    VendorPaymentId = application.VendorPaymentId,
+                    VendorInvoiceId = application.VendorInvoiceId,
+                    ApplicationAmount = -application.ApplicationAmount,
+                    FunctionalAmount = -application.FunctionalAmount,
+                    CurrencyCode = application.CurrencyCode,
+                    ExchangeRate = application.ExchangeRate,
+                    ApplicationDate = now,
+                    Notes = $"Reversal of supplier debit-note application {application.Id}: {trimmedReason}",
+                    IsReversal = true,
+                    OriginalApplicationId = application.Id,
+                    CreatedAt = now,
+                    CreatedBy = UserName,
+                    CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
+                });
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await RecordApPaymentAuditAsync(
+                    SupplierDebitApplicationReversedEvent,
+                    application.VendorPayment,
+                    beforeValues: new
+                    {
+                        application.Id,
+                        application.SupplierDebitNoteId,
+                        application.VendorInvoiceId,
+                        application.ApplicationAmount
+                    },
+                    afterValues: new { ReleasedAmount = application.ApplicationAmount },
+                    reason: trimmedReason,
+                    comment: "Released an unposted supplier-credit reservation through an immutable compensating row.",
+                    cancellationToken: cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
         public async Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(
             Guid supplierId,
             int pageNumber = 1,
@@ -2660,6 +3134,19 @@ namespace ErpSystem.Api.Services.Finance.AP
                     !allocation.VendorPayment.JournalEntryId.HasValue &&
                     allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
                     allocation.VendorPayment.Status != VendorPaymentStatus.Failed);
+            var supplierDebitApplications = _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                .GetQueryable(application =>
+                    application.TenantId == TenantId &&
+                    !application.IsDeleted);
+            var liveSupplierDebitApplications = supplierDebitApplications.Where(application =>
+                !application.IsReversal &&
+                !application.VendorPayment.IsDeleted &&
+                !application.VendorPayment.JournalEntryId.HasValue &&
+                application.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                application.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                !supplierDebitApplications.Any(reversal =>
+                    reversal.IsReversal &&
+                    reversal.OriginalApplicationId == application.Id));
             var reservingBatchStatuses = new[]
             {
                 PaymentBatchStatus.Draft,
@@ -2699,6 +3186,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                             .Sum(allocation => (decimal?)(allocation.AllocatedAmount +
                                                          allocation.DiscountAmount +
                                                          allocation.WithholdingTaxAmount)) ?? 0m) -
+                        (liveSupplierDebitApplications
+                            .Where(application => application.VendorInvoiceId == invoice.Id)
+                            .Sum(application => (decimal?)application.ApplicationAmount) ?? 0m) -
                         (batchSelections
                             .Where(selection => selection.VendorInvoiceId == invoice.Id)
                             .Sum(selection => (decimal?)selection.Amount) ?? 0m)
@@ -2820,13 +3310,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             try
             {
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"tdc0508-payment:{TenantId:N}:{id:N}", cancellationToken);
+                    ApSettlementLockKeys.Payment(TenantId, id), cancellationToken);
 
                 payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
                     .Include(p => p.Supplier)
                     .Include(p => p.Allocations.Where(a => !a.IsDeleted))
                         .ThenInclude(a => a.VendorInvoice)
+                    .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                        .ThenInclude(application => application.SupplierDebitNote)
+                    .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                        .ThenInclude(application => application.VendorInvoice)
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
 
@@ -2845,6 +3339,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
                     .Select(item => item.OriginalAllocationId!.Value)
                     .ToHashSet();
+                var activeSupplierDebitApplications = GetEffectiveSupplierDebitNoteApplications(
+                    payment.SupplierDebitNoteApplications);
                 if (payment.IsSupplierAdvance && originalAllocations.Any(item =>
                         !reversedAllocationIds.Contains(item.Id) &&
                         item.ApplicationPostingEventId.HasValue))
@@ -2858,11 +3354,12 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 foreach (var invoiceId in originalAllocations
                              .Select(item => item.VendorInvoiceId)
+                             .Concat(activeSupplierDebitApplications.Select(item => item.VendorInvoiceId))
                              .Distinct()
                              .OrderBy(item => item))
                 {
                     await _unitOfWork.AcquireTransactionLockAsync(
-                        $"tdc0508-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+                        ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
                 }
 
                 FinancePostingEvent? paymentPostingEvent = null;
@@ -2996,6 +3493,35 @@ namespace ErpSystem.Api.Services.Finance.AP
                     });
                 }
 
+                foreach (var application in activeSupplierDebitApplications)
+                {
+                    var invoice = application.VendorInvoice;
+                    if (invoice == null || invoice.TenantId != TenantId)
+                        throw new InvalidOperationException(
+                            "Supplier debit-note application references an invoice from another tenant.");
+                    if (application.PaymentPostingEventId.HasValue || payment.JournalEntryId.HasValue)
+                    {
+                        invoice.PaidAmount = Math.Max(
+                            0m,
+                            RoundMoney(invoice.PaidAmount - application.ApplicationAmount));
+                        invoice.Status = invoice.PaidAmount <= 0.01m
+                            ? VendorInvoiceStatus.Approved
+                            : VendorInvoiceStatus.PartiallyPaid;
+                        invoice.UpdatedAt = now;
+                        invoice.UpdatedBy = UserName;
+                        invoice.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                        await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+                    }
+
+                    await _unitOfWork.Repository<SupplierDebitNoteApplication>().AddAsync(
+                        CreateSupplierDebitNoteApplicationReversal(
+                            application,
+                            now,
+                            $"Controlled payment void: {reason.Trim()}",
+                            paymentReversal?.PostingEventId,
+                            paymentReversal?.JournalEntryId));
+                }
+
                 var alreadyVoided = payment.Status == VendorPaymentStatus.Voided;
                 payment.Status = VendorPaymentStatus.Voided;
                 payment.AllocatedAmount = 0m;
@@ -3034,6 +3560,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             ReversalPostingEventId = paymentReversal?.PostingEventId,
                             ReversalJournalEntryId = paymentReversal?.JournalEntryId,
                             AllocationReversalCount = pendingAllocationReversals.Count,
+                            SupplierDebitApplicationReversalCount = activeSupplierDebitApplications.Count,
                             AuxiliaryReversalPostingEventIds = auxiliaryReversalIds
                         },
                         reason: reason.Trim(),
@@ -3185,7 +3712,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
             foreach (var invoiceId in dto.InvoiceIds.OrderBy(item => item))
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+                    ApSettlementLockKeys.Invoice(TenantId, invoiceId), cancellationToken);
 
             // Refresh after taking the per-invoice locks. Another allocator may have
             // committed between the initial UI/readiness query and this transaction.
@@ -3489,7 +4016,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 foreach (var selection in selections.OrderBy(item => item.VendorInvoiceId))
                 {
                     await _unitOfWork.AcquireTransactionLockAsync(
-                        $"tdc0505-invoice:{TenantId:N}:{selection.VendorInvoiceId:N}", cancellationToken);
+                        ApSettlementLockKeys.Invoice(TenantId, selection.VendorInvoiceId), cancellationToken);
                     var decision = await RequireBatchInvoiceReadinessAsync(
                         selection,
                         ProcurementPaymentReadinessRules.BatchApproveAction,
@@ -4261,6 +4788,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(p => p.BankAccount)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
+                .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .ThenInclude(application => application.SupplierDebitNote)
+                        .ThenInclude(note => note.Vendor)
+                .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
+                    .ThenInclude(application => application.VendorInvoice)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
@@ -4323,6 +4855,77 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
+        private async Task ApplyPostedSupplierDebitNoteApplicationsAsync(
+            VendorPayment payment,
+            Guid postingEventId,
+            Guid journalEntryId,
+            CancellationToken cancellationToken)
+        {
+            var applications = GetEffectiveSupplierDebitNoteApplications(payment.SupplierDebitNoteApplications);
+            if (applications.Count == 0)
+                return;
+
+            var now = DateTime.UtcNow;
+            foreach (var application in applications
+                         .OrderBy(item => item.ApplicationDate)
+                         .ThenBy(item => item.Id))
+            {
+                if (application.PaymentPostingEventId.HasValue)
+                {
+                    if (application.PaymentPostingEventId != postingEventId ||
+                        application.PaymentJournalEntryId != journalEntryId)
+                        throw new InvalidOperationException(
+                            $"Supplier debit-note application '{application.Id}' is bound to a different payment posting.");
+                    continue;
+                }
+
+                var note = application.SupplierDebitNote;
+                var invoice = application.VendorInvoice;
+                if (note == null || note.TenantId != TenantId || note.Status != SupplierDebitNoteStatus.Posted ||
+                    !note.PostingEventId.HasValue || !note.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("AP payment references an unposted or cross-tenant supplier debit note.");
+                if (invoice == null || invoice.TenantId != TenantId || !invoice.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("AP payment supplier-credit application references an unposted or cross-tenant invoice.");
+
+                var resultingPaidAmount = RoundMoney(invoice.PaidAmount + application.ApplicationAmount);
+                if (resultingPaidAmount > RoundMoney(invoice.TotalAmount) + 0.01m)
+                    throw new InvalidOperationException(
+                        $"Supplier debit-note application would over-settle invoice '{invoice.InvoiceNumber}'.");
+
+                invoice.PaidAmount = Math.Min(resultingPaidAmount, RoundMoney(invoice.TotalAmount));
+                invoice.Status = invoice.PaidAmount >= RoundMoney(invoice.TotalAmount)
+                    ? VendorInvoiceStatus.Paid
+                    : VendorInvoiceStatus.PartiallyPaid;
+                invoice.UpdatedAt = now;
+                invoice.UpdatedBy = UserName;
+                invoice.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+
+                application.PaymentPostingEventId = postingEventId;
+                application.PaymentJournalEntryId = journalEntryId;
+                application.AppliedAt = now;
+                application.UpdatedAt = now;
+                application.UpdatedBy = UserName;
+                application.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                await _unitOfWork.Repository<SupplierDebitNoteApplication>().UpdateAsync(application);
+            }
+
+            await RecordApPaymentAuditAsync(
+                SupplierDebitApplicationFinalizedEvent,
+                payment,
+                postingEventId: postingEventId,
+                journalEntryId: journalEntryId,
+                afterValues: new
+                {
+                    ApplicationIds = applications.Select(item => item.Id),
+                    DebitNoteIds = applications.Select(item => item.SupplierDebitNoteId).Distinct(),
+                    InvoiceIds = applications.Select(item => item.VendorInvoiceId).Distinct(),
+                    Total = applications.Sum(item => item.FunctionalAmount)
+                },
+                comment: "Finalized supplier-credit subledger applications with the AP payment posting; no duplicate GL lines were created.",
+                cancellationToken: cancellationToken);
+        }
+
         private async Task<FinancePostingRequestDto> BuildApPaymentPostingRequestAsync(
             VendorPayment payment,
             CancellationToken cancellationToken)
@@ -4350,6 +4953,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                   ?? new List<VendorPaymentAllocation>();
             var activeAllocations = GetEffectiveAllocations(allAllocations);
             EnsureAllocationTotalIsValid(payment, activeAllocations);
+            var activeSupplierDebitApplications = GetEffectiveSupplierDebitNoteApplications(
+                payment.SupplierDebitNoteApplications);
+            if (activeSupplierDebitApplications.Count > 0 && activeAllocations.Count == 0)
+                throw new InvalidOperationException(
+                    "A supplier debit note cannot turn a cash payment into a supplier advance. Allocate the payment cash before posting or use a standalone debit-note application workflow.");
 
             var isSupplierAdvance = activeAllocations.Count == 0;
             if (isSupplierAdvance &&
@@ -4414,7 +5022,91 @@ namespace ErpSystem.Api.Services.Finance.AP
                     throw new InvalidOperationException($"AP payment would over-settle invoice '{allocation.VendorInvoice.InvoiceNumber}'.");
             }
 
-            if (activeAllocations.Count > 0)
+            foreach (var application in activeSupplierDebitApplications)
+            {
+                if (application.TenantId != tenantId || application.VendorPaymentId != payment.Id)
+                    throw new InvalidOperationException("Supplier debit-note application belongs to another tenant or payment.");
+                if (application.ApplicationAmount <= 0m)
+                    throw new InvalidOperationException("Effective supplier debit-note applications must be positive.");
+                if (application.SupplierDebitNote == null ||
+                    application.SupplierDebitNote.TenantId != tenantId ||
+                    application.SupplierDebitNote.Status != SupplierDebitNoteStatus.Posted ||
+                    !application.SupplierDebitNote.PostingEventId.HasValue ||
+                    !application.SupplierDebitNote.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("AP payment references an unposted or cross-tenant supplier debit note.");
+                if (!application.SupplierDebitNote.SupplierId.HasValue ||
+                    application.SupplierDebitNote.SupplierId.Value != payment.SupplierId)
+                    throw new InvalidOperationException(
+                        $"Supplier debit note '{application.SupplierDebitNote.DebitNoteNumber}' does not belong to this payment's supplier.");
+                if (application.VendorInvoice == null ||
+                    application.VendorInvoice.TenantId != tenantId ||
+                    application.VendorInvoice.SupplierId != payment.SupplierId ||
+                    !application.VendorInvoice.JournalEntryId.HasValue ||
+                    application.VendorInvoice.Status == VendorInvoiceStatus.Voided)
+                    throw new InvalidOperationException("AP payment supplier-credit application references an invalid invoice.");
+                await EnsureSupplierCreditSourceJournalsActiveAsync(
+                    application.SupplierDebitNote,
+                    application.VendorInvoice,
+                    cancellationToken);
+                if (!string.Equals(
+                        NormalizeCurrency(application.CurrencyCode, "GHS"),
+                        NormalizeCurrency(application.VendorInvoice.CurrencyCode, "GHS"),
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Supplier debit-note and invoice currencies no longer match.");
+                if (payment.PaymentDate.Date < application.SupplierDebitNote.DebitNoteDate.Date)
+                    throw new InvalidOperationException("Payment date cannot precede an applied supplier debit note.");
+                if (application.SupplierDebitNote.ExchangeRate <= 0m ||
+                    application.ExchangeRate <= 0m ||
+                    RoundRate(application.ExchangeRate) != RoundRate(application.SupplierDebitNote.ExchangeRate))
+                    throw new InvalidOperationException(
+                        "Supplier debit-note application no longer matches the note's positive frozen carrying rate.");
+                if (RoundRate(application.SupplierDebitNote.ExchangeRate) !=
+                    RoundRate(application.VendorInvoice.ExchangeRate))
+                    throw new InvalidOperationException(
+                        "Supplier debit-note and invoice carrying rates no longer match; a controlled AP/FX reclassification is required before application.");
+                var noteControlAccountId = await ResolvePostedApControlAccountAsync(
+                    application.SupplierDebitNote.JournalEntryId!.Value, debitSide: true, cancellationToken);
+                var invoiceControlAccountId = await ResolvePostedApControlAccountAsync(
+                    application.VendorInvoice.JournalEntryId!.Value, debitSide: false, cancellationToken);
+                if (noteControlAccountId != invoiceControlAccountId)
+                    throw new InvalidOperationException(
+                        "Supplier debit-note and invoice AP-control account lineage no longer matches.");
+
+                var invoiceCashHistory = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        item.VendorInvoiceId == application.VendorInvoiceId &&
+                        !item.IsDeleted)
+                    .ToListAsync(cancellationToken);
+                var invoiceCreditHistory = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        item.VendorInvoiceId == application.VendorInvoiceId &&
+                        !item.IsDeleted)
+                    .ToListAsync(cancellationToken);
+                var totalInvoiceSettlement = RoundMoney(
+                    GetEffectiveAllocations(invoiceCashHistory)
+                        .Sum(item => item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount) +
+                    GetEffectiveSupplierDebitNoteApplications(invoiceCreditHistory)
+                        .Sum(item => item.ApplicationAmount));
+                if (totalInvoiceSettlement > RoundMoney(application.VendorInvoice.TotalAmount) + 0.01m)
+                    throw new InvalidOperationException(
+                        $"Payment and supplier credits would over-settle invoice '{application.VendorInvoice.InvoiceNumber}'.");
+
+                var noteHistory = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        item.SupplierDebitNoteId == application.SupplierDebitNoteId &&
+                        !item.IsDeleted)
+                    .ToListAsync(cancellationToken);
+                if (RoundMoney(GetEffectiveSupplierDebitNoteApplications(noteHistory)
+                        .Sum(item => item.ApplicationAmount)) >
+                    RoundMoney(application.SupplierDebitNote.TotalAmount) + 0.01m)
+                    throw new InvalidOperationException(
+                        $"Applications exceed supplier debit note '{application.SupplierDebitNote.DebitNoteNumber}'.");
+            }
+
+            if (activeAllocations.Count > 0 || activeSupplierDebitApplications.Count > 0)
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
@@ -4893,6 +5585,9 @@ namespace ErpSystem.Api.Services.Finance.AP
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+        private static decimal RoundRate(decimal amount)
+            => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
+
         private static VendorPaymentControlException AllocationAlreadyReversed(Guid allocationId) =>
             new(
                 "AP_PAYMENT_ALLOCATION_ALREADY_REVERSED",
@@ -4945,6 +5640,101 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .ThenBy(item => item.Id)
                 .ToList();
         }
+
+        internal static List<SupplierDebitNoteApplication> GetEffectiveSupplierDebitNoteApplications(
+            IEnumerable<SupplierDebitNoteApplication>? applications)
+        {
+            var live = applications?.Where(item => !item.IsDeleted).ToList()
+                       ?? new List<SupplierDebitNoteApplication>();
+            var reversedOriginalIds = live
+                .Where(item => item.IsReversal && item.OriginalApplicationId.HasValue)
+                .Select(item => item.OriginalApplicationId!.Value)
+                .ToHashSet();
+            return live
+                .Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id))
+                .OrderBy(item => item.ApplicationDate)
+                .ThenBy(item => item.Id)
+                .ToList();
+        }
+
+        private static List<SupplierDebitNoteApplicationDto> GetEffectiveSupplierDebitNoteApplicationDtos(
+            IEnumerable<SupplierDebitNoteApplicationDto>? applications)
+        {
+            var live = applications?.ToList() ?? new List<SupplierDebitNoteApplicationDto>();
+            var reversedOriginalIds = live
+                .Where(item => item.IsReversal && item.OriginalApplicationId.HasValue)
+                .Select(item => item.OriginalApplicationId!.Value)
+                .ToHashSet();
+            return live.Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id)).ToList();
+        }
+
+        private async Task<Guid> ResolvePostedApControlAccountAsync(
+            Guid journalEntryId,
+            bool debitSide,
+            CancellationToken cancellationToken)
+        {
+            var candidates = await _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.JournalEntryId == journalEntryId &&
+                    !item.IsDeleted &&
+                    (item.TransactionTag == "AP-Control" || item.TransactionTag == "AP-SupplierDebitNote-Control") &&
+                    (debitSide ? item.DebitAmount > 0m : item.CreditAmount > 0m))
+                .Select(item => item.AccountId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            if (candidates.Count != 1)
+                throw new InvalidOperationException("Posted AP-control account lineage is missing or ambiguous.");
+            return candidates[0];
+        }
+
+        private async Task EnsureSupplierCreditSourceJournalsActiveAsync(
+            SupplierDebitNote note,
+            VendorInvoice invoice,
+            CancellationToken cancellationToken)
+        {
+            if (!note.JournalEntryId.HasValue || !invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Supplier credit source journals are incomplete.");
+            var journalIds = new[] { note.JournalEntryId.Value, invoice.JournalEntryId.Value }.Distinct().ToList();
+            var journals = await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    journalIds.Contains(item.Id) &&
+                    !item.IsDeleted)
+                .Select(item => new { item.Id, item.IsReversed })
+                .ToListAsync(cancellationToken);
+            if (journals.Count != journalIds.Count || journals.Any(item => item.IsReversed))
+                throw new InvalidOperationException(
+                    "Supplier debit-note application references a missing or reversed note/invoice journal.");
+        }
+
+        private SupplierDebitNoteApplication CreateSupplierDebitNoteApplicationReversal(
+            SupplierDebitNoteApplication original,
+            DateTime reversalDate,
+            string reason,
+            Guid? paymentPostingEventId,
+            Guid? paymentJournalEntryId) => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            SupplierDebitNoteId = original.SupplierDebitNoteId,
+            VendorPaymentId = original.VendorPaymentId,
+            VendorInvoiceId = original.VendorInvoiceId,
+            ApplicationAmount = -original.ApplicationAmount,
+            FunctionalAmount = -original.FunctionalAmount,
+            CurrencyCode = original.CurrencyCode,
+            ExchangeRate = original.ExchangeRate,
+            ApplicationDate = reversalDate,
+            Notes = $"Reversal of supplier debit-note application {original.Id}: {reason}",
+            IsReversal = true,
+            OriginalApplicationId = original.Id,
+            PaymentPostingEventId = paymentPostingEventId,
+            PaymentJournalEntryId = paymentJournalEntryId,
+            AppliedAt = paymentPostingEventId.HasValue ? reversalDate : null,
+            CreatedAt = reversalDate,
+            CreatedBy = UserName,
+            CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
+        };
 
         private static void EnsureAllocationTotalIsValid(
             VendorPayment payment,
@@ -5149,89 +5939,34 @@ namespace ErpSystem.Api.Services.Finance.AP
         private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
         {
             var supplierRepository = _unitOfWork.Repository<Supplier>();
+            Guid canonicalSupplierId;
+            if (_apSupplierIdentityService != null)
+            {
+                // Payment entry is a Finance command, so it may create the durable exact-ID/code
+                // bridge. It must never name-match or create a Procurement supplier master.
+                canonicalSupplierId = (await _apSupplierIdentityService.ResolveAsync(
+                    supplierOrBusinessPartnerId, cancellationToken)).SupplierId;
+            }
+            else
+            {
+                // Legacy test hosts may not register the bridge. Preserve only exact Supplier-ID
+                // operation; Business Partner translation fails closed instead of guessing.
+                canonicalSupplierId = supplierOrBusinessPartnerId;
+            }
+
             var supplier = await supplierRepository
                 .GetQueryable(s =>
                     s.TenantId == TenantId &&
                     !s.IsDeleted &&
-                    s.Id == supplierOrBusinessPartnerId)
-                .FirstOrDefaultAsync(cancellationToken);
+                    s.IsActive &&
+                    s.Id == canonicalSupplierId)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "An active, unambiguous AP supplier identity is required before payment entry.");
 
-            if (supplier != null)
-            {
-                return supplier;
-            }
+            if (supplier.IsBlacklisted || string.Equals(supplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Supplier '{supplier.Name}' is not eligible for AP payment entry.");
 
-            var partner = await _unitOfWork.Repository<BusinessPartner>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    !p.IsDeleted &&
-                    p.Id == supplierOrBusinessPartnerId)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (partner == null)
-            {
-                throw new KeyNotFoundException($"Supplier or business partner with Id '{supplierOrBusinessPartnerId}' not found.");
-            }
-
-            if (string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Customer business partners cannot be used for AP vendor payments.");
-            }
-
-            if (partner.IsBlacklisted)
-            {
-                throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP vendor payments.");
-            }
-
-            supplier = await supplierRepository
-                .GetQueryable(s =>
-                    s.TenantId == TenantId &&
-                    !s.IsDeleted &&
-                    (s.Id == partner.Id ||
-                     s.SupplierCode == partner.PartnerCode ||
-                     s.Name == partner.PartnerName))
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (supplier != null)
-            {
-                return supplier;
-            }
-
-            supplier = new Supplier
-            {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                SupplierCode = string.IsNullOrWhiteSpace(partner.PartnerCode)
-                    ? $"BP-{partner.Id.ToString("N")[..8].ToUpperInvariant()}"
-                    : partner.PartnerCode,
-                Name = partner.PartnerName,
-                SupplierType = partner.PartnerType.Contains("Manufacturer", StringComparison.OrdinalIgnoreCase)
-                    ? "Manufacturer"
-                    : "Vendor",
-                Address = partner.PhysicalAddress ?? partner.MailingAddress,
-                City = partner.PhysicalCity ?? partner.MailingCity,
-                State = partner.PhysicalState ?? partner.MailingState,
-                Country = partner.PhysicalCountry ?? partner.MailingCountry,
-                ZipCode = partner.PhysicalPostalCode ?? partner.MailingPostalCode,
-                Phone = partner.PrimaryPhone,
-                Email = partner.PrimaryEmail,
-                Website = partner.Website,
-                PrimaryContactName = partner.PrimaryContactName,
-                PrimaryContactTitle = partner.PrimaryContactTitle,
-                PrimaryContactPhone = partner.PrimaryPhone,
-                PrimaryContactEmail = partner.PrimaryEmail,
-                TaxId = partner.TaxIdentificationNumber ?? partner.VATNumber,
-                PaymentTerms = partner.PaymentTerms ?? "Net 30",
-                PaymentTermId = partner.PaymentTermId,
-                IsActive = partner.IsActive,
-                IsPreferred = partner.IsPreferred,
-                Status = partner.IsActive ? "Active" : "Inactive",
-                Notes = $"Auto-created from business partner {partner.PartnerCode} for AP vendor payment entry.",
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = UserName
-            };
-
-            await supplierRepository.AddAsync(supplier);
             return supplier;
         }
 
@@ -5251,27 +5986,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return supplierId;
             }
 
-            var partner = await _unitOfWork.Repository<BusinessPartner>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    !p.IsDeleted &&
-                    p.Id == supplierOrBusinessPartnerId)
-                .FirstOrDefaultAsync(cancellationToken);
+            if (_apSupplierIdentityService == null)
+                return null;
 
-            if (partner == null)
+            try
+            {
+                // Query translation is strictly side-effect free. Lookup may expose one exact
+                // ID/code candidate but never persists a link, guesses by name, or creates a
+                // Procurement master record.
+                return (await _apSupplierIdentityService.LookupAsync(
+                    supplierOrBusinessPartnerId, cancellationToken)).SupplierId;
+            }
+            catch (KeyNotFoundException)
             {
                 return null;
             }
-
-            return await supplierRepository
-                .GetQueryable(s =>
-                    s.TenantId == TenantId &&
-                    !s.IsDeleted &&
-                    (s.Id == partner.Id ||
-                     s.SupplierCode == partner.PartnerCode ||
-                     s.Name == partner.PartnerName))
-                .Select(s => (Guid?)s.Id)
-                .FirstOrDefaultAsync(cancellationToken);
         }
 
         private async Task CreateCashTransactionForPaymentAsync(VendorPayment payment, Supplier supplier, CancellationToken cancellationToken)
@@ -5519,9 +6248,39 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PaymentReadinessControlEventId = a.PaymentReadinessControlEventId,
                     PaymentReadinessSnapshotHash = a.PaymentReadinessSnapshotHash,
                     PaymentReadinessEvaluatedAtUtc = a.PaymentReadinessEvaluatedAtUtc
-                }).ToList() ?? new List<VendorPaymentAllocationDto>()
+                }).ToList() ?? new List<VendorPaymentAllocationDto>(),
+                SupplierDebitNoteApplications = payment.SupplierDebitNoteApplications?
+                    .Where(item => !item.IsDeleted)
+                    .Select(MapSupplierDebitNoteApplication)
+                    .ToList() ?? new List<SupplierDebitNoteApplicationDto>()
             };
         }
+
+        private static SupplierDebitNoteApplicationDto MapSupplierDebitNoteApplication(
+            SupplierDebitNoteApplication application) => new()
+        {
+            Id = application.Id,
+            SupplierDebitNoteId = application.SupplierDebitNoteId,
+            DebitNoteNumber = application.SupplierDebitNote?.DebitNoteNumber ?? string.Empty,
+            SupplierCreditNoteReference = application.SupplierDebitNote?.SupplierCreditNoteReference,
+            VendorPaymentId = application.VendorPaymentId,
+            PaymentNumber = application.VendorPayment?.PaymentNumber ?? string.Empty,
+            VendorInvoiceId = application.VendorInvoiceId,
+            InvoiceNumber = application.VendorInvoice?.InvoiceNumber ?? string.Empty,
+            ApplicationAmount = application.ApplicationAmount,
+            FunctionalAmount = application.FunctionalAmount,
+            CurrencyCode = application.CurrencyCode,
+            ExchangeRate = application.ExchangeRate,
+            ApplicationDate = application.ApplicationDate,
+            Notes = application.Notes,
+            IsReversal = application.IsReversal,
+            OriginalApplicationId = application.OriginalApplicationId,
+            PaymentPostingEventId = application.PaymentPostingEventId,
+            PaymentJournalEntryId = application.PaymentJournalEntryId,
+            AppliedAt = application.AppliedAt,
+            CreatedAt = application.CreatedAt,
+            CreatedBy = application.CreatedBy
+        };
 
         private static FinancePostingTraceDto MapPostingTrace(FinancePostingEvent postingEvent)
         {
