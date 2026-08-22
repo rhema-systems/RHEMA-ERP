@@ -84,6 +84,7 @@ export interface Invoice {
     status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
     currencyCode: string;
     exchangeRate: number;
+    exchangeRateId?: string;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
@@ -106,6 +107,7 @@ export interface InvoiceCreateRequest {
     dueDate?: string;
     currencyCode: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;

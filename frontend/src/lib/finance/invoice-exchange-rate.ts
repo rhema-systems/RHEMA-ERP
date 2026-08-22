@@ -15,6 +15,7 @@ export interface InvoiceRateQuery {
 }
 
 export interface ApprovedInvoiceRateSnapshot {
+  exchangeRateId?: string;
   rate: number;
   quoteSide: ExchangeRateQuoteSide;
   source: string;
@@ -58,6 +59,7 @@ export async function loadApprovedInvoiceRate(
 
   if (transactionCurrency === functionalCurrency) {
     return {
+      exchangeRateId: undefined,
       rate: 1,
       quoteSide: 'Mid',
       source: 'Functional currency',
@@ -76,6 +78,7 @@ export async function loadApprovedInvoiceRate(
     });
 
     return {
+      exchangeRateId: rate.id,
       rate: resolvePostingExchangeRate(rate),
       quoteSide,
       source: rate.rateSource || `Approved ${quoteSide} Daily rate`,

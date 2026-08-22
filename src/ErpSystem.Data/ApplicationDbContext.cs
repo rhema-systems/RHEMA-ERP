@@ -1470,6 +1470,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.PaymentTermId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ExchangeRateRecord)
+                .WithMany()
+                .HasForeignKey(e => e.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.ExchangeRateId });
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
@@ -2053,6 +2058,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.PaymentTermId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ExchangeRateRecord)
+                .WithMany()
+                .HasForeignKey(e => e.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ExpenseAccount)
                 .WithMany()
                 .HasForeignKey(e => e.ExpenseAccountId)
@@ -2083,6 +2092,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.MatchingControlEventId });
             entity.HasIndex(e => new { e.TenantId, e.MatchExceptionControlEventId });
+            entity.HasIndex(e => new { e.TenantId, e.ExchangeRateId });
             entity.HasIndex(e => new
                 {
                     e.TenantId,

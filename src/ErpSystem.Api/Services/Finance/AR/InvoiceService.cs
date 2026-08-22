@@ -191,6 +191,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoiceNumber = await GenerateInvoiceNumberAsync(cancellationToken);
 
             var now = DateTime.UtcNow;
+            var openingExchangeRate = dto.IsOpeningBalance
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
             var invoice = new Invoice
             {
                 Id = Guid.NewGuid(),
@@ -204,8 +212,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Reference = dto.Reference,
                 Notes = dto.Notes,
                 IsOpeningBalance = dto.IsOpeningBalance,
-                CurrencyCode = dto.CurrencyCode,
-                ExchangeRate = dto.ExchangeRate,
+                CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
+                ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate,
+                ExchangeRateId = openingExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
                 PaymentTermId = paymentTerm?.Id ?? customer.PaymentTermId,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
@@ -296,9 +305,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             // Calculate Base Currency Amount
             decimal baseCurrencyAmount;
-            decimal exchangeRate = dto.ExchangeRate;
+            decimal exchangeRate = invoice.ExchangeRate;
 
-            if (string.Equals(dto.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(invoice.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 exchangeRate = 1.0m;
                 baseCurrencyAmount = subtotal + totalTax - dto.DiscountAmount; // Same as TotalAmount
@@ -363,7 +372,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(t => t.Id == TenantId)
                 .FirstOrDefaultAsync(cancellationToken);
             
-             if (tenant == null) throw new InvalidOperationException("Tenant context not found.");
+            if (tenant == null) throw new InvalidOperationException("Tenant context not found.");
+
+            var openingExchangeRate = dto.IsOpeningBalance
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
 
             var now = DateTime.UtcNow;
             invoice.InvoiceDate = dto.InvoiceDate;
@@ -371,6 +389,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
+            invoice.CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
+            invoice.ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate;
+            invoice.ExchangeRateId = openingExchangeRate?.ExchangeRateId;
             invoice.DiscountAmount = dto.DiscountAmount;
             invoice.TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId;
             invoice.UpdatedAt = now;
@@ -466,8 +487,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
             else
             {
-                // Keep existing rate unless we want to allow updating it via DTO (which isn't in UpdateDto currently)
-                // Assuming rate implies updating fields that affect total, we re-apply rate.
+                // Governed openings use the approved snapshot resolved above; ordinary draft
+                // invoices retain the editable rate supplied by their existing update contract.
                 invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
             }
 
@@ -1041,6 +1062,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             Dictionary<Guid, Account> accountCache,
             CancellationToken cancellationToken)
         {
+            var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+            exchangeRate = rateSnapshot.Rate;
             var migrationClearingAccountId = settings.MigrationClearingAccountId
                 ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AR opening balance posting.");
             await ResolvePostingAccountAsync(
@@ -1056,6 +1079,11 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 throw new InvalidOperationException($"Opening-balance customer invoice {invoice.InvoiceNumber} has no positive AR amount to post.");
             }
+            var functionalOpeningAmount = ToFunctionalAmount(
+                openingAmount,
+                invoiceCurrency,
+                functionalCurrency,
+                exchangeRate);
 
             var postingLines = new List<FinancePostingLineDto>
             {
@@ -1070,15 +1098,17 @@ namespace ErpSystem.Api.Services.Finance.AR
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     1,
-                    "AR-Control"),
+                    "AR-Control",
+                    rateSnapshot.ExchangeRateId,
+                    rateSnapshot.Source),
                 BuildPostingLine(
                     migrationClearingAccountId,
                     $"Migration clearing - AR opening balance {invoice.InvoiceNumber}",
                     debitTransactionAmount: 0m,
-                    creditTransactionAmount: openingAmount,
-                    invoiceCurrency,
+                    creditTransactionAmount: functionalOpeningAmount,
                     functionalCurrency,
-                    exchangeRate,
+                    functionalCurrency,
+                    1m,
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     2,
@@ -1452,7 +1482,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             DateTime exchangeRateDate,
             string reference,
             int lineNumber,
-            string transactionTag)
+            string transactionTag,
+            Guid? exchangeRateId = null,
+            string? exchangeRateSource = null)
         {
             var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
             var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
@@ -1465,11 +1497,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 DebitAmount = debitAmount,
                 CreditAmount = creditAmount,
                 TransactionCurrency = transactionCurrency,
+                TransactionDebitAmount = debitTransactionAmount,
+                TransactionCreditAmount = creditTransactionAmount,
                 ForeignCurrencyAmount = isForeign
                     ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
                     : null,
                 ExchangeRate = isForeign ? exchangeRate : null,
-                ExchangeRateSource = isForeign ? "AR invoice exchange-rate snapshot" : null,
+                ExchangeRateId = isForeign ? exchangeRateId : null,
+                ExchangeRateSource = isForeign
+                    ? exchangeRateSource ?? "AR invoice exchange-rate snapshot"
+                    : null,
                 ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
                 SourceReferenceNumber = reference,
                 LineNumber = lineNumber,
@@ -1666,6 +1703,77 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ? defaultValue.Trim().ToUpperInvariant()
                 : currencyCode.Trim().ToUpperInvariant();
 
+        private async Task<OpeningInvoiceExchangeRateSnapshot> ResolveOpeningInvoiceExchangeRateAsync(
+            string? currencyCode,
+            DateTime invoiceDate,
+            Guid? exchangeRateId,
+            decimal suppliedRate,
+            CancellationToken cancellationToken)
+        {
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var transactionCurrency = NormalizeCurrency(currencyCode, functionalCurrency);
+
+            if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                if (exchangeRateId.HasValue)
+                    throw new InvalidOperationException("Functional-currency AR opening invoices cannot carry foreign exchange-rate evidence.");
+                if (RoundRate(suppliedRate) != 1m)
+                    throw new InvalidOperationException("Functional-currency AR opening invoices must use an exchange rate of 1.");
+                return new OpeningInvoiceExchangeRateSnapshot(null, 1m, transactionCurrency, functionalCurrency, "Functional currency");
+            }
+
+            if (!exchangeRateId.HasValue)
+                throw new InvalidOperationException("Foreign-currency AR opening invoices require an approved exchange-rate record.");
+
+            var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
+                ? settings.ArInvoiceQuoteSide
+                : ExchangeRateQuoteSide.Mid;
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == exchangeRateId.Value &&
+                    !item.IsDeleted);
+
+            if (rate == null ||
+                !rate.IsActive ||
+                rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved) ||
+                rate.Rate <= 0m ||
+                rate.RateType != ExchangeRateType.Daily ||
+                rate.QuoteSide != quoteSide ||
+                !string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                rate.EffectiveDate.Date > invoiceDate.Date ||
+                (rate.EndDate.HasValue && rate.EndDate.Value.Date < invoiceDate.Date))
+            {
+                throw new InvalidOperationException(
+                    "The selected AR opening-invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
+            }
+
+            if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
+                throw new InvalidOperationException("The AR opening-invoice exchange-rate value does not match the approved rate record.");
+
+            return new OpeningInvoiceExchangeRateSnapshot(
+                rate.Id,
+                rate.Rate,
+                transactionCurrency,
+                functionalCurrency,
+                rate.RateSource);
+        }
+
+        private Task<OpeningInvoiceExchangeRateSnapshot> RevalidateOpeningInvoiceExchangeRateAsync(
+            Invoice invoice,
+            CancellationToken cancellationToken)
+            => ResolveOpeningInvoiceExchangeRateAsync(
+                invoice.CurrencyCode,
+                invoice.InvoiceDate,
+                invoice.ExchangeRateId,
+                invoice.ExchangeRate,
+                cancellationToken);
+
+        private static decimal RoundRate(decimal amount)
+            => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
+
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
@@ -1768,6 +1876,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 IsOpeningBalance = invoice.IsOpeningBalance,
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
+                ExchangeRateId = invoice.ExchangeRateId,
                 PaymentTermsDays = invoice.PaymentTermsDays,
                 PaymentTermId = invoice.PaymentTermId,
                 EarlyPaymentDiscountPercentage = invoice.EarlyPaymentDiscountPercentage,
@@ -1803,5 +1912,12 @@ namespace ErpSystem.Api.Services.Finance.AR
         private sealed record TaxPostingBuildResult(
             List<FinancePostingLineDto> Lines,
             List<FinanceTaxCalculationSnapshotDto> Snapshots);
+
+        private sealed record OpeningInvoiceExchangeRateSnapshot(
+            Guid? ExchangeRateId,
+            decimal Rate,
+            string TransactionCurrency,
+            string FunctionalCurrency,
+            string Source);
     }
 }

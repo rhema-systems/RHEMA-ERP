@@ -173,6 +173,14 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved tenant exchange-rate record frozen for a governed foreign-currency opening
+    /// invoice. Ordinary legacy invoices may remain null until their FX entry contract is
+    /// migrated independently.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+    public virtual ExchangeRate? ExchangeRateRecord { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal BaseCurrencyAmount { get; set; }
 

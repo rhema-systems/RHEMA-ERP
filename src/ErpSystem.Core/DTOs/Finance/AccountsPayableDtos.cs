@@ -37,6 +37,7 @@ public class VendorInvoiceDto
 
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public decimal BaseCurrencyAmount { get; set; }
 
     public int PaymentTermsDays { get; set; }
@@ -110,6 +111,7 @@ public class VendorInvoiceCreateDto
 
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public int PaymentTermsDays { get; set; } = 30;
     public Guid? PaymentTermId { get; set; }
@@ -166,6 +168,7 @@ public class VendorInvoiceUpdateDto
 
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public int PaymentTermsDays { get; set; } = 30;
     public Guid? PaymentTermId { get; set; }

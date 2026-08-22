@@ -43,6 +43,7 @@ export interface VendorInvoice {
     balanceAmount: number;
     currencyCode: string;
     exchangeRate: number;
+    exchangeRateId?: string;
     baseCurrencyAmount: number;
     paymentTermsDays: number;
     earlyPaymentDiscountPercentage: number;
@@ -285,6 +286,7 @@ export interface VendorInvoiceCreateRequest {
     dueDate?: string;
     currencyCode?: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentTermsDays?: number;
     paymentTermId?: string;
     earlyPaymentDiscountPercentage?: number;

@@ -17590,6 +17590,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("ExchangeRate")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("InvoiceDate")
                         .HasColumnType("datetime2");
 
@@ -17655,11 +17658,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("BusinessPartnerId");
 
+                    b.HasIndex("ExchangeRateId");
+
                     b.HasIndex("PaymentTermId");
 
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "ExchangeRateId");
 
                     b.ToTable("Invoices", (string)null);
                 });
@@ -23360,6 +23367,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("ExchangeRate")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("ExpenseAccountId")
                         .HasColumnType("uniqueidentifier");
 
@@ -23499,6 +23509,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ExpenseAccountId");
 
+                    b.HasIndex("ExchangeRateId");
+
                     b.HasIndex("MatchExceptionControlEventId");
 
                     b.HasIndex("MatchingControlEventId");
@@ -23516,6 +23528,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "MatchExceptionControlEventId");
 
                     b.HasIndex("TenantId", "MatchingControlEventId");
+
+                    b.HasIndex("TenantId", "ExchangeRateId");
 
                     b.HasIndex(new[] { "TenantId", "AcceptedSupplyKind", "AcceptedSupplySourceId" }, "UX_VendorInvoice_AcceptedCertificate")
                         .IsUnique()
@@ -159280,6 +159294,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", "ExchangeRateRecord")
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.PaymentTerm", "PaymentTerm")
                         .WithMany()
                         .HasForeignKey("PaymentTermId")
@@ -159297,6 +159316,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("BusinessPartner");
+
+                    b.Navigation("ExchangeRateRecord");
 
                     b.Navigation("PaymentTerm");
 
@@ -160843,6 +160864,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("ExpenseAccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", "ExchangeRateRecord")
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementControlEvent", null)
                         .WithMany()
                         .HasForeignKey("MatchExceptionControlEventId")
@@ -160888,6 +160914,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("ApAccount");
 
                     b.Navigation("ExpenseAccount");
+
+                    b.Navigation("ExchangeRateRecord");
 
                     b.Navigation("PaymentTerm");
 

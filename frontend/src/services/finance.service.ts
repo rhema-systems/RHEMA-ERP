@@ -69,6 +69,9 @@ export interface FinanceSettings {
   suspenseAccountId?: string;
   discountAllowedAccountId?: string;
   discountReceivedAccountId?: string;
+  directionalExchangeRatePolicyEnabled?: boolean;
+  arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+  apInvoiceQuoteSide?: ExchangeRateQuoteSide;
 }
 
 // --- Currency ---
