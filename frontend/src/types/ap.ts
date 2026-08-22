@@ -12,6 +12,17 @@ export type ProcurementAcceptedSupplyKind =
     | 'ServiceCompletion'
     | 'WorksPaymentCertificate';
 
+/**
+ * Finance-owned, read-only projection of Procurement's canonical Supplier master.
+ * `id` is Supplier.Id and is the identity AP reports and invoice commands submit.
+ */
+export interface ApInvoiceSupplier {
+    id: string;
+    code: string;
+    name: string;
+    paymentTermId?: string | null;
+}
+
 export interface VendorInvoice {
     id: string;
     invoiceNumber: string;
@@ -61,6 +72,7 @@ export interface VendorInvoice {
     notes?: string;
     reference?: string;
     isOpeningBalance: boolean;
+    journalEntryId?: string;
     approvedByUserId?: string;
     approvedAt?: string;
     lineItems: VendorInvoiceLineItem[];

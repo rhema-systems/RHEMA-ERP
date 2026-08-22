@@ -323,6 +323,15 @@ public class StockAdjustment : TenantEntity
 
     public DateTime AdjustmentDate { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Finance owns accounting-book configuration. Inventory persists the explicit book selected
+    /// for a governed opening-stock schedule so Finance can validate and post that same evidence.
+    /// Ordinary stock adjustments retain IFRS as their established default.
+    /// </summary>
+    [Required]
+    [MaxLength(20)]
+    public string BookClassification { get; set; } = "IFRS";
+
     [Required]
     [MaxLength(50)]
     public string ReasonCode { get; set; } = string.Empty; // Cycle Count, Physical Count, Damage, Loss, Found, etc.

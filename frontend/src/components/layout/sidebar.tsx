@@ -166,10 +166,13 @@ export const navigationItems: NavItem[] = [
             icon: Repeat2,
           },
           {
+            // Opening balances are a controlled operational lifecycle (prepare,
+            // validate, approve and post), not stable Finance setup. Keep the
+            // workspace discoverable beside the journals it ultimately creates.
             title: 'Opening Balances',
             href: '/finance/opening-balances',
             icon: Database,
-            navigationSurface: 'settings',
+            permissions: ['Finance.Read'],
           },
           {
             title: 'Journal Approval Queue',

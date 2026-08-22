@@ -212,13 +212,19 @@ public sealed class CoreFinancialReportingFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-Reporting")]
     [Trait("Category", "Reporting")]
-    public async Task CashFlow_ShouldTranslateCashNameFilterAndUseSelectedBook()
+    public async Task CashFlow_ShouldRecognizeCashEquivalentCategoryAndUseSelectedBook()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         var period = SeedPeriod(db, tenantId);
-        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Petty Cash");
+        var cash = SeedAccount(
+            db,
+            tenantId,
+            AccountType.Asset,
+            "1000",
+            "Treasury Float",
+            category: "Cash and Cash Equivalents");
         cash.CashFlowClassification = "Operating";
         var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Revenue", category: "Revenue");
         revenue.CashFlowClassification = "Operating";
@@ -247,6 +253,150 @@ public sealed class CoreFinancialReportingFoundationTests
 
         report.CashAtBeginning.Should().Be(0m);
         report.CashAtEnd.Should().Be(100m);
+        report.NetCashFromOperating.Should().Be(100m);
+        report.IsReconciled.Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_ShouldTreatGovernedBankOpeningOnPeriodStartAsBeginningCash()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        period.PeriodName = "January 2025";
+        period.PeriodCode = "2025-01";
+        period.PeriodNumber = 1;
+        period.StartDate = new DateTime(2025, 1, 1);
+        period.EndDate = new DateTime(2025, 1, 31);
+
+        var bankGl = SeedAccount(
+            db,
+            tenantId,
+            AccountType.Asset,
+            "100-1001-0000",
+            "Main Operating Bank - GHS",
+            category: "Current Assets");
+        var clearing = SeedAccount(
+            db,
+            tenantId,
+            AccountType.Asset,
+            "000-1990-0000",
+            "Migration Clearing Account",
+            category: "Current Assets");
+        db.BankAccounts.Add(new BankAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountNumber = "TDC-DEMO-GHS-001",
+            AccountName = "TDC Main Operating Account",
+            BankName = "TDC Bank",
+            Currency = "GHS",
+            AccountType = BankAccountType.Checking,
+            GLAccountId = bankGl.Id,
+            IsActive = true
+        });
+
+        SeedJournal(
+            db,
+            tenantId,
+            period.Id,
+            "FP-MIGRAT-BANK-OPENING",
+            "Posted",
+            (bankGl.Id, 750_000m, 0m),
+            (clearing.Id, 0m, 750_000m));
+        var openingJournal = db.JournalEntries.Local.Single(item =>
+            item.JournalEntryNumber == "FP-MIGRAT-BANK-OPENING");
+        openingJournal.EntryDate = new DateTime(2025, 1, 1);
+        openingJournal.SourceModule = "MIGRATION";
+        openingJournal.SourceDocumentType = "OpeningBalanceBatch";
+        foreach (var transaction in db.AccountTransactions.Local.Where(item =>
+                     item.JournalEntryId == openingJournal.Id))
+        {
+            transaction.TransactionDate = openingJournal.EntryDate;
+            transaction.SourceModule = "MIGRATION";
+            transaction.SourceDocumentType = "OpeningBalanceBatch";
+            transaction.TransactionTag = "OpeningBalance";
+        }
+
+        await db.SaveChangesAsync();
+        var service = CreateGeneralLedgerService(db, tenantId);
+
+        var cutoverDateReport = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = new DateTime(2025, 1, 1),
+            PeriodEnd = new DateTime(2026, 8, 21),
+            BookClassification = "IFRS"
+        });
+        var postCutoverReport = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = new DateTime(2025, 1, 2),
+            PeriodEnd = new DateTime(2026, 8, 21),
+            BookClassification = "IFRS"
+        });
+
+        cutoverDateReport.CashAtBeginning.Should().Be(750_000m);
+        cutoverDateReport.NetIncreaseInCash.Should().Be(0m);
+        cutoverDateReport.CashAtEnd.Should().Be(750_000m);
+        cutoverDateReport.IsReconciled.Should().BeTrue();
+        cutoverDateReport.OperatingActivities.LineItems.Should().BeEmpty();
+        cutoverDateReport.InvestingActivities.LineItems.Should().BeEmpty();
+        cutoverDateReport.FinancingActivities.LineItems.Should().BeEmpty();
+
+        postCutoverReport.CashAtBeginning.Should().Be(750_000m);
+        postCutoverReport.CashAtEnd.Should().Be(750_000m);
+        postCutoverReport.IsReconciled.Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_ShouldKeepOrdinaryFirstDayReceiptInPeriodActivity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var bankGl = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Operating Bank", category: "Current Assets");
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Revenue", category: "Revenue");
+        revenue.CashFlowClassification = "Operating";
+        db.BankAccounts.Add(new BankAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountNumber = "BANK-001",
+            AccountName = "Operating Account",
+            BankName = "Bank",
+            Currency = "GHS",
+            AccountType = BankAccountType.Checking,
+            GLAccountId = bankGl.Id,
+            IsActive = true
+        });
+        SeedJournal(db, tenantId, period.Id, "JE-FIRST-DAY-RECEIPT", "Posted", (bankGl.Id, 100m, 0m), (revenue.Id, 0m, 100m));
+        var receiptJournal = db.JournalEntries.Local.Single(item => item.JournalEntryNumber == "JE-FIRST-DAY-RECEIPT");
+        receiptJournal.EntryDate = period.StartDate;
+        foreach (var transaction in db.AccountTransactions.Local.Where(item => item.JournalEntryId == receiptJournal.Id))
+        {
+            transaction.TransactionDate = period.StartDate;
+        }
+
+        await db.SaveChangesAsync();
+        var service = CreateGeneralLedgerService(db, tenantId);
+
+        var report = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = period.StartDate,
+            PeriodEnd = period.EndDate,
+            BookClassification = "IFRS"
+        });
+
+        report.CashAtBeginning.Should().Be(0m);
+        report.NetCashFromOperating.Should().Be(100m);
+        report.NetIncreaseInCash.Should().Be(100m);
+        report.CashAtEnd.Should().Be(100m);
+        report.IsReconciled.Should().BeTrue();
     }
 
     [Fact]

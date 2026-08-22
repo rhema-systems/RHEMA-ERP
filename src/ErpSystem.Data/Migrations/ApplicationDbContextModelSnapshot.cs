@@ -83238,6 +83238,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("BookClassification")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("CorrelationId")
                         .IsRequired()
                         .HasMaxLength(100)
