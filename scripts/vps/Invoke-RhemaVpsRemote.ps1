@@ -350,6 +350,17 @@ BEGIN
            AND CHARINDEX(N'TDC0502_RECEIPT_INSPECTION_WORKFLOW_ID', @inspectionTrigger) = 0)
         INSERT @R VALUES(N'INV-FU-004 receipt-inspection trigger baseline', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260820100000_AddInventoryOpeningStockBook')
+BEGIN
+    IF OBJECT_ID(N'dbo.StockAdjustments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.StockAdjustmentItems', N'U') IS NULL
+        INSERT @R VALUES(N'Inventory opening-stock book table prerequisites', 1);
+    IF OBJECT_ID(N'dbo.StockAdjustments', N'U') IS NOT NULL
+       AND COL_LENGTH(N'dbo.StockAdjustments', N'BookClassification') IS NOT NULL
+        INSERT @R VALUES(N'Inventory opening-stock book partial migration state', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -485,6 +496,10 @@ function Invoke-Preflight {
     Write-Output 'GUARD_COVERAGE|20260813171000_INVREQFU004RequireCleanTransferEvidence'
     Write-Output 'GUARD_COVERAGE|20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse'
     Write-Output 'GUARD_COVERAGE|20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind'
+    # Opening-stock book governance adds one defaulted column and replaces two
+    # trigger bodies without mutating legacy rows. The preflight probe above
+    # rejects missing source tables and any partial column apply before startup.
+    Write-Output 'GUARD_COVERAGE|20260820100000_AddInventoryOpeningStockBook'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
