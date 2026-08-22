@@ -377,6 +377,35 @@ public class OrganizationUnitHistoryDto : BaseDto
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
     public string? ChangeReason { get; set; }
+
+    /// <summary>
+    /// What kind of change this row records: <c>Restructure</c>, <c>Leadership Change</c> or <c>Other</c>.
+    /// </summary>
+    /// <remarks>
+    /// Derived, never stored. The classification already existed in <c>ToDetailDto</c>, which nothing
+    /// in the repository ever called, so every consumer of the log was left to re-derive "reparent or
+    /// change of head?" from four nullable ids — and the register could not filter by it at all.
+    /// It now comes off <c>OrganizationUnitChangeTypes.Classify</c>, the one definition the
+    /// filter predicate is written against too.
+    /// </remarks>
+    public string ChangeType { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Filter for the paged change-log read: the register's unit, date-range and change-type controls.
+/// </summary>
+/// <remarks>
+/// Added in areas 19-23 slice 5. <c>GetPagedAsync</c> took a page number and nothing else, so the
+/// only way to answer "what changed in this unit last quarter" — the question Decision 6 says the
+/// register exists for — was to page through the whole table client-side. Every property is
+/// optional and an unset filter is the previous behaviour exactly.
+/// </remarks>
+public class OrganizationUnitHistoryFilterDto
+{
+    public Guid? UnitId { get; set; }
+    public DateOnly? StartDate { get; set; }
+    public DateOnly? EndDate { get; set; }
+    public string? ChangeType { get; set; }
 }
 
 /// <summary>
@@ -397,7 +426,8 @@ public class OrganizationUnitHistorySummaryDto
 /// </summary>
 public class OrganizationUnitHistoryDetailDto : OrganizationUnitHistoryDto
 {
-    public string ChangeType { get; set; } = string.Empty; // "Restructure", "Leadership Change", etc.
+    // ChangeType moved to the base DTO in areas 19-23 slice 5 — it is useful on every read, and
+    // declaring it here as well would only hide the inherited one.
     public string? ChangedBy { get; set; }
     public DateTime? ChangedAt { get; set; }
 }

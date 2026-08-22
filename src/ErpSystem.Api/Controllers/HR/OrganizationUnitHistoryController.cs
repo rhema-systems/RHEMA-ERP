@@ -1,3 +1,4 @@
+using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
@@ -37,16 +38,57 @@ public class OrganizationUnitHistoryController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>Largest page this endpoint will serve, however large a page the caller asks for.</summary>
+    private const int MaxPageSize = 200;
+
     /// <summary>
-    /// Retrieves organization unit history with pagination
+    /// The change-log register: every recorded change, newest first, optionally narrowed to one unit,
+    /// a date range, or a kind of change.
     /// </summary>
+    /// <remarks>
+    /// The four filters arrived in areas 19-23 slice 5 with the register that uses them. An
+    /// unrecognised <paramref name="changeType"/> is <b>refused</b> rather than ignored: a filter
+    /// that silently does nothing reads, from the screen, exactly like a filter that matched
+    /// everything.
+    /// </remarks>
     [HttpGet("paged")]
     [ProducesResponseType(typeof(PagedResult<OrganizationUnitHistoryDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetPaged(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] Guid? unitId = null,
+        [FromQuery] DateOnly? startDate = null,
+        [FromQuery] DateOnly? endDate = null,
+        [FromQuery] string? changeType = null)
     {
+        if (startDate.HasValue && endDate.HasValue && startDate > endDate)
+            return BadRequest(new { message = "The start date cannot be after the end date." });
+
+        var filter = new OrganizationUnitHistoryFilterDto
+        {
+            UnitId = unitId,
+            StartDate = startDate,
+            EndDate = endDate,
+        };
+
+        if (!string.IsNullOrWhiteSpace(changeType))
+        {
+            if (!OrganizationUnitChangeTypes.TryResolve(changeType, out var resolved))
+                return BadRequest(new
+                {
+                    message = $"Unknown change type '{changeType}'. Expected one of: {string.Join(", ", OrganizationUnitChangeTypes.All)}.",
+                });
+
+            filter.ChangeType = resolved;
+        }
+
         try
         {
-            var response = await _historyService.GetPagedAsync(pageNumber, pageSize);
+            var response = await _historyService.GetPagedAsync(
+                pageNumber < 1 ? 1 : pageNumber,
+                pageSize < 1 ? 1 : Math.Min(pageSize, MaxPageSize),
+                filter);
             return Ok(response);
         }
         catch (Exception ex)
@@ -104,8 +146,12 @@ public class OrganizationUnitHistoryController : ControllerBase
     /// </summary>
     [HttpGet("date-range")]
     [ProducesResponseType(typeof(IEnumerable<OrganizationUnitHistoryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetByDateRange([FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate)
     {
+        if (startDate > endDate)
+            return BadRequest(new { message = "The start date cannot be after the end date." });
+
         try
         {
             var response = await _historyService.GetByDateRangeAsync(startDate, endDate);

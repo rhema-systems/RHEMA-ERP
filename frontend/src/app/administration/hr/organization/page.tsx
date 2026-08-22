@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, ListTree, FolderTree, Network, Users2 } from 'lucide-react';
+import { Building2, History, ListTree, FolderTree, Network, Users2 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -38,6 +38,14 @@ export default function OrganizationSetupPage() {
               'Working groups — permanent, project, task force, committee — and who is in them.',
             href: '/administration/hr/organization/teams',
             icon: Users2,
+          },
+          {
+            // Slice 5. The audit trail under the units editor: every restructure and change of head,
+            // across the whole organisation. A unit's own log is a tab on the unit itself.
+            title: 'Unit Change Log',
+            description: 'Who a unit reported to, who headed it, and when each changed.',
+            href: '/administration/hr/organization/unit-history',
+            icon: History,
           },
           {
             // The read-only counterpart to the three editors above: the same records, drawn.

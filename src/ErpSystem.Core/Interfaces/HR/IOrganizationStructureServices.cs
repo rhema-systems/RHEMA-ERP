@@ -241,9 +241,16 @@ public interface IOrganizationUnitHistoryService
     Task<OrganizationUnitHistoryDto?> GetActiveHistoryAsync(Guid unitId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get paged organization unit history
+    /// Get paged organization unit history, optionally narrowed to a unit, a date range or a change type.
     /// </summary>
-    Task<PagedResult<OrganizationUnitHistoryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
+    /// <remarks>
+    /// The filter is optional and omitting it is the pre-slice-5 behaviour exactly.
+    /// </remarks>
+    Task<PagedResult<OrganizationUnitHistoryDto>> GetPagedAsync(
+        int pageNumber,
+        int pageSize,
+        OrganizationUnitHistoryFilterDto? filter = null,
+        CancellationToken cancellationToken = default);
 }
 
 #endregion

@@ -27,7 +27,7 @@ the JWT key passed; every harness runs **twice**.
 |---|---|---|---|---|
 | **19** | `api/Organogram` | 5 GET | 0 | engine looks sound, never rendered |
 | **19** | `api/hr/teams` | — | — | **added in slice 4b**: 12 endpoints. `Team`/`TeamMember`/`TeamMemberHistory` had tables and EF config but no writer of any kind |
-| **19** | `api/OrganizationUnitHistory` | 6 GET | 0 | **0 rows; both writers cannot save** |
+| **19** | `api/OrganizationUnitHistory` | 6 GET | 2 | **done**: slice 3 made it writable, slice 5 rendered it and found six more defects |
 | **20** | `api/external-associates` | 11 | 1 of 11 (a picker) | register never built |
 | **20** | `api/hr/employee-relievers` | 4 | 0 | **0 rows; zero readers anywhere** |
 | **20** | `api/facility-services` | 5 | 0 | medical-owned, 2 rows |
@@ -702,3 +702,111 @@ at now.
 **Residue on live data:** 24 soft-deleted fixture teams and their ended memberships, plus the usual
 `T19V` employees. The register itself reads clean — 0 live teams — and a soft-deleted team no longer
 holds its code, which is the point of the migration.
+
+### Slice 5 — the unit change-log screens. 2026-08-22, **111/111**, run twice. No migration.
+
+Harness `run-slice5.mjs`; payloads probed first with `SLICE=5 node probe-ui-payloads.mjs`. Screens:
+`/administration/hr/organization/unit-history` (the register) and a **Change log** tab on
+`…/units/[id]/edit`. Full regression alongside: slice 0 **16/16**, 1 **69/69**, 2 **100/100**,
+3 **49/49**, 4 **60/60**, 4b **88/88**. Bundle total: **493 assertions**.
+
+**Slice 3 made the audit trail able to write. Rendering it found six more defects, and the largest
+had been there since the port.**
+
+**D-30 · The register showed 9 of 66 rows and reported 66.** `Scoped()` `.Include`d
+`h.OrganizationUnit` — a **required** navigation whose principal carries the global `!IsDeleted`
+query filter — so EF composed it as an INNER JOIN and dropped every history row about a unit that
+had since been dissolved. `CountAsync` strips includes, so the envelope went on counting them.
+Measured on DEFAULT 2026-08-22 before the fix:
+
+```
+envelope says totalCount = 66 , totalPages = 1
+the page actually carries  = 9 rows        (86% invisible)
+distinct units visible     = 1             of the 40 the table holds rows for
+```
+
+The rows an audit trail exists for are precisely the ones about things that no longer exist. The
+`Include` is gone and the unit's name resolves in `ResolveNamesAsync` instead, alongside the parent
+and head names.
+
+⚠ **`GetQueryable().IgnoreQueryFilters()` does not read through a soft delete — and that was my bug,
+caught by the harness rather than by reading.** `GenericRepository.GetQueryable()` welds
+`.Where(e => !e.IsDeleted)` in as an **ordinary predicate**; `IgnoreQueryFilters` lifts the
+DbContext's *global* filter and leaves the repository's own `Where` standing. The call compiles,
+reads exactly as though it worked, and changes nothing — the first run failed on precisely the two
+assertions that asked a dissolved unit to name itself. The correct call is
+`GetQueryableIncludingDeleted(predicate)`. A sweep found three other uses of the same shape
+(`CompanyProfileProvider`, `CertificateVerificationService`, `TrainingCompletionService`) and **all
+three are correct as written** — each wants to bypass only the *tenant* filter, and two say
+"soft-deleted rows are still excluded" in place.
+
+**D-31 · Three filters that were silently ignored.** The probe measured it rather than inferring it:
+`?unitId=…`, `?startDate=2099-01-01` and `?changeType=Restructure` each returned `totalCount 66`,
+identical to unfiltered, because `GetPagedAsync` took a page number and nothing else. So the read
+Decision 6 says the register exists for — *what changed in this unit last quarter* — could not be
+asked at all. Four server-side filters now, counted **after** narrowing. An unrecognised
+`changeType` is **refused with a 400 listing the valid values**, not ignored: from the screen, a
+filter that silently does nothing is indistinguishable from one that matched everything. `pageSize`
+is clamped at 200 and both endpoints refuse an inverted date range.
+
+**D-32 · The change type was derived where no read could reach it.** `ToDetailDto` has classified
+Restructure / Leadership Change / Other since the port and **nothing in the repository has ever
+called that mapper**, so every consumer was left to re-derive "reparent or change of head?" from
+four nullable ids. Lifted to `OrganizationUnitChangeTypes`, put on the base DTO, and reused by
+`ToDetailDto`. The rule genuinely has to be written twice — `Classify` in memory, `Predicate` in SQL
+— so the harness holds a **third, independent** statement and asserts the filtered page equals the
+classified set, per type. Two statements of one rule is the shape that drifts.
+
+**D-33 · The log could not say who.** `createdBy: ""` on every live row. There is no global auditing
+interceptor in this codebase — each service stamps `CreatedBy` itself — and the writer did not. A
+change log that records what changed and why but not **who** is missing the column the question is
+usually asked about.
+
+**D-34 · `EffectiveTo` was modelled and never written**, so an effective-dated log could only ever
+say "from", and the register would have rendered a column blank for ever. Now closed **per series**,
+which is the part that had to be right: a unit's reporting line and its leadership move
+independently, so ending the head record because somebody reparented the unit would make the log
+state something that never happened. Four assertions exist only to pin that down.
+
+**D-35 · The edit form could not supply a reason.** `ChangeReason` has been on
+`UpdateOrganizationUnitDto` since slice 3 and nothing sent it, so every row the only working write
+path produced carried `changeReason: null`. The reason box appears only when the parent or the head
+actually differs from what the form loaded — a rename writes no history row, so asking why would be
+asking for something nothing keeps.
+
+**D-36 · The two dedicated endpoints recorded changes that did not happen — found by the filter, not
+by reading.** `Other` is a classification no real change can produce, and it had **nine rows**. Every
+one was `previousParentId == newParentId`: `UpdateAsync` has always guarded on
+`parentChanged`/`headChanged`, while `MoveUnitAsync` and `ChangeHeadEmployeeAsync` never did, so
+re-sending a unit's current parent stamped the trail with *"moved from A to A"*. Three of the nine
+are against the real `Administration` unit and **they cannot be removed**, because a change log has
+no delete. Both endpoints now return `true` without recording — validation still runs first, so a
+self-parent or a cycle is still refused. The harness asserts "this run added no `Other` rows" rather
+than "there are none", because the historic nine are permanent.
+
+**One screen defect that no API assertion could have caught.** The parent-unit hint on the unit form
+read *"Must be exactly one level above this unit."* That is the strict rule slice 3 **abandoned** in
+D-2c — TDC's structure skips levels, so both write paths were reconciled onto the permissive one and
+the form went on telling people otherwise. Also corrected: the head hint now says a required head
+cannot be cleared once assigned, which is what D-17 left true.
+
+**Decision 6, adjusted in the doing and worth stating.** The plan said "a tab on the unit detail plus
+one register". There is no unit detail screen — the units register navigates straight to
+`…/[id]/edit` — and building a read-only detail page to host one tab would have added a screen whose
+whole content is the form rendered twice. The tab went on the **edit** screen instead, which is
+where the two recorded changes are actually made: the record of the last restructure now sits beside
+the control that performs the next one. Both surfaces render one `UnitChangeLog` component, so the
+register and the tab cannot describe the same row differently.
+
+⚠ **A harness lesson about the harness's own escaping.** Editing `run-slice5.mjs` through a shell
+heredoc collapsed a `\n` escape into a real newline inside a JS string literal, splitting a
+`console.log` across two lines and breaking the file — twice, because the repair used the same
+escaping. Building the backslash with `chr(92)` in the Python patch script is what fixed it, and
+`node --check` after every scripted edit catches it in one step. That is the corollary to the
+README's "edit with Python, never `perl -i` or PowerShell" rule.
+
+**Residue on live data:** this slice's fixture units are soft-deleted and their history rows stay
+behind on purpose — after D-30 a deleted unit no longer takes its history with it, which is the whole
+point. One older fixture unit, `T19V130556OrgUnit`, is still live from an earlier slice's run; it is
+inert, but it is a 42nd unit in every unit listing, and removing it is a one-line delete whenever the
+user wants it gone.

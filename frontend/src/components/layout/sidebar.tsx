@@ -69,6 +69,7 @@ import {
   Activity,
   FolderTree,
   FileCheck,
+  History,
   Gavel,
   Network,
   Users2,
@@ -1622,6 +1623,9 @@ export const navigationItems: NavItem[] = [
               // Slice 4b. Teams are the working groups, as distinct from the units people are
               // formally posted into — the entities existed since the port with no way to write them.
               { title: 'Teams', href: '/administration/hr/organization/teams', icon: Users2 },
+              // Slice 5. Read-only, and gated on the HR/admin roles server-side — the log names the
+              // employees who have led each unit.
+              { title: 'Unit Change Log', href: '/administration/hr/organization/unit-history', icon: History },
             ],
           },
           {

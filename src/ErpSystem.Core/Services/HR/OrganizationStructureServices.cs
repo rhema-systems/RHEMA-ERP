@@ -803,6 +803,23 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         var oldParentId = unit.ParentUnitId;
 
+        // ⚠ A move to the parent the unit already has records nothing. `UpdateAsync` has always
+        // guarded its history writes on `parentChanged`/`headChanged`; these two endpoints did not,
+        // so re-sending the current parent stamped the trail with "moved from A to A". Slice 5 found
+        // nine such rows live on DEFAULT — three of them against the real `Administration` unit —
+        // and they are indelible, because a change log deliberately has no delete. They are also the
+        // only reason the `Other` classification, which no real change can produce, has any rows.
+        //
+        // Returning true rather than refusing: the caller asked for a state that already holds, and
+        // an idempotent no-op is the honest answer to that. What it must not do is claim something
+        // happened.
+        if (oldParentId == newParentId)
+        {
+            _logger.LogInformation(
+                "Organization unit move is a no-op: {UnitId} is already under {Parent}", unitId, newParentId);
+            return true;
+        }
+
         await RecordHistoryAsync(
             unitId,
             previousParentId: oldParentId, newParentId: newParentId,
@@ -847,6 +864,15 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         var oldHeadEmployeeId = unit.HeadEmployeeId;
 
+        // The same no-op guard as MoveUnitAsync — reappointing the sitting head is not a change of
+        // leadership, and the log should not say it was.
+        if (oldHeadEmployeeId == newHeadEmployeeId)
+        {
+            _logger.LogInformation(
+                "Organization unit head change is a no-op: {UnitId} is already headed by {Head}", unitId, newHeadEmployeeId);
+            return true;
+        }
+
         await RecordHistoryAsync(
             unitId,
             previousParentId: null, newParentId: null,
@@ -890,6 +916,39 @@ public class OrganizationUnitService : IOrganizationUnitService
         if (tenantId == Guid.Empty)
             throw new InvalidOperationException("No tenant is associated with the current user.");
 
+        var effectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // A parent row leaves both head ids null and a head row leaves both parent ids null, so which
+        // series this change belongs to is readable off the arguments.
+        var isParentChange = previousParentId.HasValue || newParentId.HasValue;
+
+        // ⚠ Close the arrangement this change replaces. `EffectiveTo` is modelled on the entity, was
+        // never written by anything, and slice 5's payload probe found it null on every row — a column
+        // the register would render blank for ever, and an effective-dated log that only ever says
+        // "from". Closing it per SERIES rather than per unit is the part that has to be right: a unit's
+        // reporting line and its leadership move independently, and ending the head record because
+        // somebody reparented the unit would make the log state something that never happened.
+        var openQuery = _historyRepository.GetQueryable()
+            .Where(h => h.TenantId == tenantId
+                        && !h.IsDeleted
+                        && h.OrganizationUnitId == unitId
+                        && h.EffectiveTo == null);
+
+        openQuery = isParentChange
+            ? openQuery.Where(h => h.PreviousParentId != null || h.NewParentId != null)
+            : openQuery.Where(h => h.PreviousHeadEmployeeId != null || h.NewHeadEmployeeId != null);
+
+        var previous = await openQuery
+            .OrderByDescending(h => h.EffectiveFrom)
+            .ThenByDescending(h => h.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (previous != null)
+        {
+            previous.EffectiveTo = effectiveFrom;
+            await _historyRepository.UpdateAsync(previous);
+        }
+
         await _historyRepository.AddAsync(new OrganizationUnitHistory
         {
             TenantId = tenantId,
@@ -898,8 +957,17 @@ public class OrganizationUnitService : IOrganizationUnitService
             NewParentId = newParentId,
             PreviousHeadEmployeeId = previousHeadEmployeeId,
             NewHeadEmployeeId = newHeadEmployeeId,
-            EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
+            EffectiveFrom = effectiveFrom,
             ChangeReason = string.IsNullOrWhiteSpace(changeReason) ? null : changeReason.Trim(),
+            // ⚠ Nothing stamps CreatedBy in this codebase — there is no global auditing interceptor,
+            // each service does it — so every row written since slice 3 carries an empty author.
+            // A change log that records what changed and why but not WHO is missing the column the
+            // question is usually asked about. Measured, not assumed: slice 5's probe read
+            // `createdBy: ""` on every live row.
+            CreatedBy = string.IsNullOrWhiteSpace(_currentUserProvider.FullName)
+                ? _currentUserProvider.Username
+                : _currentUserProvider.FullName,
+            CreatedById = _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
         });
     }
 
@@ -1006,9 +1074,21 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
         return tenantId;
     }
 
+    /// <remarks>
+    /// ⚠ <b>There is deliberately no <c>Include</c> here, and putting one back would hide 86% of the
+    /// log.</b> <c>OrganizationUnitHistory.OrganizationUnit</c> is a <i>required</i> navigation and
+    /// every <c>BaseEntity</c> carries a global <c>!IsDeleted</c> query filter, so EF composes the
+    /// include as an INNER JOIN against a filtered principal — and silently drops every history row
+    /// whose unit has since been dissolved. <c>CountAsync</c> strips includes, so the paged envelope
+    /// went on counting them: measured on DEFAULT 2026-08-22, <c>totalCount</c> said 66 while the page
+    /// carried 9 — one visible unit out of the 40 the table holds rows for.
+    ///
+    /// <para>The rows an audit trail exists for are precisely the ones about things that no longer
+    /// exist, so the unit's name is resolved in <see cref="ResolveNamesAsync"/> with the filters
+    /// ignored instead.</para>
+    /// </remarks>
     private IQueryable<OrganizationUnitHistory> Scoped(Guid tenantId) =>
         _repository.GetQueryable()
-            .Include(h => h.OrganizationUnit)
             .Where(h => h.TenantId == tenantId && !h.IsDeleted);
 
     public async Task<OrganizationUnitHistoryDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1070,10 +1150,39 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
         return entity is null ? null : (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
     }
 
-    public async Task<PagedResult<OrganizationUnitHistoryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<OrganizationUnitHistoryDto>> GetPagedAsync(
+        int pageNumber,
+        int pageSize,
+        OrganizationUnitHistoryFilterDto? filter = null,
+        CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var query = Scoped(tenantId);
+
+        // ⚠ Until slice 5 this method took a page number and nothing else, so the register could only
+        // scroll: "what changed in this unit last quarter" meant paging the whole table and filtering
+        // in the browser. Each clause below is one control on that screen. The count is taken AFTER
+        // them, so a filtered page reports how many rows match rather than how many rows exist —
+        // getting that backwards is how a register ends up claiming twelve pages of one row.
+        if (filter is not null)
+        {
+            if (filter.UnitId.HasValue)
+                query = query.Where(h => h.OrganizationUnitId == filter.UnitId.Value);
+
+            if (filter.StartDate.HasValue)
+                query = query.Where(h => h.EffectiveFrom >= filter.StartDate.Value);
+
+            if (filter.EndDate.HasValue)
+                query = query.Where(h => h.EffectiveFrom <= filter.EndDate.Value);
+
+            if (!string.IsNullOrWhiteSpace(filter.ChangeType))
+            {
+                // The controller resolves the caller's string onto one of the three constants and
+                // refuses anything else, so an unrecognised value never reaches here as "no filter".
+                query = query.Where(OrganizationUnitChangeTypes.Predicate(filter.ChangeType));
+            }
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         var pagedEntities = await query
@@ -1112,25 +1221,40 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
         if (dtos.Count == 0)
             return dtos;
 
+        // The unit's own id joins the parent ids: with the Include gone (see Scoped) this lookup is
+        // where OrganizationUnitName comes from too.
         var unitIds = entities
-            .SelectMany(e => new[] { e.PreviousParentId, e.NewParentId })
+            .SelectMany(e => new[] { (Guid?)e.OrganizationUnitId, e.PreviousParentId, e.NewParentId })
             .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
 
         var employeeIds = entities
             .SelectMany(e => new[] { e.PreviousHeadEmployeeId, e.NewHeadEmployeeId })
             .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
 
+        // ⚠ Both lookups read THROUGH the soft delete, on purpose. A change log is about arrangements
+        // that have ended: the unit a department was moved out of may since have been dissolved, and
+        // the head it replaced may since have left. Resolved through the ordinary reads, those names
+        // come back null and the log renders "moved from  to Operations Directorate" — a sentence
+        // with a hole in it, and no way for a reader to tell a missing name from a name that was
+        // never recorded.
+        //
+        // ⚠⚠ It must be `GetQueryableIncludingDeleted`, and `GetQueryable().IgnoreQueryFilters()` is
+        // NOT the same thing — that was slice 5's own bug, caught by the harness rather than by
+        // reading. `GetQueryable()` welds `.Where(e => !e.IsDeleted)` in as an ORDINARY predicate;
+        // `IgnoreQueryFilters` lifts the DbContext's global filter and leaves the repository's own
+        // `Where` standing, so the call compiles, reads exactly as if it worked, and changes nothing.
+        //
+        // Neither form widens the tenant boundary: both queries state `TenantId == tenantId`
+        // themselves, which is the RHEMA convention this whole service already follows.
         var unitNames = unitIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await _units.GetQueryable()
-                .Where(u => u.TenantId == tenantId && unitIds.Contains(u.Id))
+            : await _units.GetQueryableIncludingDeleted(u => u.TenantId == tenantId && unitIds.Contains(u.Id))
                 .Select(u => new { u.Id, u.Name })
                 .ToDictionaryAsync(u => u.Id, u => u.Name, cancellationToken);
 
         var employeeNames = employeeIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : (await _employees.GetQueryable()
-                    .Where(e => e.TenantId == tenantId && employeeIds.Contains(e.Id))
+            : (await _employees.GetQueryableIncludingDeleted(e => e.TenantId == tenantId && employeeIds.Contains(e.Id))
                     .Select(e => new { e.Id, e.FirstName, e.MiddleName, e.LastName })
                     .ToListAsync(cancellationToken))
                 .ToDictionary(
@@ -1144,6 +1268,7 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
 
         foreach (var dto in dtos)
         {
+            dto.OrganizationUnitName = Unit(dto.OrganizationUnitId) ?? dto.OrganizationUnitName;
             dto.PreviousParentName = Unit(dto.PreviousParentId);
             dto.NewParentName = Unit(dto.NewParentId);
             dto.PreviousHeadEmployeeName = Person(dto.PreviousHeadEmployeeId);
