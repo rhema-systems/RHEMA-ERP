@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -13,14 +15,38 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class ProcurementPlansController : ControllerBase
 {
     private readonly IProcurementPlanService _planService;
+    private readonly IFiscalPeriodService _fiscalPeriodService;
     private readonly ILogger<ProcurementPlansController> _logger;
 
     public ProcurementPlansController(
         IProcurementPlanService planService,
+        IFiscalPeriodService fiscalPeriodService,
         ILogger<ProcurementPlansController> logger)
     {
         _planService = planService;
+        _fiscalPeriodService = fiscalPeriodService;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Returns the current tenant's Finance-owned fiscal years for procurement planning.
+    /// The projection is exposed through Procurement so plan makers do not require the
+    /// unrelated finance.view privilege merely to select an accounting period.
+    /// </summary>
+    [HttpGet("fiscal-years")]
+    public async Task<ActionResult<IReadOnlyList<FiscalYearDto>>> GetPlanningFiscalYears(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var years = await _fiscalPeriodService.GetFiscalYearsAsync(cancellationToken);
+            return Ok(years);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting Finance fiscal years for procurement planning");
+            return StatusCode(500, "An error occurred while retrieving fiscal years for procurement planning");
+        }
     }
 
     [HttpGet]

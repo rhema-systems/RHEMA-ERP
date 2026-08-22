@@ -92,6 +92,18 @@ export interface ProcurementPlanDto {
   createdAt: string;
 }
 
+export interface ProcurementPlanningFiscalYearDto {
+  id: string;
+  fiscalYearName: string;
+  fiscalYearCode: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+  status: string;
+  isClosed: boolean;
+  isLocked: boolean;
+}
+
 export interface ProcurementPlanDetailDto extends ProcurementPlanDto {
   preparedById?: string;
   reviewedById?: string;
@@ -1007,6 +1019,16 @@ export interface CreateEmergencySupplierDto {
 // ============================================================================
 
 export const procurementPlanService = {
+  async getFiscalYears(): Promise<ProcurementPlanningFiscalYearDto[]> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/fiscal-years`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await readProblemMessage(response, 'Failed to load fiscal years for procurement planning'));
+    }
+    return response.json();
+  },
+
   async getPlans(params?: {
     page?: number;
     pageSize?: number;
