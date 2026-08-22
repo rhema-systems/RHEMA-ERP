@@ -223,9 +223,37 @@ public class ProcurementBudgetsController : ControllerBase
             var budget = await _budgetService.SubmitForApprovalAsync(id);
             return Ok(budget);
         }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (UnauthorizedAccessException ex) { return StatusCode(403, ex.Message); }
-        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(BudgetProblem(
+                StatusCodes.Status404NotFound,
+                "PROCUREMENT_BUDGET_NOT_FOUND",
+                "Procurement budget not found",
+                ex.Message));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, BudgetProblem(
+                StatusCodes.Status403Forbidden,
+                "PROCUREMENT_BUDGET_SUBMIT_FORBIDDEN",
+                "Procurement budget submission forbidden",
+                ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Procurement budget submission rejected for {BudgetId}", id);
+            var workflowInvalid = ex.Message.Contains("start step", StringComparison.OrdinalIgnoreCase) ||
+                                  ex.Message.Contains("workflow", StringComparison.OrdinalIgnoreCase);
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                workflowInvalid
+                    ? "PROCUREMENT_BUDGET_WORKFLOW_INVALID"
+                    : "PROCUREMENT_BUDGET_SUBMIT_CONFLICT",
+                workflowInvalid
+                    ? "Procurement budget approval workflow is unavailable"
+                    : "Procurement budget submission conflict",
+                ex.Message));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error submitting budget {BudgetId}", id);

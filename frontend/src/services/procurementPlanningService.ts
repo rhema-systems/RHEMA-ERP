@@ -15,12 +15,17 @@ const getAuthHeaders = () => {
 };
 
 const readProblemMessage = async (response: Response, fallback: string) => {
+  const payload = await response.text();
+  if (!payload.trim()) return fallback;
+
   try {
-    const problem = await response.json() as { detail?: string; message?: string; code?: string };
+    const parsed = JSON.parse(payload) as string | { detail?: string; message?: string; title?: string; code?: string };
+    if (typeof parsed === 'string') return parsed.trim() || fallback;
+    const problem = parsed;
     const message = problem.detail || problem.message || fallback;
     return problem.code ? `${message} (${problem.code})` : message;
   } catch {
-    return fallback;
+    return payload.trim() || fallback;
   }
 };
 
@@ -1345,7 +1350,7 @@ export const procurementBudgetService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to update procurement budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update procurement budget'));
     return response.json();
   },
 
@@ -1354,7 +1359,7 @@ export const procurementBudgetService = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to delete procurement budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to delete procurement budget'));
   },
 
   async submitBudget(id: string): Promise<ProcurementBudgetDetailDto> {

@@ -12,6 +12,7 @@ import { ArrowLeft, Edit, Send, DollarSign, TrendingUp, Loader2 } from 'lucide-r
 import { toast } from 'sonner';
 import { procurementBudgetService, type ProcurementBudgetDetailDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 export default function ProcurementBudgetDetailPage() {
   const router = useRouter();
@@ -20,6 +21,7 @@ export default function ProcurementBudgetDetailPage() {
   const [budget, setBudget] = useState<ProcurementBudgetDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) loadBudget();
@@ -39,15 +41,15 @@ export default function ProcurementBudgetDetailPage() {
   };
 
   const handleSubmitForApproval = async () => {
-    if (!confirm('Submit this budget to the configured shared approval workflow?')) return;
     try {
       setSubmitting(true);
       await procurementBudgetService.submitBudget(id);
       toast.success('Budget submitted to the approval workflow');
-      loadBudget();
+      await loadBudget();
     } catch (error) {
       console.error('Error submitting budget:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to submit budget for approval');
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +101,7 @@ export default function ProcurementBudgetDetailPage() {
               <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
                 <Edit className="h-4 w-4" />Edit
               </Button>
-              <Button onClick={handleSubmitForApproval} disabled={submitting} className="gap-2">
+              <Button onClick={() => setSubmitDialogOpen(true)} disabled={submitting} className="gap-2">
                 <Send className="h-4 w-4" />{submitting ? 'Submitting...' : 'Submit for approval'}
               </Button>
             </>
@@ -238,6 +240,16 @@ export default function ProcurementBudgetDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ConfirmationDialog
+        open={submitDialogOpen}
+        onOpenChange={setSubmitDialogOpen}
+        title="Submit budget for approval?"
+        description="This sends the budget to the configured shared approval workflow. You will not be able to edit it while approval is in progress."
+        confirmText="Submit for approval"
+        onConfirm={handleSubmitForApproval}
+        isLoading={submitting}
+      />
     </div>
   );
 }
