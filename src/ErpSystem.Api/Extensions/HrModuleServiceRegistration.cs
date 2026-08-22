@@ -482,6 +482,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOrganizationUnitService, OrganizationUnitService>();
         services.AddScoped<IOrganizationUnitHistoryService, OrganizationUnitHistoryService>();
         services.AddScoped<IOrganogramService, OrganogramService>();
+        // Slice 4b. Until this line the Team/TeamMember/TeamMemberHistory entities had DbSets,
+        // tables and EF configuration but no way at all to write them.
+        services.AddScoped<ITeamService, TeamService>();
         services.AddScoped<ILocationStructureService, LocationStructureService>();
         services.AddScoped<ILocationLevelService, LocationLevelService>();
         services.AddScoped<ILocationService, LocationService>();

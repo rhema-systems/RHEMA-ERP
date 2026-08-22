@@ -26,6 +26,7 @@ the JWT key passed; every harness runs **twice**.
 | Area | Surface | Endpoints | Screens today | State |
 |---|---|---|---|---|
 | **19** | `api/Organogram` | 5 GET | 0 | engine looks sound, never rendered |
+| **19** | `api/hr/teams` | — | — | **added in slice 4b**: 12 endpoints. `Team`/`TeamMember`/`TeamMemberHistory` had tables and EF config but no writer of any kind |
 | **19** | `api/OrganizationUnitHistory` | 6 GET | 0 | **0 rows; both writers cannot save** |
 | **20** | `api/external-associates` | 11 | 1 of 11 (a picker) | register never built |
 | **20** | `api/hr/employee-relievers` | 4 | 0 | **0 rows; zero readers anywhere** |
@@ -194,9 +195,29 @@ on the facility it describes.
 **Decision 5 · The organogram is one screen with five views**, switched by tab, not five screens.
 The DTO is uniform by design; anything else duplicates a chart component five times.
 
+> ⚠ **Reopened during slice 4, and the reopening changed the answer.** Slice 4 measured that the
+> fifth view projected a table with no writer anywhere in the repository and dropped the tab, on the
+> grounds that a view which can never contain anything is a broken promise on a screen. That was the
+> wrong fix to the right observation: the entities, tables and EF configuration all existed and only
+> the application layer was missing. **Slice 4b built the teams register instead and the tab came
+> back.** Five views, as originally decided — see Decision 7.
+
 **Decision 6 · Unit history renders as a tab on the unit detail plus one register.** A change log
 without the thing it logs is unreadable; a register is still needed for the date-range and "what
 changed this quarter" reads the controller already offers.
+
+**Decision 7 · Teams get a full register, not a stub — membership included.** Taken in slice 4b,
+after Decision 5 was reopened. A team with no members is a label, and `Team.MemberCount` is
+`[NotMapped]` precisely so a service fills it, so membership is the feature rather than an extra.
+`TeamMember` and `TeamMemberHistory` are therefore in scope with `Team`. Two fields stay unbuilt on
+the form deliberately — `ShiftId` and `LocationId` — because each needs a picker from another area
+and neither is worth guessing at before TDC says whether its teams use them.
+
+⚠ **Teams carry no FRD requirement of their own**, and that remains true after building the
+register. The entity is clearly modelled for a matrix organisation — `AllocationPercent`,
+`IsPrimary`, `MaxMembers`, `ProjectCode`, `CostCenterCode` — so the capability is real, but whether
+TDC runs project teams, task forces or committees is still an open question for them. The register
+being empty is now a statement about TDC's data rather than about the product.
 
 ---
 
@@ -226,7 +247,8 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 1 | **Company profile.** Gate, the fields the three letter services actually read, editor screen. | 22 |
 | 2 | **Policy settings.** Admin gate, ~25 knobs grouped by the area that reads each, validation (fit weights sum, retirement age ordering). | 22 |
 | 3 | **The unit audit trail.** Stamp the tenant (D-1), write history from the update path and close the bypass (D-2), cascade `Path` to descendants (D-2b), reconcile the two hierarchy rules (D-2c). | 19 |
-| 4 | **Organogram.** One screen, five views, the chart component. | 19 |
+| 4 | **Organogram.** One screen, the chart component, the split gate (D-8), the rollup (D-21), on-strength headcount (D-27), stable order (D-28), a cycle guard. | 19 |
+| 4b | **Teams register.** Team + membership + history CRUD, the filtered unique index (D-29), screens, and the organogram's fifth view restored. | 19 |
 | 5 | **Unit history screens.** Register + the unit-detail tab. | 19 |
 | 6 | **Unions and CBAs.** Register, detail, agreement collection, D-6 fix. | 21 |
 | 7 | **Reliever roster.** D-9 (the unfiltered unique index), roster screen + the leave-form default (Decision 3). | 20 |
@@ -235,6 +257,8 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. | 23 |
 | 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. | all |
 | 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
+
+Migrations so far: **two.** `IX_EmployeeRelievers_EmployeeId_Priority` (slice 7, pending) and `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b, applied). Both are the same defect — a unique index over a soft-deleting store — which is now the most reliably recurring shape in this bundle.
 
 Expected migrations: **at least one, contrary to the first draft of this plan.** Slice 0 found D-9,
 and a unique index that must exclude soft-deleted rows is a schema change:
@@ -516,3 +540,165 @@ They cannot be removed through the product — the change log deliberately has n
 Removing them needs direct SQL, which is the user's call:
 `DELETE FROM OrganizationUnitHistories WHERE ChangeReason LIKE 't19v[_]%' OR ChangeReason IS NULL AND …`
 — better done by the nine ids listed in the session, since a NULL reason is also legitimate.
+
+### Slice 4 — the organogram. 2026-08-22, **60/60**, run twice. No migration.
+
+Harness `run-slice4.mjs`; payloads probed first with `SLICE=4 node probe-ui-payloads.mjs`.
+Screen: `/hr/organogram`. Backend: the gate, the counting, the ordering, a cycle guard.
+
+**Slice 0 said the engine ran. It did — and four of the five things it returned were wrong.**
+None of it was visible without rendering the payload, which is the whole argument for the
+probe-before-TypeScript rule: reading `OrganogramService` finds none of it.
+
+| Dimension | Nodes | Unlinked | Depth | Widest branch |
+|---|---|---|---|---|
+| units | 41 | 1 (a real root) | 4 | 6 |
+| positions | 304 | 181 | 7 | 181 |
+| people | 6,287 | **6,105** | 2 | 6,105 |
+| locations | 11 | 1 | 2 | 7 |
+| teams | 0 | — | — | — |
+
+**D-8 · The gate, split deliberately.** `people` moved to `SuperAdmin,TenantAdmin,HR`; units,
+positions, locations and teams stay open to any authenticated user. Four of the five dimensions
+describe the *company* — restricting them would be gating the noticeboard. `people` is the
+personnel register: slice 0 measured a plain `Employee` pulling all 6,237 staff in one unpaged call
+with **every work email address in `meta`**. Slice 0's assertion flips to 403, and slice 4 also
+asserts the other four still answer 200 — otherwise "fixing" the hole by closing the whole
+controller would pass, and would take the org chart away from the people it exists to inform.
+
+**D-21 · §3.2's claim that headcount is "rolled up per unit" was false.** Measured: nine of TDC's
+41 units reported **zero** staff while holding children full of them — `Managing Director's Office`,
+`HR / Administration Department` and `Operations Directorate` all read 0. `TotalEmployeeCount` added
+to the DTO and computed as a subtree sum after the tree is normalised, on the three dimensions that
+carry a headcount and explicitly **not** on locations, where a rolled-up `0` would be a number
+invented for rows that have none.
+
+**D-27 · Every headcount counted leavers.** 79 terminated employees were staff on all three charts;
+unit-assigned headcount fell 6,262 → 6,183 once filtered. The predicate is lifted verbatim from
+`EmployeeService.cs:2385` rather than restated, so the organogram and the rest of HR cannot drift on
+what "a member of staff" means. Position occupancy is unmoved today (52 either way — no post is held
+*only* by a leaver) but the vacancy flag was latent: the first departure would have left a post
+reading "filled".
+
+⚠ **An EF-untranslatable predicate compiles.** The first version wrote `OnStrength` as a static
+method and called it inside `.Where()`. That builds, reads correctly, and throws at runtime. It is
+now an `Expression<Func<Employee, bool>>` applied as its own `.Where()` clause.
+
+**D-28 · Two of five dimensions came back unordered**, so sibling order shuffled between identical
+calls. Area 17/18's unordered-read lesson, one page wider.
+
+**A cycle guard, added before anything needed it.** `Build()` re-rooted *missing* parents but not
+*looping* ones. Nothing stops `Employee.ManagerId` forming a loop — the org-unit service refuses
+cycles, the employee service does not — and a looped group is reachable from no root, so the client
+either drops those people silently or spins building the tree. `DetachCycles` breaks each loop at
+one node.
+
+**D-19 · The people dimension is not a hierarchy, and the screen has to say so.** 181 of 6,286
+employees have a manager recorded (2.9%); 0 of 41 units have a head. Not slice 4's to fix — it is
+the org-authority data programme in [[hr-deferred-modules]] — but a chart drawn without comment
+reads as a *flat organisation* rather than an *unpopulated* one. The coverage panel states which,
+computed live from the payload, so the day the data lands the panel stops saying it. The harness
+asserts the same numbers, so that day is noticed rather than discovered.
+
+**The chart carries no new dependency.** `reactflow` and `recharts` are both already in the tree and
+neither ships a tree layout; the DTO's own comment assumes `d3-org-chart`, which is not installed.
+Connectors are CSS borders. Three things make a 6,105-wide fan survive: subtrees mount nothing until
+opened, sibling rows page at 40, and search expands the ancestors of its hits.
+
+⚠ **Two harness lessons, both mine**
+
+- **A parent with children is not a parent with staff.** The first D-21 assertion demanded that
+  every hollow parent report a non-zero total; it correctly failed on `Development Control Unit`,
+  `Estates Department` and `MIS Unit`, which have children and nobody anywhere beneath them. The
+  invariant is arithmetic — *total = own count + children's totals* — and checking it exactly is
+  also stronger, because it catches a rollup that double-counts as readily as one that under-counts.
+- **A fixture that moves an employee must respect the rules on the way.** The first D-27 probe built
+  a throwaway unit and moved the subject into it, and was refused: *"Selected position does not
+  belong to the specified organization unit."* A real rule doing its job. Proving a headcount needs
+  no new unit at all — the delta across a termination is the honest measurement, and because the
+  subject is minted in the run, the unit ends on the count it started with.
+
+**Verification:** frontend `tsc` clean on every touched file (repository-wide errors are the 19
+pre-existing Inventory ones — cross-module defect #4); `next lint` clean.
+
+### Slice 4b — the teams register. 2026-08-22, **88/88**, run twice. Migration `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete`.
+
+Harness `run-slice4b.mjs`. Screens: `/administration/hr/organization/teams`, `…/teams/new`,
+`…/teams/[id]`. Full regression alongside: slice 0 **16/16**, 1 **69/69**, 2 **100/100**,
+3 **49/49**, 4 **60/60**.
+
+**This slice exists because Decision 5 was reopened, and reopening it was right.**
+
+Slice 4 shipped four tabs and dropped the fifth, on the grounds that `Team` had exactly one consumer
+in the entire repository — `OrganogramService` itself — with no controller, no service, no seeder
+and no writer of any kind, so it projected a table nothing could ever fill. That reasoning had three
+legs and **one does not hold**: "don't ship an empty store" fails against slice 1, where
+`CompanyProfiles` also had zero rows and got its editor anyway. Empty means nobody built the screen,
+not that nobody wants it. Asked why the register could not simply be built, the honest answer was
+that it could.
+
+**What was already there, measured before writing a line:** three entities (`Team`, `TeamMember`,
+`TeamMemberHistory`), three real tables (31 / 20 / 18 columns), `DbSet`s at
+`ApplicationDbContext.HR.cs:48-50`, and complete EF configuration at `:790-880` — indexes, foreign
+keys, delete behaviours. Three enums. **Nothing was missing but the application layer**, which is
+why this is one slice rather than an area.
+
+**D-29 · The soft-delete/unique-index trap, third occurrence in this bundle.**
+`IX_Team_Tenant_Code` was UNIQUE with no filter over a soft-deleting store, so a dissolved team
+would hold its code for ever: the service's duplicate check reads through the soft-delete filter,
+sees nothing, approves the write, and SQL then rejects it — an opaque 500 in place of the sentence
+the service was written to give. This is D-9 (the reliever priority) and D-10 (the reissued
+associate number) a third time. **Whenever a store soft-deletes, every uniqueness claim over it —
+index or generator — is wrong until proven otherwise.** Found by reading the configuration before
+writing the service, rather than by a 500 afterwards.
+
+The migration is guarded SQL rather than the scaffolded `DropIndex`/`CreateIndex` pair, and the
+order matters: an `IF NOT EXISTS … CREATE` on its own finds the *unfiltered* index already sitting
+under the same name, skips, and records the migration as applied — leaving the defect in place and
+looking fixed. Its `Down` can legitimately fail once the filter has been live, because soft-deleted
+rows may by then share a code with a live one; that is stated in place, because silently dropping
+the uniqueness would be the worse answer.
+
+**The rules the entity implied and nothing enforced.** The modelling was thoughtful, so most of them
+were discoverable from the fields:
+
+- **A leaver cannot join a team or lead one** — the same predicate as everywhere else in HR. Without
+  it, a terminated employee walks back onto the organogram through the teams dimension, straight out
+  the side of slice 4's D-27 fix.
+- **`IX_TeamMember_Team_Employee` is deliberately not unique**, because leaving a team and rejoining
+  it later is two legitimate rows. So the duplicate rule is the service's to hold, and it must ask
+  *"is one of them current"* rather than *"does one exist"* — a `COUNT` through the wrong filter
+  would refuse a legitimate rejoin.
+- **`MaxMembers` was a field nothing read.** Now enforced on add.
+- **`IsPrimary` had to be exclusive per employee**, or the flag means nothing.
+- **Parent-team cycles are refused** rather than rendered around. Slice 4 added `DetachCycles` to
+  survive one; better not to create one.
+- **Removing a member ends the membership rather than deleting it.** A team's record of who was on
+  it is part of what the register is for, so the row stays and carries its leaving date. The harness
+  asserts the row's *survival*, not a status code.
+
+**One definition of "on the team now"** — `IsCurrentMembership`, in the mapping extensions and
+reused by the roster, the member count and the organogram, so the three cannot disagree. It is
+evaluated in memory rather than restated as an EF predicate for exactly that reason.
+
+**The organogram's fifth view came back, and gained a real number.** Teams now carry a live member
+count (membership current *and* the person on strength) with `MaxMembers` as the expected headcount,
+and roll up like the other headcount dimensions. Slice 4's two teams assertions were **flipped, not
+deleted** — one said teams carry no rolled-up count, the other that the projection is empty. Both
+were true only while nothing could write the table. The replacement asserts the chart shows exactly
+what the register holds, and prints UNPROVEN rather than passing vacuously when the register is
+empty — which on DEFAULT it still is, because TDC has authored no teams yet.
+
+⚠ **A harness lesson that was neither the harness's fault nor the product's:** a run inspected with
+`node run-slice4b.mjs | head -40` was killed by SIGPIPE partway through and never reached its
+cleanup, leaving three live fixture teams behind — which then surfaced as two *correct* failures in
+slice 4. **Truncating a harness's output truncates the harness.** Use `tail`, or redirect to a file.
+
+**Left deliberately unbuilt:** `ShiftId` and `LocationId` are on the entity and go out as `null`
+from the form. Shift needs the attendance shift-definition picker and location the site picker;
+both are easy, and both are better added once TDC has said whether its teams use them than guessed
+at now.
+
+**Residue on live data:** 24 soft-deleted fixture teams and their ended memberships, plus the usual
+`T19V` employees. The register itself reads clean — 0 live teams — and a soft-deleted team no longer
+holds its code, which is the point of the migration.

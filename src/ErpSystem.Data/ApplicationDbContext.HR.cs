@@ -789,8 +789,16 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ============================================================================
         builder.Entity<Team>(entity =>
         {
+            // Filtered, and the filter is the whole point. `DeleteAsync` on this store is a SOFT
+            // delete, so without `WHERE IsDeleted = 0` a dissolved team keeps its code for ever:
+            // the service's own duplicate check reads through the soft-delete filter, sees nothing,
+            // approves the write, and SQL then rejects it with an opaque 500. That is exactly D-9
+            // (the reliever priority) and D-10 (the reissued associate number) from slice 0 — the
+            // same trap, third occurrence in this bundle. Whenever a store soft-deletes, every
+            // uniqueness claim over it is wrong until it is filtered.
             entity.HasIndex(e => new { e.TenantId, e.Code })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_Team_Tenant_Code");
 
             entity.HasIndex(e => e.OrganizationUnitId)

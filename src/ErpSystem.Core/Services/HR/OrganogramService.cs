@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.HR;
@@ -27,6 +28,7 @@ public class OrganogramService : IOrganogramService
     private readonly IGenericRepository<Employee> _employees;
     private readonly IGenericRepository<Location> _locations;
     private readonly IGenericRepository<Team> _teams;
+    private readonly IGenericRepository<TeamMember> _teamMembers;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<OrganogramService> _logger;
 
@@ -36,6 +38,7 @@ public class OrganogramService : IOrganogramService
         IGenericRepository<Employee> employees,
         IGenericRepository<Location> locations,
         IGenericRepository<Team> teams,
+        IGenericRepository<TeamMember> teamMembers,
         ICurrentUserProvider currentUserProvider,
         ILogger<OrganogramService> logger)
     {
@@ -44,6 +47,7 @@ public class OrganogramService : IOrganogramService
         _employees = employees;
         _locations = locations;
         _teams = teams;
+        _teamMembers = teamMembers;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -58,6 +62,22 @@ public class OrganogramService : IOrganogramService
             throw new InvalidOperationException("No tenant is associated with the current user.");
         return tenantId;
     }
+
+    /// <summary>
+    /// Who counts as being in the organisation. This is the predicate
+    /// <c>EmployeeService.CanBeAssignedWork</c> uses (<c>EmployeeService.cs:2385</c>) and it is
+    /// reused verbatim rather than restated, so the organogram and the rest of HR cannot drift on
+    /// what "a member of staff" means.
+    /// </summary>
+    /// <remarks>
+    /// An <see cref="Expression{TDelegate}"/> rather than a method, and applied as its own
+    /// <c>.Where()</c> clause, because EF cannot translate a call to a C# method inside a query — a
+    /// predicate written as one compiles and then throws at runtime. Measured on DEFAULT
+    /// 2026-08-22: 79 of 6,286 employees are terminated, and until this predicate existed here every
+    /// one of them was counted as staff on the unit and position charts.
+    /// </remarks>
+    private static readonly Expression<Func<Employee, bool>> OnStrength =
+        e => e.IsActive && e.StaffStatus != StaffStatus.Terminated;
 
     private Guid RequireCurrentTenant(Guid tenantId)
     {
@@ -75,10 +95,12 @@ public class OrganogramService : IOrganogramService
             .Include(u => u.OrganizationLevel)
             .Include(u => u.HeadEmployee)
             .OrderBy(u => u.Sequence)
+            .ThenBy(u => u.Name)
             .ToListAsync(cancellationToken);
 
         var headcount = await _employees.GetQueryable()
             .Where(e => e.TenantId == tenantId && e.OrganizationUnitId != null)
+            .Where(OnStrength)
             .GroupBy(e => e.OrganizationUnitId)
             .Select(g => new { UnitId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -106,7 +128,7 @@ public class OrganogramService : IOrganogramService
             return node;
         }).ToList();
 
-        return Build("units", nodes, "Organization");
+        return Build("units", nodes, "Organization", rollUpHeadcount: true);
     }
 
     public async Task<OrganogramResponseDto> GetPositionsAsync(CancellationToken cancellationToken = default)
@@ -117,10 +139,12 @@ public class OrganogramService : IOrganogramService
             .Include(p => p.OrganizationUnit)
             .Include(p => p.StaffLevel)
             .OrderBy(p => p.Level)
+            .ThenBy(p => p.Title)
             .ToListAsync(cancellationToken);
 
         var filled = await _employees.GetQueryable()
             .Where(e => e.TenantId == tenantId)
+            .Where(OnStrength)
             .GroupBy(e => e.PositionId)
             .Select(g => new { PositionId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -149,16 +173,23 @@ public class OrganogramService : IOrganogramService
             return node;
         }).ToList();
 
-        return Build("positions", nodes, "Positions");
+        return Build("positions", nodes, "Positions", rollUpHeadcount: true);
     }
 
     public async Task<OrganogramResponseDto> GetPeopleAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        // On strength only. A leaver is not in the organisation, and drawing one still holding
+        // reporting lines is the opposite of what a reporting chart is read for. Their reports fall
+        // to the root through the dangling-parent promotion in Build(), which is the honest picture:
+        // the post is vacant and nobody has been reassigned yet.
         var employees = await _employees.GetQueryable()
             .Where(e => e.TenantId == tenantId)
+            .Where(OnStrength)
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
+            .OrderBy(e => e.LastName)
+            .ThenBy(e => e.FirstName)
             .ToListAsync(cancellationToken);
 
         var reports = employees
@@ -185,7 +216,7 @@ public class OrganogramService : IOrganogramService
             return node;
         }).ToList();
 
-        return Build("people", nodes, "Organization");
+        return Build("people", nodes, "Organization", rollUpHeadcount: true);
     }
 
     public async Task<OrganogramResponseDto> GetLocationsAsync(Guid structureId, CancellationToken cancellationToken = default)
@@ -195,6 +226,7 @@ public class OrganogramService : IOrganogramService
             .Where(l => l.TenantId == tenantId && l.StructureId == structureId)
             .Include(l => l.LocationLevel)
             .OrderBy(l => l.Sequence)
+            .ThenBy(l => l.Name)
             .ToListAsync(cancellationToken);
 
         var nodes = locations.Select(l =>
@@ -225,10 +257,28 @@ public class OrganogramService : IOrganogramService
             .Where(t => t.TenantId == tenantId)
             .Include(t => t.TeamLead)
             .Include(t => t.OrganizationUnit)
+            .OrderBy(t => t.Sequence)
+            .ThenBy(t => t.Name)
             .ToListAsync(cancellationToken);
+
+        // Membership headcount, on the same two terms as everywhere else in this service: the
+        // membership must be live, and the person must be on strength. Counting a leaver's old
+        // membership here would put them back on the organogram through the teams dimension, out
+        // the side of the D-27 fix.
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var memberships = await _teamMembers.GetQueryable()
+            .Where(m => m.TenantId == tenantId && m.IsActive)
+            .Where(m => m.LeaveDate == null || m.LeaveDate >= today)
+            .Join(_employees.GetQueryable().Where(e => e.TenantId == tenantId).Where(OnStrength),
+                  m => m.EmployeeId, e => e.Id, (m, e) => m.TeamId)
+            .ToListAsync(cancellationToken);
+        var memberCountByTeam = memberships
+            .GroupBy(id => id)
+            .ToDictionary(g => g.Key, g => g.Count());
 
         var nodes = teams.Select(t =>
         {
+            var members = memberCountByTeam.TryGetValue(t.Id, out var c) ? c : 0;
             var node = new OrganogramNodeDto
             {
                 Id = t.Id.ToString(),
@@ -239,30 +289,53 @@ public class OrganogramService : IOrganogramService
                 HeadName = t.TeamLead?.FullName,
                 IsActive = t.Status == TeamStatus.Active,
                 IsVacant = t.TeamLeadId == null,
-                Badge = t.Status == TeamStatus.Active ? null : t.Status.ToString(),
+                EmployeeCount = members,
+                ExpectedHeadcount = t.MaxMembers,
+                Badge = t.Status != TeamStatus.Active
+                    ? t.Status.ToString()
+                    : (t.TeamLeadId == null ? "No lead" : null),
             };
             if (t.OrganizationUnit != null) node.Meta["Owning unit"] = t.OrganizationUnit.Name;
+            if (!string.IsNullOrWhiteSpace(t.ProjectCode)) node.Meta["Project"] = t.ProjectCode!;
+            if (!string.IsNullOrWhiteSpace(t.CostCenterCode)) node.Meta["Cost centre"] = t.CostCenterCode!;
+            node.Meta["Members"] = t.MaxMembers.HasValue ? $"{members} of {t.MaxMembers}" : members.ToString();
+            node.Meta["Effective from"] = t.EffectiveFrom.ToString("yyyy-MM-dd");
+            if (t.EffectiveTo.HasValue) node.Meta["Effective to"] = t.EffectiveTo.Value.ToString("yyyy-MM-dd");
             return node;
         }).ToList();
 
-        return Build("teams", nodes, "Teams");
+        // Rolls up now that teams carry a headcount at all — slice 4b. Before the register existed
+        // the dimension projected a table nothing could write, so every node was null and a
+        // rolled-up "0" would have been a number invented for rows that had none.
+        return Build("teams", nodes, "Teams", rollUpHeadcount: true);
     }
 
     /// <summary>
-    /// Normalises a flat node set into a single-rooted tree the client can render:
-    /// dangling parent references become roots, and when more than one root exists a synthetic
-    /// root is prepended so d3-org-chart always receives exactly one root.
+    /// Normalises a flat node set into a single-rooted tree the client can render: self-parents and
+    /// cycles are broken, dangling parent references become roots, and when more than one root
+    /// exists a synthetic root is prepended so the renderer always receives exactly one.
     /// </summary>
-    private static OrganogramResponseDto Build(string dimension, List<OrganogramNodeDto> nodes, string rootLabel)
+    /// <param name="rollUpHeadcount">
+    /// True on the dimensions that carry a headcount (units, positions, people). False on locations
+    /// and teams, where <c>EmployeeCount</c> is null throughout and a rolled-up "0" would be a
+    /// number invented for nodes that have none.
+    /// </param>
+    private static OrganogramResponseDto Build(
+        string dimension, List<OrganogramNodeDto> nodes, string rootLabel, bool rollUpHeadcount = false)
     {
-        var ids = new HashSet<string>(nodes.Select(n => n.Id));
+        var byId = new Dictionary<string, OrganogramNodeDto>(nodes.Count);
+        foreach (var n in nodes) byId[n.Id] = n;
 
         // Any node whose parent isn't present (filtered out / orphaned) is promoted to a root.
+        // This is also what re-roots the reports of someone who has left: their manager is no longer
+        // on strength, so the id no longer resolves and the reports surface rather than vanish.
         foreach (var n in nodes)
         {
-            if (!string.IsNullOrEmpty(n.ParentId) && !ids.Contains(n.ParentId))
+            if (!string.IsNullOrEmpty(n.ParentId) && !byId.ContainsKey(n.ParentId))
                 n.ParentId = null;
         }
+
+        DetachCycles(nodes, byId);
 
         var roots = nodes.Where(n => string.IsNullOrEmpty(n.ParentId)).ToList();
         if (roots.Count > 1)
@@ -280,6 +353,8 @@ public class OrganogramService : IOrganogramService
             });
         }
 
+        if (rollUpHeadcount) RollUpHeadcount(nodes);
+
         return new OrganogramResponseDto
         {
             Dimension = dimension,
@@ -287,5 +362,92 @@ public class OrganogramService : IOrganogramService
             NodeCount = nodes.Count,
             GeneratedAtUtc = DateTime.UtcNow,
         };
+    }
+
+    /// <summary>
+    /// Breaks any parent cycle by detaching the node that closes it.
+    /// </summary>
+    /// <remarks>
+    /// The contract of these endpoints is "a flat list the client turns into a tree". Nothing in the
+    /// product stops <c>Employee.ManagerId</c> from forming a loop — the org-unit service refuses
+    /// cycles, the employee service does not — and a looped group is reachable from no root at all,
+    /// so the client either drops those people silently or spins building the tree. Detaching one
+    /// node per cycle makes the group render, visibly, as its own top-level branch.
+    /// </remarks>
+    private static void DetachCycles(List<OrganogramNodeDto> nodes, Dictionary<string, OrganogramNodeDto> byId)
+    {
+        foreach (var n in nodes)
+        {
+            if (n.ParentId == n.Id) n.ParentId = null;
+        }
+
+        var settled = new HashSet<string>();
+        var onPath = new HashSet<string>();
+        var path = new List<OrganogramNodeDto>();
+
+        foreach (var start in nodes)
+        {
+            if (settled.Contains(start.Id)) continue;
+            onPath.Clear();
+            path.Clear();
+
+            var cursor = start;
+            while (cursor is not null && !settled.Contains(cursor.Id))
+            {
+                if (!onPath.Add(cursor.Id))
+                {
+                    cursor.ParentId = null; // this node closes the loop; it becomes a root
+                    break;
+                }
+                path.Add(cursor);
+                cursor = string.IsNullOrEmpty(cursor.ParentId) ? null : byId[cursor.ParentId];
+            }
+
+            foreach (var seen in path) settled.Add(seen.Id);
+        }
+    }
+
+    /// <summary>
+    /// Fills <see cref="OrganogramNodeDto.TotalEmployeeCount"/> with the subtree total at every node.
+    /// </summary>
+    /// <remarks>
+    /// Iterative rather than recursive: the people dimension is six thousand nodes and a stack
+    /// overflow on a deep chain is not a failure mode worth owning for the sake of four fewer lines.
+    /// Safe to walk because <see cref="DetachCycles"/> has already run.
+    /// </remarks>
+    private static void RollUpHeadcount(List<OrganogramNodeDto> nodes)
+    {
+        var children = new Dictionary<string, List<OrganogramNodeDto>>();
+        foreach (var n in nodes)
+        {
+            n.TotalEmployeeCount = n.EmployeeCount;
+            if (string.IsNullOrEmpty(n.ParentId)) continue;
+            if (!children.TryGetValue(n.ParentId, out var siblings))
+                children[n.ParentId] = siblings = new List<OrganogramNodeDto>();
+            siblings.Add(n);
+        }
+
+        var order = new List<OrganogramNodeDto>(nodes.Count);
+        var stack = new Stack<OrganogramNodeDto>();
+        foreach (var root in nodes.Where(n => string.IsNullOrEmpty(n.ParentId)))
+            stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+            order.Add(n);
+            if (children.TryGetValue(n.Id, out var kids))
+                foreach (var k in kids) stack.Push(k);
+        }
+
+        // Reverse pre-order is a valid post-order: every child is settled before its parent is read.
+        for (var i = order.Count - 1; i >= 0; i--)
+        {
+            var n = order[i];
+            if (!children.TryGetValue(n.Id, out var kids)) continue;
+            var total = n.EmployeeCount ?? 0;
+            foreach (var k in kids) total += k.TotalEmployeeCount ?? 0;
+            n.TotalEmployeeCount = total;
+        }
     }
 }

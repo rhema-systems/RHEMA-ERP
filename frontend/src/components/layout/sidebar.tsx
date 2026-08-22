@@ -410,6 +410,10 @@ export const navigationItems: NavItem[] = [
     icon: UserCheck,
     children: [
       { title: 'Employees', href: '/hr/employees', icon: Users },
+      // Read-only view of the org's own records. Lives here rather than under Administration
+      // because it is looked at daily, not configured — and the administration tree is gated to
+      // admin roles, which would hide it from the HR officers the API gate lets in.
+      { title: 'Organogram', href: '/hr/organogram', icon: Network },
       {
         title: 'Payroll',
         href: '/hr/payroll',
@@ -1615,6 +1619,9 @@ export const navigationItems: NavItem[] = [
               { title: 'Structures', href: '/administration/hr/organization/structures', icon: Building2 },
               { title: 'Levels', href: '/administration/hr/organization/levels', icon: ListTree },
               { title: 'Units', href: '/administration/hr/organization/units', icon: FolderTree },
+              // Slice 4b. Teams are the working groups, as distinct from the units people are
+              // formally posted into — the entities existed since the port with no way to write them.
+              { title: 'Teams', href: '/administration/hr/organization/teams', icon: Users2 },
             ],
           },
           {

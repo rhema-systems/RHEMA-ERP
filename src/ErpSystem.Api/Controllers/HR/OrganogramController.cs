@@ -1,5 +1,6 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,13 +9,35 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <summary>
 /// Serves the organogram visualisation: each endpoint returns a flat list of uniform
 /// <see cref="OrganogramNodeDto"/> for one dimension (units, positions, people, locations, teams).
-/// The client builds the tree. All data is tenant-scoped by the DbContext query filters.
+/// The client builds the tree. Every read is scoped to the authenticated tenant by the service.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The gate is deliberately split, and the split is the whole point rather than an oversight.
+/// Four of the five dimensions describe the <i>company</i> — its units, its posts, its sites, its
+/// teams — which is exactly what an org chart exists to make common knowledge, so they stay open to
+/// any authenticated user. Restricting them would be gating the noticeboard.
+/// </para>
+/// <para>
+/// <c>people</c> is not that. It is the personnel register: slice 0 measured a plain
+/// <c>Employee</c> pulling all 6,237 staff records out of it in one unpaged call, every one of them
+/// carrying a work email address in <c>meta</c>. That is a staff-directory export wearing a chart's
+/// clothes, and it is HR's to hold.
+/// </para>
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
 public class OrganogramController : ControllerBase
 {
+    /// <summary>
+    /// Who may read the people dimension. Matches the company-profile gate from slice 1 — if TDC
+    /// wants the reporting chart visible company-wide, adding <c>Constants.Roles.Employee</c> here
+    /// is the whole change, but do it knowing the payload includes everyone's email.
+    /// </summary>
+    private const string PeopleRoles =
+        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
+
     private readonly IOrganogramService _service;
     private readonly ILogger<OrganogramController> _logger;
 
@@ -35,7 +58,9 @@ public class OrganogramController : ControllerBase
         => await SafeAsync(() => _service.GetPositionsAsync(cancellationToken), "positions");
 
     [HttpGet("people")]
+    [Authorize(Roles = PeopleRoles)]
     [ProducesResponseType(typeof(OrganogramResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<OrganogramResponseDto>> GetPeople(CancellationToken cancellationToken)
         => await SafeAsync(() => _service.GetPeopleAsync(cancellationToken), "people");
 
