@@ -411,10 +411,25 @@ public class ProcurementBudgetRepository : GenericRepository<ProcurementBudget>,
         };
     }
 
-    public async Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid departmentId)
+    public async Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid tenantId)
     {
-        var count = await _dbSet.CountAsync(b => b.FiscalYear == fiscalYear && b.DepartmentId == departmentId);
-        return $"PB-{fiscalYear}-{(count + 1):D4}";
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("A tenant is required to generate a procurement budget code.");
+
+        var prefix = $"PB-{fiscalYear}-";
+        var existingCodes = await _dbSet
+            .IgnoreQueryFilters()
+            .Where(b => b.TenantId == tenantId && b.BudgetCode.StartsWith(prefix))
+            .Select(b => b.BudgetCode)
+            .ToListAsync();
+
+        var highestSequence = existingCodes
+            .Select(code => code[prefix.Length..])
+            .Select(value => int.TryParse(value, out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highestSequence + 1):D4}";
     }
 
     public async Task<bool> BudgetCodeExistsAsync(string budgetCode)

@@ -210,11 +210,48 @@ public class ProcurementPlansController : ControllerBase
             var plan = await _planService.CreateAsync(dto);
             return CreatedAtAction(nameof(GetPlan), new { id = plan.Id }, plan);
         }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(PlanProblem(
+                StatusCodes.Status404NotFound,
+                "PROCUREMENT_PLAN_REFERENCE_NOT_FOUND",
+                "Procurement plan reference not found",
+                ex.Message));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, PlanProblem(
+                StatusCodes.Status403Forbidden,
+                "PROCUREMENT_PLAN_ACCESS_FORBIDDEN",
+                "Procurement plan access forbidden",
+                ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(PlanProblem(
+                StatusCodes.Status409Conflict,
+                "PROCUREMENT_PLAN_VALIDATION_FAILED",
+                "Procurement plan validation failed",
+                ex.Message));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating procurement plan");
             return StatusCode(500, "An error occurred while creating the procurement plan");
         }
+    }
+
+    private ProblemDetails PlanProblem(int status, string code, string title, string detail)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = title,
+            Detail = detail,
+            Instance = HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        return problem;
     }
 
     [HttpPut("{id}")]

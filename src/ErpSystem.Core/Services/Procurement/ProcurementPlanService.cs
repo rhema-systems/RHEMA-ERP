@@ -143,6 +143,7 @@ public class ProcurementPlanService : IProcurementPlanService
 
         var planNumber = await _planRepository.GeneratePlanNumberAsync(dto.FiscalYear);
         var currentUserId = _currentUserProvider.UserId;
+        var resolvedCurrency = selectedBudget?.Currency ?? dto.Currency;
 
         var plan = new ProcurementPlan
         {
@@ -157,7 +158,7 @@ public class ProcurementPlanService : IProcurementPlanService
             PlanEndDate = dto.PlanEndDate,
             PlanDurationYears = dto.PlanDurationYears,
             TotalEstimatedBudget = dto.TotalEstimatedBudget,
-            Currency = dto.Currency,
+            Currency = resolvedCurrency,
             Notes = dto.Notes,
             Status = "Draft",
             PreparedById = currentUserId != Guid.Empty ? currentUserId : null,
@@ -201,7 +202,19 @@ public class ProcurementPlanService : IProcurementPlanService
         if (plan.Status != "Draft")
             throw new InvalidOperationException("Only draft plans can be updated");
 
-        var currencyChanged = !string.Equals(plan.Currency, dto.Currency, StringComparison.OrdinalIgnoreCase);
+        var linkedBudget = (await _budgetRepository.GetByPlanIdAsync(id))
+            .FirstOrDefault(budget =>
+                budget.TenantId == _currentUserProvider.TenantId &&
+                !budget.IsDeleted);
+        if (linkedBudget is not null &&
+            (linkedBudget.DepartmentId != dto.DepartmentId || linkedBudget.FiscalYear != dto.FiscalYear))
+        {
+            throw new InvalidOperationException(
+                "The plan department and fiscal year must continue to match its approved budget.");
+        }
+
+        var resolvedCurrency = linkedBudget?.Currency ?? dto.Currency;
+        var currencyChanged = !string.Equals(plan.Currency, resolvedCurrency, StringComparison.OrdinalIgnoreCase);
 
         plan.Title = dto.Title;
         plan.Description = dto.Description;
@@ -213,7 +226,7 @@ public class ProcurementPlanService : IProcurementPlanService
         plan.PlanEndDate = dto.PlanEndDate;
         plan.PlanDurationYears = dto.PlanDurationYears;
         plan.TotalEstimatedBudget = dto.TotalEstimatedBudget;
-        plan.Currency = dto.Currency;
+        plan.Currency = resolvedCurrency;
         plan.Notes = dto.Notes;
         plan.UpdatedAt = DateTime.UtcNow;
 
@@ -224,7 +237,7 @@ public class ProcurementPlanService : IProcurementPlanService
             var planItems = await _itemRepository.GetByPlanIdAsync(id);
             foreach (var item in planItems.Where(i => !i.IsDeleted))
             {
-                item.Currency = dto.Currency;
+                item.Currency = resolvedCurrency;
                 item.UpdatedAt = DateTime.UtcNow;
                 await _itemRepository.UpdateAsync(item);
             }
@@ -426,6 +439,9 @@ public class ProcurementPlanService : IProcurementPlanService
 
         if (linkedBudget.DepartmentId != plan.DepartmentId || linkedBudget.FiscalYear != plan.FiscalYear)
             throw new InvalidOperationException("The linked procurement budget does not match the plan department and fiscal year.");
+
+        if (!string.Equals(linkedBudget.Currency, plan.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The procurement plan currency must match its linked approved budget.");
     }
 
     public async Task<ProcurementPlanDetailDto> PublishAsync(Guid id, PublishProcurementPlanDto dto)

@@ -3,6 +3,8 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Procurement;
 
@@ -144,12 +146,57 @@ public class ProcurementBudgetsController : ControllerBase
             var budget = await _budgetService.CreateAsync(dto);
             return CreatedAtAction(nameof(GetBudget), new { id = budget.Id }, budget);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, BudgetProblem(
+                StatusCodes.Status403Forbidden,
+                "PROCUREMENT_BUDGET_TENANT_REQUIRED",
+                "Procurement budget access forbidden",
+                ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                "PROCUREMENT_BUDGET_CONFLICT",
+                "Procurement budget conflict",
+                ex.Message));
+        }
+        catch (DbUpdateException ex) when (IsBudgetCodeConflict(ex))
+        {
+            _logger.LogWarning(ex, "Concurrent procurement budget number allocation conflict");
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                "PROCUREMENT_BUDGET_NUMBER_CONFLICT",
+                "Procurement budget number conflict",
+                "Another budget was created at the same time. Please retry; the system will allocate the next budget code."));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating budget");
             return StatusCode(500, "An error occurred while creating the budget");
         }
     }
+
+    private ProblemDetails BudgetProblem(int status, string code, string title, string detail)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = title,
+            Detail = detail,
+            Instance = HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        return problem;
+    }
+
+    private static bool IsBudgetCodeConflict(DbUpdateException exception)
+        => exception.InnerException is SqlException sqlException &&
+           sqlException.Number is 2601 or 2627 &&
+           sqlException.Message.Contains(
+               "IX_ProcurementBudgets_TenantId_BudgetCode",
+               StringComparison.OrdinalIgnoreCase);
 
     [HttpPut("{id}")]
     public async Task<ActionResult<ProcurementBudgetDetailDto>> UpdateBudget(Guid id, [FromBody] CreateProcurementBudgetDto dto)

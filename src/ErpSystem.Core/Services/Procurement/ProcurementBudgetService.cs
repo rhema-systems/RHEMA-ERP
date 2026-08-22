@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
@@ -87,47 +88,80 @@ public class ProcurementBudgetService : IProcurementBudgetService
 
     public async Task<ProcurementBudgetDetailDto> CreateAsync(CreateProcurementBudgetDto dto)
     {
-        var budgetCode = await _budgetRepository.GenerateBudgetCodeAsync(dto.FiscalYear, dto.DepartmentId);
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new UnauthorizedAccessException("A tenant context is required to create a procurement budget.");
 
-        var budget = new ProcurementBudget
+        async Task<ProcurementBudgetDetailDto> CreateUnderNumberLockAsync()
         {
-            BudgetCode = budgetCode,
-            Title = dto.Title,
-            Description = dto.Description,
-            DepartmentId = dto.DepartmentId,
-            ProcurementPlanId = dto.ProcurementPlanId,
-            FiscalYear = dto.FiscalYear,
-            AllocatedAmount = dto.AllocatedAmount,
-            Currency = dto.Currency,
-            ControlLevel = dto.ControlLevel,
-            WarningThresholdPercent = dto.WarningThresholdPercent,
-            EffectiveDate = dto.EffectiveDate,
-            ExpiryDate = dto.ExpiryDate,
-            Notes = dto.Notes,
-            Status = "Draft",
-            TenantId = _currentUserProvider.TenantId
-        };
+            await _unitOfWork.AcquireTransactionLockAsync(
+                $"procurement-budget-number:{tenantId:N}:{dto.FiscalYear}");
 
-        await _budgetRepository.AddAsync(budget);
+            var budgetCode = await _budgetRepository.GenerateBudgetCodeAsync(dto.FiscalYear, tenantId);
 
-        foreach (var allocationDto in dto.Allocations)
-        {
-            var allocation = new ProcurementBudgetAllocation
+            var budget = new ProcurementBudget
             {
-                ProcurementBudgetId = budget.Id,
-                CategoryName = allocationDto.CategoryName,
-                CategoryDescription = allocationDto.CategoryDescription,
-                AllocatedAmount = allocationDto.AllocatedAmount,
-                Notes = allocationDto.Notes,
-                TenantId = _currentUserProvider.TenantId
+                BudgetCode = budgetCode,
+                Title = dto.Title,
+                Description = dto.Description,
+                DepartmentId = dto.DepartmentId,
+                ProcurementPlanId = dto.ProcurementPlanId,
+                FiscalYear = dto.FiscalYear,
+                AllocatedAmount = dto.AllocatedAmount,
+                Currency = dto.Currency,
+                ControlLevel = dto.ControlLevel,
+                WarningThresholdPercent = dto.WarningThresholdPercent,
+                EffectiveDate = dto.EffectiveDate,
+                ExpiryDate = dto.ExpiryDate,
+                Notes = dto.Notes,
+                Status = "Draft",
+                TenantId = tenantId
             };
-            await _allocationRepository.AddAsync(allocation);
+
+            await _budgetRepository.AddAsync(budget);
+
+            foreach (var allocationDto in dto.Allocations)
+            {
+                var allocation = new ProcurementBudgetAllocation
+                {
+                    ProcurementBudgetId = budget.Id,
+                    CategoryName = allocationDto.CategoryName,
+                    CategoryDescription = allocationDto.CategoryDescription,
+                    AllocatedAmount = allocationDto.AllocatedAmount,
+                    Notes = allocationDto.Notes,
+                    TenantId = tenantId
+                };
+                await _allocationRepository.AddAsync(allocation);
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+            _logger.LogInformation("Created procurement budget {BudgetCode}", budgetCode);
+
+            return await GetByIdAsync(budget.Id)
+                ?? throw new InvalidOperationException("Failed to retrieve created budget");
         }
 
-        await _unitOfWork.SaveChangesAsync();
-        _logger.LogInformation("Created procurement budget {BudgetCode}", budgetCode);
+        if (_unitOfWork.HasActiveTransaction)
+            return await CreateUnderNumberLockAsync();
 
-        return await GetByIdAsync(budget.Id) ?? throw new InvalidOperationException("Failed to retrieve created budget");
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                var result = await CreateUnderNumberLockAsync();
+                await _unitOfWork.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync();
+                else
+                    _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
     }
 
     public async Task<ProcurementBudgetDetailDto> UpdateAsync(Guid id, CreateProcurementBudgetDto dto)

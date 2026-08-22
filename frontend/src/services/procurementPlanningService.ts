@@ -1066,7 +1066,7 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create procurement plan');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to create procurement plan'));
     return response.json();
   },
 
@@ -1335,7 +1335,7 @@ export const procurementBudgetService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create procurement budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to create procurement budget'));
     return response.json();
   },
 
@@ -1380,7 +1380,7 @@ export const procurementBudgetService = {
     const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/available-for-linking?departmentId=${departmentId}&fiscalYear=${fiscalYear}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to get available budgets');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to get available budgets'));
     return response.json();
   },
 
