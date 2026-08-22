@@ -4,6 +4,9 @@ import type {
   HealthcareFacilitySummary,
   HealthcareFacilityCreateRequest,
   HealthcareFacilityUpdateRequest,
+  FacilityService,
+  FacilityServiceCreateRequest,
+  FacilityServiceUpdateRequest,
   Physician,
   PhysicianSummary,
   PhysicianCreateRequest,
@@ -35,6 +38,7 @@ import type {
  */
 class MedicalFacilityService {
   private readonly facilities = '/healthcare-facilities';
+  private readonly facilityServices = '/facility-services';
   private readonly physicians = '/medical-physicians';
 
   // ── Facilities ─────────────────────────────────────────────────────────────
@@ -71,8 +75,41 @@ class MedicalFacilityService {
     return apiService.put<HealthcareFacility>(`${this.facilities}/${id}`, payload);
   }
 
+  /**
+   * ⚠ Refused with a 422 naming the count while the facility still lists services. The delete
+   * is a soft delete, so nothing cascades and no foreign key objects - before slice 9 the
+   * services simply stopped being listable while still existing. Deactivate the facility instead.
+   */
   removeFacility(id: string): Promise<void> {
     return apiService.delete<void>(`${this.facilities}/${id}`);
+  }
+
+  // ── Facility services ──────────────────────────────────────────────────────
+
+  /**
+   * The services one facility offers. Reads are open to any authenticated user - an employee
+   * filing a claim has to be able to see what the facility does.
+   */
+  getFacilityServices(facilityId: string): Promise<FacilityService[]> {
+    return apiService.get<FacilityService[]>(`${this.facilityServices}/facility/${facilityId}`);
+  }
+
+  getFacilityService(id: string): Promise<FacilityService> {
+    return apiService.get<FacilityService>(`${this.facilityServices}/${id}`);
+  }
+
+  /** ⚠ 404s when `facilityId` names no facility of yours; it used to be a raw 500. */
+  createFacilityService(payload: FacilityServiceCreateRequest): Promise<FacilityService> {
+    return apiService.post<FacilityService>(this.facilityServices, payload);
+  }
+
+  updateFacilityService(id: string, payload: FacilityServiceUpdateRequest): Promise<FacilityService> {
+    return apiService.put<FacilityService>(`${this.facilityServices}/${id}`, payload);
+  }
+
+  /** ⚠ Needs HR.Medical.Admin, like every other delete in this module. HR staff get a 403. */
+  removeFacilityService(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.facilityServices}/${id}`);
   }
 
   // ── Physicians ─────────────────────────────────────────────────────────────

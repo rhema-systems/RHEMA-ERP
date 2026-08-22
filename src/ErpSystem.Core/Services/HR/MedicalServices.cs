@@ -183,12 +183,29 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         return entity.ToDto();
     }
 
+    /// <remarks>
+    /// ⚠ Refused while the facility still lists services. The delete is a <b>soft</b> delete, so
+    /// nothing cascades and no foreign key objects — the services simply stopped being listable,
+    /// because their read joined the facility on a required navigation. Measured in areas 19-23
+    /// slice 9: <c>services before: 1 → services after: 0</c>, with the row still readable by id
+    /// throughout. Deactivating the facility is the operation this refusal points at; it keeps every
+    /// claim, exam and service that names the facility intact.
+    /// </remarks>
     public async Task<bool> DeleteFacilityAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _facilityRepository.GetByIdAsync(id);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{id}' not found.");
+
+        var services = (await _facilityServiceRepository.GetByFacilityIdAsync(id))
+            .Count(svc => svc.TenantId == entity.TenantId);
+        if (services > 0)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"{entity.FacilityName} lists {services} {(services == 1 ? "service" : "services")} and cannot be deleted. " +
+                "Remove them first, or deactivate the facility instead — it will stop appearing in the pickers " +
+                "while every claim and exam that names it keeps its record.");
 
         await _facilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -289,6 +306,71 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         return true;
     }
 
+    /// <summary>
+    /// Resolves the facility name for a service, tenant-scoped.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The repository reads no longer <c>.Include</c> the facility, because the navigation is
+    /// required and the include was an INNER JOIN that deleted rows from the answer. The name is
+    /// resolved here instead — which is also what fixes the half of this that was always broken:
+    /// <c>GetFacilityServiceByIdAsync</c>, the create response and the update response every one
+    /// returned <c>facilityName: ""</c>, because none of them had the navigation loaded. Only the
+    /// by-facility list ever populated it, by accident of its include. Measured in slice 9.
+    /// </remarks>
+    private async Task<string> ResolveFacilityNameAsync(Guid facilityId, Guid tenantId)
+    {
+        var facility = await _facilityRepository.GetByIdAsync(facilityId);
+        return facility is not null && facility.TenantId == tenantId ? facility.FacilityName : string.Empty;
+    }
+
+    private async Task<FacilityServiceDto> ToDtoWithFacilityAsync(FacilityService entity)
+    {
+        var dto = entity.ToDto();
+        dto.FacilityName = await ResolveFacilityNameAsync(entity.FacilityId, entity.TenantId);
+        return dto;
+    }
+
+    /// <summary>
+    /// The facility a service is being hung on must exist and be the caller's own.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ There was no check at all. A <c>facilityId</c> naming nobody reached the database and came
+    /// back as a bare <b>500</b> — measured in slice 9 — and a facility belonging to another tenant
+    /// would have satisfied the foreign key perfectly, because <c>HealthcareFacilities</c> is one
+    /// table for every tenant. Same shape as slice 7's D-60: the constraint cannot see a tenant.
+    /// </remarks>
+    private async Task<HealthcareFacility> GetOwnedFacilityAsync(Guid facilityId, Guid tenantId)
+    {
+        var facility = await _facilityRepository.GetByIdAsync(facilityId);
+        if (facility is null || facility.IsDeleted || facility.TenantId != tenantId)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.NotFound,
+                $"Healthcare facility with ID '{facilityId}' not found.");
+        return facility;
+    }
+
+    /// <summary>
+    /// One facility cannot list the same service twice.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Duplicates were accepted, measured by posting the identical payload twice. A picker then
+    /// offers the same service under two ids with two different estimated costs, and a claim naming
+    /// one of them is telling you nothing about which was meant. Compared case-insensitively and on
+    /// the trimmed name, because "X-ray" and "X-Ray " are the same service to everyone but SQL.
+    /// </remarks>
+    private async Task EnsureServiceNameIsFreeAsync(Guid facilityId, Guid tenantId, string name, Guid? excludeId)
+    {
+        var trimmed = (name ?? string.Empty).Trim();
+        var clash = (await _facilityServiceRepository.GetByFacilityIdAsync(facilityId))
+            .Any(svc => svc.TenantId == tenantId
+                     && (excludeId is null || svc.Id != excludeId.Value)
+                     && string.Equals(svc.Name.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+        if (clash)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"This facility already lists a service called '{trimmed}'.");
+    }
+
     public async Task<FacilityServiceDto> GetFacilityServiceByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _facilityServiceRepository.GetByIdAsync(id);
@@ -296,25 +378,39 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{id}' not found.");
 
-        return entity.ToDto();
+        return await ToDtoWithFacilityAsync(entity);
     }
 
     public async Task<IEnumerable<FacilityServiceDto>> GetFacilityServicesAsync(Guid facilityId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _facilityServiceRepository.GetByFacilityIdAsync(facilityId);
-        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+        var entities = (await _facilityServiceRepository.GetByFacilityIdAsync(facilityId))
+            .Where(e => e.TenantId == tenantId)
+            .ToList();
+
+        // One lookup for the whole list rather than one per row: every service here is on the same
+        // facility by construction.
+        var facilityName = entities.Count == 0
+            ? string.Empty
+            : await ResolveFacilityNameAsync(facilityId, tenantId);
+
+        var dtos = entities.ToDtoList().ToList();
+        foreach (var dto in dtos) dto.FacilityName = facilityName;
+        return dtos;
     }
 
     public async Task<FacilityServiceDto> CreateFacilityServiceAsync(CreateFacilityServiceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         EnsureTenant(tenantId);
+        await GetOwnedFacilityAsync(createDto.FacilityId, tenantId);
+        await EnsureServiceNameIsFreeAsync(createDto.FacilityId, tenantId, createDto.Name, null);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _facilityServiceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithFacilityAsync(entity);
     }
 
     public async Task<FacilityServiceDto> UpdateFacilityServiceAsync(UpdateFacilityServiceDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -324,12 +420,16 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{updateDto.Id}' not found.");
 
+        // ⚠ The update path used to hold none of the create path's rules. A rename onto an existing
+        // service was accepted; slice 7's D-62 in a second place.
+        await EnsureServiceNameIsFreeAsync(entity.FacilityId, entity.TenantId, updateDto.Name, entity.Id);
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _facilityServiceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithFacilityAsync(entity);
     }
 
     public async Task<bool> DeleteFacilityServiceAsync(Guid id, CancellationToken cancellationToken = default)

@@ -1,17 +1,17 @@
 'use client';
 
-import { z } from 'zod';
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceListPanel } from '@/components/hr/common/ResourceListPanel';
 import {
-  TextField,
-  TextareaField,
-  SelectField,
-  SwitchField,
-  FieldRow,
-} from '@/components/hr/employee/tabs/fields';
+  FacilityFormFields,
+  facilitySchema,
+  facilityFormToRequest,
+  emptyFacility,
+  type FacilityForm,
+} from '@/components/hr/medical/facility-form';
 import { medicalFacilityService } from '@/services/hr/medical-reference.service';
 import { HEALTH_FACILITY_TYPE_OPTIONS } from '@/types/hr/medical';
 import type { HealthcareFacilitySummary } from '@/types/hr/medical';
@@ -23,80 +23,17 @@ import type { HealthcareFacilitySummary } from '@/types/hr/medical';
  * done, and an expense claim cannot be filed without one — so this register is the first thing
  * to populate. Reading it does not need medical permissions (employees file their own claims and
  * must be able to pick a facility); creating and editing does, and deleting needs admin.
+ *
+ * ⚠ **Create only.** Editing lives on the facility detail screen, reached by the name in the first
+ * column. The rows here are `HealthcareFacilitySummary` and that payload carries ten keys — measured
+ * in areas 19-23 slice 9 — none of which is `physicalAddress`, a required field. A dialog seeded
+ * from a row therefore opened with it blank and made the user retype an address the screen could not
+ * show them. The detail screen loads the whole record, so nothing is missing there.
+ *
+ * ⚠ Deleting is refused while the facility still lists services, with a 422 naming the count. The
+ * delete is a soft delete, so nothing cascades and no foreign key objects; before slice 9 the
+ * services silently stopped being listable while continuing to exist.
  */
-const facilitySchema = z.object({
-  facilityName: z.string().min(1, 'Required').max(300),
-  shortName: z.string().max(100).optional(),
-  facilityCode: z.string().min(1, 'Required').max(50),
-  facilityType: z.enum([
-    'GeneralHospital',
-    'SpecializedHospital',
-    'TeachingHospital',
-    'Clinic',
-    'Polyclinic',
-    'MedicalCenter',
-    'Pharmacy',
-    'DiagnosticCenter',
-    'Laboratory',
-    'ImagingCenter',
-    'UrgentCare',
-    'DaySurgeryCenter',
-    'RehabilitationCenter',
-    'MaternityHome',
-    'DentalClinic',
-    'OpticalCenter',
-  ]),
-  licenseNumber: z.string().max(100).optional(),
-  physicalAddress: z.string().min(1, 'Required').max(500),
-  digitalAddress: z.string().max(50).optional(),
-  city: z.string().max(100).optional(),
-  primaryPhone: z.string().max(50).optional(),
-  emergencyPhone: z.string().max(50).optional(),
-  email: z.string().email('Not a valid email').max(255).optional().or(z.literal('')),
-  hasEmergencyServices: z.boolean(),
-  has24HourService: z.boolean(),
-  hasAmbulanceService: z.boolean(),
-  hasLaboratory: z.boolean(),
-  hasPharmacy: z.boolean(),
-  acceptsNHIS: z.boolean(),
-  nhisAccreditationNumber: z.string().max(100).optional(),
-  contactPersonName: z.string().max(200).optional(),
-  contactPersonPhone: z.string().max(50).optional(),
-  operatingHours: z.string().max(100).optional(),
-  isActive: z.boolean(),
-  notes: z.string().max(1000).optional(),
-});
-
-type FacilityForm = z.input<typeof facilitySchema>;
-
-const emptyFacility: FacilityForm = {
-  facilityName: '',
-  shortName: '',
-  facilityCode: '',
-  facilityType: 'GeneralHospital',
-  licenseNumber: '',
-  physicalAddress: '',
-  digitalAddress: '',
-  city: '',
-  primaryPhone: '',
-  emergencyPhone: '',
-  email: '',
-  hasEmergencyServices: false,
-  has24HourService: false,
-  hasAmbulanceService: false,
-  hasLaboratory: false,
-  hasPharmacy: false,
-  acceptsNHIS: false,
-  nhisAccreditationNumber: '',
-  contactPersonName: '',
-  contactPersonPhone: '',
-  operatingHours: '',
-  isActive: true,
-  notes: '',
-};
-
-const blank = (v?: string) => (v && v.length > 0 ? v : null);
-
 const typeLabel = (v: string) =>
   HEALTH_FACILITY_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
 
@@ -116,49 +53,26 @@ export default function HealthcareFacilitiesPage() {
         dialogHint="The facility code is how staff will recognise it on a claim — keep it short and stable."
         emptyDescription="No facilities have been registered yet. Add the hospitals and clinics staff actually attend; claims cannot be filed without one."
         list={() => medicalFacilityService.getFacilities()}
-        create={(values) => {
-          const v = facilitySchema.parse(values);
-          return medicalFacilityService.createFacility({
-            ...v,
-            shortName: blank(v.shortName),
-            licenseNumber: blank(v.licenseNumber),
-            digitalAddress: blank(v.digitalAddress),
-            city: blank(v.city),
-            primaryPhone: blank(v.primaryPhone),
-            emergencyPhone: blank(v.emergencyPhone),
-            email: blank(v.email),
-            nhisAccreditationNumber: blank(v.nhisAccreditationNumber),
-            contactPersonName: blank(v.contactPersonName),
-            contactPersonPhone: blank(v.contactPersonPhone),
-            operatingHours: blank(v.operatingHours),
-            notes: blank(v.notes),
-          });
-        }}
-        update={(id, values) => {
-          const v = facilitySchema.parse(values);
-          return medicalFacilityService.updateFacility(id, {
-            id,
-            ...v,
-            shortName: blank(v.shortName),
-            licenseNumber: blank(v.licenseNumber),
-            digitalAddress: blank(v.digitalAddress),
-            city: blank(v.city),
-            primaryPhone: blank(v.primaryPhone),
-            emergencyPhone: blank(v.emergencyPhone),
-            email: blank(v.email),
-            nhisAccreditationNumber: blank(v.nhisAccreditationNumber),
-            contactPersonName: blank(v.contactPersonName),
-            contactPersonPhone: blank(v.contactPersonPhone),
-            operatingHours: blank(v.operatingHours),
-            notes: blank(v.notes),
-          });
-        }}
+        create={(values) => medicalFacilityService.createFacility(facilityFormToRequest(values))}
+        // Never called: `allowUpdate` is false, and editing is the detail screen's job. Kept
+        // pointing at the real endpoint so the prop cannot quietly become a lie if that changes.
+        update={(id, values) =>
+          medicalFacilityService.updateFacility(id, { id, ...facilityFormToRequest(values) })
+        }
+        allowUpdate={false}
         remove={(id) => medicalFacilityService.removeFacility(id)}
         getId={(f) => f.id}
         columns={[
           {
             header: 'Facility',
-            cell: (f) => <span className="font-medium">{f.facilityName}</span>,
+            cell: (f) => (
+              <Link
+                href={`/hr/medical/facilities/${f.id}`}
+                className="font-medium text-primary hover:underline"
+              >
+                {f.facilityName}
+              </Link>
+            ),
           },
           {
             header: 'Code',
@@ -179,81 +93,9 @@ export default function HealthcareFacilitiesPage() {
         ]}
         schema={facilitySchema as any}
         emptyForm={emptyFacility}
-        toForm={(f) => ({
-          ...emptyFacility,
-          facilityName: f.facilityName,
-          facilityCode: f.facilityCode,
-          facilityType: f.facilityType,
-          city: f.city ?? '',
-          primaryPhone: f.primaryPhone ?? '',
-          hasEmergencyServices: f.hasEmergencyServices,
-          acceptsNHIS: f.acceptsNHIS,
-          isActive: f.isActive,
-          // physicalAddress is required by the API but absent from the summary row the table
-          // holds; the dialog re-collects it rather than silently sending an empty string.
-          physicalAddress: '',
-        })}
-        renderFields={(form) => (
-          <>
-            <FieldRow>
-              <TextField form={form} name="facilityName" label="Facility name" required />
-              <TextField form={form} name="facilityCode" label="Facility code" required />
-            </FieldRow>
-            <FieldRow>
-              <SelectField
-                form={form}
-                name="facilityType"
-                label="Type"
-                required
-                options={HEALTH_FACILITY_TYPE_OPTIONS}
-              />
-              <TextField form={form} name="shortName" label="Short name" />
-            </FieldRow>
-            <TextField
-              form={form}
-              name="physicalAddress"
-              label="Physical address"
-              required
-              placeholder="e.g. Liberation Road, Airport Residential Area"
-            />
-            <FieldRow>
-              <TextField form={form} name="city" label="City" />
-              <TextField form={form} name="digitalAddress" label="Digital address (GhanaPost GPS)" />
-            </FieldRow>
-            <FieldRow>
-              <TextField form={form} name="primaryPhone" label="Primary phone" />
-              <TextField form={form} name="emergencyPhone" label="Emergency phone" />
-            </FieldRow>
-            <FieldRow>
-              <TextField form={form} name="email" label="Email" />
-              <TextField form={form} name="licenseNumber" label="Licence number" />
-            </FieldRow>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <SwitchField form={form} name="hasEmergencyServices" label="Accident & emergency" />
-              <SwitchField form={form} name="has24HourService" label="Open 24 hours" />
-              <SwitchField form={form} name="hasAmbulanceService" label="Ambulance service" />
-              <SwitchField form={form} name="hasLaboratory" label="Laboratory on site" />
-              <SwitchField form={form} name="hasPharmacy" label="Pharmacy on site" />
-              <SwitchField form={form} name="acceptsNHIS" label="Accepts NHIS" />
-            </div>
-
-            <FieldRow>
-              <TextField
-                form={form}
-                name="nhisAccreditationNumber"
-                label="NHIS accreditation number"
-              />
-              <TextField form={form} name="operatingHours" label="Operating hours" />
-            </FieldRow>
-            <FieldRow>
-              <TextField form={form} name="contactPersonName" label="Contact person" />
-              <TextField form={form} name="contactPersonPhone" label="Contact phone" />
-            </FieldRow>
-            <SwitchField form={form} name="isActive" label="Active" />
-            <TextareaField form={form} name="notes" label="Notes" rows={2} />
-          </>
-        )}
+        // Only reached by the create path, which starts from `emptyFacility`; `allowUpdate` is off.
+        toForm={() => emptyFacility}
+        renderFields={(form) => <FacilityFormFields form={form} />}
       />
     </div>
   );

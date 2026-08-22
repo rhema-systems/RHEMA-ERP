@@ -116,7 +116,13 @@ public static class MedicalMappingExtensions
     {
         var dto = MapHealthcareFacilityCore<HealthcareFacilityDetailDto>(entity);
         dto.Physicians = entity.Physicians.Select(p => p.ToSummaryDto()).ToList();
-        dto.Services = entity.Services.Select(s => s.ToDto()).ToList();
+        // ⚠ Set the facility name explicitly rather than leaving ToDto to read `s.Facility`. It
+        // resolves today only because EF fixup wires the navigation back to the entity being mapped
+        // — the same accident-of-tracking slice 0 caught on the union agreement. An AsNoTracking read
+        // here would silently blank every row.
+        dto.Services = entity.Services
+            .Select(s => { var svc = s.ToDto(); svc.FacilityName = entity.FacilityName; return svc; })
+            .ToList();
         dto.ProviderNetworks = entity.ProviderFacilities.Select(pf => pf.ToSummaryDto()).ToList();
         return dto;
     }

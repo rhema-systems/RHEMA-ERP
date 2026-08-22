@@ -30,7 +30,7 @@ the JWT key passed; every harness runs **twice**.
 | **19** | `api/OrganizationUnitHistory` | 6 GET | 2 | **done**: slice 3 made it writable, slice 5 rendered it and found six more defects |
 | **20** | `api/external-associates` | 11 | 1 of 11 (a picker) | **done in slice 8**: register, detail, the filtered unique index (D-10), and the delete that used to empty an interview panel |
 | **20** | `api/hr/employee-relievers` | 5 | 2 | **done in slice 7**: roster tab, the leave-form seeding Decision 3 required, and the filtered unique index |
-| **20** | `api/facility-services` | 5 | 0 | medical-owned, 2 rows |
+| **20** | `api/facility-services` | 5 | 0 | **done in slice 9**: the facility detail screen that Decision 4 assumed already existed, plus the delete that used to empty a service list in silence |
 | **20** | `api/employee-certificates` | 9 | ✅ area 7 | **done, out of scope** |
 | **20** | `api/probations` | — | ✅ area 15b | **done, out of scope** |
 | **21** | `api/hr/unions` | 10 | 3 | **done in slice 6**: register, detail + agreements, and the job-description picker that was the missing reader |
@@ -253,7 +253,7 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 6 | **Unions and CBAs.** Register, detail, agreement collection, D-6 fix. | 21 |
 | 7 | **Reliever roster.** D-9 (the unfiltered unique index), roster screen + the leave-form default (Decision 3). | 20 |
 | 8 | **External associates.** D-10 (the reissued number), register, detail, activate/deactivate — the 10 unreached endpoints. ✅ | 20 |
-| 9 | **Facility services** onto the area-11 facility detail. | 20 |
+| 9 | **Facility services** onto the area-11 facility detail. ✅ | 20 |
 | 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. | 23 |
 | 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. | all |
 | 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
@@ -1154,3 +1154,114 @@ is now the correct behaviour rather than the defect. ⚠ One orphaned `JobInterv
 row was created against a **real** interview while proving D-63 and removed with SQL, because it
 could no longer be reached through the API — that was harness damage to TDC data, not a product fact,
 and the table is clean.
+
+### Slice 9 — facility services. 2026-08-22, **50/50**, run twice. No migration.
+
+Harness `run-slice9.mjs`; payloads probed first with `SLICE=9 node probe-ui-payloads.mjs`. Screens: a
+**healthcare-facility detail** at `/hr/medical/facilities/[id]` carrying the services collection and
+the facility's own edit form. Full regression alongside: slice 0 **17/17**, 1 **69/69**, 2
+**100/100**, 3 **49/49**, 4 **60/60**, 4b **88/88**, 5 **111/111**, 6 **77/77**, 7 **63/63**, 8
+**82/82**. Bundle total: **766 assertions**.
+
+⚠ **Decision 4 needed slice 5's adjustment, for slice 5's reason.** It sent facility services to "the
+area-11 healthcare-facility detail"; there is no facility detail screen. The register is a
+table-with-dialog built on `ResourceListPanel`, and a services tab inside a modal is not a place to
+work. Slice 9 built the detail screen, and the services hang off it as a `ResourceCollectionTab` —
+the same component the insurance detail already uses for its plans. **A service is meaningless
+without its facility**: "X-ray, GHS 200" is a price-list entry, "X-ray at Tema General, GHS 200" is a
+fact a claim can be checked against.
+
+**D-68 · Three of the five endpoints returned `facilityName: ""`.** The create response, the update
+response, and — the one that matters — `GET api/facility-services/{id}`, a **read**. Only the
+by-facility list ever filled it, and only because that single repository method happened to
+`.Include` the navigation. Measured side by side before the fix:
+
+```
+    facilityName on the create response: ""
+    facilityName on the read-back:       ""
+    facilityName in the list:            "A11S2 Hospital 373529"
+```
+
+The name is now resolved in the service, once per list rather than once per row, and all four reads
+are asserted to agree.
+
+**D-69 · A create naming a facility that does not exist was a bare 500**, because nothing checked. It
+is now a 404 with a sentence. ⚠ **The tenant half is the part that could not have been caught by the
+foreign key**: `HealthcareFacilities` is one table for every tenant, so a stranger's facility id
+satisfies the constraint perfectly and the row lands stamped with the caller's tenant pointing at
+someone else's hospital. Slice 7's D-60 in a second place — and the harness says in place that it
+cannot reach the cross-tenant case from one tenant's token, rather than implying it proved it.
+
+**D-70 · One facility could list the same service twice.** Posting the identical payload twice was
+accepted, so a picker offers the same service under two ids with two different estimated costs and a
+claim naming one of them says nothing about which was meant. Refused now, case- and
+padding-insensitively — and **the update path had none of the create path's rules either**, which is
+D-62's shape again. Three assertions guard the ways a fix like this goes wrong:
+
+- the same name on a **different** facility is still fine (a rule stated as "this name is taken"
+  rather than "taken *here*" would pass every other assertion and stop two hospitals both offering a
+  consultation);
+- a service may **keep its own name** while something else changes (without the exclude-self clause
+  the rule refuses most updates, and nothing above would notice);
+- a different name on the same facility still works.
+
+**D-71 · Deleting a facility silently emptied its service list.** Measured before the fix:
+
+```
+    services before: 1
+    DELETE api/healthcare-facilities/{id}   2xx
+    services after:  0
+    GET api/facility-services/{id} for the orphan   2xx   <- still readable by id
+```
+
+Not deleted — *unreachable from the only list that leads to it*. `FacilityService.FacilityId` is
+required, so `.Include(s => s.Facility)` is an INNER JOIN, and the global `!IsDeleted` filter on the
+principal removes the rows from the answer. **Fourth occurrence of the shape slice 5 found in the
+org-unit change log**, and the second in two slices after D-63. The `OnDelete.Restrict` on the
+foreign key reads like protection and is none: the delete is soft, so the constraint never fires.
+
+⚠ **`Physician` has the identical include and is not affected** — its `FacilityId` is nullable, so
+the same line is a LEFT JOIN and its rows survive. **The difference is the requiredness of the
+navigation, not the include**, which is the sharpest statement of this trap the bundle has produced
+and the test to apply at the next `.Include`.
+
+Two fixes, deliberately: the includes are gone, and `DeleteFacilityAsync` now refuses while the
+facility lists services, naming the count and pointing at deactivating instead. ⚠ **The include fix
+is not observable through the API once the guard holds** — there is no way left to reach the state it
+broke — and the run says so on screen rather than implying the assertions cover it. Same honesty as
+slice 8's unique index.
+
+**D-72 · The frontend offered 17 of the server's 34 service types.** Home care, telemedicine,
+dialysis, rehabilitation and thirteen specialties were accepted by the API the whole time and
+reachable from no screen, so a facility running a dialysis unit had to be filed under "Other". ⚠ **I
+was about to record this as the opposite defect.** Reading the enum, `Other` appeared to be missing
+server-side and therefore a value the frontend would send and the API reject; POSTing it proved
+otherwise — `Other = 99`, past the end of the run I had read. The probe is what stopped a confident,
+wrong entry going into this log. All 34 are now offered, and `run-slice9.mjs` POSTs every one of them
+so the union cannot drift again in silence.
+
+**The gate was already right, and is asserted anyway.** Reads open (an employee filing a claim has to
+see what the facility does), writes `Medical.Write`, deletes `Medical.Admin`. A plain employee reads
+and cannot write; **HR writes and cannot delete**. That last one is the separation area 11 introduced
+after an HR-role user deleted a paid claim, and it is asserted here so a change to
+`HrPermissions.RoleGrants` cannot widen it quietly.
+
+**Found on the way, and fixed at the root: the register's edit dialog could not show what it was
+editing.** `ResourceListPanel` seeds its form from the row it holds, and those rows are
+`HealthcareFacilitySummary` — ten keys, measured, **none of them `physicalAddress`**, which is
+required. So `toForm` set it to `''`, zod refused the submit, and the user had to retype an address
+the screen could not display. Editing moved to the detail screen, which loads the whole record; the
+register keeps create, where every field is typed fresh and nothing can be lost. The schema and
+fields moved to `components/hr/medical/facility-form.tsx` so the two surfaces cannot disagree.
+
+**`GET healthcare-facilities/{id}/details` is deliberately still uncalled**, and this is a decision
+rather than an oversight for slice 12 to find. It works and it carries `physicians`, `services` and
+`providerNetworks` — but both of the other two arrays were **empty in every measurement**, so a
+TypeScript type for them would be exactly the fiction areas 12 and 14 paid for. The detail screen
+reads `GET /{id}` and the services list instead, both fully probed. ⚠ Its `services` were also
+populating their `facilityName` only by EF fixup wiring the navigation back to the entity being
+mapped — the accident-of-tracking shape slice 0 caught on the union agreement — so `ToDetailDto` now
+sets it explicitly.
+
+**Residue on live data:** two fixture facilities per run, both deleted at the end (the guard permits
+it once their services are gone), plus the soft-deleted rows behind them.

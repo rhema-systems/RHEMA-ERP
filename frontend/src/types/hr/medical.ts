@@ -969,6 +969,15 @@ export const NHIS_CLAIM_STATUS_OPTIONS: { value: NHISClaimStatus; label: string 
   { value: 'Appealed', label: 'Appealed' },
 ];
 
+/**
+ * ⚠ All 34 server values, not the 17 this union used to carry.
+ *
+ * The seventeen missing ones — home care, telemedicine, dialysis, rehabilitation and the thirteen
+ * specialties — were accepted by the API the whole time and offered by no screen, so a facility that
+ * runs a dialysis unit had to be filed under "Other". Established by execution in areas 19-23 slice
+ * 9: every value below was POSTed and echoed back. `Other` is 99 on the server, not 18; the
+ * serialised name is what travels, so the numbering gap never mattered.
+ */
 export type MedicalServiceType =
   | 'Consultation'
   | 'EmergencyCare'
@@ -986,6 +995,23 @@ export type MedicalServiceType =
   | 'HealthScreening'
   | 'MentalHealth'
   | 'AmbulanceService'
+  | 'HomeCare'
+  | 'Telemedicine'
+  | 'Rehabilitation'
+  | 'Dialysis'
+  | 'PsychiatricServices'
+  | 'PediatricServices'
+  | 'ObstetricsGynecologyServices'
+  | 'CardiologyServices'
+  | 'NeurologyServices'
+  | 'DermatologyServices'
+  | 'OphthalmologyServices'
+  | 'ENT'
+  | 'PathologyServices'
+  | 'OncologyServices'
+  | 'NephrologyServices'
+  | 'GastroenterologyServices'
+  | 'PulmonologyServices'
   | 'Other';
 
 export const MEDICAL_SERVICE_TYPE_OPTIONS: { value: MedicalServiceType; label: string }[] = [
@@ -1005,8 +1031,84 @@ export const MEDICAL_SERVICE_TYPE_OPTIONS: { value: MedicalServiceType; label: s
   { value: 'HealthScreening', label: 'Health screening' },
   { value: 'MentalHealth', label: 'Mental health' },
   { value: 'AmbulanceService', label: 'Ambulance' },
+  { value: 'HomeCare', label: 'Home care' },
+  { value: 'Telemedicine', label: 'Telemedicine' },
+  { value: 'Rehabilitation', label: 'Rehabilitation' },
+  { value: 'Dialysis', label: 'Dialysis' },
+  { value: 'PsychiatricServices', label: 'Psychiatry' },
+  { value: 'PediatricServices', label: 'Paediatrics' },
+  { value: 'ObstetricsGynecologyServices', label: 'Obstetrics & gynaecology' },
+  { value: 'CardiologyServices', label: 'Cardiology' },
+  { value: 'NeurologyServices', label: 'Neurology' },
+  { value: 'DermatologyServices', label: 'Dermatology' },
+  { value: 'OphthalmologyServices', label: 'Ophthalmology' },
+  { value: 'ENT', label: 'ENT' },
+  { value: 'PathologyServices', label: 'Pathology' },
+  { value: 'OncologyServices', label: 'Oncology' },
+  { value: 'NephrologyServices', label: 'Nephrology' },
+  { value: 'GastroenterologyServices', label: 'Gastroenterology' },
+  { value: 'PulmonologyServices', label: 'Pulmonology' },
   { value: 'Other', label: 'Other' },
 ];
+
+// ── Facility services (slice 9) ───────────────────────────────────────────────
+
+/**
+ * A service a facility offers, and what it costs. Backend: `api/facility-services`.
+ *
+ * ⚠ Transcribed from a live payload, not from the DTO name.
+ */
+export interface FacilityService {
+  id: string;
+  tenantId: string;
+  facilityId: string;
+  /**
+   * ⚠ Was `""` on `GET /{id}`, on the create response and on the update response — only the
+   * by-facility list populated it, by accident of that one query's include. Resolved server-side on
+   * all five since slice 9, but a screen that already knows its facility should prefer its own copy.
+   */
+  facilityName: string;
+  name: string;
+  serviceType: MedicalServiceType;
+  /** The server's `ToString()` of the enum — not a display label; use MEDICAL_SERVICE_TYPE_OPTIONS. */
+  serviceTypeName: string;
+  estimatedCost?: number | null;
+  requiresAppointment: boolean;
+  isEmergencyService: boolean;
+  requiresPreAuthorization: boolean;
+  isActive: boolean;
+  notes?: string | null;
+  createdAt: string;
+  createdBy?: string | null;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface FacilityServiceCreateRequest {
+  facilityId: string;
+  name: string;
+  serviceType: MedicalServiceType;
+  estimatedCost?: number | null;
+  requiresAppointment: boolean;
+  isEmergencyService: boolean;
+  requiresPreAuthorization: boolean;
+  isActive: boolean;
+  notes?: string | null;
+}
+
+/** ⚠ Carries no `facilityId`: a service cannot be moved between facilities. */
+export interface FacilityServiceUpdateRequest {
+  id: string;
+  name: string;
+  serviceType: MedicalServiceType;
+  estimatedCost?: number | null;
+  requiresAppointment: boolean;
+  isEmergencyService: boolean;
+  requiresPreAuthorization: boolean;
+  isActive: boolean;
+  notes?: string | null;
+}
+
 
 export interface NHISClaimSummary {
   id: string;
