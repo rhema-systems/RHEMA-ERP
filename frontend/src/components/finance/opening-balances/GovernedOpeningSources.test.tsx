@@ -226,7 +226,7 @@ describe('GovernedOpeningSources', () => {
               ...financeOptions.bankAccounts[0],
               currencyCode: 'USD',
               exchangeRateId: 'rate-usd-1',
-              exchangeRate: 15,
+              exchangeRate: 12.5,
               exchangeRateDate: '2025-01-01T00:00:00Z',
               exchangeRateType: 'Daily',
               exchangeRateQuoteSide: 'Mid',
@@ -259,7 +259,7 @@ describe('GovernedOpeningSources', () => {
     expect(screen.getByText(/Approved Daily Mid rate:/)).toBeInTheDocument();
     expect(screen.getByText(/Bank of Ghana/)).toBeInTheDocument();
     expect(screen.getByText(/USD.*50,000\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/GHS.*750,000\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/GHS.*625,000\.00/)).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Prepare immutable bank batch' })
