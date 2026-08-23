@@ -5,9 +5,72 @@ using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
+
+/// <summary>
+/// Who the caller is, and what that lets them do, for every asset service in this file.
+/// </summary>
+/// <remarks>
+/// <para><b>Area 16, slice 1.</b> Before it, <c>AssetsController</c> carried a single bare
+/// <c>[Authorize]</c> over 82 routes and no service checked anything beyond the tenant. Slice 0
+/// proved what that meant by execution: a plain <c>Employee</c> could create asset types, create
+/// company assets, dispose of a company asset, reach the requisition approval endpoint and read
+/// every employee's assignments.</para>
+///
+/// <para><b>The controller's role attributes are the outer gate; these helpers are the inner
+/// one, and both are needed.</b> An attribute cannot express "this employee, on this record" —
+/// it does not know whose record it is — so the self-service routes carry only <c>[Authorize]</c>
+/// and are gated here instead. Neither half is a gate on its own.</para>
+///
+/// <para><c>UnauthorizedAccessException</c> is deliberate: <c>GlobalExceptionHandlingMiddleware</c>
+/// turns it into a <b>403 carrying its own message</b>, so a refusal can explain itself rather than
+/// arriving as an opaque error the user cannot act on.</para>
+/// </remarks>
+internal static class AssetActor
+{
+    /// <summary>HR and the two admin roles act on anyone's assets. Nobody else does.</summary>
+    /// <remarks>
+    /// Both HR spellings are checked. The seeded role is renamed from "HR User" to "HR" on startup,
+    /// but a tenant that has not run that migration still holds the old name.
+    /// </remarks>
+    internal static bool IsHr(ICurrentUserService user) =>
+        user.IsInRole(Constants.Roles.Hr)
+        || user.IsInRole(Constants.Roles.LegacyHrUser)
+        || user.IsInRole(Constants.Roles.SuperAdmin)
+        || user.IsInRole(Constants.Roles.TenantAdmin);
+
+    /// <summary>The caller's own employee record, or null where their login is not linked to one.</summary>
+    /// <remarks>
+    /// Null is never treated as a match. An unlinked login — <c>admin</c> is one — is nobody's
+    /// subject, so it fails every self check and passes only on the HR branch.
+    /// </remarks>
+    internal static Guid? CallerEmployeeId(ICurrentUserService user) =>
+        user.EmployeeId is { } id && id != Guid.Empty ? id : null;
+
+    /// <summary>The subject of the record, or HR acting for them.</summary>
+    internal static void EnsureSelfOrHr(ICurrentUserService user, Guid subjectEmployeeId, string action)
+    {
+        if (IsHr(user)) return;
+        if (CallerEmployeeId(user) == subjectEmployeeId) return;
+        throw new UnauthorizedAccessException($"Only HR and the employee concerned can {action}.");
+    }
+
+    /// <summary>
+    /// The subject of the record and nobody else — <b>HR included</b>.
+    /// </summary>
+    /// <remarks>
+    /// Reserved for the acts that are a person's own signature rather than an administrative step.
+    /// Acknowledging receipt of an asset is the only one today.
+    /// </remarks>
+    internal static void EnsureIsSubject(ICurrentUserService user, Guid subjectEmployeeId, string action)
+    {
+        if (CallerEmployeeId(user) == subjectEmployeeId) return;
+        throw new UnauthorizedAccessException($"Only the employee concerned can {action}.");
+    }
+}
 
 #region Asset Type Services
 
@@ -343,6 +406,9 @@ public class CompanyAssetService : ICompanyAssetService
 
     public async Task<IEnumerable<CompanyAssetSummaryDto>> GetByEmployeeAsync(Guid employeeId)
     {
+        AssetActor.EnsureSelfOrHr(_currentUserService, employeeId,
+            "see which company assets an employee holds");
+
         var tenantId = GetTenantId();
         var assets = await _assetRepo.GetByEmployeeAsync(employeeId);
         return assets.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
@@ -612,7 +678,15 @@ public class AssetAssignmentService : IAssetAssignmentService
     public async Task<AssetAssignmentDto?> GetByIdAsync(Guid id)
     {
         var entity = await _assignmentRepo.GetWithDetailsAsync(id);
-        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId()) return null;
+
+        // An assignment names a person and what they were given, in what condition, on what terms,
+        // and what they owe if they break it. Its holder may read it; nobody else outside HR may.
+        // The refusal is a 403 rather than a 404 on purpose — the record exists and the caller is
+        // being told they are not entitled to it, which is a different fact from "no such thing".
+        AssetActor.EnsureSelfOrHr(_currentUserService, entity.EmployeeId, "read an asset assignment");
+
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<AssetAssignmentSummaryDto>> GetAllAsync()
@@ -668,6 +742,9 @@ public class AssetAssignmentService : IAssetAssignmentService
 
     public async Task<IEnumerable<AssetAssignmentSummaryDto>> GetByEmployeeIdAsync(Guid employeeId)
     {
+        AssetActor.EnsureSelfOrHr(_currentUserService, employeeId,
+            "list an employee's asset assignments");
+
         var tenantId = GetTenantId();
         var assignments = await _assignmentRepo.GetByEmployeeIdAsync(employeeId);
         return assignments.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
@@ -675,6 +752,9 @@ public class AssetAssignmentService : IAssetAssignmentService
 
     public async Task<IEnumerable<AssetAssignmentSummaryDto>> GetActiveAssignmentsForEmployeeAsync(Guid employeeId)
     {
+        AssetActor.EnsureSelfOrHr(_currentUserService, employeeId,
+            "list what an employee currently holds");
+
         var tenantId = GetTenantId();
         var assignments = await _assignmentRepo.GetActiveAssignmentsForEmployeeAsync(employeeId);
         return assignments.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
@@ -739,6 +819,23 @@ public class AssetAssignmentService : IAssetAssignmentService
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
         
         var entity = await GetOwnedAssignmentAsync(dto.AssignmentId);
+
+        // ⚠ AREA 16 D-b. Acknowledgement is the one act on this record that only its subject may
+        // perform: it is the employee's word that they received the asset and accept the terms
+        // printed on the assignment. Slice 0 proved that until this line ANY authenticated caller
+        // could sign for anybody — a third party acknowledged an assignment they had nothing to do
+        // with, and the record then read as though the holder had.
+        //
+        // HR deliberately gets no override. Where an employee cannot reach the portal the answer is
+        // the printed, physically signed responsibility form (AST-5, slice 5) recorded as what it
+        // is — not HR quietly ticking the box in the employee's name, which is the same defect with
+        // better manners.
+        AssetActor.EnsureIsSubject(_currentUserService, entity.EmployeeId,
+            "acknowledge receipt of an asset");
+
+        if (entity.Status != AssignmentStatus.Active)
+            throw new InvalidOperationException(
+                "Only an active assignment can be acknowledged; this one has already been closed.");
 
         entity.EmployeeAcknowledged = true;
         entity.AcknowledgementDate = DateTime.UtcNow;
@@ -1191,7 +1288,11 @@ public class AssetRequisitionService : IAssetRequisitionService
     public async Task<AssetRequisitionDto?> GetByIdAsync(Guid id)
     {
         var entity = await _requisitionRepo.GetWithDetailsAsync(id);
-        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId()) return null;
+
+        AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById, "read an asset requisition");
+
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<AssetRequisitionSummaryDto>> GetAllAsync()
@@ -1231,6 +1332,9 @@ public class AssetRequisitionService : IAssetRequisitionService
 
     public async Task<IEnumerable<AssetRequisitionSummaryDto>> GetByRequestedByIdAsync(Guid employeeId)
     {
+        AssetActor.EnsureSelfOrHr(_currentUserService, employeeId,
+            "list the asset requisitions an employee has raised");
+
         var tenantId = GetTenantId();
         var requisitions = await _requisitionRepo.GetByRequestedByIdAsync(employeeId);
         return requisitions.Where(r => r.TenantId == tenantId).ToSummaryDtoList();
@@ -1267,7 +1371,12 @@ public class AssetRequisitionService : IAssetRequisitionService
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
         
         var entity = await GetOwnedRequisitionAsync(id);
-        
+
+        // The requester may correct their own request; HR may correct anyone's. The status rule
+        // below is a separate question from the actor rule above and neither substitutes for the
+        // other: an employee editing someone else's draft is refused here, not there.
+        AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById, "edit an asset requisition");
+
         if (entity.Status != AssetRequisitionStatus.Submitted && entity.Status != AssetRequisitionStatus.Draft)
             throw new InvalidOperationException("Only draft or submitted requisitions can be updated.");
 
@@ -1282,6 +1391,17 @@ public class AssetRequisitionService : IAssetRequisitionService
     public async Task DeleteAsync(Guid id)
     {
         var entity = await GetOwnedRequisitionAsync(id);
+
+        AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById,
+            "withdraw an asset requisition");
+
+        // A decided requisition is a record of a decision. Withdrawing it after the fact would
+        // erase the approval or the rejection along with the request, so it stops being possible
+        // once anyone has answered it.
+        if (entity.Status != AssetRequisitionStatus.Submitted && entity.Status != AssetRequisitionStatus.Draft)
+            throw new InvalidOperationException(
+                "Only a draft or submitted requisition can be withdrawn; this one has already been decided.");
+
         await _requisitionRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }

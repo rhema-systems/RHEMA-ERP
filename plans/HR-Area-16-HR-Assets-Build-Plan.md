@@ -38,8 +38,8 @@ decision — record the change where it happened.
 | **Backend today** | 10 entities, **82 endpoints** on one controller, 1,634 lines of service, 1,193 lines of DTOs, 939 lines of mapping, 584 lines of repositories |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
-| **Authorization today** | one bare `[Authorize]` on the controller. **No role or permission gate on any of the 82 routes** |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled; **slice 0 green twice, 41 assertions, 82/82 routes executed** |
+| **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–1 green twice — 86 assertions.** All 82 routes gated |
 | **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `run-slice0.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
@@ -196,6 +196,17 @@ be reached, for the reason D-k gives.
   writes answer 400/404 on a well-formed id. This is the same token-actor confusion as D-k, in a
   second place, and it is the shape [[hr-attendance-actor-conventions]] already warned about —
   *`ApprovedById` is an Employee FK, unlike Leave's*.
+
+- **D-m — every domain refusal in this area is mute.** Found while writing slice 1.
+  `GlobalExceptionHandlingMiddleware` **discards** an `InvalidOperationException`'s message and
+  substitutes the fixed string *"The operation is not valid for the current state of the object."*;
+  `ArgumentException` becomes *"Invalid argument provided."* — which also means every "not found" in
+  these services arrives as an opaque 400. So a rule that fires correctly still cannot tell the user
+  what to do about it. `UnauthorizedAccessException` is the exception: it is passed through **with
+  its own message**, which is why slice 1's 403s can be asserted on their wording.
+  The fix is an `AssetsException` case in the middleware mirroring the `AwardsException` one area 14
+  added (`response.Detail = ex.Message; // safe to display by design`), plus converting this file's
+  domain throws onto it. **Scheduled into slice 2.**
 
 **What slice 0 proved DOES work**, so later slices do not re-litigate it: asset types and their
 attributes; the asset register including attribute values, images and attachments; assignment
@@ -361,7 +372,7 @@ overdue returns; and the full screen set.
 |---|---|---|
 | **0** | **Prove the ground** | Call all 82 routes. Confirm or kill D-a … D-i. Diagnostic only, no production code |
 | **1** | Authorization + the actor | Role/permission gates over all 82 routes; acknowledgement bound to the assignee (D-b); self-or-HR on the ownership reads |
-| **2** | The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link, read-through of Finance fields, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` on create (AST-4, AST-7, AST-11, D-i(b)) — **and D-j**, the PUT that erases what it omits |
+| **2** | The register, and where an asset comes from | **D-m first** — refusals that speak — then `AssetSource` + `FixedAssetId` link, read-through of Finance fields, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` on create (AST-4, AST-7, AST-11, D-i(b)), **and D-j**, the PUT that erases what it omits. First migration of the area |
 | **3** | Requisition on the workflow engine, and on behalf | **D-k first** — a real approver from the token — then D3's workflow chain, `BeneficiaryEmployeeId` (AST-6b), and D-e's fulfilment set |
 | **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), **D-l** — transfers made creatable at all — then transfer onto the same engine |
 | **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
@@ -417,3 +428,55 @@ rows are still present with `IsDeleted = 1` and `WHERE IsDeleted = 0` returns 0 
 **strings** on the read DTOs, not ints — an assertion comparing to `1` measures nothing. (2) The
 soft delete means a unique index added in a later slice will not release on delete; area 13 hit
 that five times.
+
+---
+
+### Slice 1 — authorization, and the acknowledgement actor. 2026-08-23, **45/45, run twice** (stamps 161001, 161002). No migration.
+
+Two files changed: `AssetsController.cs` and `AssetsServices.cs`.
+
+**All 82 routes now carry an explicit gate.** 71 are `[Authorize(Roles = HrRoles)]` — SuperAdmin,
+TenantAdmin, HR. Eleven are self-service and carry a bare `[Authorize]` **plus a matching check in
+the service**, because an attribute cannot express *"this employee, on this record"*: it does not
+know whose record it is. The eleven are the type picker, the four "what do I hold" reads, the
+acknowledge action, and the five requisition routes AST-6 puts in an employee's hands.
+
+⚠ **The class could not simply carry the role list.** Stacked `[Authorize]` attributes are **ANDed**,
+so a class-level role gate cannot be widened per action. The class stays at bare `[Authorize]` and
+every action states its own — more attributes, but no route inherits a gate by accident and a new
+action with none is visibly ungated rather than quietly protected.
+
+**The sweep is exhaustive, not sampled.** All 71 administrative routes are called with a plain
+`Employee` token and must answer 403 — 0 leaks. It can be exhaustive because authorization runs
+*before* model binding, so a nil guid and an empty body still reach the decision; no valid payload
+has to be invented per route. The four writes slice 0 proved an employee could really perform
+(create a type, create an asset, **dispose of an asset**, read everyone's assignments) are then
+re-run with genuine payloads, because a 403 on a nonsense id could in principle come from somewhere
+other than the gate.
+
+**D-b is flipped and the flip is the proof.** A stranger acknowledging someone else's assignment
+was asserted as *succeeding* in slice 0; it is asserted as a 403 here. **HR is refused too, on
+purpose.** Acknowledgement is the employee's word that they received the asset and accept its terms,
+so it is not an administrative step anyone can take for them — `AssetActor.EnsureIsSubject` is
+reserved for exactly that kind of act, and it is the only one today. Where an employee cannot reach
+the portal at all, AST-5's printed and physically signed responsibility form (slice 5) records that
+as what it is, rather than HR ticking the box in the employee's name — the same defect with better
+manners. Two refusals in a row are asserted to leave `employeeAcknowledged` false, so the rule is
+proved to have *held* and not merely to have thrown.
+
+**A guard came with it:** a returned assignment can no longer be acknowledged. Slice 0's fixture
+could acknowledge a closed record, which would have let a signature appear after the asset was back
+in the store.
+
+**HR's own access is re-asserted throughout**, and the unlinked `admin` login is asserted separately:
+it passes on the HR branch and never on the self branch, because `CallerEmployeeId` returns null for
+a login with no employee record and null is never treated as a match. A gate that locks out the
+people who run the process is a regression wearing a fix's clothes.
+
+**Found, recorded, not fixed here — D-m.** See §3.4. The 403s speak; the domain refusals do not,
+because the middleware discards `InvalidOperationException` messages. Slice 1's harness asserts the
+mute text deliberately so the flip is visible when slice 2 lands.
+
+**`run-slice0.mjs` is a historical record from here on.** Five of its assertions (one D-b, four D-f)
+describe behaviour this slice fixed, so it now fails on exactly the lines it was written to prove.
+That is the design working; its header lists which five.
