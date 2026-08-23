@@ -1196,7 +1196,12 @@ public class CreateAssetRequisitionDto : CreateDtoBase
 
     public DateTime? RequiredByDate { get; set; }
 
-    public AssetRequisitionStatus Status { get; set; } = AssetRequisitionStatus.Submitted;
+    // ⚠ There is deliberately no `Status` here any more (area 16, slice 3b). It used to be written
+    // straight onto the record, so a caller could POST `{"status": 3}` and create a requisition
+    // that was already Approved — no approver, no approval date, no workflow instance — and HR's
+    // fulfilment gate ("only an approved requisition can be fulfilled") was satisfied by it. A new
+    // requisition is a Draft; it reaches Submitted through `POST requisitions/{id}/submit` and
+    // every state after that belongs to the approval workflow.
 }
 
 /// <summary>
@@ -1233,7 +1238,22 @@ public class UpdateAssetRequisitionDto : UpdateDtoBase
 
     public DateTime? RequiredByDate { get; set; }
 
-    public AssetRequisitionStatus? Status { get; set; }
+    // ⚠ No `Status` here either, and for a worse reason than on the create DTO: this one applied to
+    // an EXISTING record, so a requester editing their own draft could set it to Approved or
+    // straight to Fulfilled. Slice 3b: the workflow owns the status, the form owns the request.
+}
+
+/// <summary>
+/// Why a request is being pulled back out of an approval queue — requisitions and transfers alike.
+/// </summary>
+/// <remarks>
+/// The body is optional on both recall routes: a recall with no reason is still a recall, and
+/// refusing one over a missing sentence would only teach people to type a full stop.
+/// </remarks>
+public class RecallAssetRequestDto
+{
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
 }
 
 /// <summary>One asset issued against a requisition, and the assignment that issued it — D-e.</summary>

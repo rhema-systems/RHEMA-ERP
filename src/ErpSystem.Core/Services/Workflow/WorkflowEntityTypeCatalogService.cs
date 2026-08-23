@@ -52,6 +52,11 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("ProbationPeriod", "Human Resources", "Probation confirmed by the named confirming authority before HR issues the confirmation letter", "UserCheck", "#059669", 79),
             new("JobDescription", "Human Resources", "Job descriptions approved against a position before they take effect (FR-HR-134)", "FileText", "#0D9488", 79),
             new("ManpowerBudget", "Human Resources", "Manpower budgets approved Department Head to HR to Managing Director before headcount is authorised (FR-HR-135)", "Users", "#B45309", 79),
+            // ⚠ Prefixed `Hr`, and deliberately. `AssetTransfer` already means Finance's fixed-asset
+            // transfer to WorkflowEntityDisplayService, and `Asset` above is the Inventory one. HR's
+            // staff-asset records are a third thing with the same names — see the build plan §3.3.
+            new("HrAssetRequisition", "Human Resources", "Staff requests for a company asset, approved before HR issues one (AST-6)", "ClipboardList", "#0891B2", 79),
+            new("HrAssetTransfer", "Human Resources", "Company assets moved between employees, locations or units, approved before the move (AST-2)", "ArrowRightLeft", "#7C3AED", 79),
             new("Project", "Projects", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Projects", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Projects", "Project closure approval and close-out governance", "Flag", "#15803D", 84),

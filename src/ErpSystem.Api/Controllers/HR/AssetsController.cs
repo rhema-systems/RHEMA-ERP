@@ -859,6 +859,32 @@ public class AssetsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Submit a draft requisition for approval.</summary>
+    /// <remarks>
+    /// Self-service: the requester sends their own request, HR sends anyone's — the same rule as
+    /// editing one. Where it goes next is the tenant's published workflow definition's business,
+    /// not this controller's.
+    /// </remarks>
+    [HttpPost("requisitions/{id:guid}/submit")]
+    [Authorize]
+    public async Task<ActionResult<AssetRequisitionDto>> SubmitRequisition(Guid id)
+    {
+        var result = await _requisitionService.SubmitAsync(id);
+        return Ok(result);
+    }
+
+    /// <summary>Recall a submitted requisition back to draft.</summary>
+    /// <remarks>Self-service: only the person who raised it, checked on the record.</remarks>
+    [HttpPost("requisitions/{id:guid}/recall")]
+    [Authorize]
+    public async Task<ActionResult<AssetRequisitionDto>> RecallRequisition(
+        Guid id,
+        [FromBody] RecallAssetRequestDto? dto = null)
+    {
+        var result = await _requisitionService.RecallAsync(id, dto?.Reason);
+        return Ok(result);
+    }
+
     /// <summary>Approve requisition.</summary>
     [HttpPost("requisitions/{id:guid}/approve")]
     [Authorize(Roles = HrRoles)]
@@ -976,6 +1002,26 @@ public class AssetsController : ControllerBase
     {
         await _transferService.DeleteAsync(id);
         return NoContent();
+    }
+
+    /// <summary>Submit a draft transfer for approval.</summary>
+    [HttpPost("transfers/{id:guid}/submit")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetTransferDto>> SubmitTransfer(Guid id)
+    {
+        var result = await _transferService.SubmitAsync(id);
+        return Ok(result);
+    }
+
+    /// <summary>Recall a submitted transfer back to draft.</summary>
+    [HttpPost("transfers/{id:guid}/recall")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetTransferDto>> RecallTransfer(
+        Guid id,
+        [FromBody] RecallAssetRequestDto? dto = null)
+    {
+        var result = await _transferService.RecallAsync(id, dto?.Reason);
+        return Ok(result);
     }
 
     /// <summary>Approve transfer.</summary>

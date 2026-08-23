@@ -141,6 +141,13 @@ public interface IAssetRequisitionService
     Task<AssetRequisitionDto> CreateAsync(CreateAssetRequisitionDto dto);
     Task<AssetRequisitionDto> UpdateAsync(Guid id, UpdateAssetRequisitionDto dto);
     Task DeleteAsync(Guid id);
+
+    /// <summary>Sends a draft requisition for approval (D3 - the workflow engine).</summary>
+    Task<AssetRequisitionDto> SubmitAsync(Guid id);
+
+    /// <summary>Pulls a submitted requisition back to draft, for the requester alone.</summary>
+    Task<AssetRequisitionDto> RecallAsync(Guid id, string? reason);
+
     Task ApproveAsync(Guid id, ApproveAssetRequisitionDto dto);
     Task RejectAsync(Guid id, RejectAssetRequisitionDto dto);
     Task FulfillAsync(Guid id, FulfillAssetRequisitionDto dto);
@@ -160,6 +167,13 @@ public interface IAssetTransferService
     Task<AssetTransferDto> CreateAsync(CreateAssetTransferDto dto);
     Task<AssetTransferDto> UpdateAsync(Guid id, UpdateAssetTransferDto dto);
     Task DeleteAsync(Guid id);
+
+    /// <summary>Sends a draft transfer for approval (D3 - the workflow engine).</summary>
+    Task<AssetTransferDto> SubmitAsync(Guid id);
+
+    /// <summary>Pulls a submitted transfer back to draft, for the initiator alone.</summary>
+    Task<AssetTransferDto> RecallAsync(Guid id, string? reason);
+
     Task ApproveAsync(Guid id);
     Task CompleteAsync(Guid id);
     Task RejectAsync(Guid id);

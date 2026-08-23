@@ -1718,6 +1718,54 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = requisition.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "HR_ASSET_REQUISITION", "HrAssetRequisition", "HR Asset Requisition"))
+        {
+            var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetRequisition>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Asset requisition not found");
+
+            // What a definition could reasonably branch on: how many of what, how urgently, and
+            // whether the person who asked is the person who gets it. A department head signing off
+            // one replacement keyboard and ten laptops for a new site are not the same decision.
+            context["requisitionNumber"] = requisition.RequisitionNumber;
+            context["assetTypeId"] = requisition.AssetTypeId;
+            context["quantity"] = requisition.Quantity;
+            context["priority"] = requisition.Priority.ToString();
+            context["isUrgent"] = requisition.Priority == Core.Enums.HRAssetRequisitionPriority.Urgent;
+            context["requestedById"] = requisition.RequestedById;
+            context["beneficiaryEmployeeId"] = requisition.BeneficiaryEmployeeId;
+            // AST-6b. Who benefits is a routing fact, not decoration: a request somebody raised for
+            // themselves and one raised on another employee's behalf carry different conflicts.
+            context["isOnBehalf"] = requisition.BeneficiaryEmployeeId != null;
+            context["requiredByDate"] = requisition.RequiredByDate;
+            context["status"] = requisition.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_ASSET_TRANSFER", "HrAssetTransfer", "HR Asset Transfer"))
+        {
+            // ⚠ Fully qualified. `AssetTransfer` unqualified in this file would be ambiguous or
+            // wrong — Finance declares one too, and this is HR's. Build plan §3.3.
+            var transfer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetTransfer>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Asset transfer not found");
+
+            // The kind of move is the routing fact here: handing a laptop from one employee to
+            // another is a different authority from moving equipment between units or sites.
+            context["transferNumber"] = transfer.TransferNumber;
+            context["assetId"] = transfer.AssetId;
+            context["transferType"] = transfer.Type.ToString();
+            context["isBetweenEmployees"] = transfer.Type == Core.Enums.HRAssetTransferType.EmployeeToEmployee;
+            context["fromEmployeeId"] = transfer.FromEmployeeId;
+            context["toEmployeeId"] = transfer.ToEmployeeId;
+            context["fromLocationId"] = transfer.FromLocationId;
+            context["toLocationId"] = transfer.ToLocationId;
+            context["fromUnitId"] = transfer.FromUnitId;
+            context["toUnitId"] = transfer.ToUnitId;
+            context["initiatedById"] = transfer.InitiatedById;
+            context["transferDate"] = transfer.TransferDate;
+            context["status"] = transfer.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "EMPLOYEE_SEPARATION", "EmployeeSeparation", "Employee Separation"))
         {
             var separation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSeparation>()

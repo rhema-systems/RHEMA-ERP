@@ -594,12 +594,24 @@ public class AssetTransferRepository : GenericRepository<AssetTransfer>, IAssetT
             .FirstOrDefaultAsync(at => at.TenantId == tenantId && at.TransferNumber == transferNumber && !at.IsDeleted);
     }
 
+    // ⚠ The three reads below load the SAME graph as GetByTenantAsync, and they have to.
+    // AssetTransferSummaryDto reads the asset's name, and then reads From/To off the employee, the
+    // location or the unit depending on the transfer's TYPE — so a read that includes only the
+    // employees returns a blank `fromName`/`toName` for every location or unit transfer, and a read
+    // that omits the asset returns a blank `assetName` everywhere. That is the uneven-.Include
+    // family this area has now met five times (D-n, D-o, D-o(b), requisitionNumber in slice 3):
+    // a mapping and the read that feeds it are ONE change.
     public async Task<IEnumerable<AssetTransfer>> GetByAssetIdAsync(Guid assetId)
     {
         return await _context.Set<AssetTransfer>()
+            .Include(at => at.Asset)
             .Include(at => at.InitiatedBy)
             .Include(at => at.FromEmployee)
             .Include(at => at.ToEmployee)
+            .Include(at => at.FromLocation)
+            .Include(at => at.ToLocation)
+            .Include(at => at.FromUnit)
+            .Include(at => at.ToUnit)
             .Where(at => at.AssetId == assetId && !at.IsDeleted)
             .OrderByDescending(at => at.TransferDate)
             .ToListAsync();
@@ -610,6 +622,12 @@ public class AssetTransferRepository : GenericRepository<AssetTransfer>, IAssetT
         return await _context.Set<AssetTransfer>()
             .Include(at => at.Asset)
             .Include(at => at.InitiatedBy)
+            .Include(at => at.FromEmployee)
+            .Include(at => at.ToEmployee)
+            .Include(at => at.FromLocation)
+            .Include(at => at.ToLocation)
+            .Include(at => at.FromUnit)
+            .Include(at => at.ToUnit)
             .Where(at => at.TenantId == tenantId && at.Status == status && !at.IsDeleted)
             .ToListAsync();
     }
@@ -621,6 +639,10 @@ public class AssetTransferRepository : GenericRepository<AssetTransfer>, IAssetT
             .Include(at => at.InitiatedBy)
             .Include(at => at.FromEmployee)
             .Include(at => at.ToEmployee)
+            .Include(at => at.FromLocation)
+            .Include(at => at.ToLocation)
+            .Include(at => at.FromUnit)
+            .Include(at => at.ToUnit)
             .Where(at => at.TenantId == tenantId && at.Status == HRAssetTransferStatus.Pending && !at.IsDeleted)
             .OrderBy(at => at.TransferDate)
             .ToListAsync();

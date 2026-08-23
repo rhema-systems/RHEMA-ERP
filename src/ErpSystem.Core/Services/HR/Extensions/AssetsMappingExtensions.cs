@@ -802,7 +802,9 @@ public static class AssetsMappingExtensions
             Priority = dto.Priority,
             Justification = dto.Justification,
             RequiredByDate = dto.RequiredByDate,
-            Status = dto.Status,
+            // Status is not mapped from the payload — the service sets Draft. See the note on
+            // CreateAssetRequisitionDto for what a client-settable status let through.
+            Status = AssetRequisitionStatus.Draft,
             CreatedBy = userId.ToString()
         };
     }
@@ -815,13 +817,10 @@ public static class AssetsMappingExtensions
         entity.Priority = dto.Priority;
         entity.Justification = dto.Justification;
         entity.RequiredByDate = dto.RequiredByDate;
-        
-        // Update status only if provided
-        if (dto.Status.HasValue)
-        {
-            entity.Status = dto.Status.Value;
-        }
-        
+
+        // The status is NOT taken from the payload. It used to be — see UpdateAssetRequisitionDto.
+        // BeneficiaryEmployeeId is not set here either: it needs the on-behalf authorization check,
+        // so the service assigns it after calling this.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -938,7 +937,9 @@ public static class AssetsMappingExtensions
             ToUnitId = dto.ToUnitId,
             TransferReason = dto.TransferReason,
             InitiatedById = initiatedById,
-            Status = HRAssetTransferStatus.Pending,
+            // Draft, not Pending. A transfer is out for approval only once somebody submits it —
+            // slice 3b split the two states apart so a recall has somewhere to land.
+            Status = HRAssetTransferStatus.Draft,
             Notes = dto.Notes,
             CreatedBy = userId.ToString()
         };

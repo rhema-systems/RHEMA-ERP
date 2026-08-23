@@ -414,6 +414,44 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            // ⚠ FULLY QUALIFIED, and it has to be: this file carries
+            // `using ErpSystem.Core.Entities.Finance.FixedAssets`, so a bare `AssetTransfer` here is
+            // Finance's, and the key "AssetTransfer" is already claimed by it further down. HR's
+            // staff-asset records answer to `HrAssetRequisition` / `HrAssetTransfer` for exactly
+            // that reason — see the build plan §3.3 on the three-level name collision.
+            if (key == Normalize("HrAssetRequisition") || key == Normalize("HR_ASSET_REQUISITION") || key == Normalize("HR Asset Requisition"))
+            {
+                var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetRequisition>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AssetType, x => x.RequestedBy);
+                info.EntityType = "HrAssetRequisition";
+                info.EntityNumber = requisition?.RequisitionNumber;
+                // What is being asked for and by whom, because an approver deciding "yes, issue it"
+                // needs both: "REQ-20260823-A1B2C3" alone says nothing about whether a laptop for a
+                // new starter is a reasonable thing to sign.
+                info.EntityName = requisition == null
+                    ? null
+                    : requisition.AssetType == null
+                        ? requisition.RequisitionNumber
+                        : $"{requisition.RequisitionNumber} — {requisition.Quantity} × {requisition.AssetType.Name}";
+                info.ActionUrl = $"/hr/assets/requisitions/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("HrAssetTransfer") || key == Normalize("HR_ASSET_TRANSFER") || key == Normalize("HR Asset Transfer"))
+            {
+                var transfer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetTransfer>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Asset);
+                info.EntityType = "HrAssetTransfer";
+                info.EntityNumber = transfer?.TransferNumber;
+                info.EntityName = transfer == null
+                    ? null
+                    : transfer.Asset == null
+                        ? transfer.TransferNumber
+                        : $"{transfer.TransferNumber} — {transfer.Asset.AssetName}";
+                info.ActionUrl = $"/hr/assets/transfers/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("SuccessionPlan") || key == Normalize("SUCCESSION_PLAN") || key == Normalize("Succession Plan"))
             {
                 var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()

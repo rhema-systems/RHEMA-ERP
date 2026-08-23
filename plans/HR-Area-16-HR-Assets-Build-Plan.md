@@ -39,8 +39,8 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–3 green twice — 314 assertions.** The requisition pipeline runs end to end for the first time since the port |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `run-slice0.mjs` |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–3b green twice — 449 assertions.** Both approval surfaces are on the workflow engine, and the transfer sub-surface can create a row for the first time since the port |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice3b.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -199,6 +199,10 @@ be reached, for the reason D-k gives.
   writes answer 400/404 on a well-formed id. This is the same token-actor confusion as D-k, in a
   second place, and it is the shape [[hr-attendance-actor-conventions]] already warned about —
   *`ApprovedById` is an Employee FK, unlike Leave's*.
+  ✅ **Fixed in slice 3b**, pulled forward from slice 4 because a surface whose records cannot be
+  created cannot have its approvals wired to anything. **Two sites, not one**: `ApproveAsync` put
+  the user id into `ApprovedById`, an Employee FK as well, so even a transfer created by some other
+  route could never have been approved.
 
 - **D-m — every domain refusal in this area is mute.** Found while writing slice 1.
   `GlobalExceptionHandlingMiddleware` **discards** an `InvalidOperationException`'s message and
@@ -238,6 +242,42 @@ be reached, for the reason D-k gives.
   it turned out to be unreachable for a second reason nobody had noticed. ✅ Fixed in slice 3 by
   asking the specific question first. Found only because an assertion about one refusal was answered
   by a different one.
+
+- **D-q — a requisition could be created already Approved.** Found while wiring D3.
+  `CreateAssetRequisitionDto` carried a `Status` that `ToEntity` wrote straight onto the record, and
+  `UpdateAssetRequisitionDto` carried a nullable one that `UpdateEntity` applied to an **existing**
+  record. So `POST requisitions {"status": 3}` produced an approved requisition with no approver, no
+  approval date and no workflow instance — and HR's *"only an approved requisition can be
+  fulfilled"* gate was satisfied by it. The edit path was worse: the requester could set their own
+  draft to `Fulfilled`. ✅ **Fixed in slice 3b** — the field is gone from both DTOs and the status
+  belongs to the approval workflow.
+- **D-r — `BeneficiaryEmployeeId` on the update DTO was read by nothing.** Slice 3 added AST-6b's
+  beneficiary to both the create and the update DTO, with the same documentation on each;
+  `UpdateEntity` never assigned it. Correcting who a request was for silently did nothing and the
+  form showed the old name back on the next read — the area-14 shape of a field that exists,
+  type-checks, serialises and carries nothing. ✅ **Fixed in slice 3b**, with the same on-behalf
+  authorization the create path runs.
+- **D-s — a transfer had no destination rule, and one transfer type has nowhere to go.**
+  Nothing checked that an employee-to-employee move named an employee; `CompleteAsync` would then
+  have set the asset's holder to **null**, leaving the register saying nobody holds it and no record
+  of who did. And `HRAssetTransferType.DepartmentToDepartment` has no column on either side of
+  `AssetTransfer` and no branch in `CompleteAsync` — completing one moved nothing and reported
+  success. ✅ **Fixed in slice 3b**: each type's destination is required and checked to exist, and
+  the department type is refused *in words* pointing at unit-to-unit, which does work. Never
+  observable before, because D-l meant no transfer existed.
+- **D-t — three transfer reads fed a summary they could not fill.** `GetByAssetIdAsync`,
+  `GetByStatusAsync` and `GetPendingTransfersAsync` loaded fewer navigations than
+  `GetByTenantAsync`, while all four project into `AssetTransferSummaryDto` — which reads the
+  asset's name, and then reads From/To off the employee, the location **or** the unit depending on
+  the transfer's type. So `assetName` was blank everywhere and `fromName`/`toName` blank for every
+  location and unit transfer. The **fifth** instance of the uneven-`.Include` family in this area
+  (D-n, D-o, D-o(b), `requisitionNumber` in slice 3). ✅ Evened up in slice 3b.
+
+**Still open, and which slice owns each:** D-a and D-c (slice 4), D-d (slice 7), D-h (slice 9), and
+one recorded here for slice 4: **completing an employee-to-employee transfer updates the asset's
+holder but leaves the old assignment `Active` and creates no new one**, so the assignment register
+and the asset disagree about who has it. It belongs with the availability guard and the return
+consistency check rather than beside the routing, or the assignment rules get written twice.
 
 **What slice 0 proved DOES work**, so later slices do not re-litigate it: asset types and their
 attributes; the asset register including attribute values, images and attachments; assignment
@@ -406,8 +446,8 @@ overdue returns; and the full screen set.
 | **2** | ✅ Refusals that speak | D-m — `AssetsWorkflowException`, 404/409/400, no migration |
 | **2b** | ✅ The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link and the picker that sets it, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` end to end (AST-4, AST-7, AST-11, D-i(b)), **and D-j**. **First migration of the area** |
 | **3** | ✅ The requisition pipeline runs | D-k (a real approver), AST-6b on-behalf, D-e (fulfilment recorded on the assignments), D-p |
-| **3b** | Requisition and transfer approvals on the workflow engine | D3 — the four-step recipe, with the configurable chain and the approvals inbox |
-| **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), **D-l** — transfers made creatable at all — then transfer onto the same engine |
+| **3b** | ✅ Both approvals on the workflow engine | D3 — the four-step recipe on `HrAssetRequisition` and `HrAssetTransfer`, Draft → submit → decide → recall; **D-l** pulled forward so transfers exist at all; D-q, D-r, D-s, D-t |
+| **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), and the transfer-completion gap: a completed employee-to-employee move leaves the old assignment Active |
 | **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
 | **6** | The employee's own surface | `/hr/assets/me` + `EmployeePortalController` routes: my assets, acknowledge, request, request on behalf (AST-6, AST-8) |
 | **7** | Damage and surcharge | The surcharge record, its approval, its recovery route (AST-3, D-d) |
@@ -664,3 +704,89 @@ the assignments and more completely than it ever lived in one column.
 one list where it matters most. And the assignment detail read gained `requisitionNumber` in its DTO
 and mapping without the `.Include` that feeds it, so it came back null. That shape has now appeared
 **four times** in this area; the standing lesson is that a mapping and a read are one change.
+
+### Slice 3b — both approvals on the workflow engine, and transfers made to exist. 2026-08-23, **135/135, run twice** (stamps 165005, 167001). No migration.
+
+Delivers **D3** and closes **D-l**, **D-q**, **D-r**, **D-s**, **D-t**. Slices 1, 2, 2b and 3 re-run
+at 45/45, 85/85, 94/94 and 49/49 — 449 assertions for the area.
+
+**Why D-l came forward from slice 4.** You cannot put a surface's approvals on a workflow engine
+while nothing on that surface can be created. `CreateAsync` passed the caller's **user** id into
+`InitiatedById`, an **Employee** FK, so every create answered 500 and all eleven transfer routes had
+never touched a real row. Fixing it here meant transfers could be wired once, with requisitions,
+instead of being wired twice. ⚠ It turned out to be **two sites**: `ApproveAsync` did the same thing
+to `ApprovedById`, so even a transfer created some other way could never have been approved.
+
+**The status was a payload field, and that is the finding that matters most (D-q).**
+`CreateAssetRequisitionDto` carried a `Status` written straight onto the record. `{"status": 3}`
+therefore created a requisition that was already **Approved** — no approver, no approval date, no
+workflow instance — and HR's *"only an approved requisition can be fulfilled"* gate accepted it.
+The update DTO carried a nullable one applied to an existing record, so a requester could push their
+own draft to `Fulfilled`. Neither is reachable now: a requisition is born a Draft and every state
+after that belongs to the engine. The harness asserts the flip directly — a create that asks to be
+born Approved comes back a Draft, and fulfilling it is refused.
+
+**The lifecycle both surfaces now share.** Draft → `submit` → Submitted/Pending → Approved or
+Rejected, with `recall` returning it to Draft for the person who raised it. Four consequences worth
+recording: a draft is the requester's to edit or withdraw and a submitted one is not (*"recall it
+first"*, rather than a record changing under the approver reading it); rejection stays **terminal**
+here rather than returning to Draft, because slice 2 already settled that a decided requisition is
+the record of a decision; recall is the requester's alone, and HR is told to reject instead; and
+`HRAssetTransferStatus` gained a `Draft = 0` because it had no state before `Pending` — without it
+"pending" meant both "nobody has sent this" and "an approver is holding it", and a recall had
+nowhere to land. `AssetRequisitionStatus` needed nothing: `Submitted` already meant exactly that.
+
+**⚠ The entity types are `HrAssetRequisition` and `HrAssetTransfer`.** `AssetTransfer` as a workflow
+key already means **Finance's fixed-asset transfer** — `WorkflowEntityDisplayService` resolves it to
+that entity and sets a fixed-asset `ActionUrl`. Registering HR's under the same key would have sent
+an HR approver's notification to a fixed-asset screen and reported no error at all. §3.3's collision
+now reaches a **fourth** level: entity, table, interface, and workflow entity-type key.
+
+**Who may not sign, and why it is not `preventInitiatorApproval`.** Both definitions leave that flag
+**false**, deliberately. It guards "nobody approves their own request", where the initiator is the
+one who benefits — but HR raises requisitions on a new joiner's behalf (AST-6b) and raises every
+transfer about somebody else's equipment, so set true it would silently have meant "a second HR
+officer must". The real conflict is guarded on the record instead, by employee id:
+`RequireNotTheBeneficiary` refuses anyone approving the issue of an asset to **themselves** —
+computed as `BeneficiaryEmployeeId ?? RequestedById`, the same expression fulfilment uses to decide
+who receives it, so the rule and its consequence cannot drift apart — and `RequireNotTheRecipient`
+does the same for a transfer into the caller's own hands. This is area 9b's lesson applied rather
+than rediscovered.
+
+**The two assertions that separate "wired" against "appears wired".** The first full run was
+129/129 on the first attempt, which on this area is a warning rather than a result: every status in
+it would read the same if the engine were bypassed and the adapter simply wrote them. Two more were
+added and they are the ones worth keeping. With **no published definition**, a submit must be
+refused *in words* and the requisition must still be a Draft — it is not, if the engine was never in
+the path. And with a definition routed to an authority the HR officer does **not** hold, the
+approve must be refused by the **engine** (`CanUserApproveAsync`) after the controller's role gate
+has already let them through. Both pass; the first one **failed** when written, and that failure was
+the harness's own — see below.
+
+**The instrument lied, quietly, and that is the transferable lesson.**
+`retireActiveDefinitions` swallowed every failure into an empty `catch` and returned 0, which the
+run read as *"nothing to retire"* rather than *"nothing was retired"*. It was running as the HR
+actor, and `POST definitions/{id}/retire` is gated
+`SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager` — so every call 403'd, definitions piled
+up across runs, and the one assertion that needed there to be **no** active definition failed while
+the helper reported success. It now borrows `admin`, hands the caller's token back, and **throws**
+when it cannot do its job. Third area running in which a harness helper cried wolf or lied on its
+first outing.
+
+**Two response envelopes, recorded because they cost a run each.** `POST Workflow/definitions`
+answers `{ success, data }`, not the definition — reading `.id` off the envelope yields `undefined`
+and the next call goes to `/definitions/undefined`. The admin listing answers
+`{ success, data: [...], metadata }` — not a bare array and not `items`.
+
+**⚠ Entity types and definitions are TENANT-scoped, so the harness seeds and publishes as the HR
+actor**, not as `admin`. Seeding on the wrong tenant registers the types where nothing will look for
+them, and every submit then refuses with *"is not configured"* while the seed call itself returns
+200.
+
+**What slices 2 and 3 had to change, and what they did not.** Both decide a requisition, so both now
+publish a definition and submit before deciding, and neither passes `status` on a create. Nothing
+either of them **asserts** was touched: D-k's real approver, D-e's two facts and AST-6b's beneficiary
+all still prove themselves. The engine's refusals are carried through as `AssetsWorkflowException`
+rather than left to the middleware, so *"No active workflow definition found for entity type
+'HrAssetRequisition'"* reaches an administrator instead of becoming *"The operation is not valid for
+the current state of the object."* — D-m's complaint, arriving from outside the area.

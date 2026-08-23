@@ -1470,6 +1470,15 @@ public class AssetRequisitionService : IAssetRequisitionService
     private readonly IEmployeeRepository _employeeRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowIntegrationService _workflow;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
+
+    /// <summary>
+    /// ⚠ <c>HrAssetRequisition</c>, not <c>AssetRequisition</c>. The prefix is not decoration: the
+    /// workflow entity-type keys are a flat namespace shared with Finance's fixed assets and the
+    /// Inventory <c>Asset</c>, and the build plan's §3.3 collision reaches them too.
+    /// </summary>
+    private const string EntityType = "HrAssetRequisition";
 
     public AssetRequisitionService(
         IAssetRequisitionRepository requisitionRepo,
@@ -1477,7 +1486,9 @@ public class AssetRequisitionService : IAssetRequisitionService
         IAssetAssignmentRepository assignmentRepo,
         IEmployeeRepository employeeRepo,
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IWorkflowIntegrationService workflow,
+        IWorkflowStatusAdapterRegistry workflowAdapters)
     {
         _requisitionRepo = requisitionRepo;
         _assetRepo = assetRepo;
@@ -1485,9 +1496,25 @@ public class AssetRequisitionService : IAssetRequisitionService
         _employeeRepo = employeeRepo;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _workflow = workflow;
+        _workflowAdapters = workflowAdapters;
     }
 
+    /// <summary>The authenticated login, as the workflow engine wants it.</summary>
+    /// <remarks>
+    /// ⚠ <b>Two different actor ids run through this service and they are not interchangeable.</b>
+    /// The engine resolves approvers by <c>ApplicationUser</c>, so every call into it takes this
+    /// one; everything the requisition stores — <c>RequestedById</c>, <c>ApprovedById</c>,
+    /// <c>FulfilledById</c>, <c>BeneficiaryEmployeeId</c> — is an <b>Employee</b> foreign key and
+    /// takes <see cref="RequireCallerEmployeeId"/> instead. Confusing the two is precisely defect
+    /// D-l on the transfer surface, where a user id was written into an Employee FK and every
+    /// create answered 500. See <c>hr-attendance-actor-conventions</c>.
+    /// </remarks>
+    private Guid RequireCallerUserId() =>
+        Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
     /// <summary>
+    /// The caller's own employee record    /// <summary>
     /// The caller's own employee record — the actor for every stamp on this surface.
     /// </summary>
     /// <remarks>
@@ -1664,16 +1691,24 @@ public class AssetRequisitionService : IAssetRequisitionService
     public async Task<AssetRequisitionDto> CreateAsync(CreateAssetRequisitionDto dto)
     {
         var tenantId = GetTenantId();
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+        var userId = RequireCallerUserId();
+
         // Generate requisition number
         var requisitionNumber = $"REQ-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
 
         var requestedById = RequireCallerEmployeeId("raise an asset requisition");
         var beneficiaryId = await ResolveBeneficiaryAsync(dto.BeneficiaryEmployeeId, requestedById, tenantId);
-        
+
         var entity = dto.ToEntity(tenantId, requestedById, userId, requisitionNumber);
         entity.BeneficiaryEmployeeId = beneficiaryId;
+
+        // Slice 3b. A new requisition is a DRAFT, always, and the payload has no say in it.
+        // `CreateAssetRequisitionDto` used to carry a `Status` that was written straight onto the
+        // record, so `{"status": 3}` created a requisition that was already Approved - no approver,
+        // no approval date, no workflow, and HR's fulfilment gate satisfied. The status of an
+        // approval record belongs to the thing that approves it.
+        entity.Status = AssetRequisitionStatus.Draft;
+
         await _requisitionRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -1683,8 +1718,9 @@ public class AssetRequisitionService : IAssetRequisitionService
 
     public async Task<AssetRequisitionDto> UpdateAsync(Guid id, UpdateAssetRequisitionDto dto)
     {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+        var tenantId = GetTenantId();
+        var userId = RequireCallerUserId();
+
         var entity = await GetOwnedRequisitionAsync(id);
 
         // The requester may correct their own request; HR may correct anyone's. The status rule
@@ -1692,11 +1728,18 @@ public class AssetRequisitionService : IAssetRequisitionService
         // other: an employee editing someone else's draft is refused here, not there.
         AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById, "edit an asset requisition");
 
-        if (entity.Status != AssetRequisitionStatus.Submitted && entity.Status != AssetRequisitionStatus.Draft)
-            throw AssetsWorkflowException.InvalidState(
-                "Only a draft or submitted requisition can be edited; this one has already been decided.");
+        RequireEditableDraft(entity, "edited");
 
         entity.UpdateEntity(dto, userId);
+
+        // AST-6b, and a field that used to be read by nothing. `UpdateAssetRequisitionDto` carried
+        // `BeneficiaryEmployeeId` with the same documentation as the create DTO, and `UpdateEntity`
+        // never assigned it - so correcting who a request was for silently did nothing and the form
+        // showed the old name back. The same authorization runs as on create: naming somebody else
+        // still takes HR or being their recorded line manager.
+        entity.BeneficiaryEmployeeId =
+            await ResolveBeneficiaryAsync(dto.BeneficiaryEmployeeId, entity.RequestedById, tenantId);
+
         await _requisitionRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -1711,32 +1754,108 @@ public class AssetRequisitionService : IAssetRequisitionService
         AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById,
             "withdraw an asset requisition");
 
-        // A decided requisition is a record of a decision. Withdrawing it after the fact would
-        // erase the approval or the rejection along with the request, so it stops being possible
-        // once anyone has answered it.
-        if (entity.Status != AssetRequisitionStatus.Submitted && entity.Status != AssetRequisitionStatus.Draft)
-            throw AssetsWorkflowException.InvalidState(
-                "Only a draft or submitted requisition can be withdrawn; this one has already been decided.");
+        RequireEditableDraft(entity, "withdrawn");
 
         await _requisitionRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// The one gate for editing and withdrawing, and the reason it answers in three ways.
+    /// </summary>
+    /// <remarks>
+    /// <para>A <b>draft</b> is the requester's own: theirs to change or throw away. A
+    /// <b>submitted</b> one is the engine's - somebody has it in their queue - so it must be
+    /// recalled first, and the refusal says so rather than leaving the requester to guess. A
+    /// <b>decided</b> one is a record of a decision: withdrawing it after the fact would erase the
+    /// approval or the rejection along with the request.</para>
+    ///
+    /// <para>Before slice 3b a submitted requisition was freely editable, which under a workflow
+    /// means the record an approver is reading can change under them between opening it and
+    /// signing it.</para>
+    /// </remarks>
+    private static void RequireEditableDraft(AssetRequisition entity, string verb)
+    {
+        if (entity.Status == AssetRequisitionStatus.Draft) return;
+
+        if (entity.Status is AssetRequisitionStatus.Submitted or AssetRequisitionStatus.UnderReview)
+            throw AssetsWorkflowException.InvalidState(
+                $"This requisition is out for approval and cannot be {verb}; recall it first.");
+
+        throw AssetsWorkflowException.InvalidState(
+            $"Only a draft requisition can be {verb}; this one has already been decided.");
+    }
+
+    /// <summary>
+    /// Sends a draft requisition for approval - D3, the workflow engine.
+    /// </summary>
+    /// <remarks>
+    /// The ported surface had no such act: a requisition was born "Submitted" and an HR officer
+    /// wrote Approved onto it directly. Routing now belongs to the tenant's published definition,
+    /// which decides whose queue this lands in; what does not belong there is who may raise the
+    /// request, which is checked here, first, off the record itself.
+    /// </remarks>
+    public async Task<AssetRequisitionDto> SubmitAsync(Guid id)
+    {
+        var entity = await GetOwnedRequisitionAsync(id);
+
+        AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById,
+            "submit an asset requisition for approval");
+
+        if (entity.Status != AssetRequisitionStatus.Draft)
+            throw AssetsWorkflowException.InvalidState(
+                entity.Status is AssetRequisitionStatus.Submitted or AssetRequisitionStatus.UnderReview
+                    ? "This requisition is already out for approval."
+                    : $"Only a draft requisition can be submitted; this one is {entity.Status}.");
+
+        // The engine builds its routing context by reading the entity back out of the database, so
+        // anything set-but-unsaved would be invisible to it. Nothing is pending here - the record
+        // was saved by create or update - but the order is the rule, not the accident.
+        var result = await RunWorkflowAsync(
+            () => _workflow.SubmitAsync(EntityType, entity.Id),
+            "start the requisition approval workflow");
+
+        var actingUserId = RequireCallerUserId();
+        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, result.Outcome, actingUserId);
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = actingUserId.ToString();
+
+        await _requisitionRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        var submitted = await _requisitionRepo.GetWithDetailsAsync(id);
+        return submitted!.ToDto();
+    }
+
     public async Task ApproveAsync(Guid id, ApproveAssetRequisitionDto dto)
     {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
         var entity = await GetOwnedRequisitionAsync(id);
 
         // D-k. The approver is the person approving. See RequireCallerEmployeeId for what was here.
         var approverId = RequireCallerEmployeeId("approve an asset requisition");
+        var actingUserId = RequireCallerUserId();
 
-        entity.Status = AssetRequisitionStatus.Approved;
-        entity.ApprovedById = approverId;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.ApprovalComments = dto.ApprovalComments;
+        RequireDecidable(entity);
+        RequireNotTheBeneficiary(entity, approverId, "approve");
+
+        var result = await ProcessApprovalAsync(entity, "Approve", dto.ApprovalComments);
+
+        _workflowAdapters.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+
+        // Stamped only when the chain has actually finished. A definition with two approval steps
+        // leaves the record Submitted after the first signature, and writing ApprovedById there
+        // would name one signatory as *the* approver of something not yet approved.
+        if (result.Outcome == WorkflowOutcome.Approved)
+        {
+            entity.ApprovedById = approverId;
+            entity.ApprovalDate = DateTime.UtcNow;
+        }
+        if (!string.IsNullOrWhiteSpace(dto.ApprovalComments))
+            entity.ApprovalComments = dto.ApprovalComments;
+
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedBy = actingUserId.ToString();
 
         await _requisitionRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -1744,18 +1863,154 @@ public class AssetRequisitionService : IAssetRequisitionService
 
     public async Task RejectAsync(Guid id, RejectAssetRequisitionDto dto)
     {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
         var entity = await GetOwnedRequisitionAsync(id);
 
-        entity.Status = AssetRequisitionStatus.Rejected;
-        entity.RejectedDate = DateTime.UtcNow;
-        entity.RejectionReason = dto.RejectionReason;
+        var approverId = RequireCallerEmployeeId("reject an asset requisition");
+        var actingUserId = RequireCallerUserId();
+
+        RequireDecidable(entity);
+        RequireNotTheBeneficiary(entity, approverId, "reject");
+
+        var reason = string.IsNullOrWhiteSpace(dto.RejectionReason) ? "Rejected" : dto.RejectionReason.Trim();
+        var result = await ProcessApprovalAsync(entity, "Reject", reason);
+
+        _workflowAdapters.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, reason);
+
+        entity.RejectionReason = reason;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedBy = actingUserId.ToString();
 
         await _requisitionRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Withdraws a requisition the requester has sent but nobody has ruled on yet, returning it to
+    /// Draft so they can change it and send it again.
+    /// </summary>
+    /// <remarks>
+    /// The generic recall button in <c>WorkflowApprovalActions</c> calls the engine directly, so
+    /// the "only the requester may recall" rule below binds API callers and not that button. That
+    /// is the module's existing split - PIP and staff requisitions have it too - recorded rather
+    /// than introduced here.
+    /// </remarks>
+    public async Task<AssetRequisitionDto> RecallAsync(Guid id, string? reason)
+    {
+        var entity = await GetOwnedRequisitionAsync(id);
+
+        var callerEmployeeId = AssetActor.CallerEmployeeId(_currentUserService);
+        if (callerEmployeeId != entity.RequestedById)
+            throw new UnauthorizedAccessException(
+                "Only the person who raised a requisition can recall it. HR can reject it instead.");
+
+        if (entity.Status is not (AssetRequisitionStatus.Submitted or AssetRequisitionStatus.UnderReview))
+            throw AssetsWorkflowException.InvalidState(
+                $"Only a requisition still awaiting approval can be recalled; this one is {entity.Status}.");
+
+        var actingUserId = RequireCallerUserId();
+        var result = await RunWorkflowAsync(
+            () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
+            "recall the requisition");
+
+        _workflowAdapters.GetAdapter(EntityType).ApplyRecallOutcome(entity, actingUserId, reason);
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = actingUserId.ToString();
+
+        await _requisitionRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        var recalled = await _requisitionRepo.GetWithDetailsAsync(id);
+        return recalled!.ToDto();
+    }
+
+    /// <summary>Only a requisition that is actually out for approval can be decided.</summary>
+    private static void RequireDecidable(AssetRequisition entity)
+    {
+        if (entity.Status is AssetRequisitionStatus.Submitted or AssetRequisitionStatus.UnderReview) return;
+
+        throw AssetsWorkflowException.InvalidState(
+            entity.Status == AssetRequisitionStatus.Draft
+                ? "This requisition has not been submitted for approval yet."
+                : $"Only a requisition awaiting approval can be decided; this one is {entity.Status}.");
+    }
+
+    /// <summary>
+    /// Nobody approves the issue of an asset to themselves.
+    /// </summary>
+    /// <remarks>
+    /// <para>The subject is <c>BeneficiaryEmployeeId ?? RequestedById</c> - the same expression
+    /// fulfilment uses to decide who receives the asset, so the rule and the consequence cannot
+    /// drift apart.</para>
+    ///
+    /// <para>This deliberately does <b>not</b> bar an HR officer from approving a request they
+    /// raised <i>on somebody else's behalf</i>. The conflict a self-approval rule guards against is
+    /// gaining by your own signature, and an officer who raises a starter kit for a new joiner
+    /// gains nothing - the area-9b lesson about <c>preventInitiatorApproval</c> being the wrong
+    /// control when the record is about a third party. It is the beneficiary, not the initiator,
+    /// who must not sign.</para>
+    /// </remarks>
+    private static void RequireNotTheBeneficiary(AssetRequisition entity, Guid actorEmployeeId, string verb)
+    {
+        var issueTo = entity.BeneficiaryEmployeeId ?? entity.RequestedById;
+        if (actorEmployeeId != issueTo) return;
+
+        throw new UnauthorizedAccessException(
+            $"You cannot {verb} a requisition for an asset that would be issued to you.");
+    }
+
+    /// <summary>
+    /// Runs one approval action through the engine, refusing first in the record's own terms.
+    /// </summary>
+    /// <remarks>
+    /// <c>CanUserApproveAsync</c> answers "are you on this step", which is a fact about the
+    /// definition. The rules above answer "may this be decided, and by you", which are facts about
+    /// the requisition - so they run first and their refusals name the record. If the definition is
+    /// missing or was authored wrongly, the record's own rules still hold.
+    /// </remarks>
+    private async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
+        AssetRequisition entity, string action, string? comments)
+    {
+        var actingUserId = RequireCallerUserId();
+
+        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this requisition's approval workflow.");
+
+        return await RunWorkflowAsync(
+            () => _workflow.ProcessApprovalAsync(EntityType, entity.Id, actingUserId, action, comments),
+            $"process the {action.ToLowerInvariant()}");
+    }
+
+    /// <summary>
+    /// Calls the engine and turns anything it refuses into a refusal this area's callers can read.
+    /// </summary>
+    /// <remarks>
+    /// The engine reports a missing entity type or an unpublished definition as an
+    /// <see cref="InvalidOperationException"/>, whose message
+    /// <c>GlobalExceptionHandlingMiddleware</c> throws away - the D-m complaint again, arriving
+    /// from outside the area. "Workflow entity type 'HrAssetRequisition' is not configured" is
+    /// exactly what an administrator needs to see, so it is carried through as a 409 instead of
+    /// becoming "The operation is not valid for the current state of the object."
+    /// </remarks>
+    internal static async Task<WorkflowIntegrationResult> RunWorkflowAsync(
+        Func<Task<WorkflowIntegrationResult>> call, string what)
+    {
+        WorkflowIntegrationResult result;
+        try
+        {
+            result = await call();
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw AssetsWorkflowException.InvalidState($"Could not {what}: {ex.Message}");
+        }
+
+        if (!result.ExecutionResult.Success)
+            throw AssetsWorkflowException.InvalidState(
+                result.ExecutionResult.Message ?? $"Could not {what}.");
+
+        return result;
     }
 
     public async Task FulfillAsync(Guid id, FulfillAssetRequisitionDto dto)
@@ -1882,19 +2137,67 @@ public class AssetTransferService : IAssetTransferService
 {
     private readonly IAssetTransferRepository _transferRepo;
     private readonly ICompanyAssetRepository _assetRepo;
+    private readonly IEmployeeRepository _employeeRepo;
+    private readonly ILocationRepository _locationRepo;
+    private readonly IOrganizationUnitRepository _unitRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowIntegrationService _workflow;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
+
+    /// <summary>
+    /// The workflow entity-type key. <b>Prefixed, and it has to be</b>: "AssetTransfer" already
+    /// means Finance's fixed-asset transfer to <c>WorkflowEntityDisplayService</c>. Registering
+    /// this surface under that key would have pointed an HR approver's notification at a
+    /// fixed-asset screen, and nothing would have reported an error. Build plan §3.3.
+    /// </summary>
+    private const string EntityType = "HrAssetTransfer";
 
     public AssetTransferService(
         IAssetTransferRepository transferRepo,
         ICompanyAssetRepository assetRepo,
+        IEmployeeRepository employeeRepo,
+        ILocationRepository locationRepo,
+        IOrganizationUnitRepository unitRepo,
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IWorkflowIntegrationService workflow,
+        IWorkflowStatusAdapterRegistry workflowAdapters)
     {
         _transferRepo = transferRepo;
         _assetRepo = assetRepo;
+        _employeeRepo = employeeRepo;
+        _locationRepo = locationRepo;
+        _unitRepo = unitRepo;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _workflow = workflow;
+        _workflowAdapters = workflowAdapters;
+    }
+
+    /// <summary>The authenticated login, for the workflow engine.</summary>
+    private Guid RequireCallerUserId() =>
+        Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
+    /// <summary>
+    /// The caller's own employee record - <b>defect D-l lived here</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>CreateAsync</c> passed the caller's <b>user</b> id into <c>InitiatedById</c>, and
+    /// <c>ApproveAsync</c> passed it into <c>ApprovedById</c>. Both are <b>Employee</b> foreign
+    /// keys. An <c>ApplicationUser</c> id is not an <c>Employee</c> id, so SQL rejected the INSERT
+    /// with error 547 and <b>every transfer create answered 500, for every actor, since the
+    /// port</b> - which meant all eleven transfer routes had never touched a real row: not one
+    /// list, not one approval, not one completed move.</para>
+    ///
+    /// <para>The same shape as D-k on the requisition surface, and the same remedy: an actor whose
+    /// login is not linked to an employee is refused in words rather than stamped as nobody.</para>
+    /// </remarks>
+    private Guid RequireCallerEmployeeId(string action)
+    {
+        return AssetActor.CallerEmployeeId(_currentUserService)
+            ?? throw new UnauthorizedAccessException(
+                $"Your user account is not linked to an employee record, so it cannot {action}.");
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -1985,14 +2288,31 @@ public class AssetTransferService : IAssetTransferService
     public async Task<AssetTransferDto> CreateAsync(CreateAssetTransferDto dto)
     {
         var tenantId = GetTenantId();
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+        var userId = RequireCallerUserId();
 
-        await GetOwnedAssetAsync(dto.AssetId);
-        
+        // D-l. An Employee id, because InitiatedById is an Employee foreign key.
+        var initiatedById = RequireCallerEmployeeId("raise an asset transfer");
+
+        var asset = await GetOwnedAssetAsync(dto.AssetId);
+
+        if (asset.Status is CompanyAssetStatus.Disposed or CompanyAssetStatus.LostStolen)
+            throw AssetsWorkflowException.InvalidState(
+                $"Asset {asset.AssetNumber} cannot be transferred; its status is {asset.Status}.");
+
+        await RequireDestinationAsync(dto, tenantId);
+
         // Generate transfer number
         var transferNumber = $"TRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
 
-        var entity = dto.ToEntity(tenantId, userId, userId, transferNumber);
+        var entity = dto.ToEntity(tenantId, initiatedById, userId, transferNumber);
+
+        // Where the asset is coming FROM is a fact the register already holds, so it is taken from
+        // the asset unless the caller states it. A transfer whose "from" side is blank cannot be
+        // read back as a movement afterwards - it says where something went and not where it was.
+        entity.FromEmployeeId ??= asset.CurrentAssignedToId;
+        entity.FromLocationId ??= asset.LocationId;
+        entity.FromUnitId ??= asset.UnitId;
+
         await _transferRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -2000,15 +2320,69 @@ public class AssetTransferService : IAssetTransferService
         return created!.ToDto();
     }
 
+    /// <summary>
+    /// Every transfer type needs a destination of its own kind, and it must exist.
+    /// </summary>
+    /// <remarks>
+    /// <para>Nothing checked this before, because nothing could create a transfer at all (D-l). An
+    /// employee-to-employee move with no <c>ToEmployeeId</c> would have been accepted, approved and
+    /// completed, and <c>CompleteAsync</c> would then have set the asset's holder to null - the
+    /// register would show it held by nobody with no record of who had it.</para>
+    ///
+    /// <para><b>⚠ <c>DepartmentToDepartment</c> is refused, and that is a finding rather than a
+    /// decision.</b> The enum offers it, but <c>AssetTransfer</c> has no department column on
+    /// either side and <c>CompanyAsset</c> has no department at all - so a department transfer had
+    /// nowhere to record where it came from, nowhere to record where it went, and
+    /// <c>CompleteAsync</c>'s type switch has no branch for it, meaning completing one moved
+    /// nothing and reported success. Refusing it in words is honest; the alternative is a feature
+    /// that silently does nothing. Units are the structure this module actually holds, and
+    /// <c>UnitToUnit</c> does work.</para>
+    /// </remarks>
+    private async Task RequireDestinationAsync(CreateAssetTransferDto dto, Guid tenantId)
+    {
+        switch (dto.Type)
+        {
+            case HRAssetTransferType.EmployeeToEmployee:
+                if (dto.ToEmployeeId is not { } toEmployeeId)
+                    throw AssetsWorkflowException.Invalid(
+                        "An employee-to-employee transfer needs the employee it is going to.");
+                var employee = await _employeeRepo.GetByIdAsync(toEmployeeId);
+                if (employee is null || employee.TenantId != tenantId || employee.IsDeleted)
+                    throw AssetsWorkflowException.NotFound($"No employee was found with id {toEmployeeId}.");
+                break;
+
+            case HRAssetTransferType.LocationToLocation:
+                if (dto.ToLocationId is not { } toLocationId)
+                    throw AssetsWorkflowException.Invalid(
+                        "A location-to-location transfer needs the location it is going to.");
+                var location = await _locationRepo.GetByIdAsync(toLocationId);
+                if (location is null || location.TenantId != tenantId || location.IsDeleted)
+                    throw AssetsWorkflowException.NotFound($"No location was found with id {toLocationId}.");
+                break;
+
+            case HRAssetTransferType.UnitToUnit:
+                if (dto.ToUnitId is not { } toUnitId)
+                    throw AssetsWorkflowException.Invalid(
+                        "A unit-to-unit transfer needs the unit it is going to.");
+                var unit = await _unitRepo.GetByIdAsync(toUnitId);
+                if (unit is null || unit.TenantId != tenantId || unit.IsDeleted)
+                    throw AssetsWorkflowException.NotFound($"No organization unit was found with id {toUnitId}.");
+                break;
+
+            default:
+                throw AssetsWorkflowException.Invalid(
+                    "Department-to-department transfers are not supported: an asset records a unit "
+                    + "and a location, not a department. Use a unit-to-unit transfer instead.");
+        }
+    }
+
     public async Task<AssetTransferDto> UpdateAsync(Guid id, UpdateAssetTransferDto dto)
     {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+        var userId = RequireCallerUserId();
+
         var entity = await GetOwnedTransferAsync(id);
 
-        if (entity.Status != HRAssetTransferStatus.Pending)
-            throw AssetsWorkflowException.InvalidState(
-                "Only a pending transfer can be edited; this one has already been actioned.");
+        RequireEditableDraft(entity, "edited");
 
         entity.UpdateEntity(dto, userId);
         await _transferRepo.UpdateAsync(entity);
@@ -2021,30 +2395,178 @@ public class AssetTransferService : IAssetTransferService
     public async Task DeleteAsync(Guid id)
     {
         var entity = await GetOwnedTransferAsync(id);
+
+        // There was no guard here at all: a completed transfer - the record of an asset having
+        // moved - could be deleted by anyone who could reach the route.
+        RequireEditableDraft(entity, "withdrawn");
+
         await _transferRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
 
-    public async Task ApproveAsync(Guid id)
+    /// <summary>Editing and withdrawing, and the three ways this answers. See the requisition twin.</summary>
+    private static void RequireEditableDraft(AssetTransfer entity, string verb)
     {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+        if (entity.Status == HRAssetTransferStatus.Draft) return;
+
+        if (entity.Status == HRAssetTransferStatus.Pending)
+            throw AssetsWorkflowException.InvalidState(
+                $"This transfer is out for approval and cannot be {verb}; recall it first.");
+
+        throw AssetsWorkflowException.InvalidState(
+            $"Only a draft transfer can be {verb}; this one is {entity.Status}.");
+    }
+
+    /// <summary>Sends a draft transfer for approval - D3, the workflow engine.</summary>
+    public async Task<AssetTransferDto> SubmitAsync(Guid id)
+    {
         var entity = await GetOwnedTransferAsync(id);
 
-        entity.Status = HRAssetTransferStatus.Approved;
-        entity.ApprovedById = userId;
-        entity.ApprovalDate = DateTime.UtcNow;
+        if (entity.Status != HRAssetTransferStatus.Draft)
+            throw AssetsWorkflowException.InvalidState(
+                entity.Status == HRAssetTransferStatus.Pending
+                    ? "This transfer is already out for approval."
+                    : $"Only a draft transfer can be submitted; this one is {entity.Status}.");
+
+        var result = await AssetRequisitionService.RunWorkflowAsync(
+            () => _workflow.SubmitAsync(EntityType, entity.Id),
+            "start the transfer approval workflow");
+
+        var actingUserId = RequireCallerUserId();
+        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, result.Outcome, actingUserId);
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedBy = actingUserId.ToString();
+
+        await _transferRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        var submitted = await _transferRepo.GetWithDetailsAsync(id);
+        return submitted!.ToDto();
+    }
+
+    public async Task ApproveAsync(Guid id)
+    {
+        var entity = await GetOwnedTransferAsync(id);
+
+        // D-l, second site: ApprovedById is an Employee foreign key too.
+        var approverId = RequireCallerEmployeeId("approve an asset transfer");
+        var actingUserId = RequireCallerUserId();
+
+        RequireDecidable(entity);
+        RequireNotTheRecipient(entity, approverId, "approve");
+
+        var result = await ProcessApprovalAsync(entity, "Approve", null);
+
+        _workflowAdapters.GetAdapter(EntityType).ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+
+        if (result.Outcome == WorkflowOutcome.Approved)
+        {
+            entity.ApprovedById = approverId;
+            entity.ApprovalDate = DateTime.UtcNow;
+        }
+
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = actingUserId.ToString();
 
         await _transferRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
 
+    public async Task RejectAsync(Guid id)
+    {
+        var entity = await GetOwnedTransferAsync(id);
+
+        var approverId = RequireCallerEmployeeId("reject an asset transfer");
+        var actingUserId = RequireCallerUserId();
+
+        RequireDecidable(entity);
+        RequireNotTheRecipient(entity, approverId, "reject");
+
+        var result = await ProcessApprovalAsync(entity, "Reject", "Rejected");
+
+        _workflowAdapters.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, "Rejected");
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = actingUserId.ToString();
+
+        await _transferRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    /// <summary>Withdraws a transfer that is out for approval, returning it to Draft.</summary>
+    public async Task<AssetTransferDto> RecallAsync(Guid id, string? reason)
+    {
+        var entity = await GetOwnedTransferAsync(id);
+
+        var callerEmployeeId = AssetActor.CallerEmployeeId(_currentUserService);
+        if (callerEmployeeId != entity.InitiatedById)
+            throw new UnauthorizedAccessException(
+                "Only the person who raised a transfer can recall it. An approver can reject it instead.");
+
+        if (entity.Status != HRAssetTransferStatus.Pending)
+            throw AssetsWorkflowException.InvalidState(
+                $"Only a transfer still awaiting approval can be recalled; this one is {entity.Status}.");
+
+        var actingUserId = RequireCallerUserId();
+        var result = await AssetRequisitionService.RunWorkflowAsync(
+            () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
+            "recall the transfer");
+
+        _workflowAdapters.GetAdapter(EntityType).ApplyRecallOutcome(entity, actingUserId, reason);
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = actingUserId.ToString();
+
+        await _transferRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        var recalled = await _transferRepo.GetWithDetailsAsync(id);
+        return recalled!.ToDto();
+    }
+
+    private static void RequireDecidable(AssetTransfer entity)
+    {
+        if (entity.Status == HRAssetTransferStatus.Pending) return;
+
+        throw AssetsWorkflowException.InvalidState(
+            entity.Status == HRAssetTransferStatus.Draft
+                ? "This transfer has not been submitted for approval yet."
+                : $"Only a transfer awaiting approval can be decided; this one is {entity.Status}.");
+    }
+
+    /// <summary>
+    /// Nobody approves an asset being moved into their own hands.
+    /// </summary>
+    /// <remarks>
+    /// The requisition twin of this rule bars the beneficiary; here it is the receiving employee.
+    /// Both say the same thing: the signature that matters is the one from somebody who does not
+    /// gain by it. The initiator is not barred - HR raises these about other people.
+    /// </remarks>
+    private static void RequireNotTheRecipient(AssetTransfer entity, Guid actorEmployeeId, string verb)
+    {
+        if (entity.ToEmployeeId != actorEmployeeId) return;
+
+        throw new UnauthorizedAccessException(
+            $"You cannot {verb} a transfer of an asset to yourself.");
+    }
+
+    private async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
+        AssetTransfer entity, string action, string? comments)
+    {
+        var actingUserId = RequireCallerUserId();
+
+        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this transfer's approval workflow.");
+
+        return await AssetRequisitionService.RunWorkflowAsync(
+            () => _workflow.ProcessApprovalAsync(EntityType, entity.Id, actingUserId, action, comments),
+            $"process the {action.ToLowerInvariant()}");
+    }
+
     public async Task CompleteAsync(Guid id)
     {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+        var userId = RequireCallerUserId();
+
         var entity = await GetOwnedTransferAsync(id);
 
         if (entity.Status != HRAssetTransferStatus.Approved && entity.Status != HRAssetTransferStatus.InTransit)
@@ -2058,7 +2580,13 @@ public class AssetTransferService : IAssetTransferService
 
         await _transferRepo.UpdateAsync(entity);
 
-        // Update asset location/assignment
+        // Completion is the module carrying out what was approved, so it stays a direct action and
+        // is deliberately NOT a workflow step - the same boundary the two outcome proposals draw.
+        //
+        // ⚠ What it does not yet do: an employee-to-employee move updates the asset's holder but
+        // leaves the OLD ASSIGNMENT ACTIVE and creates no new one, so the assignment register and
+        // the asset disagree about who has it. Recorded as a defect for slice 4, which owns
+        // assignment integrity; fixing it here would mean writing the assignment rules twice.
         var asset = await GetOwnedAssetAsync(entity.AssetId);
         if (entity.Type == HRAssetTransferType.EmployeeToEmployee)
         {
@@ -2076,20 +2604,6 @@ public class AssetTransferService : IAssetTransferService
         asset.UpdatedBy = userId.ToString();
         await _assetRepo.UpdateAsync(asset);
 
-        await _unitOfWork.SaveChangesAsync();
-    }
-
-    public async Task RejectAsync(Guid id)
-    {
-        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
-        var entity = await GetOwnedTransferAsync(id);
-
-        entity.Status = HRAssetTransferStatus.Rejected;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-
-        await _transferRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
 }

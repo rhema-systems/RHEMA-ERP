@@ -181,6 +181,20 @@ public enum HRAssetRequisitionPriority
 
 public enum HRAssetTransferStatus
 {
+    /// <summary>
+    /// Raised but not yet sent for approval — area 16, slice 3b.
+    /// </summary>
+    /// <remarks>
+    /// The enum had no such member because nothing could create a transfer at all (D-l), so every
+    /// transfer was born <c>Pending</c> and "pending" meant both "nobody has looked at this" and
+    /// "this is out for approval". Putting the approval on the workflow engine needs those to be
+    /// two different states: a draft is the initiator's to edit or withdraw, a pending one is the
+    /// engine's and must be recalled first. Zero is safe as the default for the unset case, which
+    /// is the whole point of choosing it.
+    /// </remarks>
+    [Description("Draft")]
+    Draft = 0,
+
     [Description("Pending")]
     Pending = 1,
 
