@@ -370,8 +370,10 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "USD",
-                Rate = 0.08m,
-                InverseRate = 12.5m, // 1 / 0.08
+                // ExchangeRate.Rate is functional/base currency per one target-currency unit:
+                // 1 USD = 12.50 GHS. AP, AR and governed openings freeze this carrying rate.
+                Rate = 12.5m,
+                InverseRate = 0.08m, // 1 / 12.5
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -394,8 +396,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "EUR",
-                Rate = 0.076m,
-                InverseRate = 13.1579m, // 1 / 0.076
+                Rate = 13.1579m,
+                InverseRate = 0.076m, // rounded 1 / 13.1579
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -418,8 +420,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "GBP",
-                Rate = 0.063m,
-                InverseRate = 15.873m, // 1 / 0.063
+                Rate = 15.873m,
+                InverseRate = 0.063m, // rounded 1 / 15.873
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
