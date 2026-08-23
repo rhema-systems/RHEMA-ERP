@@ -39,8 +39,8 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–3b green twice — 449 assertions.** Both approval surfaces are on the workflow engine, and the transfer sub-surface can create a row for the first time since the port |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice3b.mjs` |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–4 green twice — 481 assertions.** The register and the asset now agree with each other: an asset cannot be in two people's hands, a return cannot contradict itself, and a completed transfer moves the custody record rather than a pointer |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice4.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -139,6 +139,11 @@ be reached, for the reason D-k gives.
   never checks `IsCurrentlyAssigned`, `IsAssignable`, or `Status` (Disposed / InMaintenance /
   LostStolen). Assigning an already-assigned asset silently orphans the previous assignment, which
   stays `Active`. **This is exactly what AST-2 asks for and it is absent.**
+  ✅ **Fixed in slice 4.** The guard lives in `AssetIntegrity.RequireAssignable`, shared by the two
+  paths that issue assets — a direct assignment and a requisition fulfilment — so the refusal is the
+  same sentence whichever door the user came through, and a rule added later cannot land on only one
+  of them. It also asks the `IsAssignable` question, which existed from the port and which
+  **neither** path had ever read.
 - **D-b — acknowledgement has no actor.** `AcknowledgeAssignmentAsync` (`:737`) sets
   `EmployeeAcknowledged = true` for whoever calls it. `AcknowledgeAssignmentDto` carries only
   `AssignmentId`. Nothing checks that the caller is the assignee, and nothing records who
@@ -147,6 +152,12 @@ be reached, for the reason D-k gives.
   `ReturnedInGoodCondition` and `DamageReported` straight from the payload with no consistency
   check, then sets asset status from `DamageReported` alone. A return can be simultaneously "in
   good condition" and "damaged".
+  ✅ **Fixed in slice 4** by `AssetIntegrity.RequireConsistentReturn`, which refuses five internal
+  contradictions: both-at-once, damage with no description, liability without damage, a repair or
+  replacement cost without damage, and "good condition" alongside a Poor or NonFunctional condition.
+  The rules are deliberately about the record contradicting *itself* — whether an employee should be
+  charged is slice 7's decision, but whether an asset came back both fine and broken is not a
+  decision at all.
 - **D-d — the damage fields are inert.** `EmployeeLiable`, `RepairCost` and `ReplacementCost` are
   stored and never read by anything. There is no surcharge, no recovery, no route to payroll or to
   the separation settlement. **AST-3 has a field but no feature.**
@@ -273,11 +284,29 @@ be reached, for the reason D-k gives.
   location and unit transfer. The **fifth** instance of the uneven-`.Include` family in this area
   (D-n, D-o, D-o(b), `requisitionNumber` in slice 3). ✅ Evened up in slice 3b.
 
-**Still open, and which slice owns each:** D-a and D-c (slice 4), D-d (slice 7), D-h (slice 9), and
-one recorded here for slice 4: **completing an employee-to-employee transfer updates the asset's
-holder but leaves the old assignment `Active` and creates no new one**, so the assignment register
-and the asset disagree about who has it. It belongs with the availability guard and the return
-consistency check rather than beside the routing, or the assignment rules get written twice.
+- **D-u — deleting an assignment left its asset stuck, permanently.** Found while writing slice 4.
+  `DeleteAsync` soft-deleted the assignment and left the asset carrying `IsCurrentlyAssigned = true`,
+  `Status = Assigned` and a `CurrentAssignedToId` pointing at a holder whose assignment no longer
+  existed. Harmless while D-a was open — anyone could assign over it. **Closing D-a is what turned it
+  into a trap**: the new guard refuses to issue such an asset to anybody, and no return can free it
+  because the record a return acts on has gone. ✅ Fixed in slice 4: deleting the only thing that
+  says an asset is held now says it is not held, guarded so that deleting a *historical* assignment
+  cannot release an asset somebody holds today.
+- **D-v — an assignment could be returned twice.** `ReturnAssetAsync` had no status guard at all, so
+  a second return overwrote the first one's condition, notes, damage description, liability and
+  costs, and put a Damaged asset back to Available. ✅ Fixed in slice 4. Its two employee foreign
+  keys were unchecked too (`ReturnedToId`, and `ApprovedById` on create), which is the D-k/D-l shape
+  a third time: an id that does not exist reached SQL and came back as a 500.
+
+**The transfer-completion gap, recorded in slice 3b, is closed.** Completing an employee-to-employee
+transfer used to move `CurrentAssignedToId` and nothing else. It now closes the outgoing assignment
+and opens one for the recipient — carrying the terms over rather than inventing them, citing the
+transfer in a new `AssetAssignment.TransferId` column, and **not** carrying the previous holder's
+acknowledgement, which would forge a signature (D-b). A transfer whose "from" employee no longer
+holds the asset is refused rather than completed against stale facts.
+
+**Still open, and which slice owns each:** **D-d** (slice 7 — the damage fields the return now
+records coherently are still read by nothing) and **D-h** (slice 9).
 
 **What slice 0 proved DOES work**, so later slices do not re-litigate it: asset types and their
 attributes; the asset register including attribute values, images and attachments; assignment
@@ -447,7 +476,7 @@ overdue returns; and the full screen set.
 | **2b** | ✅ The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link and the picker that sets it, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` end to end (AST-4, AST-7, AST-11, D-i(b)), **and D-j**. **First migration of the area** |
 | **3** | ✅ The requisition pipeline runs | D-k (a real approver), AST-6b on-behalf, D-e (fulfilment recorded on the assignments), D-p |
 | **3b** | ✅ Both approvals on the workflow engine | D3 — the four-step recipe on `HrAssetRequisition` and `HrAssetTransfer`, Draft → submit → decide → recall; **D-l** pulled forward so transfers exist at all; D-q, D-r, D-s, D-t |
-| **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), and the transfer-completion gap: a completed employee-to-employee move leaves the old assignment Active |
+| **4** | ✅ Assignment integrity | The availability guard (AST-2, **D-a**), the return consistency check (**D-c**), the transfer-completion gap, and two holes that made an asset unusable: a deleted assignment that never released it, and a return that could be taken twice. Migration `AddAssetAssignmentTransferLink` |
 | **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
 | **6** | The employee's own surface | `/hr/assets/me` + `EmployeePortalController` routes: my assets, acknowledge, request, request on behalf (AST-6, AST-8) |
 | **7** | Damage and surcharge | The surcharge record, its approval, its recovery route (AST-3, D-d) |
@@ -790,3 +819,71 @@ all still prove themselves. The engine's refusals are carried through as `Assets
 rather than left to the middleware, so *"No active workflow definition found for entity type
 'HrAssetRequisition'"* reaches an administrator instead of becoming *"The operation is not valid for
 the current state of the object."* — D-m's complaint, arriving from outside the area.
+
+### Slice 4 — assignment integrity: the register and the asset made to agree. 2026-08-23, **73/73, run twice** (stamps 170001, 171001). Migration `AddAssetAssignmentTransferLink`.
+
+Closes **D-a**, **D-c**, **D-u**, **D-v** and the transfer-completion gap slice 3b left here.
+Slices 1, 2, 2b, 3 and 3b re-run at 45/45, 85/85, 94/94, 49/49 and 135/135 — 481 assertions.
+
+**One guard, two doors.** Slice 3 gave fulfilment an availability rule and slice 0 proved the direct
+assignment path had none, so the same question was being asked in two places, in different words,
+with different answers. Both now call `AssetIntegrity.RequireAssignable`. The order of its three
+questions is load-bearing and is defect D-p written down: assigning sets **both**
+`IsCurrentlyAssigned` and `Status = Assigned`, so asking about status first answers every held asset
+with *"not available; its status is Assigned"* — true, useless, and it leaves the specific rule
+below it permanently unreachable. Sharing the guard also gave fulfilment the `IsAssignable` check,
+which **neither** path had ever made.
+
+**Closing one defect turned a dormant one into a trap.** `DeleteAsync` left the asset marked
+assigned to a holder whose assignment no longer existed (D-u). That was survivable while D-a was
+open — anyone could assign over it. With D-a closed the asset becomes **unusable**: nothing can
+issue it, and no return can free it because the record a return acts on is gone. Worth stating
+generally: a guard that makes the system stricter can make an existing hole load-bearing, so the
+question after closing a defect is what *used to* paper over it.
+
+**The consistency rules are about the record contradicting itself, not about policy.** Whether an
+employee should be charged for a cracked screen is slice 7's decision. Whether a return can say the
+asset came back in good condition *and* came back damaged is not a decision at all — and slice 0
+measured that it was accepted and stored exactly as sent, so nothing downstream could decide whether
+to raise a surcharge or hold an exit clearance: the record answered yes to both questions. Five
+contradictions are now refused, and the four fields D-d will read (`EmployeeLiable`, `RepairCost`,
+`ReplacementCost`, `DamageDescription`) can no longer be set on a return that reports no damage.
+
+**Custody moves, not a pointer.** Completing an employee-to-employee transfer moved
+`CurrentAssignedToId` and left the old assignment `Active`: the outgoing employee still held the
+asset as far as every query was concerned — including the exit-clearance hook FR-HR-183 will hang on
+— and the recipient had no assignment at all: no terms, no acknowledgement to give, nothing to
+return. The completion now closes the old one and opens a new one, and three details are deliberate.
+The terms are **carried over** rather than defaulted, because the asset is the same asset on the
+same footing and inventing a fresh set would quietly change what somebody is responsible for. The
+acknowledgement is **not** carried over — that is the holder's own signature (D-b), and copying it
+would forge one. And a transfer whose "from" employee no longer holds the asset is **refused**
+rather than completed against facts that have moved since it was approved.
+
+**The closed assignment reads `Transferred`, and getting there is worth recording.** It was first
+written as `Returned` on the reasoning that `AssignmentStatus` lives in the HRApi-owned `HREnums.cs`,
+which is overwritten byte-for-byte on every sync, so a member added there would be lost. That
+reasoning was half right: the file *is* owned, but it **already carries two RHEMA-added members** —
+`AppraisalStatus.Open` and `ProbationStatus.ConfirmationApproved`, each with a doc comment naming the
+area that added it. The established practice is to add in place, not to work around. So
+`Transferred = 6` was added the same way, and the header of `HREnums.Rhema.cs` now lists all three,
+so a sync has a checklist instead of three separate memories of why a member is there.
+
+Behaviourally nothing moved — **every** consumer of `AssignmentStatus` in the module filters on
+`Active`, so a transferred row drops out of "what does this employee still hold" exactly as a
+returned one does. What changed is what the record says in the one place somebody looks to find out
+what happened to an asset: nobody took it back, and the next custody starts the same day.
+`ReturnedToId` now carries the **recipient** rather than the processing officer, because under a
+`Transferred` status "returned to" can only mean "handed to" — the officer was there to stop that
+field lying while the status still said Returned.
+
+**The migration was clean this time, and the thing to check had moved.** No invented rename — but the
+scaffold also dropped and re-added `FK_AssetTransfer_Tenants_TenantId`, flipping it Cascade →
+Restrict. That is **not** drift introduced here: `ConfigureGlobalTenantRelationships` has always set
+every tenant foreign key to Restrict "to avoid multiple cascade paths in SQL Server", and this one
+table's constraint was left on Cascade by an earlier migration. Adding
+`AssetAssignments → AssetTransfer` is what made it matter — SQL Server refuses the new foreign key
+while the old one still cascades — so the correction is a **precondition** of the column rather than
+a side effect. Kept, guarded on `delete_referential_action <> 0` so it is a no-op on a database
+already in the right state, and deliberately **not** undone by `Down`, which would leave the database
+in a state the model has never described.

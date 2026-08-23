@@ -284,6 +284,17 @@ public class AssetAssignment : TenantEntity
     /// </remarks>
     public Guid? RequisitionId { get; set; }
 
+    /// <summary>
+    /// The transfer this custody came from, where it came from one — area 16, slice 4.
+    /// </summary>
+    /// <remarks>
+    /// The twin of <see cref="RequisitionId"/>, and it exists for the same reason: an assignment
+    /// that appears from nowhere cannot be traced back to what authorised it. Set by
+    /// <c>AssetTransferService.CompleteAsync</c> when an employee-to-employee move hands the asset
+    /// to its new holder. Null for every assignment HR raises directly, which is most of them.
+    /// </remarks>
+    public Guid? TransferId { get; set; }
+
     // Assignment Details
     public DateOnly AssignmentDate { get; set; }
     
@@ -362,6 +373,9 @@ public class AssetAssignment : TenantEntity
 
     [ForeignKey(nameof(RequisitionId))]
     public virtual AssetRequisition? Requisition { get; set; }
+
+    [ForeignKey(nameof(TransferId))]
+    public virtual AssetTransfer? Transfer { get; set; }
 }
 
 /// <summary>

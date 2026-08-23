@@ -440,6 +440,8 @@ public static class AssetsMappingExtensions
             EmployeeId = entity.EmployeeId,
             RequisitionId = entity.RequisitionId,
             RequisitionNumber = entity.Requisition?.RequisitionNumber,
+            TransferId = entity.TransferId,
+            TransferNumber = entity.Transfer?.TransferNumber,
             EmployeeName = entity.Employee != null 
                 ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
                 : string.Empty,

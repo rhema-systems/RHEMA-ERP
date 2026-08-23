@@ -680,6 +680,10 @@ public class AssetAssignmentDto : BaseDto
     /// <summary>The requisition that produced this assignment, where it came from one — D-e.</summary>
     public Guid? RequisitionId { get; set; }
     public string? RequisitionNumber { get; set; }
+
+    /// <summary>The transfer that produced this assignment, where it came from one — slice 4.</summary>
+    public Guid? TransferId { get; set; }
+    public string? TransferNumber { get; set; }
     public string? EmployeeNumber { get; set; }
     
     // Assignment Details

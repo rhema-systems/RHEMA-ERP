@@ -1,5 +1,17 @@
 // RHEMA-only HR enums — kept OUT of HREnums.cs on purpose.
 //
+// ⚠ THE OTHER HALF OF THIS ARRANGEMENT: members RHEMA has added to enums that HRApi DOES own.
+// Those cannot live here — a C# enum cannot be declared in two files — so they sit in HREnums.cs
+// and are listed below. **After any HRApi sync, check each one is still present**; a lost member
+// compiles as an error at its usage site, which is the good case, but a re-used numeric value would
+// not. Each is marked with a doc comment naming the area that added it.
+//
+//   AppraisalStatus.Open = 0                 the retained RHEMA appraisal model
+//   ProbationStatus.ConfirmationApproved = 5 area 15b — the gap between the authority approving
+//                                            confirmation and HR issuing the letter
+//   AssignmentStatus.Transferred = 6         area 16 slice 4 — custody passed to another employee
+//                                            by an approved transfer, rather than handed back
+//
 // HREnums.cs is owned by HRApi and is overwritten byte-for-byte on every HRApi sync, so any
 // RHEMA-specific enum defined there would be lost. This file is the sync-safe home for the two
 // kinds of RHEMA enum that HRApi's HREnums.cs does not define:

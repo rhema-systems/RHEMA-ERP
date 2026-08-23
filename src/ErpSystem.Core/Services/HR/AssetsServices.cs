@@ -13,6 +13,12 @@ using ErpSystem.Core.Interfaces;
 // `IAssetTransferService` in this file ambiguous, including the HR service declared at the bottom
 // of it. Aliasing the one type we actually want keeps the collision from ever arising.
 using IFixedAssetService = ErpSystem.Core.Interfaces.Finance.IFixedAssetService;
+
+// Slice 4 names `Employee` as a return type for the first time in this file. An ALIAS again, not
+// `using ErpSystem.Core.Entities.HR` — that namespace carries a hundred-odd HR entities and pulling
+// all of them in beside `Entities.HR.Assets` is how this file's `AssetType` and `AssetTransfer`
+// become ambiguous. One type, named once.
+using Employee = ErpSystem.Core.Entities.HR.Employee;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.Extensions.Logging;
@@ -78,6 +84,101 @@ internal static class AssetActor
     {
         if (CallerEmployeeId(user) == subjectEmployeeId) return;
         throw new UnauthorizedAccessException($"Only the employee concerned can {action}.");
+    }
+}
+
+/// <summary>
+/// Whether an asset can be put into somebody's hands, and whether a return makes sense — the two
+/// integrity questions this module was never asking. Area 16, slice 4.
+/// </summary>
+/// <remarks>
+/// <para>These live here rather than in one service because <b>two paths issue assets</b>: HR
+/// assigning one directly, and a requisition being fulfilled. Slice 3 gave fulfilment its own
+/// version of the availability rule and slice 0 proved the direct path had none at all — so the
+/// same question was being asked in two places, in different words, with different answers. One
+/// helper means the refusal a user meets is the same sentence whichever door they came through,
+/// and a rule added later cannot land on only one of them.</para>
+/// </remarks>
+internal static class AssetIntegrity
+{
+    /// <summary>
+    /// Refuses an asset that cannot be issued — <b>defect D-a</b>, and AST-2 as written.
+    /// </summary>
+    /// <remarks>
+    /// <para>Slice 0 measured what its absence meant: an already-held asset was assigned to a
+    /// second employee, the first assignment was left <c>Active</c> and orphaned, the asset
+    /// silently changed hands, and two "current" assignments existed for one asset — with nothing
+    /// to say which was true.</para>
+    ///
+    /// <para>⚠ <b>The order of these three questions is load-bearing</b>, and getting it wrong is
+    /// defect D-p, which slice 3 had to fix on the fulfilment path. Assigning an asset sets
+    /// <b>both</b> <c>IsCurrentlyAssigned</c> and <c>Status = Assigned</c>, so asking about status
+    /// first answers every held asset with "not available; its status is Assigned" — true, useless,
+    /// and it leaves the specific rule below it permanently unreachable. The specific question goes
+    /// first; the status rule then answers for what it is actually about: disposed, damaged, lost,
+    /// in maintenance.</para>
+    /// </remarks>
+    internal static void RequireAssignable(CompanyAsset asset)
+    {
+        if (asset.IsCurrentlyAssigned)
+            throw AssetsWorkflowException.Conflict(
+                $"Asset {asset.AssetNumber} is already assigned to someone.");
+
+        // An asset the register says is not for issue — a shared printer, a fixture, a vehicle on
+        // the fleet's books. The flag existed from the port and nothing had ever read it.
+        if (!asset.IsAssignable)
+            throw AssetsWorkflowException.InvalidState(
+                $"Asset {asset.AssetNumber} is not marked as assignable, so it cannot be issued to an employee.");
+
+        if (asset.Status != CompanyAssetStatus.Available)
+            throw AssetsWorkflowException.InvalidState(
+                $"Asset {asset.AssetNumber} is not available; its status is {asset.Status}.");
+    }
+
+    /// <summary>
+    /// Refuses a return that contradicts itself — <b>defect D-c</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Slice 0 sent a return that was <c>returnedInGoodCondition: true</c> <b>and</b>
+    /// <c>damageReported: true</c>, with a cracked screen described, a liable employee and a repair
+    /// cost — and it was accepted and stored exactly as sent. Both facts then went on the record,
+    /// so nothing downstream could decide whether to raise a surcharge (slice 7) or to hold the
+    /// exit clearance (slice 10): the record answered "yes" to both questions.</para>
+    ///
+    /// <para>The rules are deliberately about <i>internal contradiction</i> rather than about
+    /// policy. Whether an employee should be charged is slice 7's decision; whether a return can
+    /// say the asset came back fine and came back broken is not a decision at all.</para>
+    /// </remarks>
+    internal static void RequireConsistentReturn(ReturnAssetDto dto)
+    {
+        if (dto.ReturnedInGoodCondition && dto.DamageReported)
+            throw AssetsWorkflowException.Invalid(
+                "A return cannot be both in good condition and damaged. Clear one of the two.");
+
+        if (dto.DamageReported && string.IsNullOrWhiteSpace(dto.DamageDescription))
+            throw AssetsWorkflowException.Invalid(
+                "Describe the damage. A damage report with no description cannot be acted on.");
+
+        // Liability, a repair cost and a replacement cost are all consequences OF damage. Recorded
+        // without it they are the inert fields of D-d waiting to mislead somebody: slice 7 reads
+        // them to raise a surcharge, and a surcharge for damage nobody reported is indefensible.
+        if (!dto.DamageReported)
+        {
+            if (dto.EmployeeLiable)
+                throw AssetsWorkflowException.Invalid(
+                    "An employee cannot be held liable on a return that reports no damage.");
+
+            if (dto.RepairCost is > 0 || dto.ReplacementCost is > 0)
+                throw AssetsWorkflowException.Invalid(
+                    "A repair or replacement cost needs the damage that caused it to be reported.");
+        }
+
+        // The condition and the verdict are two ways of saying the same thing, so they must agree.
+        if (dto.ReturnedInGoodCondition
+            && dto.ConditionAtReturn is HRAssetCondition.Poor or HRAssetCondition.NonFunctional)
+            throw AssetsWorkflowException.Invalid(
+                $"An asset returned in {dto.ConditionAtReturn} condition cannot also be recorded as "
+                + "returned in good condition.");
     }
 }
 
@@ -851,19 +952,41 @@ public class AssetAssignmentService : IAssetAssignmentService
 {
     private readonly IAssetAssignmentRepository _assignmentRepo;
     private readonly ICompanyAssetRepository _assetRepo;
+    private readonly IEmployeeRepository _employeeRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
 
     public AssetAssignmentService(
         IAssetAssignmentRepository assignmentRepo,
         ICompanyAssetRepository assetRepo,
+        IEmployeeRepository employeeRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService)
     {
         _assignmentRepo = assignmentRepo;
         _assetRepo = assetRepo;
+        _employeeRepo = employeeRepo;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+    }
+
+    /// <summary>
+    /// An employee this record is about to name, or a 404 saying which id was not found.
+    /// </summary>
+    /// <remarks>
+    /// Every one of these is an <b>Employee</b> foreign key, so an id that does not exist reaches
+    /// SQL and comes back as error 547 — a 500 with an opaque body, which is exactly how D-k and
+    /// D-l presented. Three columns on this surface take an employee id from the payload
+    /// (<c>EmployeeId</c>, <c>ApprovedById</c>, <c>ReturnedToId</c>) and not one of them was
+    /// checked.
+    /// </remarks>
+    private async Task<Employee> RequireEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _employeeRepo.GetByIdAsync(employeeId);
+        if (employee is null || employee.TenantId != GetTenantId() || employee.IsDeleted)
+            throw AssetsWorkflowException.NotFound(
+                $"No employee was found with id {employeeId} to be {role}.");
+        return employee;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -993,7 +1116,14 @@ public class AssetAssignmentService : IAssetAssignmentService
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
 
         var asset = await GetOwnedAssetAsync(dto.AssetId);
-        
+
+        // D-a / AST-2. Nothing asked this before, and slice 0 measured what that meant.
+        AssetIntegrity.RequireAssignable(asset);
+
+        await RequireEmployeeAsync(dto.EmployeeId, "the holder");
+        if (dto.ApprovedById is { } approvedById)
+            await RequireEmployeeAsync(approvedById, "the approver");
+
         // Generate assignment number
         var assignmentNumber = $"ASN-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
 
@@ -1017,23 +1147,62 @@ public class AssetAssignmentService : IAssetAssignmentService
     public async Task<AssetAssignmentDto> UpdateAsync(Guid id, UpdateAssetAssignmentDto dto)
     {
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+
         var entity = await GetOwnedAssignmentAsync(id);
+
+        // The terms of an assignment — when it is due back, who is responsible for what — describe
+        // a live custody. Once the asset is back they are history, and editing them rewrites what
+        // the holder signed for after the fact.
+        if (entity.Status != AssignmentStatus.Active)
+            throw AssetsWorkflowException.InvalidState(
+                $"Only an active assignment can be edited; this one is {entity.Status}.");
+
         entity.UpdateEntity(dto, userId);
         await _assignmentRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        
+
         var updated = await _assignmentRepo.GetWithDetailsAsync(id);
         return updated!.ToDto();
     }
 
+    /// <summary>
+    /// Withdraws an assignment recorded in error — and puts the asset back on the shelf.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>The release is the point.</b> This is a soft delete, and it used to remove the
+    /// assignment while leaving the asset carrying <c>IsCurrentlyAssigned = true</c>,
+    /// <c>Status = Assigned</c> and a <c>CurrentAssignedToId</c> pointing at a holder whose
+    /// assignment no longer existed. The asset was then <b>stuck</b>: the new D-a guard would
+    /// refuse to assign it to anybody, and no return could free it because the record a return acts
+    /// on had gone. Deleting the only thing that says an asset is held has to say it is not held.
+    ///
+    /// <para>The guard against stomping is <c>CurrentAssignedToId == entity.EmployeeId</c>: with
+    /// D-a in place an asset has at most one active assignment, but a deletion of a *historical*
+    /// assignment must not release an asset somebody else is holding today.</para>
+    /// </remarks>
     public async Task DeleteAsync(Guid id)
     {
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
         var entity = await GetOwnedAssignmentAsync(id);
         await _assignmentRepo.DeleteAsync(entity);
+
+        if (entity.Status == AssignmentStatus.Active)
+        {
+            var asset = await GetOwnedAssetAsync(entity.AssetId);
+            if (asset.CurrentAssignedToId == entity.EmployeeId)
+            {
+                asset.IsCurrentlyAssigned = false;
+                asset.CurrentAssignedToId = null;
+                asset.Status = CompanyAssetStatus.Available;
+                asset.UpdatedAt = DateTime.UtcNow;
+                asset.UpdatedBy = userId.ToString();
+                await _assetRepo.UpdateAsync(asset);
+            }
+        }
+
         await _unitOfWork.SaveChangesAsync();
     }
-
     public async Task AcknowledgeAssignmentAsync(AcknowledgeAssignmentDto dto)
     {
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
@@ -1069,8 +1238,21 @@ public class AssetAssignmentService : IAssetAssignmentService
     public async Task ReturnAssetAsync(ReturnAssetDto dto)
     {
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
-        
+
         var entity = await GetOwnedAssignmentAsync(dto.AssignmentId);
+
+        // Returning an already-returned assignment used to be accepted, and it did real damage: it
+        // overwrote the original return's condition, notes and damage record with the second
+        // caller's, and put the asset back to Available even where the first return had marked it
+        // Damaged. An asset can only come back once.
+        if (entity.Status != AssignmentStatus.Active)
+            throw AssetsWorkflowException.InvalidState(
+                $"Only an active assignment can be returned; this one is {entity.Status}.");
+
+        // D-c. The return must not contradict itself.
+        AssetIntegrity.RequireConsistentReturn(dto);
+
+        await RequireEmployeeAsync(dto.ReturnedToId, "the person receiving it back");
 
         entity.Status = AssignmentStatus.Returned;
         entity.ReturnDate = DateTime.UtcNow;
@@ -2039,22 +2221,12 @@ public class AssetRequisitionService : IAssetRequisitionService
         foreach (var assetId in dto.AssignedAssetIds)
         {
             var asset = await GetOwnedAssetAsync(assetId);
-            
-            // ⚠ Order matters, and the ported order made one of these rules unreachable.
-            // Assigning an asset sets BOTH IsCurrentlyAssigned and Status = Assigned, so asking
-            // about status first meant an asset already in somebody's hands was always refused
-            // as "not available; its status is Assigned" - true, but it buries the fact the user
-            // needs and it left the Conflict rule below dead. The specific question goes first;
-            // the status rule then answers for what it is actually about: disposed, damaged,
-            // lost, in maintenance.
-            if (asset.IsCurrentlyAssigned)
-                throw AssetsWorkflowException.Conflict(
-                    $"Asset {asset.AssetNumber} is already assigned to someone.");
-            
-            if (asset.Status != CompanyAssetStatus.Available)
-                throw AssetsWorkflowException.InvalidState(
-                    $"Asset {asset.AssetNumber} is not available; its status is {asset.Status}.");
-            
+
+            // Slice 4. The same guard the direct assignment path runs, from one place — including
+            // the `IsAssignable` question, which neither path was asking. The comment about the
+            // order of these checks (defect D-p) now lives with the rule itself.
+            AssetIntegrity.RequireAssignable(asset);
+
             assets.Add(asset);
         }
 
@@ -2137,6 +2309,7 @@ public class AssetTransferService : IAssetTransferService
 {
     private readonly IAssetTransferRepository _transferRepo;
     private readonly ICompanyAssetRepository _assetRepo;
+    private readonly IAssetAssignmentRepository _assignmentRepo;
     private readonly IEmployeeRepository _employeeRepo;
     private readonly ILocationRepository _locationRepo;
     private readonly IOrganizationUnitRepository _unitRepo;
@@ -2156,6 +2329,7 @@ public class AssetTransferService : IAssetTransferService
     public AssetTransferService(
         IAssetTransferRepository transferRepo,
         ICompanyAssetRepository assetRepo,
+        IAssetAssignmentRepository assignmentRepo,
         IEmployeeRepository employeeRepo,
         ILocationRepository locationRepo,
         IOrganizationUnitRepository unitRepo,
@@ -2166,6 +2340,7 @@ public class AssetTransferService : IAssetTransferService
     {
         _transferRepo = transferRepo;
         _assetRepo = assetRepo;
+        _assignmentRepo = assignmentRepo;
         _employeeRepo = employeeRepo;
         _locationRepo = locationRepo;
         _unitRepo = unitRepo;
@@ -2573,6 +2748,22 @@ public class AssetTransferService : IAssetTransferService
             throw AssetsWorkflowException.InvalidState(
                 "Only an approved or in-transit transfer can be completed.");
 
+        var asset = await GetOwnedAssetAsync(entity.AssetId);
+
+        // ⚠ The asset may have moved since this transfer was raised — returned, reassigned, or
+        // carried by another transfer that completed first. Completing on top of that would
+        // silently take it out of the current holder's hands with no record on their assignment.
+        // Approval was given for a move FROM somebody; if that is no longer true, the transfer has
+        // to be raised again against the facts.
+        if (entity.Type == HRAssetTransferType.EmployeeToEmployee
+            && entity.FromEmployeeId is { } expectedHolder
+            && asset.CurrentAssignedToId != expectedHolder)
+        {
+            throw AssetsWorkflowException.Conflict(
+                $"Asset {asset.AssetNumber} is no longer held by the employee this transfer moves it "
+                + "from, so the transfer cannot be completed. Raise a new one against who holds it now.");
+        }
+
         entity.Status = HRAssetTransferStatus.Completed;
         entity.CompletionDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -2582,15 +2773,12 @@ public class AssetTransferService : IAssetTransferService
 
         // Completion is the module carrying out what was approved, so it stays a direct action and
         // is deliberately NOT a workflow step - the same boundary the two outcome proposals draw.
-        //
-        // ⚠ What it does not yet do: an employee-to-employee move updates the asset's holder but
-        // leaves the OLD ASSIGNMENT ACTIVE and creates no new one, so the assignment register and
-        // the asset disagree about who has it. Recorded as a defect for slice 4, which owns
-        // assignment integrity; fixing it here would mean writing the assignment rules twice.
-        var asset = await GetOwnedAssetAsync(entity.AssetId);
         if (entity.Type == HRAssetTransferType.EmployeeToEmployee)
         {
+            await MoveCustodyAsync(entity, asset, userId);
             asset.CurrentAssignedToId = entity.ToEmployeeId;
+            asset.IsCurrentlyAssigned = entity.ToEmployeeId != null;
+            if (entity.ToEmployeeId != null) asset.Status = CompanyAssetStatus.Assigned;
         }
         else if (entity.Type == HRAssetTransferType.LocationToLocation)
         {
@@ -2606,6 +2794,98 @@ public class AssetTransferService : IAssetTransferService
 
         await _unitOfWork.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// Closes the outgoing assignment and opens the incoming one, so the custody register and the
+    /// asset tell the same story — the gap slice 3b found and left for slice 4.
+    /// </summary>
+    /// <remarks>
+    /// <para>Completing an employee-to-employee transfer used to move <c>CurrentAssignedToId</c>
+    /// and nothing else. The <b>old assignment stayed Active</b>, so the outgoing employee's "what
+    /// I hold" list still showed the asset, the exit-clearance hook (FR-HR-183, slice 10) would
+    /// have held their exit over an item they no longer had, and the recipient had no assignment at
+    /// all — no terms, no acknowledgement to give, nothing to return. This is D-a's shape from the
+    /// other end: the asset said one thing and the register another.</para>
+    ///
+    /// <para><b>The outgoing assignment is closed as <c>Transferred</c>, not <c>Returned</c>.</b>
+    /// Nobody took the asset back and the next custody starts the same day, so <c>Returned</c>
+    /// would have been a lie in the one place somebody looks to find out what happened to it.
+    /// <c>AssignmentStatus</c> is declared in the HRApi-owned <c>HREnums.cs</c>, which is why this
+    /// was first written as a compromise — but that file already carries two RHEMA-added members
+    /// with the same justification, and the header of <c>HREnums.Rhema.cs</c> now lists all three so
+    /// a sync has a checklist. Behaviourally nothing moves: every query in the module asks whether
+    /// an assignment is <c>Active</c>.</para>
+    ///
+    /// <para><c>ReturnedToId</c> carries the <b>recipient</b>. Under a <c>Transferred</c> status
+    /// "returned to" can only mean "handed to", so the row is self-describing without opening the
+    /// transfer — and the reason it named the processing officer instead, on the first cut, was to
+    /// keep that field from lying while the status still said Returned.</para>
+    /// </remarks>
+    private async Task MoveCustodyAsync(AssetTransfer transfer, CompanyAsset asset, Guid userId)
+    {
+        var outgoing = await _assignmentRepo.GetActiveAssignmentForAssetAsync(asset.Id);
+        if (outgoing is not null && outgoing.TenantId == transfer.TenantId)
+        {
+            outgoing.Status = AssignmentStatus.Transferred;
+            outgoing.ReturnDate = DateTime.UtcNow;
+            outgoing.ConditionAtReturn = asset.Condition;
+            outgoing.ReturnedInGoodCondition = true;
+            outgoing.ReturnedToId = transfer.ToEmployeeId ?? transfer.InitiatedById;
+            outgoing.ReturnNotes = Truncate(
+                $"Closed by transfer {transfer.TransferNumber}: custody passed to another employee."
+                + (string.IsNullOrWhiteSpace(transfer.TransferReason) ? string.Empty : $" {transfer.TransferReason}"),
+                1000);
+            outgoing.UpdatedAt = DateTime.UtcNow;
+            outgoing.UpdatedBy = userId.ToString();
+            await _assignmentRepo.UpdateAsync(outgoing);
+        }
+
+        if (transfer.ToEmployeeId is not { } recipientId) return;
+
+        var incoming = new AssetAssignment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = transfer.TenantId,
+            AssignmentNumber = $"ASN-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
+            AssetId = asset.Id,
+            EmployeeId = recipientId,
+
+            // Where this custody came from, the same way a fulfilment records its requisition (D-e).
+            // Without it the recipient's assignment appears from nowhere and the transfer that
+            // authorised it cannot be found from the record it produced.
+            TransferId = transfer.Id,
+            AssignmentDate = DateOnly.FromDateTime(DateTime.UtcNow),
+
+            // The terms are carried over from the assignment that just closed rather than invented:
+            // the asset is the same asset on the same footing, and defaulting a fresh set here
+            // would quietly change what somebody is responsible for.
+            Type = outgoing?.Type ?? AssignmentType.Permanent,
+            Purpose = outgoing?.Purpose ?? AssignmentPurpose.RegularWork,
+            ExpectedReturnDate = outgoing?.ExpectedReturnDate,
+            IsPrimaryUser = outgoing?.IsPrimaryUser ?? true,
+            ResponsibleForLoss = outgoing?.ResponsibleForLoss ?? true,
+            ResponsibleForDamage = outgoing?.ResponsibleForDamage ?? true,
+            TermsAndConditions = outgoing?.TermsAndConditions,
+            ConditionAtAssignment = asset.Condition,
+            AssignmentNotes = Truncate($"Received by transfer {transfer.TransferNumber}.", 1000),
+
+            ApprovedById = transfer.ApprovedById,
+            ApprovalDate = transfer.ApprovalDate,
+            Status = AssignmentStatus.Active,
+
+            // ⚠ NOT carried over. Acknowledgement is the holder's own signature that they received
+            // this asset and accept these terms (D-b) — the recipient has not given it, and copying
+            // the previous holder's would forge it.
+            EmployeeAcknowledged = false,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = userId.ToString()
+        };
+
+        await _assignmentRepo.AddAsync(incoming);
+    }
+
+    private static string Truncate(string value, int max)
+        => value.Length > max ? value[..max] : value;
 }
 
 #endregion

@@ -293,6 +293,9 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
             .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
             .Include(aa => aa.Requisition)
+            // ⚠ In with the mapping that reads it, not after somebody notices the field is null.
+            // `transferNumber` without this .Include is the sixth instance of that shape here.
+            .Include(aa => aa.Transfer)
             .Include(aa => aa.ApprovedBy)
             .Include(aa => aa.ReturnedTo)
             .FirstOrDefaultAsync(aa => aa.Id == id && !aa.IsDeleted);

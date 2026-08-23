@@ -4292,6 +4292,16 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.RequisitionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.RequisitionId);
+
+            // Slice 4. Configured EXPLICITLY rather than left to convention, for the same reason
+            // the requisition link above is: an unpaired navigation is how this module ended up
+            // with duplicate shadow FK columns before. `WithMany()` with no inverse is deliberate —
+            // a transfer produces at most one assignment and does not need a collection to say so.
+            entity.HasOne(x => x.Transfer)
+                .WithMany()
+                .HasForeignKey(x => x.TransferId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.TransferId);
         });
 
         builder.Entity<AssetMaintenance>(entity =>

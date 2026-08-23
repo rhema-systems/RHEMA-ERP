@@ -6183,7 +6183,22 @@ public enum AssignmentStatus
     Lost = 4,
 
     [Description("Damaged")]
-    Damaged = 5
+    Damaged = 5,
+
+    /// <summary>
+    /// The holder passed the asset to another employee through an approved asset transfer, rather
+    /// than handing it back. RHEMA addition, area 16 slice 4 — see the note at the top of
+    /// <c>HREnums.Rhema.cs</c>.
+    /// </summary>
+    /// <remarks>
+    /// Closing an employee-to-employee transfer as <c>Returned</c> would have been a lie in the one
+    /// place somebody goes to find out what happened to an asset: nobody took it back, and the next
+    /// custody starts the same day. Every query in the module asks whether an assignment is
+    /// <c>Active</c>, so this behaves exactly as <c>Returned</c> does for "what does this employee
+    /// still hold" — it only changes what the record says about why the custody ended.
+    /// </remarks>
+    [Description("Transferred")]
+    Transferred = 6
 }
 
 public enum AssetMaintenanceType
