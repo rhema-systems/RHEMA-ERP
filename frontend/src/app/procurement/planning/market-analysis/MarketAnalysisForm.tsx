@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { currencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import { procurementCurrencyService, type CurrencyListDto } from '@/services/financeCommonService';
 import {
   inventoryManagementService,
   type InventoryCategoryDto,
@@ -108,7 +108,7 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
     void (async () => {
       setLoadingOptions(true);
       const [currencyResult, itemResult, categoryResult] = await Promise.allSettled([
-        currencyService.getActive(),
+        procurementCurrencyService.getActive(),
         inventoryManagementService.getInventoryItems({ isActive: true }),
         inventoryManagementService.getActiveInventoryCategories(),
       ]);
