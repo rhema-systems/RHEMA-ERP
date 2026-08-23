@@ -204,26 +204,26 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
             }
         }
 
-        // If definition has steps, validate the workflow structure
-        if (definition.Steps?.Any() == true)
+        var activeSteps = definition.Steps?
+            .Where(step => !step.IsDeleted)
+            .ToList() ?? new List<WorkflowStep>();
+        if (activeSteps.Count == 0)
         {
-            await ValidateWorkflowStructureAsync(definition, errors, cancellationToken);
+            errors.Add("Workflow must have at least one active step");
+        }
+        else
+        {
+            await ValidateWorkflowStructureAsync(activeSteps, errors, cancellationToken);
         }
 
         return (errors.Count == 0, errors);
     }
 
-    private async Task ValidateWorkflowStructureAsync(WorkflowDefinition definition, List<string> errors, CancellationToken cancellationToken)
+    private async Task ValidateWorkflowStructureAsync(
+        IReadOnlyList<WorkflowStep> steps,
+        List<string> errors,
+        CancellationToken cancellationToken)
     {
-        var steps = definition.Steps.ToList();
-
-        // Must have at least one step
-        if (!steps.Any())
-        {
-            errors.Add("Workflow must have at least one step");
-            return;
-        }
-
         // Must have exactly one start step
         var startSteps = steps.Where(s => s.IsStartStep).ToList();
         if (startSteps.Count == 0)
@@ -385,23 +385,32 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         }
 
         // Validate transitions if they exist
-        if (definition.Steps.Any(s => s.OutgoingTransitions?.Any() == true))
+        if (steps.Any(s => s.OutgoingTransitions?.Any(transition => !transition.IsDeleted) == true))
         {
-            await ValidateTransitionsAsync(definition, errors, cancellationToken);
+            await ValidateTransitionsAsync(steps, errors, cancellationToken);
         }
 
         // Validate that all non-end steps have outgoing transitions
-        var stepsWithoutTransitions = steps.Where(s => !s.IsEndStep && (!s.OutgoingTransitions?.Any() ?? true)).ToList();
+        var stepsWithoutTransitions = steps
+            .Where(s => !s.IsEndStep &&
+                        (s.OutgoingTransitions?.All(transition => transition.IsDeleted) ?? true))
+            .ToList();
         if (stepsWithoutTransitions.Any())
         {
             errors.Add($"Non-end steps must have at least one outgoing transition: {string.Join(", ", stepsWithoutTransitions.Select(s => s.Name))}");
         }
     }
 
-    private static async Task ValidateTransitionsAsync(WorkflowDefinition definition, List<string> errors, CancellationToken cancellationToken)
+    private static async Task ValidateTransitionsAsync(
+        IReadOnlyList<WorkflowStep> steps,
+        List<string> errors,
+        CancellationToken cancellationToken)
     {
-        var allTransitions = definition.Steps.SelectMany(s => s.OutgoingTransitions ?? Enumerable.Empty<WorkflowTransition>()).ToList();
-        var stepIds = definition.Steps.Select(s => s.Id).ToHashSet();
+        var allTransitions = steps
+            .SelectMany(s => s.OutgoingTransitions ?? Enumerable.Empty<WorkflowTransition>())
+            .Where(transition => !transition.IsDeleted)
+            .ToList();
+        var stepIds = steps.Select(s => s.Id).ToHashSet();
 
         foreach (var transition in allTransitions)
         {
@@ -424,7 +433,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         }
 
         // Check for unreachable steps (except start step)
-        var startStep = definition.Steps.FirstOrDefault(s => s.IsStartStep);
+        var startStep = steps.FirstOrDefault(s => s.IsStartStep);
         if (startStep != null)
         {
             var reachableStepIds = new HashSet<Guid> { startStep.Id };
@@ -445,7 +454,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
                 }
             }
 
-            var unreachableSteps = definition.Steps.Where(s => !reachableStepIds.Contains(s.Id)).ToList();
+            var unreachableSteps = steps.Where(s => !reachableStepIds.Contains(s.Id)).ToList();
             if (unreachableSteps.Any())
             {
                 errors.Add($"Unreachable steps found: {string.Join(", ", unreachableSteps.Select(s => s.Name))}");

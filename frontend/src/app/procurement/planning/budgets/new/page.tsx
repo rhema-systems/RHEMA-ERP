@@ -85,7 +85,7 @@ export default function NewProcurementBudgetPage() {
       router.push('/procurement/planning/budgets');
     } catch (error) {
       console.error('Error creating procurement budget:', error);
-      toast.error('Failed to create procurement budget');
+      toast.error(error instanceof Error ? error.message : 'Failed to create procurement budget');
     } finally {
       setLoading(false);
     }

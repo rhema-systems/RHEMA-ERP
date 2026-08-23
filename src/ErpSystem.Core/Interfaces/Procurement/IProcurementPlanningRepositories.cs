@@ -76,7 +76,7 @@ public interface IProcurementBudgetRepository : IGenericRepository<ProcurementBu
         string? status = null,
         Guid? departmentId = null,
         int? fiscalYear = null);
-    Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid departmentId);
+    Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid tenantId);
     Task<bool> BudgetCodeExistsAsync(string budgetCode);
     Task<decimal> GetTotalAllocatedBudgetAsync(Guid departmentId, int fiscalYear);
     Task<decimal> GetTotalUtilizedBudgetAsync(Guid departmentId, int fiscalYear);

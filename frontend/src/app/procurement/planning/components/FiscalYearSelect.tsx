@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { financeDataService } from '@/services/finance/finance-data.service';
-import type { FiscalYear } from '@/types/finance';
+import {
+  procurementPlanService,
+  type ProcurementPlanningFiscalYearDto,
+} from '@/services/procurementPlanningService';
 
 interface FiscalYearSelectProps {
   value: number;
@@ -17,7 +19,7 @@ interface FiscalYearSelectProps {
 
 const manualValuePrefix = 'manual-year-';
 
-const isWithinFiscalYear = (fiscalYear: FiscalYear, timestamp: number) => {
+const isWithinFiscalYear = (fiscalYear: ProcurementPlanningFiscalYearDto, timestamp: number) => {
   const start = Date.parse(fiscalYear.startDate);
   const end = Date.parse(fiscalYear.endDate);
 
@@ -33,7 +35,7 @@ const formatDate = (value?: string) => {
   return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-const formatFiscalYearLabel = (fiscalYear: FiscalYear) => {
+const formatFiscalYearLabel = (fiscalYear: ProcurementPlanningFiscalYearDto) => {
   const code = fiscalYear.fiscalYearCode?.trim();
   const name = fiscalYear.fiscalYearName?.trim();
 
@@ -49,7 +51,7 @@ export function FiscalYearSelect({
   placeholder = 'Select fiscal year',
   autoSelectFirstAvailable = false,
 }: FiscalYearSelectProps) {
-  const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
+  const [fiscalYears, setFiscalYears] = useState<ProcurementPlanningFiscalYearDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -60,7 +62,7 @@ export function FiscalYearSelect({
       try {
         setLoading(true);
         setLoadFailed(false);
-        const data = await financeDataService.getFiscalYears();
+        const data = await procurementPlanService.getFiscalYears();
         if (isMounted) setFiscalYears(data);
       } catch (error) {
         console.error('Error loading fiscal years:', error);
@@ -138,10 +140,18 @@ export function FiscalYearSelect({
           const range = [formatDate(fiscalYear.startDate), formatDate(fiscalYear.endDate)].filter(Boolean).join(' - ');
 
           return (
-            <SelectItem key={fiscalYear.id} value={fiscalYear.id}>
+            <SelectItem
+              key={fiscalYear.id}
+              value={fiscalYear.id}
+              disabled={fiscalYear.isClosed || fiscalYear.isLocked}
+            >
               <div className="flex flex-col">
                 <span>{formatFiscalYearLabel(fiscalYear)}</span>
-                {range ? <span className="text-xs text-muted-foreground">{range}</span> : null}
+                <span className="text-xs text-muted-foreground">
+                  {[range, fiscalYear.isClosed ? 'Closed' : fiscalYear.isLocked ? 'Locked' : 'Available']
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
               </div>
             </SelectItem>
           );

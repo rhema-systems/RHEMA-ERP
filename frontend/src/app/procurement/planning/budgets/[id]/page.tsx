@@ -8,10 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Edit, CheckCircle, DollarSign, TrendingUp, Loader2 } from 'lucide-react';
+import { ArrowLeft, Edit, Send, DollarSign, TrendingUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementBudgetService, type ProcurementBudgetDetailDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 export default function ProcurementBudgetDetailPage() {
   const router = useRouter();
@@ -19,7 +20,8 @@ export default function ProcurementBudgetDetailPage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [budget, setBudget] = useState<ProcurementBudgetDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [approving, setApproving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) loadBudget();
@@ -38,24 +40,28 @@ export default function ProcurementBudgetDetailPage() {
     }
   };
 
-  const handleApprove = async () => {
-    if (!confirm('Are you sure you want to approve this budget? This action will make it active.')) return;
+  const handleSubmitForApproval = async () => {
     try {
-      setApproving(true);
-      await procurementBudgetService.approveBudget(id);
-      toast.success('Budget approved successfully');
-      loadBudget();
+      setSubmitting(true);
+      await procurementBudgetService.submitBudget(id);
+      toast.success('Budget submitted to the approval workflow');
+      await loadBudget();
     } catch (error) {
-      console.error('Error approving budget:', error);
-      toast.error('Failed to approve budget');
+      console.error('Error submitting budget:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to submit budget for approval');
+      return false;
     } finally {
-      setApproving(false);
+      setSubmitting(false);
     }
   };
 
   const getStatusBadge = (status: string) => {
     const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
       'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
+      'Submitted': { variant: 'secondary', className: 'bg-amber-100 text-amber-800' },
+      'UnderReview': { variant: 'secondary', className: 'bg-amber-100 text-amber-800' },
+      'Approved': { variant: 'default', className: 'bg-green-100 text-green-800' },
+      'Rejected': { variant: 'destructive', className: '' },
       'Active': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Frozen': { variant: 'outline', className: 'bg-blue-100 text-blue-800' },
       'Closed': { variant: 'outline', className: 'bg-purple-100 text-purple-800' },
@@ -95,8 +101,8 @@ export default function ProcurementBudgetDetailPage() {
               <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
                 <Edit className="h-4 w-4" />Edit
               </Button>
-              <Button onClick={handleApprove} disabled={approving} className="gap-2">
-                <CheckCircle className="h-4 w-4" />{approving ? 'Approving...' : 'Approve'}
+              <Button onClick={() => setSubmitDialogOpen(true)} disabled={submitting} className="gap-2">
+                <Send className="h-4 w-4" />{submitting ? 'Submitting...' : 'Submit for approval'}
               </Button>
             </>
           )}
@@ -234,6 +240,16 @@ export default function ProcurementBudgetDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ConfirmationDialog
+        open={submitDialogOpen}
+        onOpenChange={setSubmitDialogOpen}
+        title="Submit budget for approval?"
+        description="This sends the budget to the configured shared approval workflow. You will not be able to edit it while approval is in progress."
+        confirmText="Submit for approval"
+        onConfirm={handleSubmitForApproval}
+        isLoading={submitting}
+      />
     </div>
   );
 }

@@ -549,6 +549,12 @@ public class CreatePurchaseRequisitionDto
     public DateTime? RequiredDate { get; set; }
     public string Priority { get; set; } = "Normal";
     public string? Department { get; set; }
+
+    /// <summary>
+    /// Authoritative HR department selected by the requester.  Department is
+    /// retained as the display snapshot for legacy reporting only.
+    /// </summary>
+    public Guid? DepartmentId { get; set; }
     public string? CostCenter { get; set; }
     public string? Justification { get; set; }
     public string? Notes { get; set; }

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -98,13 +99,21 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Conflict(Problem("ROW_VERSION_STALE", "The purchase requisition changed after it was loaded. Refresh and try again.", 409));
 
             var before = _linkageService.Map(requisition);
+            var departmentName = await ResolveDepartmentNameAsync(
+                updateDto.DepartmentId,
+                requisition.TenantId,
+                cancellationToken);
+            await ApplyAuthoritativeInventoryPricingAsync(
+                updateDto.Items,
+                requisition.TenantId,
+                cancellationToken);
             if (string.IsNullOrWhiteSpace(updateDto.Linkage.CostCenter))
                 updateDto.Linkage.CostCenter = updateDto.CostCenter;
             await _linkageService.PrepareAsync(requisition, updateDto.Linkage, CorrelationId, cancellationToken);
 
             requisition.RequiredDate = updateDto.RequiredDate;
             requisition.Priority = updateDto.Priority.Trim();
-            requisition.Department = TrimOrNull(updateDto.Department, 100);
+            requisition.Department = departmentName;
             requisition.Justification = TrimOrNull(updateDto.Justification, 2000);
             requisition.Notes = TrimOrNull(updateDto.Notes, 2000);
             requisition.TotalAmount = updateDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
@@ -539,6 +548,14 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Unauthorized(Problem("AUTHENTICATION_REQUIRED", "An authenticated user is required.", 401));
 
             var tenantId = _tenantContext.GetCurrentTenantId();
+            var departmentName = await ResolveDepartmentNameAsync(
+                createDto.DepartmentId,
+                tenantId,
+                cancellationToken);
+            await ApplyAuthoritativeInventoryPricingAsync(
+                createDto.Items,
+                tenantId,
+                cancellationToken);
             var requisitionNumber = await _purchaseRequisitionRepository.GenerateRequisitionNumberAsync();
             var totalAmount = createDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
             var requisition = new PurchaseRequisition
@@ -551,7 +568,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 RequiredDate = createDto.RequiredDate,
                 Status = "Draft",
                 Priority = createDto.Priority,
-                Department = createDto.Department,
+                Department = departmentName,
                 Justification = createDto.Justification,
                 Notes = createDto.Notes,
                 TotalAmount = totalAmount,
@@ -1550,7 +1567,60 @@ public class PurchaseRequisitionsController : ControllerBase
         if (request.Items.Any(item => item.Quantity <= 0)) return "Every requisition item quantity must be greater than zero.";
         if (request.Items.Any(item => item.EstimatedUnitPrice < 0)) return "Estimated unit prices cannot be negative.";
         if (string.IsNullOrWhiteSpace(request.Priority)) return "Priority is required.";
+        if (!request.DepartmentId.HasValue || request.DepartmentId.Value == Guid.Empty)
+            return "Select an active HR department.";
         return null;
+    }
+
+    private async Task<string> ResolveDepartmentNameAsync(
+        Guid? departmentId,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (!departmentId.HasValue || departmentId.Value == Guid.Empty)
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_DEPARTMENT_REQUIRED",
+                "Select an active HR department before saving the requisition.");
+
+        var department = await _unitOfWork.Repository<Department>().GetByIdAsync(departmentId.Value);
+        if (department is null || department.TenantId != tenantId || department.IsDeleted || !department.IsActive)
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_DEPARTMENT_INVALID",
+                "The selected HR department is not available in the current tenant.");
+
+        return department.Name;
+    }
+
+    /// <summary>
+    /// Inventory-backed demand must be valued from the controlled item master.  The
+    /// requester UI deliberately has no editable price control, and direct API
+    /// callers must not be able to reintroduce one by posting an arbitrary amount.
+    /// Non-inventory demand retains its existing governed linkage valuation path.
+    /// </summary>
+    private async Task ApplyAuthoritativeInventoryPricingAsync(
+        IEnumerable<CreatePurchaseRequisitionItemDto> items,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var inventoryItems = _unitOfWork.Repository<InventoryItem>();
+
+        foreach (var requestItem in items.Where(item => item.InventoryItemId.HasValue && item.InventoryItemId.Value != Guid.Empty))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var inventoryItem = await inventoryItems.GetByIdAsync(requestItem.InventoryItemId!.Value);
+            if (inventoryItem is null || inventoryItem.TenantId != tenantId || inventoryItem.IsDeleted || inventoryItem.Status != ItemStatus.Active)
+            {
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_INVENTORY_ITEM_INVALID",
+                    "A requisition item must reference an active inventory item in the current tenant.");
+            }
+
+            requestItem.EstimatedUnitPrice = inventoryItem.LastPurchaseCost > 0
+                ? inventoryItem.LastPurchaseCost
+                : inventoryItem.StandardCost > 0
+                    ? inventoryItem.StandardCost
+                    : inventoryItem.AverageCost;
+        }
     }
 
     private static bool TryDecodeRowVersion(string value, out byte[] rowVersion)

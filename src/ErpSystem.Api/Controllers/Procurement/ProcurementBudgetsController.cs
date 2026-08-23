@@ -3,6 +3,8 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Procurement;
 
@@ -144,12 +146,57 @@ public class ProcurementBudgetsController : ControllerBase
             var budget = await _budgetService.CreateAsync(dto);
             return CreatedAtAction(nameof(GetBudget), new { id = budget.Id }, budget);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, BudgetProblem(
+                StatusCodes.Status403Forbidden,
+                "PROCUREMENT_BUDGET_TENANT_REQUIRED",
+                "Procurement budget access forbidden",
+                ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                "PROCUREMENT_BUDGET_CONFLICT",
+                "Procurement budget conflict",
+                ex.Message));
+        }
+        catch (DbUpdateException ex) when (IsBudgetCodeConflict(ex))
+        {
+            _logger.LogWarning(ex, "Concurrent procurement budget number allocation conflict");
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                "PROCUREMENT_BUDGET_NUMBER_CONFLICT",
+                "Procurement budget number conflict",
+                "Another budget was created at the same time. Please retry; the system will allocate the next budget code."));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating budget");
             return StatusCode(500, "An error occurred while creating the budget");
         }
     }
+
+    private ProblemDetails BudgetProblem(int status, string code, string title, string detail)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = title,
+            Detail = detail,
+            Instance = HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        return problem;
+    }
+
+    private static bool IsBudgetCodeConflict(DbUpdateException exception)
+        => exception.InnerException is SqlException sqlException &&
+           sqlException.Number is 2601 or 2627 &&
+           sqlException.Message.Contains(
+               "IX_ProcurementBudgets_TenantId_BudgetCode",
+               StringComparison.OrdinalIgnoreCase);
 
     [HttpPut("{id}")]
     public async Task<ActionResult<ProcurementBudgetDetailDto>> UpdateBudget(Guid id, [FromBody] CreateProcurementBudgetDto dto)
@@ -168,19 +215,69 @@ public class ProcurementBudgetsController : ControllerBase
         }
     }
 
-    [HttpPost("{id}/approve")]
-    public async Task<ActionResult<ProcurementBudgetDetailDto>> ApproveBudget(Guid id)
+    [HttpPost("{id}/submit")]
+    public async Task<ActionResult<ProcurementBudgetDetailDto>> SubmitBudget(Guid id)
     {
         try
         {
-            var budget = await _budgetService.ApproveAsync(id);
+            var budget = await _budgetService.SubmitForApprovalAsync(id);
+            return Ok(budget);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(BudgetProblem(
+                StatusCodes.Status404NotFound,
+                "PROCUREMENT_BUDGET_NOT_FOUND",
+                "Procurement budget not found",
+                ex.Message));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, BudgetProblem(
+                StatusCodes.Status403Forbidden,
+                "PROCUREMENT_BUDGET_SUBMIT_FORBIDDEN",
+                "Procurement budget submission forbidden",
+                ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Procurement budget submission rejected for {BudgetId}", id);
+            var workflowInvalid = ex.Message.Contains("start step", StringComparison.OrdinalIgnoreCase) ||
+                                  ex.Message.Contains("workflow", StringComparison.OrdinalIgnoreCase);
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                workflowInvalid
+                    ? "PROCUREMENT_BUDGET_WORKFLOW_INVALID"
+                    : "PROCUREMENT_BUDGET_SUBMIT_CONFLICT",
+                workflowInvalid
+                    ? "Procurement budget approval workflow is unavailable"
+                    : "Procurement budget submission conflict",
+                ex.Message));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting budget {BudgetId}", id);
+            return StatusCode(500, "An error occurred while submitting the budget for approval");
+        }
+    }
+
+    [HttpPost("{id}/approve")]
+    public async Task<ActionResult<ProcurementBudgetDetailDto>> ApproveBudget(
+        Guid id,
+        [FromBody] ApproveProcurementBudgetDto? dto)
+    {
+        try
+        {
+            var budget = await _budgetService.ApproveAsync(id, dto ?? new ApproveProcurementBudgetDto());
             return Ok(budget);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error approving budget {BudgetId}", id);
-            return StatusCode(500, "An error occurred while approving the budget");
+            _logger.LogError(ex, "Error processing budget workflow decision {BudgetId}", id);
+            return StatusCode(500, "An error occurred while processing the budget workflow decision");
         }
     }
 

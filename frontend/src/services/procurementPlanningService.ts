@@ -15,12 +15,17 @@ const getAuthHeaders = () => {
 };
 
 const readProblemMessage = async (response: Response, fallback: string) => {
+  const payload = await response.text();
+  if (!payload.trim()) return fallback;
+
   try {
-    const problem = await response.json() as { detail?: string; message?: string; code?: string };
+    const parsed = JSON.parse(payload) as string | { detail?: string; message?: string; title?: string; code?: string };
+    if (typeof parsed === 'string') return parsed.trim() || fallback;
+    const problem = parsed;
     const message = problem.detail || problem.message || fallback;
     return problem.code ? `${message} (${problem.code})` : message;
   } catch {
-    return fallback;
+    return payload.trim() || fallback;
   }
 };
 
@@ -77,6 +82,7 @@ export interface ProcurementPlanDto {
   planDurationYears: number;
   status: string;
   totalEstimatedBudget: number;
+  budgetId?: string;
   approvedBudget: number;
   currency: string;
   preparedByName?: string;
@@ -89,6 +95,18 @@ export interface ProcurementPlanDto {
   revisionNumber: number;
   itemCount: number;
   createdAt: string;
+}
+
+export interface ProcurementPlanningFiscalYearDto {
+  id: string;
+  fiscalYearName: string;
+  fiscalYearCode: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+  status: string;
+  isClosed: boolean;
+  isLocked: boolean;
 }
 
 export interface ProcurementPlanDetailDto extends ProcurementPlanDto {
@@ -119,6 +137,7 @@ export interface CreateProcurementPlanDto {
   planEndDate: string;
   planDurationYears?: number;
   totalEstimatedBudget?: number;
+  budgetId?: string;
   currency?: string;
   notes?: string;
   items?: CreateProcurementPlanItemDto[];
@@ -149,9 +168,9 @@ export interface ApproveProcurementPlanDto {
   approvedBudget?: number;
   comments?: string;
   autoGenerateSchedules?: boolean;
-  /** Optional: Specific budget ID to link. If null, system auto-matches by department + fiscal year */
+  /** Retained for backward-compatible API requests; plan budgets are selected during preparation. */
   budgetId?: string;
-  /** If true, automatically links to matching budget on approval */
+  /** Retained for backward-compatible API requests. */
   autoLinkBudget?: boolean;
 }
 
@@ -1005,6 +1024,16 @@ export interface CreateEmergencySupplierDto {
 // ============================================================================
 
 export const procurementPlanService = {
+  async getFiscalYears(): Promise<ProcurementPlanningFiscalYearDto[]> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/fiscal-years`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await readProblemMessage(response, 'Failed to load fiscal years for procurement planning'));
+    }
+    return response.json();
+  },
+
   async getPlans(params?: {
     page?: number;
     pageSize?: number;
@@ -1042,7 +1071,7 @@ export const procurementPlanService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create procurement plan');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to create procurement plan'));
     return response.json();
   },
 
@@ -1311,7 +1340,7 @@ export const procurementBudgetService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create procurement budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to create procurement budget'));
     return response.json();
   },
 
@@ -1321,7 +1350,7 @@ export const procurementBudgetService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to update procurement budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update procurement budget'));
     return response.json();
   },
 
@@ -1330,15 +1359,25 @@ export const procurementBudgetService = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to delete procurement budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to delete procurement budget'));
   },
 
-  async approveBudget(id: string): Promise<ProcurementBudgetDetailDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/${id}/approve`, {
+  async submitBudget(id: string): Promise<ProcurementBudgetDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/${id}/submit`, {
       method: 'POST',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to approve budget');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to submit procurement budget for approval'));
+    return response.json();
+  },
+
+  async approveBudget(id: string, data: { isApproved: boolean; comments?: string }): Promise<ProcurementBudgetDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to process procurement budget workflow decision'));
     return response.json();
   },
 
@@ -1346,7 +1385,7 @@ export const procurementBudgetService = {
     const response = await fetch(`${API_BASE_URL}/procurement/procurementbudgets/available-for-linking?departmentId=${departmentId}&fiscalYear=${fiscalYear}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to get available budgets');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to get available budgets'));
     return response.json();
   },
 

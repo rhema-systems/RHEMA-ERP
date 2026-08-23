@@ -57,6 +57,10 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
     return 'No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.';
   }
 
+  if (response.status === 403 && message && message.includes('no Security role granting this procurement privilege')) {
+    return 'You cannot create this purchase requisition yet. Ask a Security administrator to assign the active TDC Requisitioner, TDC User Department Head, TDC Procurement Officer, or TDC Senior Procurement Officer role. A warehouse responsibility assignment is not required for requisition creation.';
+  }
+
   if (
     response.status === 400 &&
     message &&
@@ -480,6 +484,7 @@ export interface CreatePurchaseRequisitionDto {
   requiredDate?: string;
   priority: string;
   department?: string;
+  departmentId?: string;
   costCenter?: string;
   justification?: string;
   notes?: string;
@@ -1262,10 +1267,7 @@ export const purchasingService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to create purchase requisition');
-    }
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
 
     // Handle empty response body (201 Created with no content)
     const text = await response.text();
