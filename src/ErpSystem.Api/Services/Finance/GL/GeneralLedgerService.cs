@@ -2000,6 +2000,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var periodStart = request.PeriodStart.Date;
             var periodEnd = request.PeriodEnd.Date;
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var cashFlowMethod = NormalizeCashFlowMethod(request.Method);
 
             var cashFlowStatement = new CashFlowStatementDto
             {
@@ -2007,7 +2008,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 PeriodStart = periodStart,
                 PeriodEnd = periodEnd,
                 BookClassification = bookClassification,
-                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
+                Method = cashFlowMethod
             };
 
             // A bank GL is a cash account because the tenant's bank master maps it as one.
@@ -2048,6 +2050,58 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .Distinct()
                     .ToListAsync();
 
+            // Every non-cash counterpart in a cash-touching journal must identify its
+            // statement section. Silently dropping an unclassified account produces a
+            // balanced GL but a false cash-flow statement, so reporting fails closed.
+            if (cashActivityJournalIds.Count > 0)
+            {
+                var cashCounterpartAccountIds = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(transaction =>
+                        cashActivityJournalIds.Contains(transaction.JournalEntryId) &&
+                        !cashAccountIds.Contains(transaction.AccountId) &&
+                        transaction.TransactionDate >= periodStart &&
+                        transaction.TransactionDate < activityEndExclusive &&
+                        !(transaction.SourceModule == "MIGRATION" &&
+                          transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                    .Select(transaction => transaction.AccountId)
+                    .Distinct()
+                    .ToListAsync();
+
+                var cashCounterpartAccounts = await _context.Accounts
+                    .AsNoTracking()
+                    .Where(account =>
+                        account.TenantId == tenantId &&
+                        !account.IsDeleted &&
+                        cashCounterpartAccountIds.Contains(account.Id))
+                    .ToListAsync();
+                var foundCounterpartIds = cashCounterpartAccounts.Select(account => account.Id).ToHashSet();
+                var unavailableCounterparts = cashCounterpartAccountIds
+                    .Where(accountId => !foundCounterpartIds.Contains(accountId))
+                    .OrderBy(accountId => accountId)
+                    .ToList();
+                if (unavailableCounterparts.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        "Cash-flow reporting cannot resolve active tenant account(s) referenced by cash journals: " +
+                        string.Join(", ", unavailableCounterparts) +
+                        ". Restore the account lineage before generating the statement.");
+                }
+
+                var unclassifiedCounterparts = cashCounterpartAccounts
+                    .Where(account => NormalizeCashFlowSection(account.CashFlowClassification) == null)
+                    .OrderBy(account => account.AccountNumber)
+                    .Select(account => $"{account.AccountNumber} - {account.AccountName}")
+                    .ToList();
+
+                if (unclassifiedCounterparts.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        "Cash-flow classification is required for cash-journal counterpart account(s): " +
+                        string.Join(", ", unclassifiedCounterparts) +
+                        ". Assign Operating, Investing, or Financing in Chart of Accounts.");
+                }
+            }
+
             // Get all accounts with cash flow classifications
             var accounts = await _context.Accounts
                 .Where(account =>
@@ -2075,9 +2129,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             // Separate accounts by cash flow classification
-            var operatingAccounts = accounts.Where(a => a.CashFlowClassification == "Operating" && accountActivity.ContainsKey(a.Id)).ToList();
-            var investingAccounts = accounts.Where(a => a.CashFlowClassification == "Investing" && accountActivity.ContainsKey(a.Id)).ToList();
-            var financingAccounts = accounts.Where(a => a.CashFlowClassification == "Financing" && accountActivity.ContainsKey(a.Id)).ToList();
+            var operatingAccounts = accounts.Where(a => NormalizeCashFlowSection(a.CashFlowClassification) == "Operating" && accountActivity.ContainsKey(a.Id)).ToList();
+            var investingAccounts = accounts.Where(a => NormalizeCashFlowSection(a.CashFlowClassification) == "Investing" && accountActivity.ContainsKey(a.Id)).ToList();
+            var financingAccounts = accounts.Where(a => NormalizeCashFlowSection(a.CashFlowClassification) == "Financing" && accountActivity.ContainsKey(a.Id)).ToList();
 
             // Build Operating Activities section
             cashFlowStatement.OperatingActivities = BuildCashFlowSection(
@@ -2087,6 +2141,19 @@ namespace ErpSystem.Api.Services.Finance.GL
                 accountActivity,
                 bookClassification,
                 request.IncludeAccountDetails);
+
+            if (cashFlowMethod == "Indirect")
+            {
+                cashFlowStatement.OperatingActivities = await BuildIndirectOperatingCashFlowSectionAsync(
+                    tenantId,
+                    periodStart,
+                    periodEnd,
+                    bookClassification,
+                    accounts,
+                    cashFlowStatement.OperatingActivities.SectionTotal,
+                    request.IncludeAccountDetails,
+                    cashFlowStatement.PresentationWarnings);
+            }
 
             // Build Investing Activities section
             cashFlowStatement.InvestingActivities = BuildCashFlowSection(
@@ -2153,6 +2220,133 @@ namespace ErpSystem.Api.Services.Finance.GL
             cashFlowStatement.CashAtEnd = cashAtEnd;
 
             return cashFlowStatement;
+        }
+
+        private async Task<CashFlowSectionDto> BuildIndirectOperatingCashFlowSectionAsync(
+            Guid tenantId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification,
+            IReadOnlyCollection<Account> classifiedAccounts,
+            decimal directOperatingCash,
+            bool includeAccountDetails,
+            ICollection<string> presentationWarnings)
+        {
+            var incomeStatement = await GenerateIncomeStatementAsync(new IncomeStatementRequestDto
+            {
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd,
+                BookClassification = bookClassification,
+                IncludeAccountDetails = false
+            });
+
+            var section = new CashFlowSectionDto
+            {
+                SectionName = "Cash Flows from Operating Activities (Indirect Method)",
+                SectionOrder = 1,
+                LineItems =
+                {
+                    new CashFlowLineItemDto
+                    {
+                        LineItemName = "Profit for the period",
+                        Amount = incomeStatement.NetProfit,
+                        LineOrder = 1
+                    }
+                }
+            };
+
+            var workingCapitalAccounts = classifiedAccounts
+                .Where(account =>
+                    NormalizeCashFlowSection(account.CashFlowClassification) == "Operating" &&
+                    account.AccountType is AccountType.Asset or AccountType.Liability)
+                .ToList();
+            var workingCapitalMovements = await CalculateCashFlowPeriodRawMovementsAsync(
+                tenantId,
+                workingCapitalAccounts.Select(account => account.Id).ToArray(),
+                periodStart,
+                periodEnd,
+                bookClassification);
+
+            var workingCapitalLines = workingCapitalAccounts
+                .Where(account => workingCapitalMovements.ContainsKey(account.Id))
+                .Select(account =>
+                {
+                    var normalMovement = ToStatementNormalBalance(
+                        account.AccountType,
+                        workingCapitalMovements[account.Id]);
+                    var cashAdjustment = account.AccountType == AccountType.Asset
+                        ? -normalMovement
+                        : normalMovement;
+                    return new
+                    {
+                        Name = $"Change in {GetLineItem(account, bookClassification) ?? account.AccountName}",
+                        Account = account,
+                        Amount = cashAdjustment
+                    };
+                })
+                .Where(item => Math.Abs(item.Amount) > 0.01m)
+                .GroupBy(item => item.Name)
+                .OrderBy(group => group.Key)
+                .Select(group => new CashFlowLineItemDto
+                {
+                    LineItemName = group.Key,
+                    Amount = group.Sum(item => item.Amount),
+                    AccountNumbers = includeAccountDetails
+                        ? group.Select(item => item.Account.AccountNumber).OrderBy(number => number).ToList()
+                        : null
+                })
+                .ToList();
+
+            foreach (var line in workingCapitalLines)
+            {
+                line.LineOrder = section.LineItems.Count + 1;
+                section.LineItems.Add(line);
+            }
+
+            var explainedOperatingCash = section.LineItems.Sum(line => line.Amount);
+            var otherNonCashAdjustments = directOperatingCash - explainedOperatingCash;
+            if (Math.Abs(otherNonCashAdjustments) > 0.01m)
+            {
+                section.LineItems.Add(new CashFlowLineItemDto
+                {
+                    LineItemName = "Other non-cash and classification adjustments",
+                    Amount = otherNonCashAdjustments,
+                    LineOrder = section.LineItems.Count + 1
+                });
+                presentationWarnings.Add(
+                    "Indirect operating cash flow contains a ledger-derived residual adjustment. " +
+                    "Review operating working-capital classifications and non-cash journals before final sign-off.");
+            }
+
+            section.SectionTotal = section.LineItems.Sum(line => line.Amount);
+            return section;
+        }
+
+        private async Task<Dictionary<Guid, decimal>> CalculateCashFlowPeriodRawMovementsAsync(
+            Guid tenantId,
+            IReadOnlyCollection<Guid> accountIds,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification)
+        {
+            if (accountIds.Count == 0)
+                return new Dictionary<Guid, decimal>();
+
+            var endExclusive = periodEnd.Date.AddDays(1);
+            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(transaction =>
+                    accountIds.Contains(transaction.AccountId) &&
+                    transaction.TransactionDate >= periodStart.Date &&
+                    transaction.TransactionDate < endExclusive &&
+                    !(transaction.SourceModule == "MIGRATION" &&
+                      transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                .GroupBy(transaction => transaction.AccountId)
+                .Select(group => new
+                {
+                    AccountId = group.Key,
+                    RawMovement = group.Sum(transaction => transaction.DebitAmount - transaction.CreditAmount)
+                })
+                .ToDictionaryAsync(item => item.AccountId, item => item.RawMovement);
         }
 
         private async Task<decimal> CalculateCashFlowAccountActivityForPeriod(
@@ -2225,6 +2419,30 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             section.SectionTotal = section.LineItems.Sum(li => li.Amount);
             return section;
+        }
+
+        private static string NormalizeCashFlowMethod(string? method)
+        {
+            return (method ?? "Indirect").Trim().ToUpperInvariant() switch
+            {
+                "DIRECT" => "Direct",
+                "INDIRECT" => "Indirect",
+                _ => throw new ArgumentException("Cash-flow method must be Direct or Indirect.", nameof(method))
+            };
+        }
+
+        private static string? NormalizeCashFlowSection(string? classification)
+        {
+            if (string.IsNullOrWhiteSpace(classification))
+                return null;
+
+            return classification.Trim().ToUpperInvariant() switch
+            {
+                "OPERATING" => "Operating",
+                "INVESTING" => "Investing",
+                "FINANCING" => "Financing",
+                _ => null
+            };
         }
 
         #endregion
