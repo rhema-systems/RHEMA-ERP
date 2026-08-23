@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using ErpSystem.Core.Services.HR.Extensions;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -163,6 +164,7 @@ public class EmployeeRelieverService : IEmployeeRelieverService
             IsActive = dto.IsActive
         };
 
+        entity.StampCreated(_currentUserProvider);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Pre-defined reliever set for employee {EmployeeId} (priority {Priority})", dto.EmployeeId, dto.Priority);
@@ -181,6 +183,7 @@ public class EmployeeRelieverService : IEmployeeRelieverService
         entity.RelieverEmployeeId = dto.RelieverEmployeeId;
         entity.Priority = dto.Priority;
         entity.IsActive = dto.IsActive;
+        entity.StampUpdated(_currentUserProvider);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -218,6 +221,10 @@ public class EmployeeRelieverService : IEmployeeRelieverService
         RelieverPositionName = e.RelieverEmployee?.Position?.Title,
         RelieverOrganizationUnitName = e.RelieverEmployee?.OrganizationUnit?.Name,
         Priority = e.Priority,
-        IsActive = e.IsActive
+        IsActive = e.IsActive,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
     };
 }

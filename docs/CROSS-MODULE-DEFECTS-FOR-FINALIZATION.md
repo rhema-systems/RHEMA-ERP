@@ -375,6 +375,77 @@ Nothing in HR. It blocks whatever screen lists the active users attached to a bu
 
 ---
 
+## 6. Platform-wide — `CreatedBy` is a display-name column and much of the codebase writes an id into it
+
+Found by the areas 19–23 slice 11 content audit, 2026-08-23. **Not fixed** — the HR stores in that
+bundle were corrected, but the pattern is codebase-wide and the convention is not HR's to change
+unilaterally.
+
+### What is broken
+
+`BaseEntity` carries **`CreatedBy` (`string?`)** and **`CreatedById` (`Guid?`)** — a name and an id,
+two columns for two different jobs. A screen renders `createdBy`. Across the solution, a large
+number of writers put a **raw GUID into the name column** and leave the id column null.
+
+Confirmed instances, by grep for `CreatedBy = <something>.ToString()` / `= userId`:
+
+```
+src/ErpSystem.Api/Controllers/ReportRoleAssignmentController.cs   3 sites
+src/ErpSystem.Api/Services/Maintenance/AssetTypeService.cs        1 site
+src/ErpSystem.Api/Services/Finance/MultiCurrency/ExchangeRateService.cs
+                                    CreatedBy = rate.CreatedByUserId.ToString(), // TODO: Resolve username
+src/ErpSystem.Core/Services/HR/ApplicationPipelineService.cs      1 site
+src/ErpSystem.Core/Services/HR/Appraisal/AppraisalCycleService.cs 2 sites
+```
+
+⚠ The `// TODO: Resolve username` in `ExchangeRateService` is the tell: **this is a known shortcut,
+taken repeatedly, and never revisited.**
+
+### What was proven
+
+Measured on live DEFAULT-tenant data:
+
+```
+ExternalAssociates   7 rows, CreatedBy set on 7 — every value is an EMPLOYEE id, not a name
+FacilityServices     3 rows, CreatedBy set on 3 — one GUID
+OrganizationUnitHistories   142 of 208 carry a real name ("admin", "t19v_…")
+```
+
+The external-associate values were resolved against `Users` and `Employees`: they match **employee
+ids**. So the register's "added by" column, the moment a screen renders it, shows a GUID.
+
+⚠ **There is no automatic stamp to fall back on.** `ApplicationDbContext.UpdateAuditableEntities`
+sets `CreatedAt`, `UpdatedAt`, `TenantId` and the soft-delete flag, and stops. The author columns
+are every service's own job — which is why the behaviour varies service by service rather than
+being uniformly right or uniformly wrong.
+
+⚠ **`UpdatedBy` is filled by nothing at all** in any of the ten stores areas 19–23 touch, including
+the ones that fill `CreatedBy`. Every "last modified" in those modules can say when and not by whom.
+
+### What it blocks
+
+Any screen with an "added by" or "last modified by" column, in every module that took the shortcut.
+It is not a crash and not a wrong number — it renders, and it renders a GUID at a human.
+
+### What a fix needs
+
+1. **Decide the convention once**, then hold it: `CreatedBy` is the display name,
+   `CreatedById` is the id. Both, not one.
+2. HR already has the rule as a named helper —
+   `ErpSystem.Core.Services.HR.Extensions.AuditStampExtensions` (`StampCreated` / `StampUpdated`,
+   with the `FullName`-then-`Username` fallback a service account needs). Promote it out of the HR
+   namespace rather than writing a second one.
+3. **Or make it automatic.** `UpdateAuditableEntities` already runs on every save and already reads
+   ambient state; giving it an `ICurrentUserProvider` would close the whole class. That is a
+   platform decision, which is exactly why it is recorded here instead of being taken in an HR slice.
+4. Backfilling is optional and probably not worth it — the existing GUIDs are recoverable, but the
+   rows that carry nothing are gone for good either way.
+
+⚠ Whatever fixes it must assert on the **value**, not on the column being non-null. A GUID in the
+name column is non-null, and that is the entire defect.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

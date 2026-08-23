@@ -124,6 +124,10 @@ public class UnionService : IUnionService
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
+        // ⚠ Nothing stamps the author automatically — see AuditStampExtensions. Slice 11's audit
+        // found every union row carrying a blank CreatedBy while the register next door had one on
+        // every row.
+        entity.StampCreated(_currentUserProvider);
         await _unionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Union created: {Name}", entity.Name);
@@ -143,6 +147,7 @@ public class UnionService : IUnionService
         }
 
         updateDto.UpdateEntity(entity);
+        entity.StampUpdated(_currentUserProvider);
         await _unionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Union updated: {Name}", entity.Name);
@@ -180,6 +185,7 @@ public class UnionService : IUnionService
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
+        entity.StampCreated(_currentUserProvider);
         await _agreementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("CBA added to union: {UnionId}", createDto.UnionId);
@@ -198,6 +204,7 @@ public class UnionService : IUnionService
         var entity = await GetOwnedAgreementAsync(updateDto.Id);
         ValidateAgreementDates(updateDto.EffectiveDate, updateDto.ExpiryDate);
         updateDto.UpdateEntity(entity);
+        entity.StampUpdated(_currentUserProvider);
         await _agreementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("CBA updated: {Id}", updateDto.Id);

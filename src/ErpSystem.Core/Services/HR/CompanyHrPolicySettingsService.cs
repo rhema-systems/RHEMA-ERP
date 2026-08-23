@@ -80,12 +80,14 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
         {
             entity = new CompanyHrPolicySettings { TenantId = tenantId };
             entity.ApplyUpdate(dto);
+            entity.StampCreated(_currentUser);
             await _repository.AddAsync(entity);
             _logger.LogInformation("Company HR policy settings created for tenant {TenantId}", entity.TenantId);
         }
         else
         {
             entity.ApplyUpdate(dto);
+            entity.StampUpdated(_currentUser);
             await _repository.UpdateAsync(entity);
             _logger.LogInformation("Company HR policy settings updated for tenant {TenantId}", entity.TenantId);
         }

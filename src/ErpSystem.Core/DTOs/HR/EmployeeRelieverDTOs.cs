@@ -5,9 +5,16 @@ namespace ErpSystem.Core.DTOs.HR;
 /// <summary>
 /// One pre-defined reliever: who covers for an employee, and in what order.
 /// </summary>
-public class EmployeeRelieverDto
+/// <remarks>
+/// ⚠ Made to inherit <see cref="BaseDto"/> by slice 11's content audit. It was the only DTO in
+/// areas 19–23 that did not, so it carried no <c>createdAt</c>, <c>createdBy</c>, <c>updatedAt</c>
+/// or <c>updatedBy</c> — and once slice 11 fixed the services to stamp the author, the reliever
+/// roster was the one store stamping a value that no caller could ever see. A field written for
+/// nobody is the same defect as a field never written; the audit only caught it because it
+/// asserted the payload rather than the row.
+/// </remarks>
+public class EmployeeRelieverDto : BaseDto
 {
-    public Guid Id { get; set; }
     public Guid EmployeeId { get; set; }
 
     /// <summary>

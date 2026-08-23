@@ -76,12 +76,14 @@ public class CompanyProfileService : ICompanyProfileService
         {
             entity = new CompanyProfile { TenantId = tenantId };
             entity.ApplyUpdate(dto);
+            entity.StampCreated(_currentUser);
             await _repository.AddAsync(entity);
             _logger.LogInformation("Company profile created for tenant {TenantId}", entity.TenantId);
         }
         else
         {
             entity.ApplyUpdate(dto);
+            entity.StampUpdated(_currentUser);
             await _repository.UpdateAsync(entity);
             _logger.LogInformation("Company profile updated for tenant {TenantId}", entity.TenantId);
         }

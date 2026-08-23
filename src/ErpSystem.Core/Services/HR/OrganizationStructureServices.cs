@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using ErpSystem.Core.Services.HR.Extensions;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -959,16 +960,11 @@ public class OrganizationUnitService : IOrganizationUnitService
             NewHeadEmployeeId = newHeadEmployeeId,
             EffectiveFrom = effectiveFrom,
             ChangeReason = string.IsNullOrWhiteSpace(changeReason) ? null : changeReason.Trim(),
-            // ⚠ Nothing stamps CreatedBy in this codebase — there is no global auditing interceptor,
-            // each service does it — so every row written since slice 3 carries an empty author.
-            // A change log that records what changed and why but not WHO is missing the column the
-            // question is usually asked about. Measured, not assumed: slice 5's probe read
-            // `createdBy: ""` on every live row.
-            CreatedBy = string.IsNullOrWhiteSpace(_currentUserProvider.FullName)
-                ? _currentUserProvider.Username
-                : _currentUserProvider.FullName,
-            CreatedById = _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
-        });
+            // ⚠ Nothing stamps CreatedBy in this codebase — there is no global auditing
+            // interceptor, each service does it. This was slice 3's inline fix and slice 11 found
+            // out what an inline fix is worth: the same hole was still open in every other store
+            // this bundle built afterwards. The rule has a name now.
+        }.StampCreated(_currentUserProvider));
     }
 
     /// <summary>

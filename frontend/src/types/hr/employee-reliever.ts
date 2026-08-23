@@ -19,6 +19,13 @@ export interface EmployeeReliever {
   /** 1 = primary, 2 = backup, and so on. Ordinal, so it starts at 1. */
   priority: number;
   isActive: boolean;
+  // Audit fields, from BaseDto. Added in slice 11: the DTO was the only one in areas 19-23 not
+  // inheriting BaseDto, so it carried no author at all — and the service had just started
+  // stamping one. Not rendered anywhere yet; that is slice 12 UI-parity work if TDC wants it.
+  createdAt?: string;
+  createdBy?: string;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
 }
 
 // Mirrors CreateEmployeeRelieverDto.

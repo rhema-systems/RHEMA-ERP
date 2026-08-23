@@ -200,6 +200,10 @@ public class TeamService : ITeamService
         // 0001-01-01, which would silently save as a real date a century before the company existed.
         if (entity.EffectiveFrom == default) entity.EffectiveFrom = Today;
 
+        // ⚠ Nothing stamps the author automatically — see AuditStampExtensions. Slice 11's audit
+        // found every team row carrying a blank CreatedBy, against 7 of 7 on the external-associate
+        // register next door. Slice 3 had already fixed this shape on the unit change log.
+        entity.StampCreated(_currentUser);
         await _teams.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -224,6 +228,7 @@ public class TeamService : ITeamService
         entity.ApplyUpdate(dto);
         if (entity.EffectiveFrom == default) entity.EffectiveFrom = Today;
 
+        entity.StampUpdated(_currentUser);
         await _teams.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -325,6 +330,7 @@ public class TeamService : ITeamService
             Notes = dto.Notes,
         };
 
+        member.StampCreated(_currentUser);
         await _members.AddAsync(member);
         if (dto.IsPrimary) await ClearOtherPrimariesAsync(tenantId, dto.EmployeeId, member.Id, cancellationToken);
 
@@ -360,6 +366,7 @@ public class TeamService : ITeamService
         member.IsActive = dto.IsActive;
         member.Notes = dto.Notes;
 
+        member.StampUpdated(_currentUser);
         await _members.UpdateAsync(member);
         if (dto.IsPrimary) await ClearOtherPrimariesAsync(tenantId, member.EmployeeId, member.Id, cancellationToken);
 
@@ -393,6 +400,7 @@ public class TeamService : ITeamService
         // delete would hide that from the roster while leaving the row to trip over later.
         member.LeaveDate = leave;
         member.IsActive = false;
+        member.StampUpdated(_currentUser);
         await _members.UpdateAsync(member);
 
         await RecordRoleChangeAsync(tenantId, teamId, member.EmployeeId, member.Role, member.Role,
@@ -542,7 +550,7 @@ public class TeamService : ITeamService
             EffectiveFrom = effectiveFrom,
             EffectiveTo = effectiveTo,
             ChangeReason = reason,
-        });
+        }.StampCreated(_currentUser));
     }
 
     private async Task ValidateAsync(

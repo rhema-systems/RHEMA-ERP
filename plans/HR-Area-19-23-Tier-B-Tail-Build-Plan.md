@@ -255,7 +255,7 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 8 | **External associates.** D-10 (the reissued number), register, detail, activate/deactivate — the 10 unreached endpoints. ✅ | 20 |
 | 9 | **Facility services** onto the area-11 facility detail. ✅ | 20 |
 | 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. ✅ | 23 |
-| 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. | all |
+| 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. ✅ | all |
 | 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
 
 Migrations: **three, all applied.** `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b), `20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete` (slice 7) and `20260822211432_FilterExternalAssociateNumberUniqueIndexOnSoftDelete` (slice 8). All three are the same defect — a uniqueness claim over a soft-deleting store — which was the most reliably recurring shape in this bundle. Slice 8 answered the open question in the third one's favour: D-10 needed **both** halves, the generator reading past the soft delete *and* the filtered index behind it, because the generator alone leaves nothing enforcing the claim and a plain unique index cannot be built over the 38 dead rows already carrying `EXT-0008`.
@@ -1458,3 +1458,113 @@ staying small has an expiry date on it, and nothing announces the date.** This o
 said why, because slice 5 had written the guard deliberately. The dangerous version is the same
 assumption left implicit — a set comparison against `pageSize=200` with no guard would have started
 silently comparing a *prefix* of the log, and passing.
+
+### Slice 11 — the content audit. 2026-08-23, **65/65**, run twice. No migration.
+
+Harness `run-slice11.mjs`, 39 routes, shapes measured first with `probe-audit-shapes.mjs`. Full
+regression alongside: slice 0 **17/17**, 1 **69/69**, 2 **100/100**, 3 **49/49**, 4 **60/60**,
+4b **88/88**, 5 **112/112**, 6 **77/77**, 7 **63/63**, 8 **82/82**, 9 **50/50**, 10 **37/37**.
+Bundle total: **869 assertions**.
+
+Area 11's sentence is why this slice exists: **a status-code harness proves the gate, not the
+feature.** Area 11 was green on status and its post-hoc content audit failed 20 of 37. This bundle
+had asserted content only where a screen consumed it; the 39 GET routes were never swept as a set.
+
+⚠ **Every audited list gets a fixture built first.** `Unions`, `CollectiveBargainingAgreements` and
+`Teams` hold **zero live rows** on TDC, so calling their lists bare would print `[]` and prove
+nothing — the exact failure a content audit exists to catch, committed by the audit itself. Nothing
+came back empty.
+
+**D-78 · Nothing stamped the author, anywhere.** `ApplicationDbContext.UpdateAuditableEntities`
+sets `CreatedAt`, `UpdatedAt`, `TenantId` and the soft-delete flag, and stops. **There is no
+auditing interceptor**, so every service must stamp `CreatedBy`/`UpdatedBy` itself. Measured across
+the bundle's ten stores:
+
+```
+    CreatedBy blank:  Unions 0/2 · Teams 0/2 · TeamMembers 0/45 · CBAs 0/2
+                      CompanyProfiles 0/1 · EmployeeRelievers 0/2
+    UpdatedBy blank:  ALL TEN STORES, including the four that did fill CreatedBy
+```
+
+⚠ **Slice 3 found this exact hole on the organisation-unit change log and fixed it inline.** Four
+registers later — 4b, 6, 7 and the area-22 settings — the same bundle had the same hole in every one
+of them, written by the same person who had just fixed it. **That is what an inline fix is worth: a
+rule that lives as an expression copied into one file cannot be carried anywhere.** It has a name
+now — `AuditStampExtensions.StampCreated` / `StampUpdated`, called from six services, with slice 3's
+copy collapsed into it. The `FullName`-then-`Username` fallback is part of the named rule rather
+than an implementation detail, because a service account has no display name and would otherwise
+stamp a blank that reads exactly like the bug.
+
+⚠ **`StampCreated` also sets `UpdatedBy`.** A row that has never been edited was last touched by
+whoever made it; leaving that null makes an unedited row indistinguishable from one whose editor was
+never recorded, which is the defect this removes.
+
+⚠ **No backfill.** Rows written before the fix keep their blanks and always will. The harness
+asserts on rows **it creates in the run**, and says so, rather than asserting a state the store
+cannot reach.
+
+**D-79 · The reliever roster stamped an author no caller could see.** The audit's first pass failed
+three assertions with `createdBy: undefined` — *absent*, not blank. `EmployeeRelieverDto` was the
+only DTO in areas 19–23 not inheriting `BaseDto`, so it carried no `createdAt`, `createdBy`,
+`updatedAt` or `updatedBy` at all. **Fixing D-78 created D-79**: the service began stamping a value
+that stopped at the mapper. ⚠ **A field written for nobody is the same defect as a field never
+written, and only an assertion on the PAYLOAD can tell the two apart** — a check against the row
+would have passed. The DTO inherits `BaseDto` now (dropping its duplicate `Id`), the mapper fills
+the four fields, and the TS mirror that claims to mirror it was updated so the claim stays true.
+
+**Not fixed, and recorded instead: `CreatedBy` is a name column and much of the codebase writes an
+id into it.** `BaseEntity` carries `CreatedBy` (`string?`) *and* `CreatedById` (`Guid?`) — a name and
+an id. The seven live external associates carry **employee ids** in the name column; so do the
+facility services. The pattern spans `ReportRoleAssignmentController` (3 sites), `AssetTypeService`,
+`ExchangeRateService` — which has a `// TODO: Resolve username` admitting it — `ApplicationPipelineService`
+and `AppraisalCycleService`. ⚠ **A convention that spans four modules is not an HR slice's to
+change**, so it is `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` **#6**, with the note that the
+real fix is probably to give `UpdateAuditableEntities` an `ICurrentUserProvider` and close the whole
+class at once. The run **prints** that facility-services still stamps a GUID rather than asserting
+it — asserting someone else's defect as expected behaviour would freeze it in place.
+
+---
+
+### The instrument, and how it lied twice before it worked
+
+`probe-audit-shapes.mjs` prints per-field **fill rates across every row**, not the shape of row [0].
+Both of its heuristics had to be sharpened after the first pass, and both had already produced a
+confident wrong finding.
+
+1. **A blank `*Name` is only a finding when the matching `*Id` is SET.** Unpaired, it flagged
+   `previousHeadEmployeeName: null` on all six history routes and `countryName: null` on the company
+   profile — and in every case the id beside it was null too, so the null name was the truthful
+   answer. **Unpaired, the heuristic reports the org-authority data gap as a code defect.**
+2. **`Organogram/locations` answered 400 and that is correct.** It is the one dimension that
+   requires a `structureId`; slice 4 documented the asymmetry and `run-slice4.mjs` asserts that 400
+   deliberately. The probe had called it bare.
+3. **"Null on all rows" is weak when the rows are the probe's own fixtures.** It flagged eighteen
+   fields on `teams` that the fixture had itself set to null. The durable version of this test is a
+   fixture that populates **every** optional field, so a null on the way back means the server
+   dropped it — which is the `hireDate`-vs-`dateEmployed` trap `setup.mjs` already warns about.
+
+**Same lesson as slice 10's route sweep, one slice later: a static instrument reports findings, not
+facts, and every one must be read at the source before it is acted on.** Two slices running, the
+first pass of a new instrument has cried wolf, and in both cases the wolf would have been a "fix" to
+working code.
+
+---
+
+### Two things the regression turned up
+
+**Slice 4's assertion count is data-dependent — 60 or 61.** Its teams-rollup assertion only fires
+when teams exist, which is the "an empty list proves nothing" pattern behaving correctly. It read 61
+while five leftover fixture teams were live and 60 once they were gone. **An assertion count quoted
+as a fixed number in this log is therefore approximate for slice 4**, and that is preferable to a
+rollup assertion that passes vacuously over an empty set.
+
+**The audit was leaving a live team behind every run, and slice 4 is what noticed.** Slice 4b
+refuses to dissolve a team that still has members — correctly, and with a sentence naming the count
+— and the audit's cleanup deleted the team before its member, so every run failed silently at
+cleanup and left one. Five had accumulated. ⚠ **This is the hazard the README already warned about**
+after a slice-4b run left three teams and made slice 4 fail for an unrelated reason; it recurred
+because a *new* file wrote its own cleanup. The cleanup removes members first now, in both the audit
+and the probe.
+
+**Residue on live data:** two harness actors per run and their employees; every fixture the audit
+builds is removed. Live `Teams` is back to **0**.
