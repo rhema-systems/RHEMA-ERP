@@ -261,7 +261,8 @@ public interface IEmployeeService
     Task<int> GetTotalEmployeeCountAsync();
     Task<int> GetActiveEmployeeCountAsync();
     Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync();
-    Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync();
+    // GetEmployeeCountByDepartmentAsync removed in slice 10 — Department is the deprecated
+    // dimension and nothing called it. Headcount by organisation unit is `api/Organogram/units`.
 
     #endregion
 }

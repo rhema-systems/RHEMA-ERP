@@ -253,6 +253,33 @@ public static class EmployeeMappingExtensions
         to.ContractDetails = from.ContractDetails;
     }
 
+    /// <summary>
+    /// Whether an employee record is live, given the employment status it carries.
+    ///
+    /// <para><c>Employee</c> holds the same fact twice — <c>StaffStatus</c> and <c>IsActive</c> —
+    /// and the four lifecycle methods on <c>EmployeeService</c> (activate, deactivate, terminate,
+    /// reinstate) each set both, in lockstep. The create and update paths did not: the create
+    /// hardcoded <c>IsActive = true</c> whatever status it was handed, and the update let a caller
+    /// move either flag without the other. Posting an employee with
+    /// <c>staffStatus: "Terminated"</c> therefore returned <c>isActive: true</c>, and every one of
+    /// the twenty-nine HR reads that filter on <c>IsActive</c> would have counted that person as
+    /// still on the payroll.</para>
+    ///
+    /// <para>The rule is read off what the codebase already decides rather than invented:
+    /// deactivate writes <c>Inactive</c>, terminate writes <c>Terminated</c>, and both write
+    /// <c>IsActive = false</c>. <c>Retired</c> is added here because a retired employee is
+    /// likewise gone — no path produces it today and no row carries it, so this is the one part
+    /// of the rule that is a judgement rather than an observation, and it is called out for TDC
+    /// rather than buried. <c>Suspended</c> and <c>OnLeave</c> are still employed and stay live.</para>
+    /// </summary>
+    public static bool IsLiveRecordFor(StaffStatus status) => status switch
+    {
+        StaffStatus.Inactive => false,
+        StaffStatus.Terminated => false,
+        StaffStatus.Retired => false,
+        _ => true,
+    };
+
     public static Employee ToEntity(this CreateEmployeeDto dto, string employeeNumber, Guid organizationLevelId, Guid locationLevelId)
         => new()
         {
@@ -310,7 +337,7 @@ public static class EmployeeMappingExtensions
             PicturePath = dto.PicturePath,
             Notes = dto.Notes,
             IsExpatriate = dto.IsExpatriate,
-            IsActive = true
+            IsActive = IsLiveRecordFor(dto.StaffStatus)
         };
 
     public static void Apply(this UpdateEmployeeDto dto, Employee e, Guid? organizationLevelId = null, Guid? locationLevelId = null)
@@ -363,6 +390,8 @@ public static class EmployeeMappingExtensions
         if (dto.StaffStatus.HasValue) e.StaffStatus = dto.StaffStatus.Value;
 
         if (locationLevelId.HasValue) e.LocationLevelId = locationLevelId.Value;
+        // (`IsActive` is reconciled against `StaffStatus` at the end of this method, after the
+        //  caller's own `isActive` has had its say — see the note there.)
         if (dto.LocationId.HasValue) e.LocationId = dto.LocationId;
         if (dto.ManagerId.HasValue) e.ManagerId = dto.ManagerId;
 
@@ -392,6 +421,22 @@ public static class EmployeeMappingExtensions
 
         if (dto.IsExpatriate.HasValue) e.IsExpatriate = dto.IsExpatriate.Value;
         if (dto.IsActive.HasValue) e.IsActive = dto.IsActive.Value;
+
+        // The status is the authority, and it gets the last word. A payload carrying both
+        // `staffStatus: "Terminated"` and `isActive: true` is contradicting itself; before this
+        // line it was stored exactly as sent, and the record then read as employed to the
+        // twenty-nine HR queries that filter on `IsActive` while reading as gone to the four
+        // headline counts that group `StaffStatus`. Whichever order the two assignments happened
+        // to run in decided which of those was true, which is not a thing a caller should be able
+        // to choose by accident.
+        //
+        // A status-only update therefore carries `IsActive` with it — moving someone to
+        // `Terminated` through this path can no longer leave them counted as on the payroll — and
+        // an `isActive` a status contradicts is overruled rather than half-applied. The dedicated
+        // lifecycle endpoints (activate / deactivate / terminate / reinstate) already set the two
+        // together and are unaffected.
+        if (dto.StaffStatus.HasValue || dto.IsActive.HasValue)
+            e.IsActive = IsLiveRecordFor(e.StaffStatus);
     }
 
     #endregion

@@ -149,9 +149,10 @@ class EmployeeService {
     return apiService.get<Record<string, number>>(`${this.baseUrl}/stats/by-status`);
   }
 
-  getCountByDepartment(): Promise<Record<string, number>> {
-    return apiService.get<Record<string, number>>(`${this.baseUrl}/stats/by-department`);
-  }
+  // `getCountByDepartment` was removed in slice 10 with the endpoint behind it. Department is the
+  // deprecated dimension — an employee must have an organisation unit and need not have a
+  // department — and nothing ever called this. For headcount by unit use `organogramService`,
+  // whose `units` view carries `employeeCount` and a subtree rollup.
 
   // ── Contacts (addresses) ──────────────────────────────────────────────────────
 

@@ -392,9 +392,9 @@ public class EmployeesController : ControllerBase
     public async Task<ActionResult<Dictionary<StaffStatus, int>>> GetEmployeeCountByStatus()
         => Ok(await _service.GetEmployeeCountByStatusAsync());
 
-    [HttpGet("stats/by-department")]
-    public async Task<ActionResult<Dictionary<string, int>>> GetEmployeeCountByDepartment()
-        => Ok(await _service.GetEmployeeCountByDepartmentAsync());
+    // `stats/by-department` was removed in slice 10. It grouped on the deprecated Department
+    // dimension, had no caller in the solution, and `GET api/Organogram/units` already answers
+    // headcount by organisation unit — with the subtree rollup this never had.
 
     #endregion
 

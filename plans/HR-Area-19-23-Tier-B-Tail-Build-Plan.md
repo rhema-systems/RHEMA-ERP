@@ -34,10 +34,10 @@ the JWT key passed; every harness runs **twice**.
 | **20** | `api/employee-certificates` | 9 | ✅ area 7 | **done, out of scope** |
 | **20** | `api/probations` | — | ✅ area 15b | **done, out of scope** |
 | **21** | `api/hr/unions` | 10 | 3 | **done in slice 6**: register, detail + agreements, and the job-description picker that was the missing reader |
-| **22** | `api/hr/company-profile` | 2 | 0 | **0 rows**, read by 3 letter/email services |
-| **22** | `api/hr/policy-settings` | 2 | 0 | 1 row, ~25 knobs, read by 11 services |
+| **22** | `api/hr/company-profile` | 2 | 1 | **done in slice 1**: the editor, and the 0 rows the three letter/email services were reading |
+| **22** | `api/hr/policy-settings` | 2 | 1 | **done in slice 2**: ~25 knobs grouped by the area that reads each, admin-gated for write |
 | **23** | `api/HRCycleDashboard` | 3 | ✅ area 5 | **done** |
-| **23** | per-area dashboards ×7 | — | ✅ all built | **done**; only the `/hr` home is thin |
+| **23** | per-area dashboards ×7 | — | ✅ all built | **done**; the `/hr` home rebuilt in slice 10, which found the four headline counts leaking across tenants |
 
 **Net unbuilt surface: 47 endpoints, 0 screens.** Areas 23 and half of 20 are already closed by
 earlier areas — the bundle is smaller than its numbering suggests, and the weight is in 19, 21, 22.
@@ -254,7 +254,7 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 7 | **Reliever roster.** D-9 (the unfiltered unique index), roster screen + the leave-form default (Decision 3). | 20 |
 | 8 | **External associates.** D-10 (the reissued number), register, detail, activate/deactivate — the 10 unreached endpoints. ✅ | 20 |
 | 9 | **Facility services** onto the area-11 facility detail. ✅ | 20 |
-| 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. | 23 |
+| 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. ✅ | 23 |
 | 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. | all |
 | 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
 
@@ -703,7 +703,7 @@ at now.
 `T19V` employees. The register itself reads clean — 0 live teams — and a soft-deleted team no longer
 holds its code, which is the point of the migration.
 
-### Slice 5 — the unit change-log screens. 2026-08-22, **111/111**, run twice. No migration.
+### Slice 5 — the unit change-log screens. 2026-08-22, **111/111**, run twice. No migration. (Re-run at **112/112** during slice 10 — see the note at the end of this log.)
 
 Harness `run-slice5.mjs`; payloads probed first with `SLICE=5 node probe-ui-payloads.mjs`. Screens:
 `/administration/hr/organization/unit-history` (the register) and a **Change log** tab on
@@ -1265,3 +1265,196 @@ sets it explicitly.
 
 **Residue on live data:** two fixture facilities per run, both deleted at the end (the guard permits
 it once their services are gone), plus the soft-deleted rows behind them.
+
+### Slice 10 — the HR home, and the route sweep. 2026-08-23, **37/37**, run twice. No migration.
+
+Harness `run-slice10.mjs` plus `sweep-routes.mjs`; payloads probed first with
+`SLICE=10 node probe-ui-payloads.mjs`, and the four candidate dashboards separately gate-checked
+against three actors before any of them was wired to a screen. Full regression alongside: slice 0
+**17/17**, 1 **69/69**, 2 **100/100**, 3 **49/49**, 4 **60/60**, 4b **88/88**, 5 **112/112**,
+6 **77/77**, 7 **63/63**, 8 **82/82**, 9 **50/50**. Bundle total: **804 assertions**. Screens: the `/hr` home rebuilt, a
+new recruitment-setup index at `/administration/hr/recruitment`, four orphaned screens put into the
+sidebar, and two dead controls removed from the travel-policy register.
+
+**The plan called `/hr` "thin".** It was four counters and a directory of half the module. The
+directory half was the known problem; the counters turned out to be the serious one, and the first
+defect below is the worst thing this bundle has found.
+
+**D-73 · `stats/total` was counting every tenant's employees, and so were the other three.** All
+four read `CountAsync()` / `GetAllAsync()`, which scope on `!IsDeleted` and nothing else. ⚠ **The
+comment that explains why that is wrong is at the top of the same file**, on `GetTenantId()`: the
+DbContext is registered without a tenant, so its global tenant query-filter is *inert*. And
+`SearchAsync`, twenty lines above the defect, already scopes explicitly for exactly that reason.
+Measured with one employee row planted under the `A11 Foreign Tenant` that area 11 left behind:
+
+```
+    GET api/hr/Employees/stats/total          6591
+    POST api/hr/Employees/paged .totalCount   6590   <- the same table, scoped properly
+```
+
+⚠ **This one is provable from the API, and that is the whole reason it is testable.** The natural
+assertion — that the four stats endpoints agree with each other — would have passed before the fix,
+because all four leaked equally. What catches it is `SearchAsync`, which counts the same table
+through *different code that names the tenant*. The bundle's lesson 8 (a rule stated twice needs a
+third statement to check it) turned out to be the only way to see this defect from outside.
+
+**D-74 · `stats/active` was answering a different question from the three tiles beside it.** It
+counted `IsActive` — the record-enabled flag — while its neighbours group `StaffStatus`. On live
+data that is 6,474 against 6,421, and the missing 53 are exactly the Probation bucket: the "Active"
+tile silently *contained* the "On probation" tile rendered next to it, so no arithmetic a reader
+did on that row of the screen worked. It now counts the status its own label names, which also
+makes the four tiles a genuine partition of the headcount.
+
+**D-75 · An employee could be created terminated and still be flagged active.** `ToEntity`
+hardcoded `IsActive = true` whatever status it was handed; `Apply` let a caller move either flag
+without the other. Measured:
+
+```
+    POST api/hr/Employees  { staffStatus: "Terminated" }  ->  isActive: true
+    stats/active           6474 -> 6475     <- a terminated employee raised the "Active" tile
+```
+
+⚠ **The rule was read off the codebase, not invented.** Deactivate writes `Inactive`, terminate
+writes `Terminated`, and both write `IsActive = false`; the four lifecycle methods have always kept
+the pair in lockstep and only the create and update paths did not. `IsLiveRecordFor` now states it
+once and both paths call it. The one judgement in it is `Retired`, which no path produces and no row
+carries — it is treated as *not* live, and that is flagged here rather than buried, because it is
+the only part of the rule the codebase did not already decide.
+
+⚠ **The status is the authority and gets the last word, in both directions.** A payload carrying
+`staffStatus: "Active"` with `isActive: false` used to be stored exactly as sent, and the record then
+read as employed to the twenty-nine HR queries that filter on `IsActive` and as gone to the four
+counts that group `StaffStatus` — with the assignment order deciding which. Asserted both ways
+round, because a fix that reconciles one direction only is the same defect mirrored.
+
+⚠ **No live row was corrupted by this.** `SELECT` over all 6,590 employees found zero rows where the
+two disagree, because every existing termination went through the lifecycle endpoint. It was a hole,
+not a wound — which is the difference between a fix and a backfill, and worth checking before
+assuming the second.
+
+**D-76 · Two of the four counts materialised every employee row to produce a handful of integers.**
+6,588 rows, and `by-department` dragged its navigation along. Measured: 274 ms and 387 ms, against
+21–32 ms for the two that counted in SQL. On the landing page. `by-status` now groups in SQL.
+
+**D-77 · `stats/by-department` grouped the workforce on the deprecated dimension, and is deleted.**
+Raised by the user on reading the D-76 fix, and they were right. `EmployeeService` line 89 already
+calls Department deprecated; `OrganizationUnitId` is **required** on an employee and `DepartmentId`
+is not; and the live data says the same — **42 organisation units against 7 departments, and 6,566
+of 6,590 employees carrying a unit against 6,076 carrying a department**, so 514 people were filed
+under "Unassigned" and 6,590 people were offered in 7 buckets.
+
+⚠ **Re-pointing it at `OrganizationUnitId` was the obvious repair and is the wrong one.**
+`GET api/Organogram/units` — built in slice 4 — already returns per-unit `employeeCount` **and** a
+subtree rollup (`totalEmployeeCount`). A second by-unit count here would be lesson 8's rule stated
+twice, with no rollup and nothing reading it. **Headcount by organisation unit has one home.** The
+endpoint, the service method, the interface member and the frontend's uncalled
+`getCountByDepartment` are all gone; `run-slice10.mjs` asserts the 404. This is slice 8's lesson 10
+in its second application — an unreachable copy of a rule is the defect in storage.
+
+⚠ Worth recording that the removed method was **correct** when it was deleted: slice 9's
+requiredness test had been applied to it and passed — `Employee.DepartmentId` is nullable, so the
+projection was a LEFT JOIN and a soft-deleted department left its people under "Unassigned" rather
+than dropping them. **It was deleted for reporting on the wrong dimension, not for being broken**,
+which is a different and easier thing to miss.
+
+**The home itself.** Two bands and a directory. The workforce band is derived from **one** grouping,
+so its four numbers cannot contradict each other — that is D-74's fix expressed as a screen rather
+than as an endpoint. The queue band is four counters that each mean somebody has to do something,
+each linking to the screen that clears it, and it is fetched **only** when the caller holds an HR
+role: all four of those endpoints answer 403 to a plain employee, so firing them unconditionally
+would buy four failed requests and an empty row. `MetricTiles` gained an optional `href` for this
+and the bespoke `StatCard` the page carried is gone.
+
+⚠ **Two measured figures were deliberately left off.** `position-vacancies/stats` reported 0 open
+against 303 positions, and `hr/teams/summary` was empty. A tile whose source is zero on live data is
+a permanent blank box, and area 14 paid for shipping one. Both are **asserted as still empty**, so
+the day either fills up the assertion fails and the tile becomes worth adding — an assertion whose
+job is to tell you when to *add* something.
+
+**The nav grid went from 13 areas to 26.** Recruitment, training, safety, medical, travel,
+succession, probation, orientation, separations, competencies, job descriptions, manpower budgets
+and the organogram were all reachable only from the sidebar, so the page the module opens on was a
+directory of half the module. ⚠ The harness reads the area list **off the filesystem**, not from a
+list written beside it — a hand-kept expected list is a second copy of the grid, and the two would
+agree with each other while both drifted from the app.
+
+---
+
+### The route sweep
+
+`sweep-routes.mjs` reads the app instead of calling it: 492 page routes, and it fails on a static
+route nothing links to or a link that resolves to no route. Neither shows up in `tsc`, in the
+linter, or in an API harness, because both are perfectly valid TypeScript.
+
+⚠ **THE FIRST VERSION OF THE SWEEP WAS WRONG IN BOTH DIRECTIONS, AND THAT IS THE LESSON.**
+
+*Three false orphans.* It matched a path only when the whole string was route characters, so
+`` `/hr/recruitment/offers/new?applicationId=${id}` `` — a live button on the application detail
+screen — did not match its own route. `vacancies/new` and `travel/claims/new` went the same way. All
+three were reported as unreachable and all three work. **Every one was opened and read before
+anything was changed**, which is the only reason nothing was "fixed".
+
+*Three hundred false dead links.* Without a lookbehind, `@/services/hr/awards.service` and
+`@/components/hr/common/AttachmentsPanel` — import specifiers — matched from their `/hr/` onwards.
+The signal was there; it was under 300 lines of noise.
+
+**A sweep that is trusted and wrong sends you to break working screens.** The rule this leaves
+behind: *a static analyser over a codebase is a measuring instrument, and an instrument reports
+findings, not facts — read every one at the source before acting on it.* Slice 5's "a filter is also
+a measuring instrument" pointed the same way from the other side.
+
+**What it found once it was right — four orphans and four dead links.**
+
+- **`/administration/hr/probation/reminders`** — movements, discipline and safety each had their
+  reminder sweep in the nav and probation's did not, so a screen that behaves exactly like its three
+  neighbours had no way in. `confirming-authorities`, which only that page links to, was stranded
+  behind it. **Three of five reminder screens navigable is the tell**: when near-identical screens
+  are treated differently, the odd one out is usually an omission rather than a decision.
+- **`/administration/hr/travel/reminders`** — the same, one area over.
+- **`/administration/hr/separation/clearance-form`** — built, linked from nothing.
+- **`/administration/hr/travel/policies`** — an orphan that was *also* the source of two dead links.
+  ⚠ **This register can list and approve; it cannot create or edit.** Its "Draft a policy" button and
+  its per-row detail link both pointed at pages that were never built. Nobody had ever hit those
+  404s because nothing linked to the screen that carried them — **one defect was hiding the other**.
+  The API is not the gap: `StaffTravelPoliciesController` carries create, update, approve, withdraw,
+  rules CRUD and exceptions. The two dead controls are removed rather than made reachable, and the
+  missing editor is recorded below as area-12 residue. Building it here would have been a feature in
+  a closed area.
+- **`/administration/hr/recruitment`** — two setup screens carried
+  `backHref="/administration/hr/recruitment"` and the route did not exist, so their Back button was a
+  404. It was the only one of six setup groups without an index page, and the sidebar's group parent
+  had been aimed at a child to work around it. The index is built and the parent points at it.
+
+**Three references that look exactly like routes and are not** are allow-listed by name with a
+reason each — an `apiService.get('/hr/benefit-policies/active')` has the identical shape to a link,
+and nothing in the text distinguishes them. A context rule ("ignore anything inside an apiService
+call") would be guessing; **an allow-list you have to justify a line at a time cannot quietly absorb
+a real dead link.**
+
+**Residue for later slices, found by the sweep and deliberately not fixed here:** the travel-policy
+editor (`/administration/hr/travel/policies/new` and `/[id]`) is unbuilt against a complete API.
+That is area 12's, and slice 12's UI-parity pass is where it belongs.
+
+**Residue on live data:** four fixture employees per run, all deleted at the end, plus the
+soft-deleted rows behind them and the two harness actors each run mints.
+
+---
+
+### Found while regressing slice 10: an assertion with an expiry date on it
+
+Slice 5 came back **107/111**, and none of it was a product regression. Its set comparisons rested on
+`ok('the whole log fits in one page here', big.totalCount <= 200)` — true at the 66 rows slice 5 was
+written against, false at the 203 the log now holds. **A change log has no delete by design, so every
+harness run makes it permanently longer**, and the controller caps `pageSize` at 200: the failure
+message's own advice, "raise the page size", had stopped being available. The ceiling is the
+product's, not the harness's.
+
+The comparison now **walks every page** instead of assuming one, and asserts that the walk accounts
+for exactly `totalCount` rows with no id seen twice — a better assertion than the one it replaced,
+because it also proves the pagination. **112/112.**
+
+⚠ **The lesson generalises past this harness: an assertion whose truth depends on the fixture data
+staying small has an expiry date on it, and nothing announces the date.** This one failed loudly and
+said why, because slice 5 had written the guard deliberately. The dangerous version is the same
+assumption left implicit — a set comparison against `pageSize=200` with no guard would have started
+silently comparing a *prefix* of the log, and passing.

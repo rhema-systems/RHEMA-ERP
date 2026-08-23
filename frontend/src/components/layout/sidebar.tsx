@@ -1703,7 +1703,7 @@ export const navigationItems: NavItem[] = [
           },
           {
             title: 'Recruitment',
-            href: '/administration/hr/recruitment/pipelines',
+            href: '/administration/hr/recruitment',
             icon: Workflow,
             children: [
               { title: 'Pipelines', href: '/administration/hr/recruitment/pipelines', icon: Workflow },
@@ -1763,6 +1763,43 @@ export const navigationItems: NavItem[] = [
             title: 'Discipline',
             href: '/administration/hr/discipline/reminders',
             icon: Gavel,
+          },
+          {
+            // Slice 10's route sweep found this one. Movements, discipline and safety each had
+            // their reminder sweep in this nav and probation's did not, so a screen that behaves
+            // exactly like its three neighbours had no way in — and `confirming-authorities`,
+            // which only the reminders page links to, was unreachable behind it.
+            title: 'Probation',
+            href: '/administration/hr/probation/reminders',
+            icon: UserPlus,
+            children: [
+              { title: 'Reminders', href: '/administration/hr/probation/reminders', icon: AlarmClock },
+              {
+                title: 'Confirming Authorities',
+                href: '/administration/hr/probation/confirming-authorities',
+                icon: UserRoundCheck,
+              },
+            ],
+          },
+          {
+            // Both children were orphans. ⚠ The policy register lists and approves but cannot
+            // create or edit: its "Draft a policy" button and its per-row link both pointed at
+            // pages that were never built, so they are gone until they are. The API behind them
+            // is complete — see the slice 10 entry in the areas 19–23 plan.
+            title: 'Travel',
+            href: '/administration/hr/travel/policies',
+            icon: Plane,
+            children: [
+              { title: 'Travel Policies', href: '/administration/hr/travel/policies', icon: ShieldCheck },
+              { title: 'Reminders', href: '/administration/hr/travel/reminders', icon: AlarmClock },
+            ],
+          },
+          {
+            // The clearance form an exiting employee is walked through, by department. Built,
+            // and reachable from nothing until the sweep.
+            title: 'Separation',
+            href: '/administration/hr/separation/clearance-form',
+            icon: DoorOpen,
           },
           {
             title: 'Safety (SHE)',

@@ -2597,20 +2597,69 @@ public class EmployeeService : IEmployeeService
     public Task<bool> EmailExistsAsync(string email) => _employeeRepository.EmailExistsAsync(NormalizeEmail(email));
     public Task<string> GenerateEmployeeNumberAsync() => _employeeRepository.GenerateEmployeeNumberAsync();
 
-    public async Task<int> GetTotalEmployeeCountAsync() => await _employeeRepository.CountAsync();
-    public async Task<int> GetActiveEmployeeCountAsync() => await _employeeRepository.CountAsync(e => e.IsActive);
+    // ── Headline counts ─────────────────────────────────────────────────────────
+    //
+    // These four feed the `/hr` landing page and nothing else. All four were wrong in the same
+    // way and one of them was wrong twice.
+    //
+    // ⚠ TENANT. Every one of them read `CountAsync()` / `GetAllAsync()`, which scope on
+    // `!IsDeleted` and nothing else. The comment on `GetTenantId()` at the top of this file says
+    // why that is not enough — the DbContext is registered without a tenant, so its global tenant
+    // filter is INERT — and `SearchAsync` twenty lines up already scopes explicitly for exactly
+    // that reason. Measured before this fix, with one employee planted under a second tenant:
+    // `stats/total` answered 6591 where the caller's own tenant held 6590. A landing page was
+    // publishing another company's headcount. Every query below now names the tenant.
+    //
+    // ⚠ MEANING. `GetActiveEmployeeCountAsync` counted `IsActive` — the record-enabled flag —
+    // while its three neighbours group `StaffStatus`, the employment status. The home renders the
+    // four side by side under one heading, so "Active 6474" and "On probation 53" read as
+    // disjoint when the 53 were inside the 6474, and the two numbers were answers to two
+    // different questions. It now counts the status its label names, which also makes the tiles
+    // a genuine partition of the total.
+    //
+    // ⚠ COST. The two dictionaries materialised every employee row — 6,588 of them, and the
+    // department one dragged its navigation along — to produce a handful of integers: 274 ms and
+    // 387 ms against 21–32 ms for the two that counted in SQL. Both now group in SQL.
+
+    public async Task<int> GetTotalEmployeeCountAsync()
+    {
+        var tenantId = GetTenantId();
+        return await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .CountAsync();
+    }
+
+    public async Task<int> GetActiveEmployeeCountAsync()
+    {
+        var tenantId = GetTenantId();
+        return await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.StaffStatus == StaffStatus.Active)
+            .CountAsync();
+    }
 
     public async Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync()
     {
-        var employees = await _employeeRepository.GetAllAsync();
-        return employees.GroupBy(e => e.StaffStatus).ToDictionary(g => g.Key, g => g.Count());
+        var tenantId = GetTenantId();
+        var rows = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .GroupBy(e => e.StaffStatus)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync();
+        return rows.ToDictionary(r => r.Status, r => r.Count);
     }
 
-    public async Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync()
-    {
-        var employees = await _employeeRepository.GetAllAsync(e => e.Department!);
-        return employees.GroupBy(e => e.Department?.Name ?? "Unassigned").ToDictionary(g => g.Key, g => g.Count());
-    }
+    // ⚠ `GetEmployeeCountByDepartmentAsync` was removed in slice 10, along with its endpoint and
+    // its uncalled frontend method. It grouped the workforce on `Department`, which the create
+    // path a few hundred lines above already calls deprecated: `OrganizationUnitId` is REQUIRED on
+    // an employee and `DepartmentId` is not, and the live data says the same — 42 organisation
+    // units against 7 departments, and 6,566 of 6,590 employees carrying a unit against 6,076
+    // carrying a department, so 514 people filed under "Unassigned".
+    //
+    // It had no caller anywhere in the solution. Re-pointing it at `OrganizationUnitId` was the
+    // obvious repair and is the wrong one: `GET api/Organogram/units` already returns per-unit
+    // `EmployeeCount` **and** a subtree rollup, so a second by-unit count here would be the same
+    // rule stated twice with no rollup and nothing reading it. Headcount by organisation unit has
+    // one home, and it is the organogram.
 
     #endregion
 
