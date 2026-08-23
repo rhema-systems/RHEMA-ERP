@@ -164,49 +164,19 @@ public class OrganizationUnitHistoryController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Retrieves latest history record for a unit
-    /// </summary>
-    [HttpGet("unit/{unitId:guid}/latest")]
-    [ProducesResponseType(typeof(OrganizationUnitHistoryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetLatestByUnitId(Guid unitId)
-    {
-        try
-        {
-            var response = await _historyService.GetLatestByUnitIdAsync(unitId);
-            if (response == null)
-                return NotFound(new { message = "No history found for this unit" });
-
-            return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving latest history for organization unit {UnitId}", unitId);
-            return StatusCode(500, "An error occurred while retrieving organization unit history");
-        }
-    }
-
-    /// <summary>
-    /// Retrieves active history record for a unit
-    /// </summary>
-    [HttpGet("unit/{unitId:guid}/active")]
-    [ProducesResponseType(typeof(OrganizationUnitHistoryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetActiveHistory(Guid unitId)
-    {
-        try
-        {
-            var response = await _historyService.GetActiveHistoryAsync(unitId);
-            if (response == null)
-                return NotFound(new { message = "No active history found for this unit" });
-
-            return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving active history for organization unit {UnitId}", unitId);
-            return StatusCode(500, "An error occurred while retrieving organization unit history");
-        }
-    }
+    // ⚠ `unit/{id}/latest` and `unit/{id}/active` were deleted in areas 19–23 slice 12, and the
+    // reason is worth keeping: they provably returned the SAME row as each other, and that row
+    // could not answer the question either of them was named for.
+    //
+    // Slice 3 made this log effective-dated per SERIES — a reparent closes the open parent row, a
+    // change of head closes the open head row, and the two move independently. The newest row in a
+    // series is therefore always the open one, so filtering on `EffectiveTo == null` (`active`)
+    // never changed the top of the same ordering `latest` used. Worse, both returned ONE row where
+    // up to two arrangements are in force, so "the current arrangement" arrived as whichever series
+    // happened to change last — a caller asking who heads a unit that was reparented afterwards got
+    // a row with both head ids null.
+    //
+    // Neither had a caller. The unit's change-log tab reads `unit/{unitId}` — the whole log, which
+    // states both series honestly — and that is the right home for the question. Same call as slice
+    // 10 deleting `stats/by-department`: the wrong dimension, not a broken implementation.
 }

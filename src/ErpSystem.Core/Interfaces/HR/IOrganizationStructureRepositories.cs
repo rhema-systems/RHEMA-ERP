@@ -234,15 +234,11 @@ public interface IOrganizationUnitHistoryRepository : IGenericRepository<Organiz
     /// </summary>
     Task<IEnumerable<OrganizationUnitHistory>> GetByUnitIdAndDateRangeAsync(Guid unitId, DateOnly startDate, DateOnly endDate);
 
-    /// <summary>
-    /// Get the latest history record for a unit
-    /// </summary>
-    Task<OrganizationUnitHistory?> GetLatestByUnitIdAsync(Guid unitId);
-
-    /// <summary>
-    /// Get active history record for a unit (where EffectiveTo is null)
-    /// </summary>
-    Task<OrganizationUnitHistory?> GetActiveHistoryAsync(Guid unitId);
+    // GetLatestByUnitIdAsync / GetActiveHistoryAsync deleted in areas 19–23 slice 12 along with the
+    // two endpoints that were their only callers. Both also carried the required-navigation
+    // `.Include(ouh => ouh.OrganizationUnit)` that slice 5 had to remove from the reads that ARE
+    // used: an INNER JOIN through a soft-deleting principal drops the history of every dissolved
+    // unit, which is exactly the row an audit trail exists to keep.
 
     /// <summary>
     /// Get all history records for units under a specific head employee

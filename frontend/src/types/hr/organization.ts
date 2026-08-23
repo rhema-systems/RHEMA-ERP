@@ -110,6 +110,27 @@ export interface CreateOrganizationUnitRequest {
 }
 
 // Mirrors UpdateOrganizationUnitDto (adds Id; level is immutable server-side).
+/**
+ * Reparents a unit. `newParentId: null` moves it to the root, which only a root-level unit may do
+ * and only while no other root exists in its structure.
+ *
+ * ⚠ Distinct from {@link UpdateOrganizationUnitRequest} on purpose, even though the edit form can
+ * perform the same move. The edit form carries ONE reason for a save that may change both the
+ * parent and the head, and the change log records those as two independent series — so a save that
+ * did both stamped the same sentence on two unrelated rows. These two commands each carry the
+ * reason for the one act they perform.
+ */
+export interface MoveUnitRequest {
+  newParentId?: string | null;
+  changeReason: string;
+}
+
+/** Appoints, replaces or (where the level permits) removes a unit's head. */
+export interface ChangeUnitHeadRequest {
+  newHeadEmployeeId?: string | null;
+  changeReason: string;
+}
+
 export interface UpdateOrganizationUnitRequest extends CreateOrganizationUnitRequest {
   id: string;
   /**

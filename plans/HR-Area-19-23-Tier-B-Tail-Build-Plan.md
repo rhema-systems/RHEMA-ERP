@@ -256,7 +256,7 @@ assumption held elsewhere*. Before merging slice 3, grep every reader of `HeadEm
 | 9 | **Facility services** onto the area-11 facility detail. ✅ | 20 |
 | 10 | **The HR home.** Real headline figures on `/hr`, and a reachability sweep of every HR route. ✅ | 23 |
 | 11 | **Content audit.** Every GET, by id, asserting content not status. Run twice. ✅ | all |
-| 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. | all |
+| 12 | **UI parity.** endpoint → service → screen, the area-14 completeness check. ✅ | all |
 
 Migrations: **three, all applied.** `20260822133728_FilterTeamCodeUniqueIndexOnSoftDelete` (slice 4b), `20260822200806_FilterEmployeeRelieverPriorityIndexOnSoftDelete` (slice 7) and `20260822211432_FilterExternalAssociateNumberUniqueIndexOnSoftDelete` (slice 8). All three are the same defect — a uniqueness claim over a soft-deleting store — which was the most reliably recurring shape in this bundle. Slice 8 answered the open question in the third one's favour: D-10 needed **both** halves, the generator reading past the soft delete *and* the filtered index behind it, because the generator alone leaves nothing enforcing the claim and a plain unique index cannot be built over the 38 dead rows already carrying `EXT-0008`.
 
@@ -1568,3 +1568,127 @@ and the probe.
 
 **Residue on live data:** two harness actors per run and their employees; every fixture the audit
 builds is removed. Live `Teams` is back to **0**.
+
+---
+
+### Slice 12 — UI parity. 2026-08-23, **47/47**, run twice. No migration.
+
+Full regression alongside, twice through: slice 0 **17/17**, 1 **69/69**, 2 **100/100**,
+3 **49/49**, 4 **60/60**, 4b **88/88**, 5 **112/112**, 6 **77/77**, 7 **63/63**, 8 **82/82**,
+9 **50/50**, 10 **37/37**, 11 **67/67**. Bundle total: **918 assertions**.
+
+Harness `run-slice12.mjs` plus `sweep-parity.mjs`, the static half. **60 endpoints across ten
+controllers, every one wrapped and every wrapper reached.** Screens: two unit-restructure dialogs, a
+team-membership editor, a Teams tab on the employee record.
+
+**The check runs endpoint → service → screen, and the direction is the finding.** Area 14 learned
+this over three asks: service → screen is structurally blind to any endpoint the service never
+wrapped, and there it hid 24 unwrapped routes including seventeen deletes. Starting at the
+controller here found three unwrapped endpoints and fourteen wrappers nothing called — of which
+eleven turned out to be convenience variants reached through a richer sibling, each now named with
+the call that covers it.
+
+**D-80 · Two endpoints that provably returned the same row, and neither could answer its own
+question.** `GET OrganizationUnitHistory/unit/{id}/latest` and `.../active` differ by one
+`EffectiveTo == null` clause over the same ordering — and since slice 3 closes a series' open row
+whenever that series changes, **the newest row in a series is always the open one**, so the clause
+never moved the answer. Worse, both returned ONE row for a unit that can have an open parent
+arrangement *and* an open head arrangement at once: a unit reparented after a change of head
+answered "who leads this?" with a row whose head ids are both null. Neither had a caller.
+**Both deleted**, with their service, interface and repository members. The unit's change-log tab
+reads `unit/{unitId}` — the whole log, which states both series — and that is the right home for the
+question. ⚠ Same call as slice 10 deleting `stats/by-department`, and worth noting for the same
+reason: **the wrong dimension, not a broken implementation.**
+⚠ Both repository methods also carried `.Include(ouh => ouh.OrganizationUnit)` — the
+required-navigation INNER JOIN that slice 5 had to remove from the reads that *are* used. Deleting
+them removed two more faces of D-30 that nobody had noticed because nobody had called them.
+
+**D-81 · `OrganizationUnitController` was a bare `[Authorize]`.** Any authenticated user could
+create, rename, reparent, delete a unit or appoint its head. **Slice 12 is what made that urgent
+rather than merely wrong** — it puts move and change-head behind buttons, and wiring a screen to an
+ungated write is how a defect acquires a user. Writes are now SuperAdmin/TenantAdmin/HR; reads stay
+open, because the unit tree is the noticeboard the organogram renders to everybody and every unit
+picker in HR reads it. ⚠ **The gate was measured before it was chosen** (slice 9's rule): every
+frontend caller of a unit write lives under `/administration/hr/organization/units`. Same split as
+the teams register, and both halves are asserted — five refusals *and* five reads that must still
+answer, because a "fix" that closed the controller would satisfy every refusal and blank the org
+chart for the whole company.
+
+**D-82 · The team roster could not edit a membership, and one whole tab was therefore unfillable.**
+`PUT teams/{id}/members/{memberId}` was wrapped and called by nothing. The roster **rendered** role,
+allocation and the primary flag and offered no way to change any of them — and `UpdateMemberAsync`
+is the **only writer of a genuine role move**: a join and a leave each record a history row whose
+previous and new role are the same. So the membership-history tab's "Member → Coordinator" line was
+a surface no act in the product could produce. ⚠ Generalises area 14's "after a vote closed nobody
+could see who won" from the other side: there the outcome had no screen, here the screen had no
+outcome.
+
+**D-83 · Nothing showed a person the teams they are on**, and the endpoint's `currentOnly` filter had
+never been exercised — the single existing caller took the default. The tab is read-only on purpose:
+membership is written from the team side because that is where the server's rules live (the cap,
+"already a member", "someone who has left cannot be added", and the one-primary-team rule that
+reaches across every team at once). An editor here would restate all four in a second place.
+⚠ **The allocation total is why the tab earns its place.** A person's time can be split across
+several teams and no single team's roster can see the others; this is the only surface that adds
+them up and says so when the total exceeds 100%.
+
+**Printed, not asserted: the edit form's shared change reason.** One `PUT` that reparents a unit and
+changes its head writes two history rows carrying the same sentence, because the form has one reason
+box and the log has two series. That is the wart the dedicated dialogs route around — and asserting
+it as expected behaviour would freeze it, exactly as slice 11 refused to assert the GUID in
+`CreatedBy`.
+
+---
+
+### The parity sweep lied twice before it worked — the third instrument in three slices
+
+`sweep-parity.mjs` reported 25 gaps on its first pass and **eight of them were the instrument**.
+
+1. **`<[^>]*>` does not match `<PagedResult<Entry>>`.** One nested generic made a whole
+   `apiService.get` call invisible, so `GET OrganizationUnitHistory/paged` read as unwrapped while
+   the register screen was calling it. **A single character class hid an endpoint** — and had it not
+   been checked at the source, the "fix" would have been a second wrapper for a route already
+   wrapped.
+2. **Intra-service delegation.** All five organogram dimensions read as uncalled because the screen
+   reaches them through `byDimension`, a sibling that dispatches to them. The sweep resolves
+   `this.method()` transitively now and labels the caller `(via byDimension)`.
+
+Slice 10's route sweep called three live screens orphans; slice 11's shape probe called a working
+endpoint broken. **Three consecutive slices, three new static instruments, three first passes that
+cried wolf**, and in every case acting on the first pass would have meant changing working code.
+⚠ The generalisation worth keeping: **the failure mode of a code-reading instrument is not
+under-reporting, it is confident over-reporting** — a regex that is nearly right produces findings
+that look exactly like real ones.
+
+**The allow-list checks itself.** A `DELIBERATE_*` entry that stops matching anything fails the
+sweep: either the wrapper was renamed and the real one is now unexplained, or it acquired a caller
+and the excuse has outlived it. Slice 12's first draft carried an entry for an endpoint that was not
+even in scope, and it printed as though it had covered something.
+
+---
+
+### What the regression turned up — and it is the third occurrence of one shape
+
+**D-84 · Slice 11's cleanup had been leaking a union on every run since it was written, and its own
+log claimed otherwise.** `DELETE hr/unions/{id}` refuses a union that still has an agreement — slice
+6 built that guard deliberately, because the delete is soft and the configured cascade only fires on
+a hard one — and the audit's cleanup deleted the union without its agreements and **swallowed the
+400 as a printed `note`**. Nine fixture unions were live on DEFAULT when slice 12's regression looked,
+against a measured ground truth of **0**. All nine removed (`clear-litter.mjs`, kept because the leak
+is a shape rather than an incident), and slice 11's cleanup now deletes agreements first.
+
+⚠ **Every cleanup step is an assertion now.** The step existed, ran, failed, and printed one line
+that scrolled past inside a green 65/65. That is the third time this bundle has been bitten by the
+same thing — a slice-4b run left three teams, slice 11's own first cleanup left five, and now this —
+and the first two were both fixed by *reordering* the deletes. Reordering fixes the instance;
+**asserting the step is what fixes the class**, and it is what neither earlier fix did. Slice 11 went
+65 → 67: minus two routes, plus four cleanup assertions and a check that no fixture union survives.
+
+**D-80 landed in two older slices, exactly as area 13 said it would.** Deleting `unit/{id}/latest`
+took slice 3 down with a harness error and slice 11 to 63/65 — both were calling it. *A correct fix
+can invalidate an assumption held elsewhere.* Slice 3's two assertions were replaced by the LIST
+contract nothing had ever checked: **a unit with no history answers an empty array, not a 404**. A
+single-resource read was right to 404; a list is not.
+⚠ And the replacement's subject is a unit **minted for it**, not TDC's root. "The root has no
+history" is a claim about today's data with an expiry date on it — slice 5's page-size lesson, which
+is the easiest one in this bundle to re-commit.

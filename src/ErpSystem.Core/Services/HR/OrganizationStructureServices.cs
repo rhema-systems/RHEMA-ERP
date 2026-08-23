@@ -1122,29 +1122,11 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
         return await ResolveNamesAsync(entities, tenantId, cancellationToken);
     }
 
-    public async Task<OrganizationUnitHistoryDto?> GetLatestByUnitIdAsync(Guid unitId, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entity = await Scoped(tenantId)
-            .Where(h => h.OrganizationUnitId == unitId)
-            .OrderByDescending(h => h.EffectiveFrom)
-            .ThenByDescending(h => h.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return entity is null ? null : (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
-    }
-
-    public async Task<OrganizationUnitHistoryDto?> GetActiveHistoryAsync(Guid unitId, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entity = await Scoped(tenantId)
-            .Where(h => h.OrganizationUnitId == unitId && h.EffectiveTo == null)
-            .OrderByDescending(h => h.EffectiveFrom)
-            .ThenByDescending(h => h.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return entity is null ? null : (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
-    }
+    // GetLatestByUnitIdAsync / GetActiveHistoryAsync deleted in areas 19–23 slice 12. They differed
+    // by one `EffectiveTo == null` clause over the same ordering, and since slice 3 closes the open
+    // row of a series whenever that series changes, the newest row is always the open one — so the
+    // clause never changed the answer. Both then returned a single row for a unit that can have an
+    // open parent arrangement AND an open head arrangement at once. See the controller.
 
     public async Task<PagedResult<OrganizationUnitHistoryDto>> GetPagedAsync(
         int pageNumber,

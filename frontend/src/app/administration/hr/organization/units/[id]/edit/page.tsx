@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2 } from 'lucide-react';
+import { ArrowRightLeft, Loader2, UserCog } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
@@ -14,6 +15,10 @@ import {
   type OrganizationUnitFormValues,
 } from '@/components/hr/organization/OrganizationUnitForm';
 import { UnitChangeLog } from '@/components/hr/organization/UnitChangeLog';
+import {
+  ChangeUnitHeadDialog,
+  MoveUnitDialog,
+} from '@/components/hr/organization/UnitRestructureDialogs';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { organizationUnitHistoryService } from '@/services/hr/organization-unit-history.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
@@ -33,6 +38,8 @@ export default function EditOrganizationUnitPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [changingHead, setChangingHead] = useState(false);
 
   const { data: unit, isLoading, isError } = useQuery({
     queryKey: ['hr', 'organization-units', id],
@@ -55,6 +62,11 @@ export default function EditOrganizationUnitPage() {
     queryFn: () => organizationUnitHistoryService.getByUnit(id),
     enabled: !!id,
   });
+
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['hr', 'organization-units'] });
+    await queryClient.invalidateQueries({ queryKey: ['hr', 'organization-unit-history'] });
+  };
 
   // Exclude the unit itself from the parent options.
   const parentOptions = useMemo(
@@ -101,6 +113,19 @@ export default function EditOrganizationUnitPage() {
         title="Edit Organization Unit"
         description={unit ? unit.name : 'Update this node of the organization hierarchy.'}
         backHref="/administration/hr/organization/units"
+        actions={
+          unit ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setChangingHead(true)}>
+                <UserCog className="mr-2 h-4 w-4" />
+                {unit.headEmployeeId ? 'Change head' : 'Appoint head'}
+              </Button>
+              <Button variant="outline" onClick={() => setMoving(true)}>
+                <ArrowRightLeft className="mr-2 h-4 w-4" /> Move unit
+              </Button>
+            </div>
+          ) : undefined
+        }
       />
 
       {isLoading ? (
@@ -166,6 +191,23 @@ export default function EditOrganizationUnitPage() {
             </Card>
           </TabsContent>
         </Tabs>
+      )}
+
+      {unit && (
+        <>
+          <MoveUnitDialog
+            unit={unit}
+            open={moving}
+            onOpenChange={setMoving}
+            onDone={refresh}
+          />
+          <ChangeUnitHeadDialog
+            unit={unit}
+            open={changingHead}
+            onOpenChange={setChangingHead}
+            onDone={refresh}
+          />
+        </>
       )}
     </div>
   );

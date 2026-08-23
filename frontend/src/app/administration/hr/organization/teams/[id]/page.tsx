@@ -3,7 +3,15 @@
 import { use, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { History, Loader2, TriangleAlert, UserMinus, UserPlus, Users2 } from 'lucide-react';
+import {
+  History,
+  Loader2,
+  Pencil,
+  TriangleAlert,
+  UserMinus,
+  UserPlus,
+  Users2,
+} from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +36,7 @@ import {
   type TeamFormValues,
 } from '@/components/hr/organization/TeamForm';
 import { AddTeamMemberDialog } from '@/components/hr/organization/AddTeamMemberDialog';
+import { EditTeamMemberDialog } from '@/components/hr/organization/EditTeamMemberDialog';
 import { teamService } from '@/services/hr/team.service';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import {
@@ -52,6 +61,7 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
 
   const [submitting, setSubmitting] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<TeamMember | null>(null);
   const [removeTarget, setRemoveTarget] = useState<TeamMember | null>(null);
   const [removing, setRemoving] = useState(false);
 
@@ -222,6 +232,7 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
               ) : (
                 <MemberTable
                   members={current}
+                  onEdit={setEditTarget}
                   onRemove={setRemoveTarget}
                   showLeaveDate={false}
                 />
@@ -239,7 +250,7 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <MemberTable members={former} showLeaveDate />
+                <MemberTable members={former} onEdit={setEditTarget} showLeaveDate />
               </CardContent>
             </Card>
           )}
@@ -325,6 +336,14 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
         onAdded={refresh}
       />
 
+      <EditTeamMemberDialog
+        teamId={id}
+        teamName={team.name}
+        member={editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+        onSaved={refresh}
+      />
+
       <ConfirmationDialog
         open={removeTarget !== null}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
@@ -345,10 +364,12 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
 
 function MemberTable({
   members,
+  onEdit,
   onRemove,
   showLeaveDate,
 }: {
   members: TeamMember[];
+  onEdit?: (member: TeamMember) => void;
   onRemove?: (member: TeamMember) => void;
   showLeaveDate: boolean;
 }) {
@@ -363,7 +384,7 @@ function MemberTable({
             <TableHead className="text-right">Allocation</TableHead>
             <TableHead>Joined</TableHead>
             {showLeaveDate && <TableHead>Left</TableHead>}
-            {onRemove && <TableHead className="w-[70px]"></TableHead>}
+            {(onEdit || onRemove) && <TableHead className="w-[110px]"></TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -393,16 +414,30 @@ function MemberTable({
               {showLeaveDate && (
                 <TableCell className="text-muted-foreground">{m.leaveDate ?? '—'}</TableCell>
               )}
-              {onRemove && (
+              {(onEdit || onRemove) && (
                 <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove ${m.employeeName}`}
-                    onClick={() => onRemove(m)}
-                  >
-                    <UserMinus className="h-4 w-4" />
-                  </Button>
+                  <div className="flex justify-end gap-1">
+                    {onEdit && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Edit ${m.employeeName}`}
+                        onClick={() => onEdit(m)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {onRemove && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${m.employeeName}`}
+                        onClick={() => onRemove(m)}
+                      >
+                        <UserMinus className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               )}
             </TableRow>

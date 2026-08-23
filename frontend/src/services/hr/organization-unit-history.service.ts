@@ -57,10 +57,11 @@ class OrganizationUnitHistoryService {
     });
   }
 
-  /** 404s when the unit has never changed — correct for a single-resource read, not an error. */
-  getLatestForUnit(unitId: string): Promise<OrganizationUnitHistoryEntry> {
-    return apiService.get<OrganizationUnitHistoryEntry>(`${this.baseUrl}/unit/${unitId}/latest`);
-  }
+  // ⚠ `getLatestForUnit` and an `active` variant were deleted in slice 12 with the two endpoints
+  // behind them. Since the log became effective-dated per SERIES, the newest row in a series is
+  // always the open one, so the two endpoints returned the same row as each other — and one row
+  // cannot state an arrangement that is up to two rows (a unit's reporting line and its leadership
+  // move independently). Ask {@link getByUnit} and read both series.
 }
 
 export const organizationUnitHistoryService = new OrganizationUnitHistoryService();

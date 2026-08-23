@@ -230,15 +230,10 @@ public interface IOrganizationUnitHistoryService
     /// </summary>
     Task<IEnumerable<OrganizationUnitHistoryDto>> GetByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Get latest history record for a unit
-    /// </summary>
-    Task<OrganizationUnitHistoryDto?> GetLatestByUnitIdAsync(Guid unitId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Get active history record for a unit
-    /// </summary>
-    Task<OrganizationUnitHistoryDto?> GetActiveHistoryAsync(Guid unitId, CancellationToken cancellationToken = default);
+    // GetLatestByUnitIdAsync / GetActiveHistoryAsync deleted in areas 19–23 slice 12: since slice 3
+    // made the log effective-dated per series, the newest row in a series is always the open one,
+    // so the two returned the same row — and one row cannot state an arrangement that is up to two
+    // rows. Use GetByUnitIdAsync and read both series. See OrganizationUnitHistoryController.
 
     /// <summary>
     /// Get paged organization unit history, optionally narrowed to a unit, a date range or a change type.
