@@ -18,6 +18,47 @@ namespace ErpSystem.Api.Tests.Middleware;
 public sealed class SystemExceptionResultLoggingFilterTests
 {
     [Fact]
+    public async Task LegacyServerErrorStringIsNormalizedWithoutLeakingControllerText()
+    {
+        var provider = new ServiceCollection().BuildServiceProvider();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            TraceIdentifier = "friendly-error-1"
+        };
+        http.Request.Method = HttpMethods.Post;
+        http.Request.Path = "/api/procurement/marketanalyses";
+        var actionContext = new ActionContext(
+            http, new RouteData(), new ActionDescriptor { DisplayName = "Create market analysis" });
+        var executing = new ResultExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new ObjectResult("An error occurred while saving the database record")
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            },
+            new object());
+        var filter = new SystemExceptionResultLoggingFilter(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SystemExceptionResultLoggingFilter>.Instance);
+
+        await filter.OnResultExecutionAsync(executing, () =>
+            Task.FromResult(new ResultExecutedContext(
+                actionContext,
+                new List<IFilterMetadata>(),
+                executing.Result,
+                new object())));
+
+        var normalized = executing.Result.Should().BeOfType<ObjectResult>().Subject;
+        normalized.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        var problem = normalized.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Title.Should().Be("We couldn't complete your request");
+        problem.Detail.Should().Contain("Reference ID: friendly-error-1");
+        problem.Detail.Should().NotContain("database record");
+        problem.Extensions["code"].Should().Be("UNEXPECTED_ERROR");
+    }
+
+    [Fact]
     public async Task CapturedHandledExceptionIsPersistedWithDiagnosticDetail()
     {
         var tenantId = Guid.NewGuid();

@@ -781,6 +781,8 @@ export default function ProcurementPlanDetailPage() {
     );
   }
 
+  const linkedBudget = plan.budgets?.find((budget) => budget.id === plan.budgetId) ?? plan.budgets?.[0];
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
@@ -950,6 +952,61 @@ export default function ProcurementPlanDetailPage() {
                 <div className="col-span-2">
                   <label className="text-sm font-medium text-gray-500">Notes</label>
                   <p className="mt-1">{plan.notes}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Linked Procurement Budget</CardTitle>
+              <CardDescription>
+                Approved budget controlling this plan&apos;s funding and currency
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {linkedBudget ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Budget</label>
+                    <p className="mt-1 font-medium">{linkedBudget.budgetCode} - {linkedBudget.title}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Status</label>
+                    <div className="mt-1">{getStatusBadge(linkedBudget.status)}</div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Allocated Amount</label>
+                    <p className="mt-1">{formatCurrency(linkedBudget.allocatedAmount, linkedBudget.currency)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Remaining Amount</label>
+                    <p className="mt-1">{formatCurrency(linkedBudget.remainingAmount, linkedBudget.currency)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Committed Amount</label>
+                    <p className="mt-1">{formatCurrency(linkedBudget.committedAmount, linkedBudget.currency)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Utilized Amount</label>
+                    <p className="mt-1">{formatCurrency(linkedBudget.utilizedAmount, linkedBudget.currency)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Currency</label>
+                    <p className="mt-1">{linkedBudget.currency}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Fiscal Year</label>
+                    <p className="mt-1">{linkedBudget.fiscalYear}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="font-medium">No procurement budget is linked to this plan.</p>
+                    <p className="mt-1 text-sm">Amend the plan and select an approved budget before adding further funding exposure.</p>
+                  </div>
                 </div>
               )}
             </CardContent>

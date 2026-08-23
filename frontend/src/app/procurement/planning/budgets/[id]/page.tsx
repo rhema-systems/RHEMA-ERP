@@ -8,11 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Edit, Send, DollarSign, TrendingUp, Loader2 } from 'lucide-react';
+import { ArrowLeft, Edit, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementBudgetService, type ProcurementBudgetDetailDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
-import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
 
 export default function ProcurementBudgetDetailPage() {
   const router = useRouter();
@@ -20,8 +20,6 @@ export default function ProcurementBudgetDetailPage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [budget, setBudget] = useState<ProcurementBudgetDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) loadBudget();
@@ -41,19 +39,23 @@ export default function ProcurementBudgetDetailPage() {
   };
 
   const handleSubmitForApproval = async () => {
-    try {
-      setSubmitting(true);
-      await procurementBudgetService.submitBudget(id);
-      toast.success('Budget submitted to the approval workflow');
-      await loadBudget();
-    } catch (error) {
-      console.error('Error submitting budget:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to submit budget for approval');
-      return false;
-    } finally {
-      setSubmitting(false);
-    }
+    await procurementBudgetService.submitBudget(id);
   };
+
+  const workflow = useWorkflowRecord({
+    entityType: 'ProcurementBudget',
+    entityId: id,
+    entityLabel: 'Procurement Budget',
+    entityNumber: budget?.budgetCode,
+    status: budget?.status || '',
+    canSubmit: budget?.status === 'Draft',
+    enabled: Boolean(id && budget),
+    commands: {
+      submit: handleSubmitForApproval,
+      afterAction: loadBudget,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   const getStatusBadge = (status: string) => {
     const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
@@ -101,9 +103,7 @@ export default function ProcurementBudgetDetailPage() {
               <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
                 <Edit className="h-4 w-4" />Edit
               </Button>
-              <Button onClick={() => setSubmitDialogOpen(true)} disabled={submitting} className="gap-2">
-                <Send className="h-4 w-4" />{submitting ? 'Submitting...' : 'Submit for approval'}
-              </Button>
+              <WorkflowApprovalActions {...workflow.actionProps} size="default" />
             </>
           )}
         </div>
@@ -241,15 +241,6 @@ export default function ProcurementBudgetDetailPage() {
         </TabsContent>
       </Tabs>
 
-      <ConfirmationDialog
-        open={submitDialogOpen}
-        onOpenChange={setSubmitDialogOpen}
-        title="Submit budget for approval?"
-        description="This sends the budget to the configured shared approval workflow. You will not be able to edit it while approval is in progress."
-        confirmText="Submit for approval"
-        onConfirm={handleSubmitForApproval}
-        isLoading={submitting}
-      />
     </div>
   );
 }

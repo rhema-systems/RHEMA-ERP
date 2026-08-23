@@ -9100,6 +9100,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(p => p.PlanningQuarter);
             entity.HasIndex(p => p.Status);
             entity.HasIndex(p => p.PublishedDate);
+            entity.HasIndex(p => p.BudgetId);
 
             entity.HasOne(p => p.Department)
                 .WithMany()
@@ -9110,6 +9111,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(i => i.ProcurementPlan)
                 .HasForeignKey(i => i.ProcurementPlanId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.Budget)
+                .WithMany()
+                .HasForeignKey(p => p.BudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ProcurementPlanItem entity
@@ -9276,6 +9282,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(p => p.MarketAnalysisId);
             entity.HasIndex(p => p.PriceDate);
+            entity.HasOne(p => p.Supplier)
+                .WithMany()
+                .HasForeignKey(p => p.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // SupplierConsolidation entity

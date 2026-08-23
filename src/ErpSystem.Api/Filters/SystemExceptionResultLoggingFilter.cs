@@ -33,6 +33,8 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
         ResultExecutingContext context,
         ResultExecutionDelegate next)
     {
+        NormalizeLegacyStringFailure(context);
+
         if (TryGetProblem(context.Result, out var problem, out var statusCode) &&
             statusCode >= StatusCodes.Status400BadRequest &&
             context.HttpContext.Request.Path.StartsWithSegments("/api") &&
@@ -43,6 +45,44 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
         }
 
         await next();
+    }
+
+    /// <summary>
+    /// Older controllers still return plain strings from catch blocks. Normalize
+    /// those responses globally so every API consumer receives the same safe,
+    /// user-readable RFC 7807 contract while those controllers are migrated.
+    /// </summary>
+    private static void NormalizeLegacyStringFailure(ResultExecutingContext context)
+    {
+        if (context.Result is not ObjectResult objectResult ||
+            objectResult.Value is not string legacyDetail)
+        {
+            return;
+        }
+
+        var statusCode = objectResult.StatusCode ?? StatusCodes.Status500InternalServerError;
+        if (statusCode < StatusCodes.Status400BadRequest)
+        {
+            return;
+        }
+
+        var isServerFailure = statusCode >= StatusCodes.Status500InternalServerError;
+        var traceId = context.HttpContext.TraceIdentifier;
+        var problem = new ProblemDetails
+        {
+            Status = statusCode,
+            Title = isServerFailure ? "We couldn't complete your request" : "Request could not be completed",
+            Detail = isServerFailure
+                ? $"Something went wrong while processing your request. Please try again. If the problem continues, contact your administrator. Reference ID: {traceId}."
+                : string.IsNullOrWhiteSpace(legacyDetail)
+                    ? "The request could not be completed."
+                    : legacyDetail.Trim(),
+            Instance = context.HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = isServerFailure ? "UNEXPECTED_ERROR" : $"HTTP_{statusCode}";
+        problem.Extensions["correlationId"] = traceId;
+
+        context.Result = new ObjectResult(problem) { StatusCode = statusCode };
     }
 
     private async Task TryPersistAsync(

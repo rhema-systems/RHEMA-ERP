@@ -754,10 +754,14 @@ public class WorkflowController : ControllerBase
                         EntityType = entityType,
                         EntityId = entityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = false,
                         CanCurrentUserApprove = false
                     }
                 });
             }
+
+            var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(
+                entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType);
 
             var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString());
             var activeInstance = instances
@@ -779,6 +783,7 @@ public class WorkflowController : ControllerBase
                         EntityType = entityTypeRecord.Code ?? entityTypeRecord.Name,
                         EntityId = entityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = approvalRequired,
                         CanCurrentUserApprove = false
                     }
                 });
@@ -835,6 +840,7 @@ public class WorkflowController : ControllerBase
                 EntityType = status.EntityType,
                 EntityId = entityId,
                 HasActiveInstance = true,
+                ApprovalRequired = true,
                 WorkflowInstanceId = status.WorkflowInstanceId,
                 WorkflowName = status.WorkflowName,
                 Status = status.Status,
@@ -917,6 +923,7 @@ public class WorkflowController : ControllerBase
                         EntityType = requestedEntityType ?? string.Empty,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = false,
                         CanCurrentUserApprove = false
                     };
                 }
@@ -936,9 +943,13 @@ public class WorkflowController : ControllerBase
                         EntityType = requestedEntityType,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = false,
                         CanCurrentUserApprove = false
                     };
                 }
+
+                var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType;
+                var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(canonicalEntityType);
 
                 var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, requestedEntityId.ToString());
                 var activeInstance = instances
@@ -957,6 +968,7 @@ public class WorkflowController : ControllerBase
                         EntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = approvalRequired,
                         CanCurrentUserApprove = false
                     };
                 }
@@ -964,7 +976,6 @@ public class WorkflowController : ControllerBase
                 var status = await _workflowEngine.GetWorkflowStatusAsync(activeInstance.Id);
 
                 // Use the canonical entity type string (code preferred) so workflow service lookups are consistent.
-                var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType;
                 var stepInfo = await _workflowService.GetCurrentWorkflowStepAsync(canonicalEntityType, requestedEntityId);
 
                 var currentStepName = stepInfo?.StepName;
@@ -1014,6 +1025,7 @@ public class WorkflowController : ControllerBase
                     EntityType = status.EntityType,
                     EntityId = requestedEntityId,
                     HasActiveInstance = true,
+                    ApprovalRequired = true,
                     WorkflowInstanceId = status.WorkflowInstanceId,
                     WorkflowName = status.WorkflowName,
                     Status = status.Status,

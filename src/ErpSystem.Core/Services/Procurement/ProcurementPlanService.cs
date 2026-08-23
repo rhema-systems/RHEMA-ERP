@@ -137,8 +137,8 @@ public class ProcurementPlanService : IProcurementPlanService
                 throw new InvalidOperationException("Only an approved or active procurement budget can be selected for a plan.");
             if (selectedBudget.DepartmentId != dto.DepartmentId || selectedBudget.FiscalYear != dto.FiscalYear)
                 throw new InvalidOperationException("The selected budget must belong to the plan department and fiscal year.");
-            if (selectedBudget.ProcurementPlanId.HasValue)
-                throw new InvalidOperationException("The selected budget is already linked to another procurement plan.");
+
+            await EnsureBudgetPlanningCapacityAsync(selectedBudget, dto.TotalEstimatedBudget);
         }
 
         var planNumber = await _planRepository.GeneratePlanNumberAsync(dto.FiscalYear);
@@ -158,6 +158,7 @@ public class ProcurementPlanService : IProcurementPlanService
             PlanEndDate = dto.PlanEndDate,
             PlanDurationYears = dto.PlanDurationYears,
             TotalEstimatedBudget = dto.TotalEstimatedBudget,
+            BudgetId = selectedBudget?.Id,
             Currency = resolvedCurrency,
             Notes = dto.Notes,
             Status = "Draft",
@@ -174,16 +175,9 @@ public class ProcurementPlanService : IProcurementPlanService
         {
             foreach (var itemDto in dto.Items)
             {
-                var item = CreatePlanItem(plan.Id, itemDto, plan.Currency);
+                var item = CreatePlanItem(plan.Id, itemDto, plan.Currency, selectedBudget?.Id);
                 await _itemRepository.AddAsync(item);
             }
-        }
-
-        if (selectedBudget is not null)
-        {
-            selectedBudget.ProcurementPlanId = plan.Id;
-            selectedBudget.UpdatedAt = DateTime.UtcNow;
-            await _budgetRepository.UpdateAsync(selectedBudget);
         }
 
         await _unitOfWork.SaveChangesAsync();
@@ -202,10 +196,26 @@ public class ProcurementPlanService : IProcurementPlanService
         if (plan.Status != "Draft")
             throw new InvalidOperationException("Only draft plans can be updated");
 
-        var linkedBudget = (await _budgetRepository.GetByPlanIdAsync(id))
-            .FirstOrDefault(budget =>
-                budget.TenantId == _currentUserProvider.TenantId &&
-                !budget.IsDeleted);
+        var linkedBudget = plan.BudgetId.HasValue
+            ? await _budgetRepository.GetByIdAsync(plan.BudgetId.Value)
+            : (await _budgetRepository.GetByPlanIdAsync(id)).FirstOrDefault(budget =>
+                budget.TenantId == _currentUserProvider.TenantId && !budget.IsDeleted);
+
+        ProcurementBudget? selectedBudget = linkedBudget;
+        if (dto.BudgetId.HasValue && dto.BudgetId != linkedBudget?.Id)
+        {
+            selectedBudget = await _budgetRepository.GetByIdAsync(dto.BudgetId.Value)
+                ?? throw new KeyNotFoundException("The selected procurement budget was not found in the current tenant.");
+
+            if (selectedBudget.TenantId != _currentUserProvider.TenantId || selectedBudget.IsDeleted)
+                throw new KeyNotFoundException("The selected procurement budget was not found in the current tenant.");
+            if (!string.Equals(selectedBudget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(selectedBudget.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Only an approved or active procurement budget can be selected for a plan.");
+            if (selectedBudget.DepartmentId != dto.DepartmentId || selectedBudget.FiscalYear != dto.FiscalYear)
+                throw new InvalidOperationException("The selected budget must belong to the plan department and fiscal year.");
+        }
+
         if (linkedBudget is not null &&
             (linkedBudget.DepartmentId != dto.DepartmentId || linkedBudget.FiscalYear != dto.FiscalYear))
         {
@@ -213,7 +223,10 @@ public class ProcurementPlanService : IProcurementPlanService
                 "The plan department and fiscal year must continue to match its approved budget.");
         }
 
-        var resolvedCurrency = linkedBudget?.Currency ?? dto.Currency;
+        if (selectedBudget is not null)
+            await EnsureBudgetPlanningCapacityAsync(selectedBudget, dto.TotalEstimatedBudget, id);
+
+        var resolvedCurrency = selectedBudget?.Currency ?? dto.Currency;
         var currencyChanged = !string.Equals(plan.Currency, resolvedCurrency, StringComparison.OrdinalIgnoreCase);
 
         plan.Title = dto.Title;
@@ -226,6 +239,7 @@ public class ProcurementPlanService : IProcurementPlanService
         plan.PlanEndDate = dto.PlanEndDate;
         plan.PlanDurationYears = dto.PlanDurationYears;
         plan.TotalEstimatedBudget = dto.TotalEstimatedBudget;
+        plan.BudgetId = selectedBudget?.Id;
         plan.Currency = resolvedCurrency;
         plan.Notes = dto.Notes;
         plan.UpdatedAt = DateTime.UtcNow;
@@ -428,7 +442,7 @@ public class ProcurementPlanService : IProcurementPlanService
 
     private static void EnsureApprovedBudgetSelected(ProcurementPlan plan)
     {
-        var linkedBudget = plan.Budgets?.FirstOrDefault(b => !b.IsDeleted);
+        var linkedBudget = plan.Budget ?? plan.Budgets?.FirstOrDefault(b => !b.IsDeleted);
         if (linkedBudget is null ||
             (!string.Equals(linkedBudget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(linkedBudget.Status, "Active", StringComparison.OrdinalIgnoreCase)))
@@ -442,6 +456,20 @@ public class ProcurementPlanService : IProcurementPlanService
 
         if (!string.Equals(linkedBudget.Currency, plan.Currency, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The procurement plan currency must match its linked approved budget.");
+    }
+
+    private async Task EnsureBudgetPlanningCapacityAsync(
+        ProcurementBudget budget,
+        decimal requestedAmount,
+        Guid? excludePlanId = null)
+    {
+        var plannedExposure = await _planRepository.GetPlannedBudgetExposureAsync(budget.Id, excludePlanId);
+        var availableForPlanning = budget.AllocatedAmount - plannedExposure;
+        if (requestedAmount > availableForPlanning)
+        {
+            throw new InvalidOperationException(
+                $"The selected budget has {availableForPlanning:N2} {budget.Currency} available for procurement planning, but this plan requires {requestedAmount:N2} {budget.Currency}.");
+        }
     }
 
     public async Task<ProcurementPlanDetailDto> PublishAsync(Guid id, PublishProcurementPlanDto dto)
@@ -1007,7 +1035,7 @@ public class ProcurementPlanService : IProcurementPlanService
         if (plan.Status != "Draft")
             throw new InvalidOperationException("Items can only be added to draft plans");
 
-        var item = CreatePlanItem(planId, dto, plan.Currency);
+        var item = CreatePlanItem(planId, dto, plan.Currency, plan.BudgetId);
         await _itemRepository.AddAsync(item);
         await _unitOfWork.SaveChangesAsync();
 
@@ -1169,13 +1197,17 @@ public class ProcurementPlanService : IProcurementPlanService
             .Where(char.IsLetterOrDigit)
             .ToArray());
 
-    private ProcurementPlanItem CreatePlanItem(Guid planId, CreateProcurementPlanItemDto dto, string currency)
+    private ProcurementPlanItem CreatePlanItem(
+        Guid planId,
+        CreateProcurementPlanItemDto dto,
+        string currency,
+        Guid? defaultBudgetId = null)
     {
         return new ProcurementPlanItem
         {
             ProcurementPlanId = planId,
             InventoryItemId = dto.InventoryItemId,
-            ProcurementBudgetId = dto.ProcurementBudgetId,
+            ProcurementBudgetId = dto.ProcurementBudgetId ?? defaultBudgetId,
             ProcurementBudgetAllocationId = dto.ProcurementBudgetAllocationId,
             MarketAnalysisId = dto.MarketAnalysisId,
             BudgetLineCode = dto.BudgetLineCode,
@@ -1224,7 +1256,7 @@ public class ProcurementPlanService : IProcurementPlanService
             PlanDurationYears = plan.PlanDurationYears,
             Status = plan.Status,
             TotalEstimatedBudget = plan.TotalEstimatedBudget,
-            BudgetId = plan.Budgets?.FirstOrDefault(budget => !budget.IsDeleted)?.Id,
+            BudgetId = plan.BudgetId ?? plan.Budgets?.FirstOrDefault(budget => !budget.IsDeleted)?.Id,
             ApprovedBudget = plan.ApprovedBudget,
             Currency = plan.Currency,
             PreparedByName = plan.PreparedBy?.FullName,
@@ -1258,7 +1290,7 @@ public class ProcurementPlanService : IProcurementPlanService
             PlanDurationYears = plan.PlanDurationYears,
             Status = plan.Status,
             TotalEstimatedBudget = plan.TotalEstimatedBudget,
-            BudgetId = plan.Budgets?.FirstOrDefault(budget => !budget.IsDeleted)?.Id,
+            BudgetId = plan.BudgetId ?? plan.Budgets?.FirstOrDefault(budget => !budget.IsDeleted)?.Id,
             ApprovedBudget = plan.ApprovedBudget,
             Currency = plan.Currency,
             PreparedById = plan.PreparedById,
@@ -1283,7 +1315,9 @@ public class ProcurementPlanService : IProcurementPlanService
             ItemCount = plan.Items?.Count(i => !i.IsDeleted) ?? 0,
             CreatedAt = plan.CreatedAt,
             Items = plan.Items?.Where(i => !i.IsDeleted).Select(MapToItemDto).ToList() ?? new(),
-            Budgets = plan.Budgets?.Where(b => !b.IsDeleted).Select(MapToBudgetDto).ToList() ?? new(),
+            Budgets = plan.Budget is not null
+                ? new List<ProcurementBudgetDto> { MapToBudgetDto(plan.Budget) }
+                : plan.Budgets?.Where(b => !b.IsDeleted).Select(MapToBudgetDto).ToList() ?? new(),
             Schedules = plan.Schedules?.Where(s => !s.IsDeleted).Select(MapToScheduleDto).ToList() ?? new()
         };
     }

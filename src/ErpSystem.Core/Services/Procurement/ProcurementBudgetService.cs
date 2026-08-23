@@ -490,13 +490,15 @@ public class ProcurementBudgetService : IProcurementBudgetService
         return true;
     }
 
-    public async Task<IEnumerable<ProcurementBudgetDto>> GetAvailableBudgetsForLinkingAsync(Guid departmentId, int fiscalYear)
+    public async Task<IEnumerable<ProcurementBudgetDto>> GetAvailableBudgetsForLinkingAsync(
+        Guid departmentId,
+        int fiscalYear,
+        bool includeLinked = false)
     {
         var budgets = await _budgetRepository.GetByDepartmentAsync(departmentId);
         var filtered = budgets.Where(b =>
             b.FiscalYear == fiscalYear &&
-            (b.Status == "Active" || b.Status == "Approved") &&
-            !b.ProcurementPlanId.HasValue); // Only budgets not already linked to a plan
+            (b.Status == "Active" || b.Status == "Approved"));
 
         return filtered.Select(MapToDto);
     }

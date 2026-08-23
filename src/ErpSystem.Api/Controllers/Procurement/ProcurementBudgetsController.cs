@@ -124,11 +124,16 @@ public class ProcurementBudgetsController : ControllerBase
     /// </summary>
     [HttpGet("available-for-linking")]
     public async Task<ActionResult<IEnumerable<ProcurementBudgetDto>>> GetAvailableBudgetsForLinking(
-        [FromQuery] Guid departmentId, [FromQuery] int fiscalYear)
+        [FromQuery] Guid departmentId,
+        [FromQuery] int fiscalYear,
+        [FromQuery] bool includeLinked = false)
     {
         try
         {
-            var budgets = await _budgetService.GetAvailableBudgetsForLinkingAsync(departmentId, fiscalYear);
+            var budgets = await _budgetService.GetAvailableBudgetsForLinkingAsync(
+                departmentId,
+                fiscalYear,
+                includeLinked);
             return Ok(budgets);
         }
         catch (Exception ex)

@@ -74,6 +74,7 @@ export default function NewProcurementPlanPage() {
         const values = await procurementBudgetService.getAvailableBudgetsForLinking(
           formData.departmentId,
           formData.fiscalYear,
+          true,
         );
         if (active) setAvailableBudgets(values);
       } catch (error) {
@@ -327,7 +328,8 @@ export default function NewProcurementPlanPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Final approval requires a selected approved budget for this department and fiscal year.
+                    Final approval requires an approved budget for this department and fiscal year. A budget may fund
+                    multiple plans while its controlled planning capacity remains sufficient.
                   </p>
                 </div>
                 <div className="space-y-2">

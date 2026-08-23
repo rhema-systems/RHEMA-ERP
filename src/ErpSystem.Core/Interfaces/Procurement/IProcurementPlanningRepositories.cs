@@ -26,6 +26,7 @@ public interface IProcurementPlanRepository : IGenericRepository<ProcurementPlan
         int? fiscalYear = null);
     Task<string> GeneratePlanNumberAsync(int fiscalYear);
     Task<bool> PlanNumberExistsAsync(string planNumber);
+    Task<decimal> GetPlannedBudgetExposureAsync(Guid budgetId, Guid? excludePlanId = null);
 }
 
 /// <summary>

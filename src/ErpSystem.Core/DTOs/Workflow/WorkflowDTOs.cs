@@ -561,6 +561,13 @@ public class WorkflowEntitySummaryDto
     public Guid EntityId { get; set; }
 
     public bool HasActiveInstance { get; set; }
+    /// <summary>
+    /// True when this tenant/entity type has an active Published approval
+    /// definition, or this record already has an active workflow instance.
+    /// When false, module UIs must hide approval controls and use their
+    /// authorized direct finalization action instead.
+    /// </summary>
+    public bool ApprovalRequired { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
     public string? WorkflowName { get; set; }
     public WorkflowInstanceStatus? Status { get; set; }

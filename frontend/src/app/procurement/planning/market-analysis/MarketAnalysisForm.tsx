@@ -45,7 +45,7 @@ const emptyForm: CreateMarketAnalysisDto = {
   priceTrend: 'Stable',
   priceChangePercent: 0,
   priceVariancePercent: undefined,
-  currency: 'USD',
+  currency: '',
   leadTimeDays: undefined,
   marketAvailability: 'Medium',
   supplyRiskLevel: 'Medium',
@@ -100,16 +100,59 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
   const [categories, setCategories] = useState<InventoryCategoryDto[]>([]);
   const [selectedItemId, setSelectedItemId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [currencyError, setCurrencyError] = useState<string>();
 
   useEffect(() => {
-    Promise.all([
-      currencyService.getActive().catch(() => []),
-      inventoryManagementService.getInventoryItems({ isActive: true }).catch(() => []),
-      inventoryManagementService.getActiveInventoryCategories().catch(() => []),
-    ]).then(([currencyData, itemData, categoryData]) => {
-      setCurrencies(currencyData.filter((currency) => Boolean(currency.code)));
+    let mounted = true;
+    void (async () => {
+      setLoadingOptions(true);
+      const [currencyResult, itemResult, categoryResult] = await Promise.allSettled([
+        currencyService.getActive(),
+        inventoryManagementService.getInventoryItems({ isActive: true }),
+        inventoryManagementService.getActiveInventoryCategories(),
+      ]);
+      if (!mounted) return;
+
+      if (currencyResult.status === 'fulfilled') {
+        const activeCurrencies = currencyResult.value.filter((currency) => Boolean(currency.code) && currency.isActive !== false);
+        setCurrencies(activeCurrencies);
+        setCurrencyError(activeCurrencies.length === 0
+          ? 'No active Finance currency is configured for this tenant.'
+          : undefined);
+        if (mode === 'create') {
+          const defaultCurrency = activeCurrencies.find((currency) => currency.isBaseCurrency) || activeCurrencies[0];
+          setForm((current) => ({
+            ...current,
+            currency: activeCurrencies.some((currency) => currency.code.toUpperCase() === current.currency?.toUpperCase())
+              ? current.currency
+              : defaultCurrency?.code || '',
+          }));
+        }
+      } else {
+        const message = currencyResult.reason instanceof Error
+          ? currencyResult.reason.message
+          : 'Unable to load Finance currencies.';
+        setCurrencies([]);
+        setCurrencyError(message);
+        toast.error('Unable to load currencies', { description: message });
+      }
+
+      const itemData = itemResult.status === 'fulfilled' ? itemResult.value : [];
+      const categoryData = categoryResult.status === 'fulfilled' ? categoryResult.value : [];
       setInventoryItems(itemData);
       setCategories(categoryData);
+
+      if (itemResult.status === 'rejected') {
+        toast.error('Unable to load inventory items', {
+          description: itemResult.reason instanceof Error ? itemResult.reason.message : undefined,
+        });
+      }
+      if (categoryResult.status === 'rejected') {
+        toast.error('Unable to load inventory categories', {
+          description: categoryResult.reason instanceof Error ? categoryResult.reason.message : undefined,
+        });
+      }
 
       if (initialValue?.itemDescription) {
         const matchedItem = itemData.find((item) =>
@@ -117,12 +160,13 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
           item.itemCode === initialValue.itemDescription ||
           `${item.itemCode} - ${item.name}` === initialValue.itemDescription
         );
-        if (matchedItem) {
-          setSelectedItemId(matchedItem.id);
-        }
+        if (matchedItem) setSelectedItemId(matchedItem.id);
       }
-    });
-  }, [initialValue?.itemDescription]);
+      setLoadingOptions(false);
+    })();
+
+    return () => { mounted = false; };
+  }, [initialValue?.itemDescription, mode]);
 
   const variancePercent = useMemo(() => {
     const previous = Number(form.previousPrice || form.historicalAveragePrice || 0);
@@ -135,24 +179,23 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
   };
 
   const currencyOptions = useMemo(() => {
-    const currentCurrency = form.currency || 'USD';
-    return currencies.some((currency) => currency.code === currentCurrency)
-      ? currencies
-      : [
-          ...currencies,
-          {
-            id: currentCurrency,
-            code: currentCurrency,
-            name: currentCurrency,
-            symbol: currentCurrency,
-            decimalPlaces: 2,
-            exchangeRate: 1,
-            isBaseCurrency: false,
-            isActive: true,
-            displayOrder: 999,
-          },
-        ];
-  }, [currencies, form.currency]);
+    const currentCurrency = form.currency?.trim();
+    if (mode !== 'edit' || !currentCurrency || currencies.some((currency) => currency.code.toUpperCase() === currentCurrency.toUpperCase())) {
+      return currencies;
+    }
+
+    return [...currencies, {
+      id: `historical-${currentCurrency}`,
+      code: currentCurrency,
+      name: `${currentCurrency} (inactive historical value)`,
+      symbol: currentCurrency,
+      decimalPlaces: 2,
+      exchangeRate: 1,
+      isBaseCurrency: false,
+      isActive: false,
+      displayOrder: 999,
+    }];
+  }, [currencies, form.currency, mode]);
 
   const categoryOptions = useMemo(() => {
     const currentCategory = form.itemCategory?.trim();
@@ -196,6 +239,10 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
       toast.error('Title is required');
       return;
     }
+    if (!form.currency?.trim()) {
+      toast.error('Select an active Finance currency');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -218,7 +265,9 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
       router.push(`/procurement/planning/market-analysis/${saved.id}`);
     } catch (error) {
       console.error('Error saving market analysis:', error);
-      toast.error('Failed to save market analysis');
+      toast.error('Failed to save market analysis', {
+        description: error instanceof Error ? error.message : undefined,
+      });
     } finally {
       setSaving(false);
     }
@@ -235,7 +284,7 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving || loadingOptions || currencyOptions.length === 0 || !form.currency}>
             <Save className="mr-2 h-4 w-4" />
             {saving ? 'Saving...' : 'Save'}
           </Button>
@@ -254,8 +303,8 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Select value={form.currency || 'USD'} onValueChange={(value) => update('currency', value)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={form.currency || undefined} onValueChange={(value) => update('currency', value)} disabled={loadingOptions || currencyOptions.length === 0}>
+                <SelectTrigger><SelectValue placeholder={loadingOptions ? 'Loading currencies...' : 'Select currency'} /></SelectTrigger>
                 <SelectContent>
                   {currencyOptions.map((currency) => (
                     <SelectItem key={currency.id || currency.code} value={currency.code}>
@@ -264,6 +313,7 @@ export function MarketAnalysisForm({ initialValue, mode }: MarketAnalysisFormPro
                   ))}
                 </SelectContent>
               </Select>
+              {currencyError && <p className="text-xs text-destructive">{currencyError}</p>}
             </div>
             <div className="space-y-2">
               <Label>Product</Label>

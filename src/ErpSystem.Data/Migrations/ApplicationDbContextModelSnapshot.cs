@@ -111386,6 +111386,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("BudgetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ApprovedDate")
                         .HasColumnType("datetime2");
 
@@ -111508,6 +111511,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ApprovedById");
+
+                    b.HasIndex("BudgetId");
 
                     b.HasIndex("DepartmentId");
 
@@ -183806,9 +183811,10 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("MarketAnalysisId")
                         .OnDelete(DeleteBehavior.Cascade);
 
-                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Supplier")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "Supplier")
                         .WithMany()
-                        .HasForeignKey("SupplierId");
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -185550,6 +185556,11 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("ApprovedById");
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementBudget", "Budget")
+                        .WithMany()
+                        .HasForeignKey("BudgetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Department", "Department")
                         .WithMany()
                         .HasForeignKey("DepartmentId")
@@ -185579,6 +185590,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ApprovedBy");
+
+                    b.Navigation("Budget");
 
                     b.Navigation("Department");
 
@@ -200010,6 +200023,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementPlan", b =>
                 {
+                    b.Navigation("Budget");
+
                     b.Navigation("Budgets");
 
                     b.Navigation("Items");

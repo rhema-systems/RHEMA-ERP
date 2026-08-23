@@ -149,6 +149,12 @@ public class UpdateProcurementPlanDto
 
     public decimal TotalEstimatedBudget { get; set; }
 
+    /// <summary>
+    /// Approved procurement budget selected while a draft plan is being prepared.
+    /// An existing plan-level budget link is preserved when this value is omitted.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
+
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
 
