@@ -2082,7 +2082,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var validation = await service.ValidateBatchAsync(batch.Id);
 
         validation.IsValid.Should().BeFalse();
-        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances require a controlled source and approved FX evidence", StringComparison.OrdinalIgnoreCase));
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
     }
 
@@ -2122,7 +2122,7 @@ public sealed class ControlledOpeningBalancePostingTests
         validation.Errors.Should().Contain(error =>
             error.Contains("must match the tenant functional currency 'GHS'", StringComparison.OrdinalIgnoreCase));
         validation.Errors.Should().Contain(error =>
-            error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+            error.Contains("foreign-currency opening balances require a controlled source and approved FX evidence", StringComparison.OrdinalIgnoreCase));
         Func<Task> submit = () => service.SubmitForApprovalAsync(batch.Id);
         await submit.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*tenant functional currency*");

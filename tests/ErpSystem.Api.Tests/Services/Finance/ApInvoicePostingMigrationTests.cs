@@ -1,3 +1,4 @@
+using System.Globalization;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.GL;
@@ -414,6 +415,13 @@ public sealed class ApInvoicePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var reversalDate = DateTime.UtcNow.Date;
+        if (reversalDate.Year != fixture.Invoice.InvoiceDate.Year ||
+            reversalDate.Month != fixture.Invoice.InvoiceDate.Month)
+        {
+            SeedOpenPeriod(db, tenantId, reversalDate);
+            await db.SaveChangesAsync();
+        }
         var (service, _) = CreateService(db, tenantId);
         var posted = await service.PostAsync(fixture.Invoice.Id);
 
@@ -590,19 +598,29 @@ public sealed class ApInvoicePostingMigrationTests
         Guid tenantId,
         bool isOpen = true,
         bool isClosed = false)
+        => SeedOpenPeriod(db, tenantId, new DateTime(2026, 7, 1), isOpen, isClosed);
+
+    private static FiscalPeriod SeedOpenPeriod(
+        ApplicationDbContext db,
+        Guid tenantId,
+        DateTime periodDate,
+        bool isOpen = true,
+        bool isClosed = false)
     {
+        var startDate = new DateTime(periodDate.Year, periodDate.Month, 1);
+        var endDate = startDate.AddMonths(1).AddDays(-1);
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             FiscalYearId = Guid.NewGuid(),
-            PeriodName = "July 2026",
-            PeriodCode = "2026-07",
-            PeriodNumber = 7,
+            PeriodName = startDate.ToString("MMMM yyyy", CultureInfo.InvariantCulture),
+            PeriodCode = startDate.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+            PeriodNumber = startDate.Month,
             PeriodType = PeriodType.Monthly,
-            StartDate = new DateTime(2026, 7, 1),
-            EndDate = new DateTime(2026, 7, 31),
-            PeriodDays = 31,
+            StartDate = startDate,
+            EndDate = endDate,
+            PeriodDays = (endDate - startDate).Days + 1,
             PeriodStatus = isClosed ? "Closed" : isOpen ? "Open" : "Future",
             IsOpen = isOpen,
             IsClosed = isClosed,
