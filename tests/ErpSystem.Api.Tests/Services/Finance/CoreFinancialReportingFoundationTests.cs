@@ -328,13 +328,15 @@ public sealed class CoreFinancialReportingFoundationTests
         {
             PeriodStart = new DateTime(2025, 1, 1),
             PeriodEnd = new DateTime(2026, 8, 21),
-            BookClassification = "IFRS"
+            BookClassification = "IFRS",
+            Method = "Direct"
         });
         var postCutoverReport = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
         {
             PeriodStart = new DateTime(2025, 1, 2),
             PeriodEnd = new DateTime(2026, 8, 21),
-            BookClassification = "IFRS"
+            BookClassification = "IFRS",
+            Method = "Direct"
         });
 
         cutoverDateReport.CashAtBeginning.Should().Be(750_000m);
@@ -397,6 +399,184 @@ public sealed class CoreFinancialReportingFoundationTests
         report.NetIncreaseInCash.Should().Be(100m);
         report.CashAtEnd.Should().Be(100m);
         report.IsReconciled.Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_DirectAndIndirectMethods_ShouldUseDistinctReconciledPresentations()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Operating Bank", "Cash and Cash Equivalents");
+        var receivables = SeedAccount(db, tenantId, AccountType.Asset, "1100", "Trade Receivables", "Accounts Receivable");
+        var equipment = SeedAccount(db, tenantId, AccountType.Asset, "1500", "Equipment", "Property, Plant & Equipment");
+        var accumulatedDepreciation = SeedAccount(db, tenantId, AccountType.Asset, "1590", "Accumulated Depreciation", "Property, Plant & Equipment");
+        var loan = SeedAccount(db, tenantId, AccountType.Liability, "2300", "Term Loan", "Long-Term Debt");
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Sales Revenue", "Revenue");
+        var depreciation = SeedAccount(db, tenantId, AccountType.Expense, "5100", "Depreciation Expense", "Depreciation and Amortization");
+        receivables.CashFlowClassification = "Operating";
+        equipment.CashFlowClassification = "Investing";
+        loan.CashFlowClassification = "Financing";
+        revenue.CashFlowClassification = "Operating";
+        depreciation.CashFlowClassification = "Operating";
+        accumulatedDepreciation.CashFlowClassification = "Investing";
+        db.BankAccounts.Add(new BankAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountNumber = "BANK-001",
+            AccountName = "Operating Account",
+            BankName = "Bank",
+            Currency = "GHS",
+            AccountType = BankAccountType.Checking,
+            GLAccountId = cash.Id,
+            IsActive = true
+        });
+
+        SeedJournal(db, tenantId, period.Id, "JE-CASH-SALE", "Posted", (cash.Id, 200m, 0m), (revenue.Id, 0m, 200m));
+        SeedJournal(db, tenantId, period.Id, "JE-CREDIT-SALE", "Posted", (receivables.Id, 100m, 0m), (revenue.Id, 0m, 100m));
+        SeedJournal(db, tenantId, period.Id, "JE-COLLECTION", "Posted", (cash.Id, 40m, 0m), (receivables.Id, 0m, 40m));
+        SeedJournal(db, tenantId, period.Id, "JE-DEPRECIATION", "Posted", (depreciation.Id, 30m, 0m), (accumulatedDepreciation.Id, 0m, 30m));
+        SeedJournal(db, tenantId, period.Id, "JE-EQUIPMENT", "Posted", (equipment.Id, 100m, 0m), (cash.Id, 0m, 100m));
+        SeedJournal(db, tenantId, period.Id, "JE-LOAN", "Posted", (cash.Id, 50m, 0m), (loan.Id, 0m, 50m));
+        await db.SaveChangesAsync();
+
+        var service = CreateGeneralLedgerService(db, tenantId);
+        var direct = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = period.StartDate,
+            PeriodEnd = period.EndDate,
+            BookClassification = "IFRS",
+            IncludeAccountDetails = true,
+            Method = "Direct"
+        });
+        var indirect = await service.GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = period.StartDate,
+            PeriodEnd = period.EndDate,
+            BookClassification = "IFRS",
+            IncludeAccountDetails = true,
+            Method = "Indirect"
+        });
+
+        direct.Method.Should().Be("Direct");
+        direct.OperatingActivities.LineItems.Should().NotContain(line => line.LineItemName == "Profit for the period");
+        direct.NetCashFromOperating.Should().Be(240m);
+        direct.NetCashFromInvesting.Should().Be(-100m);
+        direct.NetCashFromFinancing.Should().Be(50m);
+        direct.CashAtEnd.Should().Be(190m);
+        direct.IsReconciled.Should().BeTrue();
+
+        indirect.Method.Should().Be("Indirect");
+        indirect.OperatingActivities.LineItems.Single(line => line.LineItemName == "Profit for the period").Amount.Should().Be(270m);
+        indirect.OperatingActivities.LineItems.Single(line => line.LineItemName == "Change in Accounts Receivable").Amount.Should().Be(-60m);
+        indirect.OperatingActivities.LineItems.Single(line => line.LineItemName == "Other non-cash and classification adjustments").Amount.Should().Be(30m);
+        indirect.NetCashFromOperating.Should().Be(240m);
+        indirect.NetCashFromInvesting.Should().Be(-100m);
+        indirect.NetCashFromFinancing.Should().Be(50m);
+        indirect.CashAtEnd.Should().Be(190m);
+        indirect.IsReconciled.Should().BeTrue();
+        indirect.PresentationWarnings.Should().ContainSingle();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_ShouldFailClosedForUnclassifiedCashCounterpart()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Operating Bank", "Current Assets");
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Unclassified Revenue", "Revenue");
+        db.BankAccounts.Add(new BankAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountNumber = "BANK-001",
+            AccountName = "Operating Account",
+            BankName = "Bank",
+            Currency = "GHS",
+            AccountType = BankAccountType.Checking,
+            GLAccountId = cash.Id,
+            IsActive = true
+        });
+        SeedJournal(db, tenantId, period.Id, "JE-UNCLASSIFIED", "Posted", (cash.Id, 100m, 0m), (revenue.Id, 0m, 100m));
+        await db.SaveChangesAsync();
+
+        var act = () => CreateGeneralLedgerService(db, tenantId).GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = period.StartDate,
+            PeriodEnd = period.EndDate,
+            Method = "Direct"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*4000 - Unclassified Revenue*Assign Operating, Investing, or Financing*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_ShouldFailClosedWhenCashCounterpartAccountIsUnavailable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Operating Bank", "Current Assets");
+        var deletedRevenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Deleted Revenue", "Revenue");
+        deletedRevenue.CashFlowClassification = "Operating";
+        db.BankAccounts.Add(new BankAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountNumber = "BANK-001",
+            AccountName = "Operating Account",
+            BankName = "Bank",
+            Currency = "GHS",
+            AccountType = BankAccountType.Checking,
+            GLAccountId = cash.Id,
+            IsActive = true
+        });
+        SeedJournal(db, tenantId, period.Id, "JE-DELETED-COUNTERPART", "Posted", (cash.Id, 100m, 0m), (deletedRevenue.Id, 0m, 100m));
+        deletedRevenue.IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        var act = () => CreateGeneralLedgerService(db, tenantId).GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = period.StartDate,
+            PeriodEnd = period.EndDate,
+            Method = "Direct"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot resolve active tenant account(s)*Restore the account lineage*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
+    public async Task CashFlow_ShouldRejectUnknownMethod()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        await db.SaveChangesAsync();
+
+        var act = () => CreateGeneralLedgerService(db, tenantId).GenerateCashFlowStatementAsync(new CashFlowStatementRequestDto
+        {
+            PeriodStart = new DateTime(2026, 7, 1),
+            PeriodEnd = new DateTime(2026, 7, 31),
+            Method = "Hybrid"
+        });
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("Cash-flow method must be Direct or Indirect.*");
     }
 
     [Fact]

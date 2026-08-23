@@ -8,6 +8,7 @@
 
 export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
 export type AccountStatus = 'Active' | 'Inactive' | 'Closed';
+export type CashFlowClassification = 'Operating' | 'Investing' | 'Financing';
 export type JournalType = 'General' | 'Adjusting' | 'Reversing' | 'Recurring' | 'Opening Balance' | 'Closing' | 'Revaluation' | 'System Generated';
 export type PostingStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Rejected' | 'Reversed';
 export type ExchangeRateType = 'Daily' | 'Average' | 'MonthEnd' | 'QuarterEnd' | 'YearEnd' | 'Budget' | 'Fixed' | 'Spot';
@@ -170,6 +171,7 @@ export interface Account {
     accountType: AccountType;
     accountCategory?: string;
     accountSubCategory?: string;
+    cashFlowClassification?: CashFlowClassification | null;
     description?: string;
     parentAccountId?: string;
     isSegmented: boolean;
@@ -931,6 +933,7 @@ export interface CreateAccountDto {
     accountType: AccountType;
     accountCategory?: string;
     accountSubCategory?: string;
+    cashFlowClassification?: CashFlowClassification | null;
     description?: string;
     parentAccountId?: string;
     isSegmented: boolean;
@@ -1835,6 +1838,8 @@ export interface CashFlowStatementReportDto {
     periodEnd: string;
     bookClassification: string;
     currencyCode: string;
+    method: 'Direct' | 'Indirect';
+    presentationWarnings: string[];
     operatingActivities: CashFlowSectionDto;
     investingActivities: CashFlowSectionDto;
     financingActivities: CashFlowSectionDto;

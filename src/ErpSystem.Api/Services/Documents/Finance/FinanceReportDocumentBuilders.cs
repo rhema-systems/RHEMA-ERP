@@ -492,6 +492,18 @@ public sealed class CashFlowStatementDocumentBuilder : FinanceReportDocumentBuil
                 .ToList()))
             .ToList();
 
+        // A reconciling indirect-method residual is intentionally visible in every
+        // rendition. Hiding the review warning in exported evidence would make the PDF
+        // appear more authoritative than the on-screen report.
+        if (report.PresentationWarnings.Count > 0)
+        {
+            sections.Add(new FinanceReportSection(
+                "Presentation Review Warnings",
+                report.PresentationWarnings
+                    .Select(warning => new FinanceReportLine(warning, null, 0m, 0, false, false))
+                    .ToList()));
+        }
+
         var summaries = new[]
         {
             new FinanceReportSummary("Net Increase in Cash", report.NetIncreaseInCash),
@@ -499,7 +511,13 @@ public sealed class CashFlowStatementDocumentBuilder : FinanceReportDocumentBuil
             new FinanceReportSummary("Cash at End", report.CashAtEnd)
         };
 
-        return Model(report.CompanyName, ReportTitle, $"{report.PeriodStart:dd MMM yyyy} to {report.PeriodEnd:dd MMM yyyy} | Book: {report.BookClassification}", report.CurrencyCode, sections, summaries);
+        return Model(
+            report.CompanyName,
+            ReportTitle,
+            $"{report.PeriodStart:dd MMM yyyy} to {report.PeriodEnd:dd MMM yyyy} | Book: {report.BookClassification} | Method: {report.Method}",
+            report.CurrencyCode,
+            sections,
+            summaries);
     }
 }
 

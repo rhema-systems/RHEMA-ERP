@@ -191,6 +191,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 AccountType = Enum.Parse<AccountType>(dto.AccountType),
                 AccountCategory = dto.AccountCategory,
                 AccountSubCategory = dto.AccountSubCategory,
+                CashFlowClassification = NormalizeCashFlowClassification(dto.CashFlowClassification),
                 CurrencyCode = dto.CurrencyCode,
                 IsMultiCurrency = dto.IsMultiCurrency,
                 // Adjust property names to match Account entity:
@@ -304,6 +305,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             account.AccountCode = dto.AccountCode ?? account.AccountCode;
             account.AccountNumber = dto.AccountNumber;
             account.AccountName = dto.AccountName;
+            account.CashFlowClassification = NormalizeCashFlowClassification(dto.CashFlowClassification);
             // account.AccountType = Enum.Parse<AccountType>(dto.AccountType); // Handled above
             // account.AccountCategory = dto.AccountCategory; // Handled above
             // account.AccountSubCategory = dto.AccountSubCategory; // Handled above
@@ -449,6 +451,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 AccountType = account.AccountType.ToString(),
                 AccountCategory = account.AccountCategory,
                 AccountSubCategory = account.AccountSubCategory,
+                CashFlowClassification = account.CashFlowClassification,
                 CurrencyCode = account.CurrencyCode,
                 IsMultiCurrency = account.IsMultiCurrency,
                 IsIFRSClassified = account.IsIFRSClassified,
@@ -518,6 +521,22 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .ToList();
 
             return dto;
+        }
+
+        private static string? NormalizeCashFlowClassification(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            return value.Trim().ToUpperInvariant() switch
+            {
+                "OPERATING" => "Operating",
+                "INVESTING" => "Investing",
+                "FINANCING" => "Financing",
+                _ => throw new ArgumentException(
+                    "Cash-flow classification must be Operating, Investing, Financing, or blank.",
+                    nameof(value))
+            };
         }
 
         #region Multi-Currency Management

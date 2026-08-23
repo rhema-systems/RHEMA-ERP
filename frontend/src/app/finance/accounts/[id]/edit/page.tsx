@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Save, Loader2, Check, ChevronsUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { AccountType, AccountStatus, Account, UpdateAccountDto } from '@/types/finance';
+import type { AccountType, AccountStatus, Account, CashFlowClassification, UpdateAccountDto } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -159,6 +159,7 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
                 accountType: formData.accountType,
                 accountCategory: selectedClassification,
                 accountSubCategory: selectedClassification,
+                cashFlowClassification: formData.cashFlowClassification || null,
                 currencyCode: formData.currencyCode,
                 isMultiCurrency: formData.isMultiCurrency,
                 isIFRSClassified: formData.isIFRSClassified,
@@ -488,6 +489,31 @@ export default function EditAccountPage({ params }: { params: Promise<{ id: stri
                                 <CardTitle>Account Features</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-3">
+                                <div className="space-y-2 border-b pb-4">
+                                    <Label htmlFor="cashFlowClassification">Cash-flow statement section</Label>
+                                    <Select
+                                        value={formData.cashFlowClassification || 'Unclassified'}
+                                        onValueChange={(value) => setFormData({
+                                            ...formData,
+                                            cashFlowClassification: value === 'Unclassified'
+                                                ? null
+                                                : value as CashFlowClassification,
+                                        })}
+                                    >
+                                        <SelectTrigger id="cashFlowClassification">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Unclassified">Not classified</SelectItem>
+                                            <SelectItem value="Operating">Operating</SelectItem>
+                                            <SelectItem value="Investing">Investing</SelectItem>
+                                            <SelectItem value="Financing">Financing</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Required when this account is the non-cash counterpart of a cash or bank posting.
+                                    </p>
+                                </div>
                                 <div className="flex items-center space-x-2">
                                     <Checkbox
                                         id="allowDirectPosting"
