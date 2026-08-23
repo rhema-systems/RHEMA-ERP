@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,12 @@ import { ArrowLeft, Edit, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementBudgetService, type ProcurementBudgetDetailDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
-import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
+import {
+  WorkflowApprovalActions,
+  WorkflowTabContent,
+  WorkflowTabTrigger,
+  useWorkflowRecord,
+} from '@/components/workflow';
 
 export default function ProcurementBudgetDetailPage() {
   const router = useRouter();
@@ -49,9 +54,22 @@ export default function ProcurementBudgetDetailPage() {
     entityNumber: budget?.budgetCode,
     status: budget?.status || '',
     canSubmit: budget?.status === 'Draft',
+    canApproveReject: budget?.status === 'Submitted' || budget?.status === 'UnderReview',
     enabled: Boolean(id && budget),
     commands: {
       submit: handleSubmitForApproval,
+      approve: async ({ comments }) => {
+        await procurementBudgetService.approveBudget(id, {
+          isApproved: true,
+          comments: comments || undefined,
+        });
+      },
+      reject: async ({ comments }) => {
+        await procurementBudgetService.approveBudget(id, {
+          isApproved: false,
+          comments: comments || undefined,
+        });
+      },
       afterAction: loadBudget,
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
@@ -99,13 +117,11 @@ export default function ProcurementBudgetDetailPage() {
         </div>
         <div className="flex gap-2">
           {budget.status === 'Draft' && (
-            <>
-              <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
-                <Edit className="h-4 w-4" />Edit
-              </Button>
-              <WorkflowApprovalActions {...workflow.actionProps} size="default" />
-            </>
+            <Button variant="outline" onClick={() => router.push(`/procurement/planning/budgets/${id}/edit`)} className="gap-2">
+              <Edit className="h-4 w-4" />Edit
+            </Button>
           )}
+          <WorkflowApprovalActions {...workflow.actionProps} size="default" showStepBadge />
         </div>
       </div>
 
@@ -136,7 +152,7 @@ export default function ProcurementBudgetDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="details" className="w-full">
-        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="allocations">Allocations</TabsTrigger><TabsTrigger value="revisions">Revisions</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="allocations">Allocations</TabsTrigger><TabsTrigger value="revisions">Revisions</TabsTrigger><WorkflowTabTrigger /></TabsList>
         
         <TabsContent value="details" className="space-y-4">
           <Card>
@@ -239,6 +255,12 @@ export default function ProcurementBudgetDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <WorkflowTabContent
+          {...workflow.actionProps}
+          entityType="ProcurementBudget"
+          showActions
+        />
       </Tabs>
 
     </div>
