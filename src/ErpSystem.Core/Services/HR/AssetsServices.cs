@@ -5,6 +5,14 @@ using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
+
+// ⚠ An ALIAS, not `using ErpSystem.Core.Interfaces.Finance`. That namespace also declares an
+// `IAssetTransferService`, and so does `ErpSystem.Core.Interfaces.HR` — the same collision that
+// makes `AssetType` and `AssetTransfer` mean two different things depending on the file (build plan
+// §3.3), now at the interface level. Importing the whole Finance namespace made every mention of
+// `IAssetTransferService` in this file ambiguous, including the HR service declared at the bottom
+// of it. Aliasing the one type we actually want keeps the collision from ever arising.
+using IFixedAssetService = ErpSystem.Core.Interfaces.Finance.IFixedAssetService;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.Extensions.Logging;
@@ -246,7 +254,10 @@ public class AssetTypeAttributeService : IAssetTypeAttributeService
 
     public async Task<AssetTypeAttributeDto?> GetByIdAsync(Guid id)
     {
-        var entity = await _attributeRepo.GetByIdAsync(id);
+        // D-o(b). Was `GetByIdAsync`, which loads no navigations, so this read answered with a blank
+        // assetTypeName while GetByAssetTypeIdAsync next door filled it in — the same DTO, two
+        // fillings, and nothing in the payload to say which one a screen had.
+        var entity = await _attributeRepo.GetWithTypeAsync(id);
         return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
@@ -296,24 +307,32 @@ public class AssetTypeAttributeService : IAssetTypeAttributeService
 
 public class CompanyAssetService : ICompanyAssetService
 {
+    // AST-11 / decision D1. HR reads the fixed-asset register through FINANCE'S OWN SERVICE rather
+    // than querying its tables, so the boundary is visible in the dependency: everything HR can see
+    // is something Finance chose to expose, and nothing here can write. If this ever needs a method
+    // Finance does not offer, that is a conversation with Finance, not a DbContext injection.
+
     private readonly ICompanyAssetRepository _assetRepo;
     private readonly IAssetAttributeValueRepository _attributeValueRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<CompanyAssetService> _logger;
+    private readonly IFixedAssetService _fixedAssetService;
 
     public CompanyAssetService(
         ICompanyAssetRepository assetRepo,
         IAssetAttributeValueRepository attributeValueRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
-        ILogger<CompanyAssetService> logger)
+        ILogger<CompanyAssetService> logger,
+        IFixedAssetService fixedAssetService)
     {
         _assetRepo = assetRepo;
         _attributeValueRepo = attributeValueRepo;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _logger = logger;
+        _fixedAssetService = fixedAssetService;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -345,7 +364,48 @@ public class CompanyAssetService : ICompanyAssetService
     public async Task<CompanyAssetDetailDto?> GetWithDetailsAsync(Guid id)
     {
         var entity = await _assetRepo.GetWithDetailsAsync(id);
-        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDetailDto();
+        if (entity == null || entity.TenantId != GetTenantId()) return null;
+
+        var dto = entity.ToDetailDto();
+
+        // AST-11. Read the Finance figures LIVE rather than trusting the copy taken at link time —
+        // a net book value moves at every depreciation run, so a stored copy is wrong within the
+        // month. Only this read pays for the extra call; no list does.
+        if (entity.FixedAssetId is { } fixedAssetId)
+        {
+            dto.FixedAsset = await ReadFixedAssetAsync(fixedAssetId);
+        }
+
+        return dto;
+    }
+
+    /// <summary>
+    /// What Finance says about a linked fixed asset, or null where it can no longer be read.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null is a real answer, not a failure to handle: a fixed asset can be deleted in Finance
+    /// while HR still holds the link, and an HR detail screen must still render. The link id stays
+    /// on the DTO either way, so "linked to something that is gone" is visible rather than silently
+    /// looking like an unlinked asset.
+    /// </remarks>
+    private async Task<FixedAssetLinkDto?> ReadFixedAssetAsync(Guid fixedAssetId)
+    {
+        var fa = await _fixedAssetService.GetByIdAsync(fixedAssetId);
+        if (fa is null) return null;
+
+        return new FixedAssetLinkDto
+        {
+            Id = fa.Id,
+            AssetCode = fa.AssetCode,
+            Name = fa.Name,
+            CategoryName = fa.FixedAssetCategoryName,
+            PurchaseDate = fa.PurchaseDate,
+            AcquisitionCost = fa.AcquisitionCost,
+            NetBookValue = fa.NetBookValue,
+            StatusName = fa.Status.ToString(),
+            CurrentCustodianName = fa.CurrentCustodianName,
+            SerialNumber = fa.SerialNumber
+        };
     }
 
     public async Task<IEnumerable<CompanyAssetSummaryDto>> GetAllAsync()
@@ -460,7 +520,134 @@ public class CompanyAssetService : ICompanyAssetService
             _logger.LogWarning("No attribute values to process for asset {AssetId}", entity.Id);
         }
 
-        return entity.ToDto();
+        // ⚠ D-o. Re-read WITH the navigations before mapping. `entity` here was either just
+        // constructed or loaded by `GetByIdAsync`, neither of which loads AssetType, Location, Unit
+        // or CurrentAssignedTo — so mapping it produced a response whose assetTypeName, locationName
+        // and unitName were blank, while the very next GET filled them in. A screen that renders
+        // what it just saved showed empty columns until the user refreshed. Found by slice 2b, which
+        // asserted a unit name on a create response and got null.
+        var saved = await _assetRepo.GetWithDetailsAsync(entity.Id);
+        return saved!.ToDto();
+    }
+
+    public async Task<IEnumerable<FixedAssetPickDto>> GetLinkableFixedAssetsAsync(string? searchTerm = null)
+    {
+        var tenantId = GetTenantId();
+
+        var fixedAssets = await _fixedAssetService.GetAllAsync();
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            fixedAssets = fixedAssets.Where(f =>
+                f.AssetCode.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)
+                || f.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)
+                || (f.SerialNumber ?? string.Empty).Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // One pass over the HR register to work out what is already spoken for. Read from the
+        // tenant list rather than per-asset so the picker is one query, not N.
+        var linked = (await _assetRepo.GetByTenantAsync(tenantId))
+            .Where(a => a.FixedAssetId.HasValue)
+            .GroupBy(a => a.FixedAssetId!.Value)
+            .ToDictionary(g => g.Key, g => g.First().Id);
+
+        return fixedAssets.Select(f => new FixedAssetPickDto
+        {
+            Id = f.Id,
+            AssetCode = f.AssetCode,
+            Name = f.Name,
+            CategoryName = f.FixedAssetCategoryName,
+            SerialNumber = f.SerialNumber,
+            Location = f.Location,
+            NetBookValue = f.NetBookValue,
+            StatusName = f.Status.ToString(),
+            AlreadyLinked = linked.ContainsKey(f.Id),
+            LinkedCompanyAssetId = linked.TryGetValue(f.Id, out var companyAssetId) ? companyAssetId : null
+        }).OrderBy(f => f.AssetCode).ToList();
+    }
+
+    public async Task<CompanyAssetDto> CreateFromFixedAssetAsync(CreateAssetFromFixedAssetDto dto)
+    {
+        var tenantId = GetTenantId();
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
+        var fa = await _fixedAssetService.GetByIdAsync(dto.FixedAssetId)
+            ?? throw AssetsWorkflowException.NotFound(
+                $"No fixed asset was found with id {dto.FixedAssetId} in the Fixed Assets module.");
+
+        // One HR entry per fixed asset. Enforced here rather than by a unique index, because every
+        // delete in this area is a SOFT delete: an index would hold the slot after an HR entry was
+        // removed and refuse the re-link forever, with a constraint violation no user could read.
+        // Doing it in code means the check can see IsDeleted, and can say what is wrong.
+        var existing = (await _assetRepo.GetByTenantAsync(tenantId))
+            .FirstOrDefault(a => a.FixedAssetId == dto.FixedAssetId);
+        if (existing is not null)
+        {
+            throw AssetsWorkflowException.Conflict(
+                $"Fixed asset {fa.AssetCode} is already registered in HR as {existing.AssetNumber} ({existing.AssetName}).");
+        }
+
+        var entity = new CompanyAsset
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+
+            // Identity is COPIED so the HR register reads sensibly on its own and in a list. It is
+            // a snapshot for display; the live truth stays in Finance and is read through on the
+            // detail screen.
+            AssetNumber = fa.AssetCode,
+            AssetName = fa.Name,
+            Description = fa.Description,
+            SerialNumber = fa.SerialNumber,
+            PurchaseDate = DateOnly.FromDateTime(fa.PurchaseDate),
+            PurchaseCost = fa.AcquisitionCost,
+            LocationDetails = fa.Location,
+
+            AssetTag = dto.AssetTag,
+            AssetTypeId = dto.AssetTypeId,
+            Condition = dto.Condition,
+            LocationId = dto.LocationId,
+            UnitId = dto.UnitId,
+            IsAssignable = dto.IsAssignable,
+            AdditionalRemarks = dto.AdditionalRemarks,
+
+            Status = CompanyAssetStatus.Available,
+            Source = AssetSource.FixedAssetsModule,
+            FixedAssetId = fa.Id,
+
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = userId.ToString()
+        };
+
+        await _assetRepo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        var created = await _assetRepo.GetWithDetailsAsync(entity.Id);
+        return created!.ToDto();
+    }
+
+    /// <summary>
+    /// Refuses an edit that would rewrite a figure Finance owns — AST-11, decision D1.
+    /// </summary>
+    /// <remarks>
+    /// <b>Refuses rather than silently ignoring.</b> Quietly dropping the changed fields would let a
+    /// screen show a save that appeared to work and did not, which is the harder defect to find.
+    /// The message names the module to go to, because "you may not do that" without "here is where
+    /// you can" is only half an answer.
+    /// </remarks>
+    private static void EnsureFinanceOwnedFieldsUnchanged(CompanyAsset entity, UpdateCompanyAssetDto dto)
+    {
+        if (entity.Source != AssetSource.FixedAssetsModule || entity.FixedAssetId is null) return;
+
+        var changed = new List<string>();
+        if (dto.AssetNumber != entity.AssetNumber) changed.Add("asset number");
+        if (dto.PurchaseDate != entity.PurchaseDate) changed.Add("purchase date");
+        if (dto.PurchaseCost != entity.PurchaseCost) changed.Add("purchase cost");
+
+        if (changed.Count == 0) return;
+
+        throw AssetsWorkflowException.InvalidState(
+            $"This asset comes from the Fixed Assets module, which owns its {string.Join(", ", changed)}. " +
+            "Change it there; everything else on this form can be edited in HR.");
     }
 
     public async Task<CompanyAssetDto> UpdateAsync(Guid id, UpdateCompanyAssetDto dto)
@@ -471,6 +658,9 @@ public class CompanyAssetService : ICompanyAssetService
         _logger.LogInformation("Updating asset {AssetId}. Received {Count} attribute values", id, dto.AttributeValues?.Count ?? 0);
         
         var entity = await GetOwnedAssetAsync(id);
+
+        EnsureFinanceOwnedFieldsUnchanged(entity, dto);
+
         entity.UpdateEntity(dto, userId);
         await _assetRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -511,7 +701,14 @@ public class CompanyAssetService : ICompanyAssetService
             _logger.LogInformation("No attribute values to update for asset {AssetId}", id);
         }
 
-        return entity.ToDto();
+        // ⚠ D-o. Re-read WITH the navigations before mapping. `entity` here was either just
+        // constructed or loaded by `GetByIdAsync`, neither of which loads AssetType, Location, Unit
+        // or CurrentAssignedTo — so mapping it produced a response whose assetTypeName, locationName
+        // and unitName were blank, while the very next GET filled them in. A screen that renders
+        // what it just saved showed empty columns until the user refreshed. Found by slice 2b, which
+        // asserted a unit name on a create response and got null.
+        var saved = await _assetRepo.GetWithDetailsAsync(entity.Id);
+        return saved!.ToDto();
     }
 
     public async Task DeleteAsync(Guid id)
@@ -526,6 +723,16 @@ public class CompanyAssetService : ICompanyAssetService
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
         
         var entity = await GetOwnedAssetAsync(dto.AssetId);
+
+        // Disposal accounting belongs to Finance (decision D1). Disposing here would leave the
+        // fixed-asset register still carrying the thing at book value, and there is no reason for
+        // HR to be the place that happens.
+        if (entity.Source == AssetSource.FixedAssetsModule && entity.FixedAssetId.HasValue)
+        {
+            throw AssetsWorkflowException.InvalidState(
+                "This asset is capitalised in the Fixed Assets module, which owns its disposal. " +
+                "Dispose of it there; the HR record follows.");
+        }
 
         entity.Status = CompanyAssetStatus.Disposed;
         entity.DisposalDate = dto.DisposalDate;
@@ -588,7 +795,11 @@ public class AssetAttributeValueService : IAssetAttributeValueService
 
     public async Task<AssetAttributeValueDto?> GetByIdAsync(Guid id)
     {
-        var entity = await _valueRepo.GetByIdAsync(id);
+        // D-o(b). Was `GetByIdAsync`, which loads no navigations. Without the AssetTypeAttribute
+        // this read lost the attribute's name AND reported the wrong dataType — the DTO projects the
+        // type off the navigation, so a null one silently became the enum's default rather than the
+        // value's actual type. The list read beside it had the Include all along.
+        var entity = await _valueRepo.GetWithAttributeAsync(id);
         return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 

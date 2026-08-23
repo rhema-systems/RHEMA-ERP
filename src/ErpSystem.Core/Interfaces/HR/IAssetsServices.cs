@@ -42,6 +42,19 @@ public interface ICompanyAssetService
     Task<IEnumerable<CompanyAssetSummaryDto>> GetByEmployeeAsync(Guid employeeId);
     Task<IEnumerable<CompanyAssetSummaryDto>> GetDueForMaintenanceAsync(int daysAhead = 30);
     Task<CompanyAssetDto> CreateAsync(CreateCompanyAssetDto dto);
+
+    /// <summary>
+    /// AST-11 — the Finance fixed assets HR could register, with the ones it already has marked.
+    /// </summary>
+    /// <remarks>
+    /// Already-linked assets are RETURNED and flagged, not filtered out. A picker that silently
+    /// omits them leaves a user hunting for an asset that is right there; one that shows it greyed
+    /// with "already registered" answers the question they actually have.
+    /// </remarks>
+    Task<IEnumerable<FixedAssetPickDto>> GetLinkableFixedAssetsAsync(string? searchTerm = null);
+
+    /// <summary>AST-11 — register an HR asset that stands for an existing Finance fixed asset.</summary>
+    Task<CompanyAssetDto> CreateFromFixedAssetAsync(CreateAssetFromFixedAssetDto dto);
     Task<CompanyAssetDto> UpdateAsync(Guid id, UpdateCompanyAssetDto dto);
     Task DeleteAsync(Guid id);
     Task DisposeAssetAsync(DisposeAssetDto dto);

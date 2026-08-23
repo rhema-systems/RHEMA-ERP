@@ -316,6 +316,26 @@ public class AssetsController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>AST-11 — the Finance fixed assets HR could register, already-linked ones flagged.</summary>
+    [HttpGet("fixed-assets/linkable")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<FixedAssetPickDto>>> GetLinkableFixedAssets(
+        [FromQuery] string? searchTerm = null)
+    {
+        var result = await _companyAssetService.GetLinkableFixedAssetsAsync(searchTerm);
+        return Ok(result);
+    }
+
+    /// <summary>AST-11 — register an HR asset that stands for an existing Finance fixed asset.</summary>
+    [HttpPost("from-fixed-asset")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<CompanyAssetDto>> CreateAssetFromFixedAsset(
+        [FromBody] CreateAssetFromFixedAssetDto dto)
+    {
+        var result = await _companyAssetService.CreateFromFixedAssetAsync(dto);
+        return CreatedAtAction(nameof(GetAsset), new { id = result.Id }, result);
+    }
+
     /// <summary>Create asset.</summary>
     [HttpPost]
     [Authorize(Roles = HrRoles)]

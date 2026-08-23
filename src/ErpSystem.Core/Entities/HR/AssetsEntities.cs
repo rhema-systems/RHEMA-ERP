@@ -2,6 +2,12 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 
+// ⚠ An ALIAS, not `using ErpSystem.Core.Entities.Finance.FixedAssets`. That namespace declares its
+// own `AssetTransfer`, and this file declares HR's — the collision recorded in build plan §3.3.
+// C#'s local-declaration-wins rule would in fact resolve it correctly here, but relying on that
+// puts a silent trap one edit away from firing, and this exact collision has already bitten twice.
+using FixedAsset = ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset;
+
 namespace ErpSystem.Core.Entities.HR.Assets;
 
 /// <summary>
@@ -63,7 +69,45 @@ public class CompanyAsset : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// AST-7 — the field TDC calls "Additional Remarks".
+    /// </summary>
+    /// <remarks>
+    /// A new column rather than a rename. The change document asks to rename "Additional
+    /// Description" to "Additional Remarks", but no field of that name exists anywhere in this
+    /// model — the only <c>AdditionalDescription</c> in the repository is on a payroll component.
+    /// <see cref="Description"/> and <see cref="Specifications"/> are both already spoken for and
+    /// mean different things, so renaming either would have made two fields wrong to fix a label.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? AdditionalRemarks { get; set; }
+
     public Guid AssetTypeId { get; set; }
+
+    /// <summary>
+    /// AST-11 — whether HR created this entry or picked it from the Finance fixed-asset register.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not decoration. It decides ownership: see <see cref="FixedAssetId"/>.
+    /// </remarks>
+    public AssetSource Source { get; set; } = AssetSource.HrCreated;
+
+    /// <summary>
+    /// AST-11 — the Finance fixed asset this entry stands for, where it stands for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null on an HR-created asset, set on one picked from Fixed Assets. The pattern is the
+    /// one <b>Finance itself already uses</b> to reach into Operations —
+    /// <c>FixedAsset.MaintenanceAssetId</c>, a nullable FK plus a navigation — so this is the
+    /// house convention rather than a new idea.</para>
+    ///
+    /// <para><b>HR reads across this link and never writes.</b> Capitalisation, depreciation,
+    /// valuation and disposal accounting stay in Finance (area-16 decision D1); HR owns custody —
+    /// who holds the thing. On a linked asset the service refuses edits to the purchase figures and
+    /// refuses disposal outright, and says so, rather than keeping a second copy of the truth that
+    /// drifts.</para>
+    /// </remarks>
+    public Guid? FixedAssetId { get; set; }
 
     // Identification
     [MaxLength(100)]
@@ -144,6 +188,13 @@ public class CompanyAsset : TenantEntity
 
     public decimal? InsuredValue { get; set; }
 
+    /// <summary>AST-4 — when the cover lapses. Null where the asset is not insured, or not known.</summary>
+    /// <remarks>
+    /// A <c>DateOnly</c>, like every other date on this entity: cover expires on a day, not at an
+    /// instant, and storing a time would invent a precision the policy document does not have.
+    /// </remarks>
+    public DateOnly? InsuranceExpiryDate { get; set; }
+
     // Disposal
     public DateOnly? DisposalDate { get; set; }
 
@@ -163,6 +214,9 @@ public class CompanyAsset : TenantEntity
 
     [ForeignKey(nameof(CurrentAssignedToId))]
     public virtual Employee? CurrentAssignedTo { get; set; }
+
+    [ForeignKey(nameof(FixedAssetId))]
+    public virtual FixedAsset? FixedAsset { get; set; }
 
     public virtual ICollection<AssetAssignment> AssignmentHistory { get; set; } = new List<AssetAssignment>();
 

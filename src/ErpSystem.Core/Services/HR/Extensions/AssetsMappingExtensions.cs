@@ -189,6 +189,12 @@ public static class AssetsMappingExtensions
             DisposalDate = entity.DisposalDate,
             DisposalMethod = entity.DisposalMethod,
             DisposalNotes = entity.DisposalNotes,
+            AdditionalRemarks = entity.AdditionalRemarks,
+            Source = entity.Source,
+            FixedAssetId = entity.FixedAssetId,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            InsuranceExpiryDate = entity.InsuranceExpiryDate,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -215,7 +221,8 @@ public static class AssetsMappingExtensions
             CurrentAssignedToName = entity.CurrentAssignedTo != null 
                 ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}" 
                 : null,
-            CurrentValue = entity.PurchaseCost
+            CurrentValue = entity.PurchaseCost,
+            Source = entity.Source
         };
     }
 
@@ -266,6 +273,12 @@ public static class AssetsMappingExtensions
             DisposalDate = entity.DisposalDate,
             DisposalMethod = entity.DisposalMethod,
             DisposalNotes = entity.DisposalNotes,
+            AdditionalRemarks = entity.AdditionalRemarks,
+            Source = entity.Source,
+            FixedAssetId = entity.FixedAssetId,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            InsuranceExpiryDate = entity.InsuranceExpiryDate,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -312,6 +325,9 @@ public static class AssetsMappingExtensions
             IsInsured = dto.IsInsured,
             InsurancePolicyNumber = dto.InsurancePolicyNumber,
             InsuredValue = dto.InsuredValue,
+            InsuranceExpiryDate = dto.InsuranceExpiryDate,
+            AdditionalRemarks = dto.AdditionalRemarks,
+            UnitId = dto.UnitId,
             CreatedBy = userId.ToString()
         };
     }
@@ -349,6 +365,9 @@ public static class AssetsMappingExtensions
         entity.IsInsured = dto.IsInsured;
         entity.InsurancePolicyNumber = dto.InsurancePolicyNumber;
         entity.InsuredValue = dto.InsuredValue;
+        entity.InsuranceExpiryDate = dto.InsuranceExpiryDate;
+        entity.AdditionalRemarks = dto.AdditionalRemarks;
+        entity.UnitId = dto.UnitId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

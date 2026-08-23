@@ -148,8 +148,24 @@ public class CompanyAssetDto : BaseDto
     public string AssetTag { get; set; } = string.Empty;
     public string AssetName { get; set; } = string.Empty;
     public string? Description { get; set; }
+
+    /// <summary>AST-7 — "Additional Remarks".</summary>
+    public string? AdditionalRemarks { get; set; }
     public Guid AssetTypeId { get; set; }
     public string AssetTypeName { get; set; } = string.Empty;
+
+    /// <summary>AST-11 — HR-created, or picked from the Finance fixed-asset register.</summary>
+    public AssetSource Source { get; set; } = AssetSource.HrCreated;
+    public string SourceName => Source.ToString();
+
+    /// <summary>The Finance fixed asset this stands for, where it stands for one.</summary>
+    public Guid? FixedAssetId { get; set; }
+
+    /// <summary>
+    /// True where Finance owns this asset's money and its disposal, so a screen can grey those
+    /// fields rather than offering an edit the API will refuse.
+    /// </summary>
+    public bool IsFinanceOwned => Source == AssetSource.FixedAssetsModule && FixedAssetId.HasValue;
     
     // Identification
     public string? Manufacturer { get; set; }
@@ -184,6 +200,13 @@ public class CompanyAssetDto : BaseDto
     public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
     public string? LocationDetails { get; set; }
+
+    /// <summary>
+    /// The organisation unit the asset sits in. ⚠ Present on the LIST dto since the port and
+    /// permanently null until this slice, because nothing could ever set it — defect D-i(b).
+    /// </summary>
+    public Guid? UnitId { get; set; }
+    public string? UnitName { get; set; }
     
     // Assignment
     public bool IsAssignable { get; set; }
@@ -201,6 +224,18 @@ public class CompanyAssetDto : BaseDto
     public bool IsInsured { get; set; }
     public string? InsurancePolicyNumber { get; set; }
     public decimal? InsuredValue { get; set; }
+
+    /// <summary>AST-4 — when the cover lapses.</summary>
+    public DateOnly? InsuranceExpiryDate { get; set; }
+
+    /// <summary>
+    /// Cover that has already lapsed on an asset still flagged as insured. False — not null — when
+    /// no expiry is recorded: an unknown date is not an expired one, and a screen that treated it
+    /// as one would cry wolf across the whole register.
+    /// </summary>
+    public bool IsInsuranceExpired =>
+        IsInsured && InsuranceExpiryDate.HasValue
+        && InsuranceExpiryDate.Value < DateOnly.FromDateTime(DateTime.UtcNow);
     
     // Disposal
     public DateOnly? DisposalDate { get; set; }
@@ -229,6 +264,10 @@ public class CompanyAssetSummaryDto
     public bool IsCurrentlyAssigned { get; set; }
     public string? CurrentAssignedToName { get; set; }
     public decimal? CurrentValue { get; set; }
+
+    /// <summary>AST-11 — so a register list shows at a glance where each row came from.</summary>
+    public AssetSource Source { get; set; } = AssetSource.HrCreated;
+    public string SourceName => Source.ToString();
 }
 
 /// <summary>
@@ -236,6 +275,17 @@ public class CompanyAssetSummaryDto
 /// </summary>
 public class CompanyAssetDetailDto : CompanyAssetDto
 {
+    /// <summary>
+    /// AST-11 — what the Finance fixed-asset register says about this asset, read live.
+    /// </summary>
+    /// <remarks>
+    /// Null on an HR-created asset. <b>Read through on demand, never copied onto the HR row</b>: a
+    /// net book value changes at every depreciation run, and a stored copy would be wrong within
+    /// the month. Only the detail read pays for the extra call — the list reads must not, which is
+    /// why this lives here and not on <see cref="CompanyAssetDto"/>.
+    /// </remarks>
+    public FixedAssetLinkDto? FixedAsset { get; set; }
+
     public List<AssetAttributeValueDto> AttributeValues { get; set; } = new();
     public List<AssetAssignmentSummaryDto> RecentAssignments { get; set; } = new();
     public List<AssetMaintenanceSummaryDto> RecentMaintenance { get; set; } = new();
@@ -259,6 +309,10 @@ public class CreateCompanyAssetDto : CreateDtoBase
 
     [MaxLength(1000)]
     public string? Description { get; set; }
+
+    /// <summary>AST-7 — "Additional Remarks".</summary>
+    [MaxLength(1000)]
+    public string? AdditionalRemarks { get; set; }
 
     [Required]
     public Guid AssetTypeId { get; set; }
@@ -313,6 +367,12 @@ public class CreateCompanyAssetDto : CreateDtoBase
     [MaxLength(500)]
     public string? LocationDetails { get; set; }
 
+    /// <summary>
+    /// The organisation unit the asset sits in. ⚠ Absent from both payloads until this slice, which
+    /// is why the column — and the list column that reads it — were always null. Defect D-i(b).
+    /// </summary>
+    public Guid? UnitId { get; set; }
+
     // Assignment
     public bool IsAssignable { get; set; }
 
@@ -330,6 +390,9 @@ public class CreateCompanyAssetDto : CreateDtoBase
 
     [Range(0, double.MaxValue)]
     public decimal? InsuredValue { get; set; }
+
+    /// <summary>AST-4 — when the cover lapses.</summary>
+    public DateOnly? InsuranceExpiryDate { get; set; }
 
     public List<CreateAssetAttributeValueDto>? AttributeValues { get; set; }
 }
@@ -351,6 +414,10 @@ public class UpdateCompanyAssetDto : UpdateDtoBase
 
     [MaxLength(1000)]
     public string? Description { get; set; }
+
+    /// <summary>AST-7 — "Additional Remarks".</summary>
+    [MaxLength(1000)]
+    public string? AdditionalRemarks { get; set; }
 
     [Required]
     public Guid AssetTypeId { get; set; }
@@ -405,6 +472,12 @@ public class UpdateCompanyAssetDto : UpdateDtoBase
     [MaxLength(500)]
     public string? LocationDetails { get; set; }
 
+    /// <summary>
+    /// The organisation unit the asset sits in. ⚠ Absent from both payloads until this slice, which
+    /// is why the column — and the list column that reads it — were always null. Defect D-i(b).
+    /// </summary>
+    public Guid? UnitId { get; set; }
+
     // Assignment
     public bool IsAssignable { get; set; }
 
@@ -426,6 +499,9 @@ public class UpdateCompanyAssetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal? InsuredValue { get; set; }
 
+    /// <summary>AST-4 — when the cover lapses.</summary>
+    public DateOnly? InsuranceExpiryDate { get; set; }
+
     // Disposal
     public DateOnly? DisposalDate { get; set; }
     public DisposalMethod? DisposalMethod { get; set; }
@@ -434,6 +510,92 @@ public class UpdateCompanyAssetDto : UpdateDtoBase
     public string? DisposalNotes { get; set; }
 
     public List<CreateAssetAttributeValueDto>? AttributeValues { get; set; }
+}
+
+/// <summary>
+/// What Finance says about a fixed asset HR has linked to — AST-11. Read-only in HR, all of it.
+/// </summary>
+public class FixedAssetLinkDto
+{
+    public Guid Id { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? CategoryName { get; set; }
+    public DateTime PurchaseDate { get; set; }
+    public decimal AcquisitionCost { get; set; }
+
+    /// <summary>Depreciated value as Finance holds it today. Never stored on the HR row.</summary>
+    public decimal NetBookValue { get; set; }
+
+    public string StatusName { get; set; } = string.Empty;
+    public string? CurrentCustodianName { get; set; }
+    public string? SerialNumber { get; set; }
+}
+
+/// <summary>
+/// One row of the "pick an asset from Fixed Assets" list — AST-11.
+/// </summary>
+/// <remarks>
+/// Deliberately thin. The picker needs enough to identify the thing and no more; the full financial
+/// picture belongs on the Finance screens, and re-serving it here would be the duplication the
+/// change document explicitly asks us to avoid.
+/// </remarks>
+public class FixedAssetPickDto
+{
+    public Guid Id { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? CategoryName { get; set; }
+    public string? SerialNumber { get; set; }
+    public string? Location { get; set; }
+    public decimal NetBookValue { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True where HR has already registered this fixed asset. Linked assets are RETURNED rather
+    /// than filtered out, so a user who cannot find one is told why instead of being handed a list
+    /// that silently omits it.
+    /// </summary>
+    public bool AlreadyLinked { get; set; }
+
+    /// <summary>The HR asset holding the link, where there is one — so a screen can navigate to it.</summary>
+    public Guid? LinkedCompanyAssetId { get; set; }
+}
+
+/// <summary>
+/// Registers an asset in HR from an existing Finance fixed asset — AST-11.
+/// </summary>
+/// <remarks>
+/// Identity fields are COPIED from Finance at the moment of linking (code, name, serial number,
+/// purchase date, acquisition cost) so the HR register reads sensibly on its own and in a list. The
+/// money is a display snapshot only — <see cref="CompanyAssetDetailDto.FixedAsset"/> is the live
+/// truth, and HR refuses to edit the copied figures afterwards.
+/// </remarks>
+public class CreateAssetFromFixedAssetDto : CreateDtoBase
+{
+    [Required]
+    public Guid FixedAssetId { get; set; }
+
+    /// <summary>
+    /// HR's own classification. Asked for rather than derived: Finance's categories are accounting
+    /// classes and do not map onto the things HR issues to people.
+    /// </summary>
+    [Required]
+    public Guid AssetTypeId { get; set; }
+
+    [MaxLength(70)]
+    public string AssetTag { get; set; } = string.Empty;
+
+    public HRAssetCondition Condition { get; set; } = HRAssetCondition.Good;
+
+    public Guid? LocationId { get; set; }
+
+    public Guid? UnitId { get; set; }
+
+    public bool IsAssignable { get; set; } = true;
+
+    [MaxLength(1000)]
+    public string? AdditionalRemarks { get; set; }
 }
 
 /// <summary>

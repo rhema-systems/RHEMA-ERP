@@ -35,11 +35,11 @@ decision — record the change where it happened.
 | **Branch** | `hrdev` |
 | **FRD requirements** | **FR-HR-183 (M)** — exit clearance across "outstanding loans, salary advances, **company property, office equipment**, duty-post keys, documents and payroll recoveries". That is the only FRD line that touches this area. |
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
-| **Backend today** | 10 entities, **82 endpoints** on one controller, 1,634 lines of service, 1,193 lines of DTOs, 939 lines of mapping, 584 lines of repositories |
+| **Backend today** | 10 entities, **84 endpoints** on one controller (82 ported + 2 added in slice 2b), 1,634 lines of service, 1,193 lines of DTOs, 939 lines of mapping, 584 lines of repositories |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–2 green twice — 171 assertions.** All 82 routes gated; every refusal speaks |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–2b green twice — 265 assertions.** 84 routes, all gated; every refusal speaks; the Fixed Assets link is live |
 | **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `run-slice0.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
@@ -209,6 +209,25 @@ be reached, for the reason D-k gives.
   finalization, because the middleware swallowing these messages is a platform default every module
   has had to work around one at a time.
 
+- **D-n — seven repository reads fill the same DTO differently.** `GetByAssetTypeAsync`,
+  `GetByStatusAsync`, `GetByLocationAsync`, `GetByEmployeeAsync`, `GetAvailableForAssignmentAsync`,
+  `GetDueForMaintenanceAsync` and `GetWarrantyExpiringAsync` all project into
+  `CompanyAssetSummaryDto`, exactly as `GetByTenantAsync` does, but loaded fewer navigations — so
+  `locationName`, `unitName` and `currentAssignedToName` came back **null on some filters and
+  populated on others**, with nothing in the payload for a screen to tell which list it held.
+  ✅ Evened up in slice 2b.
+- **D-o — a write response returned names it had never loaded.** `CompanyAssetService.CreateAsync`
+  and `UpdateAsync` mapped the entity straight from memory, where no navigation had been loaded, so
+  `assetTypeName`, `locationName` and `unitName` were blank on every create and edit — while the
+  very next GET filled them in. A screen rendering what it just saved showed empty columns until the
+  user refreshed. ✅ Fixed in slice 2b by re-reading with details before mapping.
+- **D-o(b) — and the same shape inverted, on two by-id READS.** `GET attributes/{id}` and
+  `GET attribute-values/{id}` went through the generic `GetByIdAsync`, which loads no navigations,
+  while the list reads beside them carried the `.Include` all along. The second is worse than a lost
+  label: `AssetAttributeValueDto.DataType` is projected **off the navigation**, so a null one did not
+  merely blank a name — it **reported the wrong data type for the value being returned**. ✅ Fixed in
+  slice 2b with two repository reads that load the navigation.
+
 **What slice 0 proved DOES work**, so later slices do not re-litigate it: asset types and their
 attributes; the asset register including attribute values, images and attachments; assignment
 create / read / edit / acknowledge / return; the maintenance log including complete; requisition
@@ -374,7 +393,7 @@ overdue returns; and the full screen set.
 | **0** | ✅ **Prove the ground** | Call all 82 routes. Confirm or kill D-a … D-i. Diagnostic only, no production code |
 | **1** | ✅ Authorization + the actor | Role/permission gates over all 82 routes; acknowledgement bound to the assignee (D-b); self-or-HR on the ownership reads |
 | **2** | ✅ Refusals that speak | D-m — `AssetsWorkflowException`, 404/409/400, no migration |
-| **2b** | The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link and the picker that sets it, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` end to end (AST-4, AST-7, AST-11, D-i(b)), **and D-j**. **First migration of the area** |
+| **2b** | ✅ The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link and the picker that sets it, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` end to end (AST-4, AST-7, AST-11, D-i(b)), **and D-j**. **First migration of the area** |
 | **3** | Requisition on the workflow engine, and on behalf | **D-k first** — a real approver from the token — then D3's workflow chain, `BeneficiaryEmployeeId` (AST-6b), and D-e's fulfilment set |
 | **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), **D-l** — transfers made creatable at all — then transfer onto the same engine |
 | **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
@@ -524,3 +543,60 @@ regression suite: only that line moved, and the comment on it says why.
 ⚠ **A known, correct piece of litter:** each slice-2 run leaves one rejected requisition behind,
 because "a decided requisition cannot be withdrawn" is exactly the rule the slice asserts and it
 binds HR too. The row is the rule working, not a cleanup failure.
+
+---
+
+### Slice 2b — the register, and where an asset comes from. 2026-08-23, **94/94, run twice** (stamps 163004, 163005). Migration `AddHrAssetSourceAndFixedAssetLink`.
+
+Delivers **AST-11**, **AST-7**, **AST-4**, and closes **D-i(b)**, **D-j**, **D-n**, **D-o** and
+**D-o(b)**. Two new routes (84 total, all gated). Slices 1 and 2 re-run at 45/45 and 85/85.
+
+**AST-11 is a boundary, so it is built and tested from both sides.** HR can list Finance's
+fixed assets (`GET fixed-assets/linkable`) and register one (`POST from-fixed-asset`), which
+stamps `Source = FixedAssetsModule` and a real FK to `FixedAssets`. The detail read then pulls
+Finance's figures **live** — a net book value moves at every depreciation run, so a stored copy is
+wrong within the month. And HR is *refused*, by name, any edit to the purchase cost, asset number or
+purchase date of a linked asset, and refused its disposal outright, each refusal naming the module
+to go to instead. A boundary that is only documented is not a boundary.
+
+**The dependency is the statement.** HR reads Finance through `IFixedAssetService`, Finance's own
+service, not its tables — so everything HR can see is something Finance chose to expose, and nothing
+here can write. ⚠ It has to be imported as a **using alias**: `Core.Interfaces.Finance` also declares
+an `IAssetTransferService`, and so does `Core.Interfaces.HR`, so a namespace import made every
+mention of that type in the file ambiguous — including HR's own service at the bottom of it. That is
+the §3.3 collision at a third level, after the entities and the tables. The entity file takes an
+alias too, for the same reason one step removed.
+
+**The picker returns already-linked assets rather than filtering them out**, flagged, with the id of
+the HR asset holding the link. A picker that silently omits them leaves a user hunting for something
+that is right there; one that shows it greyed answers the question they actually have.
+
+⚠ **There is deliberately no unique index on `FixedAssetId`**, though the rule is one HR entry per
+fixed asset. Every delete here is a **soft** delete, so a unique index would hold the slot after an
+HR entry was removed and refuse the re-link forever, with a constraint violation no user could read.
+The rule lives in the service where it can see `IsDeleted` and name the asset already holding the
+link. The harness proves the point directly: link, soft-delete, link again — which is the exact
+sequence an index would have made impossible.
+
+**Provenance is not user-editable.** `Source` and `FixedAssetId` are absent from both write mappings,
+so the only way into `FixedAssetsModule` is the linking endpoint. Asserted, not assumed: a PUT
+carrying `source: 'HrCreated'` is proved to leave both untouched — otherwise anyone could relabel a
+Finance-owned asset and walk past every guard that reads the flag.
+
+**D-j turned out to be a mischaracterisation, and the harness says so.** The PUT is full-replace *by
+design*; slice 0 "lost" fields only because the probe sent a partial body. What actually mattered is
+whether the read returns everything the write accepts, so a load-then-save cannot destroy data —
+and before this slice it did not, because `unitId` was on no DTO a form could round-trip. That is now
+asserted as a 20-field read-edit-save round-trip, which is the honest form of the test.
+
+**Three defects found while building, all fixed here.** D-n: seven reads filling one DTO differently.
+D-o: create and update returning names they had never loaded. D-o(b): the inverse on two by-id reads
+— and the attribute-value one was reporting the **wrong data type**, not merely a blank name.
+
+**Two lessons, both about method rather than about assets.** First, *do not predict which half of a
+pair is broken*. D-o(b) was written expecting the create response to be blank, because that is what
+the register did; the opposite was true. The assertion that finds it either way — *the by-id read and
+the list read agree* — is the one now in the file. Second, the repair that took an extra build was
+mine: a patch script assigned the second `old`/`new` inside a branch that did not run, so the first
+replacement's text leaked into the second and one service was handed another's method body. The
+compiler caught it only because the return type stopped matching its interface.

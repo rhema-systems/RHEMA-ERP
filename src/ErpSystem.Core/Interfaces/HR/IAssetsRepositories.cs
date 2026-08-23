@@ -15,6 +15,17 @@ public interface IAssetTypeRepository : IGenericRepository<AssetType>
 
 public interface IAssetTypeAttributeRepository : IGenericRepository<AssetTypeAttribute>
 {
+    /// <summary>
+    /// One attribute with its asset type loaded — D-o(b).
+    /// </summary>
+    /// <remarks>
+    /// The by-id read went through the generic <c>GetByIdAsync</c>, which loads no navigations, so
+    /// <c>GET attributes/{id}</c> answered with a blank <c>assetTypeName</c> while the list beside
+    /// it filled the same field in. Two fillings of one DTO, and nothing in the payload to tell a
+    /// screen which it was holding.
+    /// </remarks>
+    Task<AssetTypeAttribute?> GetWithTypeAsync(Guid id);
+
     Task<IEnumerable<AssetTypeAttribute>> GetByAssetTypeIdAsync(Guid assetTypeId);
     Task<IEnumerable<AssetTypeAttribute>> GetRequiredAttributesAsync(Guid assetTypeId);
 }
@@ -41,6 +52,17 @@ public interface ICompanyAssetRepository : IGenericRepository<CompanyAsset>
 
 public interface IAssetAttributeValueRepository : IGenericRepository<AssetAttributeValue>
 {
+    /// <summary>
+    /// One attribute value with its defining attribute loaded — D-o(b).
+    /// </summary>
+    /// <remarks>
+    /// Same shape as <see cref="IAssetTypeAttributeRepository.GetWithTypeAsync"/>, and worse in one
+    /// respect: without the navigation the DTO's <c>dataType</c> is read off a null attribute and
+    /// falls back to the enum's default, so the by-id read did not merely lose a label — it reported
+    /// the wrong type for the value it was returning.
+    /// </remarks>
+    Task<AssetAttributeValue?> GetWithAttributeAsync(Guid id);
+
     Task<IEnumerable<AssetAttributeValue>> GetByAssetIdAsync(Guid assetId);
     Task<AssetAttributeValue?> GetByAssetAndAttributeAsync(Guid assetId, Guid attributeId);
     Task DeleteByAssetIdAsync(Guid assetId);

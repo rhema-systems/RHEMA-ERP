@@ -139,6 +139,31 @@ public enum HRAssetCondition
     NonFunctional = 5
 }
 
+/// <summary>
+/// Where an entry in the HR asset register came from — AST-11.
+/// </summary>
+/// <remarks>
+/// <para>The change document asks for "some kind of flag or detail to indicate that it came from
+/// that module, aside any assets HR might possibly create at their end". This is that flag, and it
+/// is not cosmetic: it decides who owns which fields. On a <see cref="FixedAssetsModule"/> asset the
+/// purchase figures and the disposal belong to Finance and HR refuses to edit them; on an
+/// <see cref="HrCreated"/> one HR owns everything.</para>
+///
+/// <para>Values start at 1 so that a row written before this column existed cannot read as a
+/// meaningful source by accident. The database default is <see cref="HrCreated"/>, which is the
+/// truthful description of every asset that existed before the link did.</para>
+/// </remarks>
+public enum AssetSource
+{
+    /// <summary>Registered by HR directly — uniforms, phones, tools, anything below the capitalisation threshold.</summary>
+    [Description("Created in HR")]
+    HrCreated = 1,
+
+    /// <summary>Picked from the Finance fixed-asset register and linked to it. Finance owns its money.</summary>
+    [Description("From Fixed Assets")]
+    FixedAssetsModule = 2
+}
+
 public enum HRAssetRequisitionPriority
 {
     [Description("Urgent")]

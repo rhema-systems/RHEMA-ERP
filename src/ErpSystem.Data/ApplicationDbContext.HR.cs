@@ -4142,6 +4142,18 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.PurchaseCost).HasColumnType("decimal(18,2)");
             entity.Property(x => x.InsuredValue).HasColumnType("decimal(18,2)");
 
+            // AST-11. The default matters: every asset that existed before this column did was
+            // created in HR, so HrCreated is the truthful description of it rather than a
+            // placeholder. Without the default those rows would read as source 0 — a value the
+            // enum does not define, which no screen could render and no rule could branch on.
+            entity.Property(x => x.Source).HasConversion<int>()
+                .HasDefaultValue(AssetSource.HrCreated);
+            entity.HasIndex(x => x.Source);
+
+            // AST-4. Indexed because the expiry sweep (slice 11) reads exactly this column, and an
+            // expiry date nothing ever queries is the kind of field that quietly stays null.
+            entity.HasIndex(x => x.InsuranceExpiryDate);
+
             entity.HasOne(x => x.AssetType)
                 .WithMany()
                 .HasForeignKey(x => x.AssetTypeId)
@@ -4151,6 +4163,34 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // The organisation unit an asset sits in. ⚠ This navigation existed on the entity and
+            // was mapped into CompanyAssetSummaryDto, but was configured nowhere, absent from the
+            // create and update DTOs, and absent from the read DTO — so `unitId` and `unitName` on
+            // every list row were permanently null. Defect D-i(b). Configured explicitly here so
+            // the pairing cannot fall back to a shadow FK.
+            entity.HasOne(x => x.Unit)
+                .WithMany()
+                .HasForeignKey(x => x.UnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.UnitId);
+
+            // AST-11 — the link into Finance's register. Nullable, Restrict, and paired explicitly
+            // with WithMany() so EF cannot mint a duplicate shadow FK beside it. The direction is
+            // new (HR -> Finance) but the shape is not: FixedAsset itself carries exactly this kind
+            // of nullable FK into Maintenance.
+            entity.HasOne(x => x.FixedAsset)
+                .WithMany()
+                .HasForeignKey(x => x.FixedAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Not unique, and deliberately so. A unique index would be the obvious choice — one HR
+            // entry per fixed asset — but every delete in this area is a SOFT delete, so a deleted
+            // link would hold its slot forever and re-linking the same fixed asset would fail with
+            // no way for a user to see why. The one-link rule is enforced in the service, where it
+            // can read IsDeleted and can explain itself. (Area 13 lost five faces to this exact
+            // trap.)
+            entity.HasIndex(x => x.FixedAssetId);
 
             entity.HasOne(x => x.CurrentAssignedTo)
                 .WithMany()

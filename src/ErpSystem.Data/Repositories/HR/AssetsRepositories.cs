@@ -51,6 +51,13 @@ public class AssetTypeAttributeRepository : GenericRepository<AssetTypeAttribute
 {
     public AssetTypeAttributeRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<AssetTypeAttribute?> GetWithTypeAsync(Guid id)
+    {
+        return await _context.Set<AssetTypeAttribute>()
+            .Include(ata => ata.AssetType)
+            .FirstOrDefaultAsync(ata => ata.Id == id && !ata.IsDeleted);
+    }
+
     public async Task<IEnumerable<AssetTypeAttribute>> GetByAssetTypeIdAsync(Guid assetTypeId)
     {
         return await _context.Set<AssetTypeAttribute>()
@@ -124,6 +131,8 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
     {
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
             .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.AssetTypeId == assetTypeId && !ca.IsDeleted)
             .ToListAsync();
@@ -133,6 +142,8 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
     {
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
             .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.TenantId == tenantId && ca.Status == status && !ca.IsDeleted)
             .ToListAsync();
@@ -142,6 +153,8 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
     {
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
             .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.LocationId == locationId && !ca.IsDeleted)
             .ToListAsync();
@@ -151,6 +164,9 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
     {
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.CurrentAssignedToId == employeeId && !ca.IsDeleted)
             .ToListAsync();
     }
@@ -159,6 +175,9 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
     {
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.TenantId == tenantId 
                 && ca.IsAssignable 
                 && !ca.IsCurrentlyAssigned 
@@ -172,6 +191,9 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
         var futureDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(daysAhead));
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.TenantId == tenantId 
                 && ca.RequiresRegularMaintenance 
                 && ca.NextMaintenanceDate != null 
@@ -185,6 +207,9 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
         var futureDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(daysAhead));
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
             .Where(ca => ca.TenantId == tenantId 
                 && ca.HasWarranty 
                 && ca.WarrantyEndDate != null 
@@ -198,6 +223,13 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
 public class AssetAttributeValueRepository : GenericRepository<AssetAttributeValue>, IAssetAttributeValueRepository
 {
     public AssetAttributeValueRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<AssetAttributeValue?> GetWithAttributeAsync(Guid id)
+    {
+        return await _context.Set<AssetAttributeValue>()
+            .Include(av => av.AssetTypeAttribute)
+            .FirstOrDefaultAsync(av => av.Id == id && !av.IsDeleted);
+    }
 
     public async Task<IEnumerable<AssetAttributeValue>> GetByAssetIdAsync(Guid assetId)
     {
