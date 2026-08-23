@@ -232,6 +232,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
                 cancellationToken);
+            var openingExchangeRate = dto.IsOpeningBalance
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
 
             var invoice = new VendorInvoice
             {
@@ -245,8 +253,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 InvoiceDate = dto.InvoiceDate,
                 ReceivedDate = dto.ReceivedDate ?? now,
                 DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
-                CurrencyCode = dto.CurrencyCode,
-                ExchangeRate = dto.ExchangeRate,
+                CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
+                ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate,
+                ExchangeRateId = openingExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
                 PaymentTermId = paymentTerm?.Id,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
@@ -374,6 +383,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
                 cancellationToken);
+            var openingExchangeRate = dto.IsOpeningBalance
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
             var acceptedSupply = await ResolveAcceptedSupplyForUpdateAsync(
                 invoice, dto, supplier, cancellationToken);
 
@@ -383,8 +400,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.InvoiceDate = dto.InvoiceDate;
             invoice.ReceivedDate = dto.ReceivedDate;
             invoice.DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays);
-            invoice.CurrencyCode = dto.CurrencyCode;
-            invoice.ExchangeRate = dto.ExchangeRate;
+            invoice.CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
+            invoice.ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate;
+            invoice.ExchangeRateId = openingExchangeRate?.ExchangeRateId;
             invoice.PaymentTermsDays = paymentTermsDays;
             invoice.PaymentTermId = paymentTerm?.Id;
             invoice.EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage;
@@ -581,6 +599,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be submitted for approval.");
 
+            if (invoice.IsOpeningBalance)
+                await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+
             if (ProcurementInvoiceThreeWayMatchRules.IsRequired(invoice.PurchaseOrderId, invoice.IsOpeningBalance))
                 await EvaluateThreeWayMatchAsync(invoice.Id, "SubmitForApproval", requireApprovalReady: true, cancellationToken);
             else
@@ -641,6 +662,9 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be approved.");
+
+            if (invoice.IsOpeningBalance)
+                await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
 
             if (ProcurementInvoiceThreeWayMatchRules.IsRequired(invoice.PurchaseOrderId, invoice.IsOpeningBalance))
                 await EvaluateThreeWayMatchAsync(invoice.Id, "Approve", requireApprovalReady: true, cancellationToken);
@@ -2184,6 +2208,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             Dictionary<Guid, Account> accountCache,
             CancellationToken cancellationToken)
         {
+            var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+            exchangeRate = rateSnapshot.Rate;
             var migrationClearingAccountId = settings.MigrationClearingAccountId
                 ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AP opening balance posting.");
             await ResolvePostingAccountAsync(
@@ -2199,17 +2225,22 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 throw new InvalidOperationException($"Opening-balance vendor invoice {invoice.InvoiceNumber} has no positive AP amount to post.");
             }
+            var functionalOpeningAmount = ToFunctionalAmount(
+                openingAmount,
+                invoiceCurrency,
+                functionalCurrency,
+                exchangeRate);
 
             var postingLines = new List<FinancePostingLineDto>
             {
                 BuildPostingLine(
                     migrationClearingAccountId,
                     $"Migration clearing - AP opening balance {invoice.InvoiceNumber}",
-                    debitForeignAmount: openingAmount,
+                    debitForeignAmount: functionalOpeningAmount,
                     creditForeignAmount: 0m,
-                    invoiceCurrency,
                     functionalCurrency,
-                    exchangeRate,
+                    functionalCurrency,
+                    1m,
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     1,
@@ -2225,7 +2256,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     2,
-                    "AP-Control")
+                    "AP-Control",
+                    rateSnapshot.ExchangeRateId,
+                    rateSnapshot.Source)
             };
 
             return new FinancePostingRequestDto
@@ -2594,7 +2627,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime exchangeRateDate,
             string reference,
             int lineNumber,
-            string transactionTag)
+            string transactionTag,
+            Guid? exchangeRateId = null,
+            string? exchangeRateSource = null)
         {
             var isForeign = !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
             var debitAmount = ToFunctionalAmount(debitForeignAmount, invoiceCurrency, functionalCurrency, exchangeRate);
@@ -2607,11 +2642,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DebitAmount = debitAmount,
                 CreditAmount = creditAmount,
                 TransactionCurrency = invoiceCurrency,
+                TransactionDebitAmount = debitForeignAmount,
+                TransactionCreditAmount = creditForeignAmount,
                 ForeignCurrencyAmount = isForeign
                     ? debitForeignAmount > 0m ? debitForeignAmount : creditForeignAmount
                     : null,
                 ExchangeRate = isForeign ? exchangeRate : null,
-                ExchangeRateSource = isForeign ? "AP invoice exchange-rate snapshot" : null,
+                ExchangeRateId = isForeign ? exchangeRateId : null,
+                ExchangeRateSource = isForeign
+                    ? exchangeRateSource ?? "AP invoice exchange-rate snapshot"
+                    : null,
                 ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
                 SourceReferenceNumber = reference,
                 LineNumber = lineNumber,
@@ -2859,6 +2899,77 @@ namespace ErpSystem.Api.Services.Finance.AP
             => string.IsNullOrWhiteSpace(currencyCode)
                 ? defaultValue.Trim().ToUpperInvariant()
                 : currencyCode.Trim().ToUpperInvariant();
+
+        private async Task<OpeningInvoiceExchangeRateSnapshot> ResolveOpeningInvoiceExchangeRateAsync(
+            string? currencyCode,
+            DateTime invoiceDate,
+            Guid? exchangeRateId,
+            decimal suppliedRate,
+            CancellationToken cancellationToken)
+        {
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var transactionCurrency = NormalizeCurrency(currencyCode, functionalCurrency);
+
+            if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                if (exchangeRateId.HasValue)
+                    throw new InvalidOperationException("Functional-currency AP opening invoices cannot carry foreign exchange-rate evidence.");
+                if (RoundRate(suppliedRate) != 1m)
+                    throw new InvalidOperationException("Functional-currency AP opening invoices must use an exchange rate of 1.");
+                return new OpeningInvoiceExchangeRateSnapshot(null, 1m, transactionCurrency, functionalCurrency, "Functional currency");
+            }
+
+            if (!exchangeRateId.HasValue)
+                throw new InvalidOperationException("Foreign-currency AP opening invoices require an approved exchange-rate record.");
+
+            var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
+                ? settings.ApInvoiceQuoteSide
+                : ExchangeRateQuoteSide.Mid;
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == exchangeRateId.Value &&
+                    !item.IsDeleted);
+
+            if (rate == null ||
+                !rate.IsActive ||
+                rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved) ||
+                rate.Rate <= 0m ||
+                rate.RateType != ExchangeRateType.Daily ||
+                rate.QuoteSide != quoteSide ||
+                !string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                rate.EffectiveDate.Date > invoiceDate.Date ||
+                (rate.EndDate.HasValue && rate.EndDate.Value.Date < invoiceDate.Date))
+            {
+                throw new InvalidOperationException(
+                    "The selected AP opening-invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
+            }
+
+            if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
+                throw new InvalidOperationException("The AP opening-invoice exchange-rate value does not match the approved rate record.");
+
+            return new OpeningInvoiceExchangeRateSnapshot(
+                rate.Id,
+                rate.Rate,
+                transactionCurrency,
+                functionalCurrency,
+                rate.RateSource);
+        }
+
+        private Task<OpeningInvoiceExchangeRateSnapshot> RevalidateOpeningInvoiceExchangeRateAsync(
+            VendorInvoice invoice,
+            CancellationToken cancellationToken)
+            => ResolveOpeningInvoiceExchangeRateAsync(
+                invoice.CurrencyCode,
+                invoice.InvoiceDate,
+                invoice.ExchangeRateId,
+                invoice.ExchangeRate,
+                cancellationToken);
+
+        private static decimal RoundRate(decimal amount)
+            => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
 
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
@@ -3191,6 +3302,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 BalanceAmount = invoice.BalanceAmount,
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
+                ExchangeRateId = invoice.ExchangeRateId,
                 BaseCurrencyAmount = invoice.BaseCurrencyAmount,
                 PaymentTermsDays = invoice.PaymentTermsDays,
                 PaymentTermId = invoice.PaymentTermId,
@@ -3369,6 +3481,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             return new InvoiceWhtResolution(tax.Id, effectiveRate.Value, tax.TaxPayableAccountId);
         }
+
+        private sealed record OpeningInvoiceExchangeRateSnapshot(
+            Guid? ExchangeRateId,
+            decimal Rate,
+            string TransactionCurrency,
+            string FunctionalCurrency,
+            string Source);
 
         private sealed record InvoiceWhtResolution(Guid? TaxId, decimal Rate, Guid? TaxPayableAccountId);
 

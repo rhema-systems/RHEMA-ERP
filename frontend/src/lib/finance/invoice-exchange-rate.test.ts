@@ -21,6 +21,7 @@ describe('invoice exchange-rate control', () => {
     );
 
     expect(snapshot.rate).toBe(1);
+    expect(snapshot.exchangeRateId).toBeUndefined();
     expect(snapshot.isFunctionalCurrency).toBe(true);
     expect(fetchRate).not.toHaveBeenCalled();
   });
@@ -65,6 +66,7 @@ describe('invoice exchange-rate control', () => {
     );
 
     expect(snapshot.rate).toBe(15.4);
+    expect(snapshot.exchangeRateId).toBe('rate-1');
     expect(fetchRate).toHaveBeenCalledWith('USD', {
       baseCurrencyCode: 'GHS',
       effectiveDate: '2025-02-03',

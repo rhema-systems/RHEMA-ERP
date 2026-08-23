@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -59,6 +59,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
+import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
+import { useTenant } from '@/contexts/TenantContext';
 
 const lineItemSchema = z.object({
     lineItemType: z.enum(['Expense', 'Product', 'Inventory']).default('Expense'),
@@ -85,6 +87,7 @@ const invoiceSchema = z.object({
     paymentTermId: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
+    exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
     notes: z.string().optional(),
@@ -105,6 +108,8 @@ export default function CreateVendorInvoicePage() {
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const preselectedPurchaseOrderId = searchParams.get('purchaseOrderId');
     const { toast } = useToast();
+    const { currentTenantCode } = useTenant();
+    const exchangeRateRequestId = useRef(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
 
@@ -172,6 +177,12 @@ export default function CreateVendorInvoicePage() {
     const { data: warehousesData } = useQuery({
         queryKey: ['warehouses'],
         queryFn: () => inventoryManagementService.getWarehouses(),
+    });
+
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings', currentTenantCode, 'ap-invoice-rate-policy'],
+        queryFn: () => financeService.getSettings(),
+        enabled: Boolean(currentTenantCode),
     });
 
     const { data: purchaseOrdersData, isLoading: purchaseOrdersLoading } = useQuery({
@@ -245,6 +256,7 @@ export default function CreateVendorInvoicePage() {
             paymentTermId: '',
             currencyCode: 'GHS',
             exchangeRate: 1.0,
+            exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
             isOpeningBalance: defaultOpeningBalance,
@@ -283,6 +295,69 @@ export default function CreateVendorInvoicePage() {
     const selectedWithholdingTax = withholdingTaxOptions.find(tax => tax.id === watchWithholdingTaxId);
     const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(selectedWithholdingTax?.rate || 0);
     const watchLineItems = form.watch('lineItems') || [];
+
+    const applyInvoiceExchangeRate = async (currencyCode: string) => {
+        const requestId = ++exchangeRateRequestId.current;
+        const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+        const isOpeningBalance = form.getValues('isOpeningBalance');
+
+        if (isOpeningBalance) {
+            // Clear the prior date/currency evidence before the async lookup so Save cannot race
+            // with a stale approved-rate identity while the new historical rate is loading.
+            form.setValue('exchangeRateId', undefined);
+            if (!financeSettings) {
+                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
+            }
+            let snapshot;
+            try {
+                snapshot = await loadApprovedInvoiceRate(
+                    {
+                        module: 'AP',
+                        transactionCurrency: currencyCode,
+                        functionalCurrency,
+                        invoiceDate: form.getValues('invoiceDate'),
+                        settings: financeSettings,
+                    },
+                    (code, query) => financeService.getCurrentExchangeRate(code, query)
+                );
+            } catch (error) {
+                if (requestId !== exchangeRateRequestId.current) return;
+                throw error;
+            }
+            if (requestId !== exchangeRateRequestId.current) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            form.setValue('exchangeRateSource', snapshot.source);
+            return;
+        }
+
+        form.setValue('exchangeRateId', undefined);
+        if (currencyCode === functionalCurrency) {
+            form.setValue('exchangeRate', 1);
+            form.setValue('exchangeRateSource', 'Daily');
+            return;
+        }
+
+        let rateObj;
+        try {
+            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+        } catch (error) {
+            if (requestId !== exchangeRateRequestId.current) return;
+            throw error;
+        }
+        if (requestId !== exchangeRateRequestId.current) return;
+        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
+        form.setValue('exchangeRateSource', 'Daily');
+    };
+
+    useEffect(() => {
+        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
+            console.error('Failed to resolve governed AP opening-invoice rate', error);
+            form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRateSource', 'Unavailable');
+        });
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
 
     useEffect(() => {
         if (!watchIsOpeningBalance) return;
@@ -455,24 +530,17 @@ export default function CreateVendorInvoicePage() {
             }
             if (supplier.currency) {
                 form.setValue('currencyCode', supplier.currency);
-                if (supplier.currency === 'GHS') {
+                try {
+                    await applyInvoiceExchangeRate(supplier.currency);
+                } catch (err) {
+                    console.error("Failed to fetch exchange rate for supplier currency", err);
+                    form.setValue('exchangeRateId', undefined);
                     form.setValue('exchangeRate', 1.0);
-                    form.setValue('exchangeRateSource', 'Daily');
-                } else {
-                    try {
-                        const rateObj = await financeService.getCurrentExchangeRate(supplier.currency);
-                        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                        form.setValue('exchangeRateSource', 'Daily');
-                    } catch (err) {
-                        console.error("Failed to fetch exchange rate for supplier currency", err);
-                        form.setValue('exchangeRate', 1.0);
-                        form.setValue('exchangeRateSource', 'Custom');
-                    }
+                    form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
                 form.setValue('currencyCode', 'GHS');
-                form.setValue('exchangeRate', 1.0);
-                form.setValue('exchangeRateSource', 'Daily');
+                await applyInvoiceExchangeRate('GHS');
             }
         }
     };
@@ -554,12 +622,22 @@ export default function CreateVendorInvoicePage() {
                 });
                 return;
             }
+            const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    variant: 'destructive',
+                });
+                return;
+            }
             await accountsPayableService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
+                exchangeRateId: isOpeningBalance ? data.exchangeRateId : undefined,
                 // The backend resolves rate/account again from this tax id. Sending the displayed
                 // values keeps the compatibility DTO descriptive but grants them no authority.
                 withholdingTaxId: isOpeningBalance || data.withholdingTaxId === 'none' ? null : data.withholdingTaxId,
@@ -792,19 +870,13 @@ export default function CreateVendorInvoicePage() {
                                         value={field.value} 
                                         onValueChange={async (val) => {
                                             field.onChange(val);
-                                            if (val === 'GHS') {
+                                            try {
+                                                await applyInvoiceExchangeRate(val);
+                                            } catch (err) {
+                                                console.error("Failed to fetch exchange rate for currency", err);
+                                                form.setValue('exchangeRateId', undefined);
                                                 form.setValue('exchangeRate', 1.0);
-                                                form.setValue('exchangeRateSource', 'Daily');
-                                            } else {
-                                                try {
-                                                    const rateObj = await financeService.getCurrentExchangeRate(val);
-                                                    form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                                                    form.setValue('exchangeRateSource', 'Daily');
-                                                } catch (err) {
-                                                    console.error("Failed to fetch exchange rate for currency", err);
-                                                    form.setValue('exchangeRate', 1.0);
-                                                    form.setValue('exchangeRateSource', 'Custom');
-                                                }
+                                                form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
                                     >
@@ -822,18 +894,25 @@ export default function CreateVendorInvoicePage() {
                             />
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="space-y-2">
                                 <Label className="text-amber-600 font-semibold">Exchange Rate to Base Currency</Label>
                                 <Input 
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
+                                    readOnly={watchIsOpeningBalance}
+                                    aria-readonly={watchIsOpeningBalance}
                                     {...form.register('exchangeRate', {
-                                        onChange: () => form.setValue('exchangeRateSource', 'Custom')
+                                        onChange: () => {
+                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
+                                        }
                                     })} 
                                 />
-                                <span className="text-[11px] text-muted-foreground block mt-1">1 {watchCurrencyCode} = {form.watch('exchangeRate')} GHS</span>
+                                <span className="text-[11px] text-muted-foreground block mt-1">
+                                    1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
+                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                </span>
                             </div>
                         )}
 
@@ -905,7 +984,7 @@ export default function CreateVendorInvoicePage() {
                             </span>
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 lg:col-span-3 space-y-4">
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -917,7 +996,7 @@ export default function CreateVendorInvoicePage() {
                                             render={({ field }) => (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
                                                             <CalendarIcon className="mr-2 h-3 w-3" />
                                                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                                                         </Button>
@@ -935,18 +1014,22 @@ export default function CreateVendorInvoicePage() {
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                    <SelectTrigger className="h-10 text-xs">
-                                                        <SelectValue placeholder="Select FX Source" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="Daily">Daily</SelectItem>
-                                                        <SelectItem value="Spot">Spot</SelectItem>
-                                                        <SelectItem value="Official">Official</SelectItem>
-                                                        <SelectItem value="Market">Market</SelectItem>
-                                                        <SelectItem value="Custom">Custom</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                watchIsOpeningBalance ? (
+                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
+                                                ) : (
+                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
+                                                        <SelectTrigger className="h-10 text-xs">
+                                                            <SelectValue placeholder="Select FX Source" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Daily">Daily</SelectItem>
+                                                            <SelectItem value="Spot">Spot</SelectItem>
+                                                            <SelectItem value="Official">Official</SelectItem>
+                                                            <SelectItem value="Market">Market</SelectItem>
+                                                            <SelectItem value="Custom">Custom</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )
                                             )}
                                         />
                                     </div>
