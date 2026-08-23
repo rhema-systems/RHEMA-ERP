@@ -13,6 +13,21 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceDemoPrerequisiteSeederTests
 {
     [Fact]
+    public void StandardFinanceSeed_ShouldProvisionFixedAssetConfigurationWithoutAssetMasters()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Data", "Seeders", "FinanceDataSeeder.cs"));
+
+        source.Should().Contain("SeedFixedAssetCategoriesAsync");
+        source.Should().NotContain("SeedFixedAssetsAsync");
+        source.Should().NotContain("FA-2024-BLDG-001");
+        source.Should().NotContain("FA-2024-EQP-001");
+        source.Should().NotContain("FA-2024-EQP-002");
+        source.Should().NotContain("FA-2024-VEH-001");
+    }
+
+    [Fact]
     public void BankLiquidityCode_ShouldRemainUniqueForDeterministicSeedIdentifiers()
     {
         // Finance seed GUIDs deliberately share a readable family prefix. This reproduces the
@@ -152,5 +167,22 @@ public sealed class FinanceDemoPrerequisiteSeederTests
             .UseInMemoryDatabase($"finance-demo-prerequisites-{Guid.NewGuid():N}")
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "src")) &&
+                Directory.Exists(Path.Combine(directory.FullName, "tests")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate repository root from test output directory.");
     }
 }
