@@ -274,6 +274,16 @@ public class AssetAssignment : TenantEntity
 
     public Guid EmployeeId { get; set; }
 
+    /// <summary>
+    /// The requisition this assignment fulfils, where it came from one — D-e.
+    /// </summary>
+    /// <remarks>
+    /// Null for an assignment HR raises directly, which is most of them. Set by
+    /// <c>AssetRequisitionService.FulfillAsync</c>, and it is the only record of what a requisition
+    /// produced now that the single <c>AssignedAssetId</c> column is gone.
+    /// </remarks>
+    public Guid? RequisitionId { get; set; }
+
     // Assignment Details
     public DateOnly AssignmentDate { get; set; }
     
@@ -349,6 +359,9 @@ public class AssetAssignment : TenantEntity
 
     [ForeignKey(nameof(ReturnedToId))]
     public virtual Employee? ReturnedTo { get; set; }
+
+    [ForeignKey(nameof(RequisitionId))]
+    public virtual AssetRequisition? Requisition { get; set; }
 }
 
 /// <summary>
@@ -430,8 +443,24 @@ public class AssetRequisition : TenantEntity
     [MaxLength(70)]
     public string RequisitionNumber { get; set; } = string.Empty;
 
+    /// <summary>Who raised the request. Always taken from the token, never from the payload.</summary>
     [Required]
     public Guid RequestedById { get; set; }
+
+    /// <summary>
+    /// AST-6b — who the asset is actually <b>for</b>, when that is not the person who asked.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null means "me": the requester is the beneficiary. Set only when someone raises a
+    /// request on another employee's behalf, which HR may always do and a recorded line manager may
+    /// do for their own reports.</para>
+    ///
+    /// <para><b>Two columns, because one cannot answer "who did this, and to whom".</b> That is the
+    /// area-9 lesson: a record with a single actor column silently attributes the act to its
+    /// subject, or the subject to its actor, and neither can be recovered afterwards. Fulfilment
+    /// reads this one — the asset is assigned to the beneficiary, not to whoever typed the form.</para>
+    /// </remarks>
+    public Guid? BeneficiaryEmployeeId { get; set; }
 
     public DateTime RequestDate { get; set; }
     
@@ -473,8 +502,6 @@ public class AssetRequisition : TenantEntity
     
     public Guid? FulfilledById { get; set; }
 
-    public Guid? AssignedAssetId { get; set; }
-
     [ForeignKey(nameof(RequestedById))]
     public virtual Employee RequestedBy { get; set; } = null!;
 
@@ -487,8 +514,21 @@ public class AssetRequisition : TenantEntity
     [ForeignKey(nameof(FulfilledById))]
     public virtual Employee? FulfilledBy { get; set; }
 
-    [ForeignKey(nameof(AssignedAssetId))]
-    public virtual CompanyAsset? AssignedAsset { get; set; }
+    [ForeignKey(nameof(BeneficiaryEmployeeId))]
+    public virtual Employee? BeneficiaryEmployee { get; set; }
+
+    /// <summary>
+    /// What this requisition actually produced — D-e.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This replaces a single <c>AssignedAssetId</c> column. A requisition carries a
+    /// <c>Quantity</c> and <c>FulfillAssetRequisitionDto</c> has always accepted a <b>list</b> of
+    /// assets, so fulfilling one request with three assets created three assignments and then
+    /// remembered exactly one of them. Rather than add a join table, the assignments themselves are
+    /// the record: each one cites the requisition it came from, so "what did this yield" is a query
+    /// and there is only one place the answer lives.
+    /// </remarks>
+    public virtual ICollection<AssetAssignment> FulfilledAssignments { get; set; } = new List<AssetAssignment>();
 }
 
 /// <summary>

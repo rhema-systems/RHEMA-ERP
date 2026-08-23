@@ -1467,6 +1467,7 @@ public class AssetRequisitionService : IAssetRequisitionService
     private readonly IAssetRequisitionRepository _requisitionRepo;
     private readonly ICompanyAssetRepository _assetRepo;
     private readonly IAssetAssignmentRepository _assignmentRepo;
+    private readonly IEmployeeRepository _employeeRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
 
@@ -1474,14 +1475,70 @@ public class AssetRequisitionService : IAssetRequisitionService
         IAssetRequisitionRepository requisitionRepo,
         ICompanyAssetRepository assetRepo,
         IAssetAssignmentRepository assignmentRepo,
+        IEmployeeRepository employeeRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService)
     {
         _requisitionRepo = requisitionRepo;
         _assetRepo = assetRepo;
         _assignmentRepo = assignmentRepo;
+        _employeeRepo = employeeRepo;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+    }
+
+    /// <summary>
+    /// The caller's own employee record — the actor for every stamp on this surface.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Defect D-k lived exactly here.</b> <c>ApproveAsync</c> and <c>FulfillAsync</c> both
+    /// carried the literal <c>Guid.Parse("D1D0261F-934D-4809-95EF-CD76156694A5")</c> behind a
+    /// <c>// TODO: Replace with actual employee ID lookup</c>. <c>ApprovedById</c> and
+    /// <c>FulfilledById</c> are <b>Employee</b> foreign keys and that employee has never existed on
+    /// this database, so SQL rejected every UPDATE with error 547 and both endpoints answered 500 —
+    /// for every actor, on every tenant, since the port. Because approval is fulfilment's
+    /// precondition, the requisition pipeline had never once run end to end.
+    ///
+    /// <para>The refusal here is deliberate and explicit rather than a silent null: an approver who
+    /// is not an employee cannot be recorded as one, and quietly stamping nobody would recreate the
+    /// same hole with better manners.</para>
+    /// </remarks>
+    private Guid RequireCallerEmployeeId(string action)
+    {
+        return AssetActor.CallerEmployeeId(_currentUserService)
+            ?? throw new UnauthorizedAccessException(
+                $"Your user account is not linked to an employee record, so it cannot {action}.");
+    }
+
+    /// <summary>
+    /// Resolves and authorises the employee a request is being raised FOR — AST-6b.
+    /// </summary>
+    /// <remarks>
+    /// <para>HR may raise a request for anybody. Anyone else may raise one only for themselves or
+    /// for an employee whose <c>ManagerId</c> names them.</para>
+    ///
+    /// <para>⚠ <b>The manager branch is correct and will rarely fire.</b> Measured on this database
+    /// while writing it: <b>181 of 6,822</b> live employees carry a <c>ManagerId</c> — 2.7%. The rule
+    /// is written against the data model rather than against the data, so it starts working the day
+    /// the org chart is maintained; until then almost every on-behalf request comes through HR. That
+    /// is a data gap, not a rule to weaken, and it is the same unmaintained-org-data seam that keeps
+    /// FR-HR-080/181 deferred.</para>
+    /// </remarks>
+    private async Task<Guid?> ResolveBeneficiaryAsync(Guid? requested, Guid requesterEmployeeId, Guid tenantId)
+    {
+        if (requested is not { } beneficiaryId || beneficiaryId == requesterEmployeeId) return null;
+
+        var beneficiary = await _employeeRepo.GetByIdAsync(beneficiaryId);
+        if (beneficiary is null || beneficiary.TenantId != tenantId || beneficiary.IsDeleted)
+            throw AssetsWorkflowException.NotFound(
+                $"No employee was found with id {beneficiaryId}.");
+
+        if (!AssetActor.IsHr(_currentUserService) && beneficiary.ManagerId != requesterEmployeeId)
+            throw new UnauthorizedAccessException(
+                "You can raise a request on behalf of an employee only if you are their recorded "
+                + "line manager. HR can raise one for anybody.");
+
+        return beneficiaryId;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -1518,9 +1575,38 @@ public class AssetRequisitionService : IAssetRequisitionService
         var entity = await _requisitionRepo.GetWithDetailsAsync(id);
         if (entity == null || entity.TenantId != GetTenantId()) return null;
 
-        AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById, "read an asset requisition");
+        // Self-or-HR on BOTH actors: the person a request was raised for may read it as surely as
+        // the person who raised it. Reading only RequestedById would hide an employee's own
+        // requisition from them the moment somebody raised it on their behalf.
+        if (!AssetActor.IsHr(_currentUserService))
+        {
+            var caller = AssetActor.CallerEmployeeId(_currentUserService);
+            if (caller != entity.RequestedById && caller != entity.BeneficiaryEmployeeId)
+                throw new UnauthorizedAccessException(
+                    "Only HR and the employee concerned can read an asset requisition.");
+        }
 
-        return entity.ToDto();
+        var dto = entity.ToDto();
+
+        // D-e. What the requisition produced, read from the assignments that cite it — the only
+        // record of the fact now that the single-asset column is gone.
+        var fulfilments = await _assignmentRepo.GetByRequisitionIdAsync(entity.Id);
+        dto.FulfilledWith = fulfilments
+            .Where(a => a.TenantId == entity.TenantId)
+            .Select(a => new RequisitionFulfilmentDto
+            {
+                AssignmentId = a.Id,
+                AssignmentNumber = a.AssignmentNumber,
+                AssetId = a.AssetId,
+                AssetNumber = a.Asset?.AssetNumber ?? string.Empty,
+                AssetName = a.Asset?.AssetName ?? string.Empty,
+                EmployeeId = a.EmployeeId,
+                EmployeeName = a.Employee != null ? $"{a.Employee.FirstName} {a.Employee.LastName}" : string.Empty,
+                AssignmentDate = a.AssignmentDate
+            })
+            .ToList();
+
+        return dto;
     }
 
     public async Task<IEnumerable<AssetRequisitionSummaryDto>> GetAllAsync()
@@ -1583,10 +1669,11 @@ public class AssetRequisitionService : IAssetRequisitionService
         // Generate requisition number
         var requisitionNumber = $"REQ-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
 
-        var requestedById = _currentUserService.EmployeeId
-            ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
+        var requestedById = RequireCallerEmployeeId("raise an asset requisition");
+        var beneficiaryId = await ResolveBeneficiaryAsync(dto.BeneficiaryEmployeeId, requestedById, tenantId);
         
         var entity = dto.ToEntity(tenantId, requestedById, userId, requisitionNumber);
+        entity.BeneficiaryEmployeeId = beneficiaryId;
         await _requisitionRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -1641,8 +1728,8 @@ public class AssetRequisitionService : IAssetRequisitionService
         
         var entity = await GetOwnedRequisitionAsync(id);
 
-        // TODO: Replace with actual employee ID lookup - using temporary approver employee ID
-        var approverId = Guid.Parse("D1D0261F-934D-4809-95EF-CD76156694A5");
+        // D-k. The approver is the person approving. See RequireCallerEmployeeId for what was here.
+        var approverId = RequireCallerEmployeeId("approve an asset requisition");
 
         entity.Status = AssetRequisitionStatus.Approved;
         entity.ApprovedById = approverId;
@@ -1676,8 +1763,8 @@ public class AssetRequisitionService : IAssetRequisitionService
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
         var tenantId = GetTenantId();
         
-        // Temporary employee ID for foreign key constraints
-        var fulfilledById = Guid.Parse("D1D0261F-934D-4809-95EF-CD76156694A5");
+        // D-k, second site.
+        var fulfilledById = RequireCallerEmployeeId("fulfil an asset requisition");
         
         var requisition = await GetOwnedRequisitionAsync(id);
 
@@ -1698,16 +1785,28 @@ public class AssetRequisitionService : IAssetRequisitionService
         {
             var asset = await GetOwnedAssetAsync(assetId);
             
-            if (asset.Status != CompanyAssetStatus.Available)
-                throw AssetsWorkflowException.InvalidState(
-                    $"Asset {asset.AssetNumber} is not available; its status is {asset.Status}.");
-            
+            // ⚠ Order matters, and the ported order made one of these rules unreachable.
+            // Assigning an asset sets BOTH IsCurrentlyAssigned and Status = Assigned, so asking
+            // about status first meant an asset already in somebody's hands was always refused
+            // as "not available; its status is Assigned" - true, but it buries the fact the user
+            // needs and it left the Conflict rule below dead. The specific question goes first;
+            // the status rule then answers for what it is actually about: disposed, damaged,
+            // lost, in maintenance.
             if (asset.IsCurrentlyAssigned)
                 throw AssetsWorkflowException.Conflict(
                     $"Asset {asset.AssetNumber} is already assigned to someone.");
             
+            if (asset.Status != CompanyAssetStatus.Available)
+                throw AssetsWorkflowException.InvalidState(
+                    $"Asset {asset.AssetNumber} is not available; its status is {asset.Status}.");
+            
             assets.Add(asset);
         }
+
+        // Who actually receives them: the beneficiary where the request was raised on someone's
+        // behalf, the requester otherwise. The same rule the DTO exposes as ForEmployeeId, so a
+        // screen and the server cannot disagree about it.
+        var issueTo = requisition.BeneficiaryEmployeeId ?? requisition.RequestedById;
 
         // Create asset assignments and update assets
         foreach (var asset in assets)
@@ -1719,7 +1818,16 @@ public class AssetRequisitionService : IAssetRequisitionService
                 TenantId = tenantId,
                 AssignmentNumber = $"ASN-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper()}",
                 AssetId = asset.Id,
-                EmployeeId = requisition.RequestedById,
+
+                // AST-6b. The asset goes to the BENEFICIARY, not to whoever filled in the form.
+                // Before the beneficiary column existed these were always the same person, so the
+                // ported code could not have been wrong — it simply had no way to be right.
+                EmployeeId = issueTo,
+
+                // D-e. Each assignment cites the requisition that produced it. This replaces the
+                // single AssignedAssetId column, which remembered one asset however many were
+                // issued against the quantity.
+                RequisitionId = requisition.Id,
                 AssignmentDate = DateOnly.FromDateTime(DateTime.UtcNow),
                 Type = AssignmentType.Permanent,
                 Purpose = AssignmentPurpose.RegularWork,
@@ -1741,7 +1849,7 @@ public class AssetRequisitionService : IAssetRequisitionService
             // Update asset
             asset.Status = CompanyAssetStatus.Assigned;
             asset.IsCurrentlyAssigned = true;
-            asset.CurrentAssignedToId = requisition.RequestedById;
+            asset.CurrentAssignedToId = issueTo;
             asset.UpdatedAt = DateTime.UtcNow;
             asset.UpdatedBy = fulfilledById.ToString();
             
@@ -1754,11 +1862,9 @@ public class AssetRequisitionService : IAssetRequisitionService
         requisition.FulfilledDate = DateTime.UtcNow;
         requisition.FulfilledById = fulfilledById;
         
-        // For backward compatibility, if only one asset, set AssignedAssetId
-        if (dto.AssignedAssetIds.Count == 1)
-        {
-            requisition.AssignedAssetId = dto.AssignedAssetIds[0];
-        }
+        // D-e. Nothing is written back here any more. What the requisition produced is recorded on
+        // the assignments themselves, each citing RequisitionId, so a fulfilment of three assets is
+        // three facts rather than one fact and two silences.
         
         requisition.UpdatedAt = DateTime.UtcNow;
         requisition.UpdatedBy = fulfilledById.ToString();

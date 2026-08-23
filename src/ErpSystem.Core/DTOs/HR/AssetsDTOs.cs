@@ -676,6 +676,10 @@ public class AssetAssignmentDto : BaseDto
     public string AssetNumber { get; set; } = string.Empty;
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>The requisition that produced this assignment, where it came from one — D-e.</summary>
+    public Guid? RequisitionId { get; set; }
+    public string? RequisitionNumber { get; set; }
     public string? EmployeeNumber { get; set; }
     
     // Assignment Details
@@ -1080,6 +1084,24 @@ public class AssetRequisitionDto : BaseDto
     public string RequisitionNumber { get; set; } = string.Empty;
     public Guid RequestedById { get; set; }
     public string RequestedByName { get; set; } = string.Empty;
+
+    /// <summary>AST-6b — who the asset is for, when that is not the person who asked.</summary>
+    public Guid? BeneficiaryEmployeeId { get; set; }
+    public string? BeneficiaryEmployeeName { get; set; }
+
+    /// <summary>
+    /// The employee the asset will actually be issued to: the beneficiary where one is named, the
+    /// requester otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Computed here so that no screen has to re-derive it and get it subtly wrong, and so the rule
+    /// is stated once. Fulfilment applies exactly the same one.
+    /// </remarks>
+    public Guid ForEmployeeId => BeneficiaryEmployeeId ?? RequestedById;
+    public string ForEmployeeName => BeneficiaryEmployeeName ?? RequestedByName;
+
+    /// <summary>True where somebody raised this on another employee's behalf.</summary>
+    public bool IsOnBehalf => BeneficiaryEmployeeId.HasValue && BeneficiaryEmployeeId != RequestedById;
     public DateTime RequestDate { get; set; }
     public Guid AssetTypeId { get; set; }
     public string AssetTypeName { get; set; } = string.Empty;
@@ -1104,11 +1126,19 @@ public class AssetRequisitionDto : BaseDto
     
     // Fulfillment
     public bool IsFulfilled { get; set; }
+
+    /// <summary>
+    /// The assets this requisition produced — D-e.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a single nullable asset column, which could only ever remember one of them however
+    /// many were issued against a quantity. Populated on the by-id read from the assignments that
+    /// cite this requisition, which is now the only record of the fact.
+    /// </remarks>
+    public List<RequisitionFulfilmentDto> FulfilledWith { get; set; } = new();
     public DateTime? FulfilledDate { get; set; }
     public Guid? FulfilledById { get; set; }
     public string? FulfilledByName { get; set; }
-    public Guid? AssignedAssetId { get; set; }
-    public string? AssignedAssetName { get; set; }
 }
 
 /// <summary>
@@ -1119,6 +1149,9 @@ public class AssetRequisitionSummaryDto
     public Guid Id { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public string RequestedByName { get; set; } = string.Empty;
+
+    /// <summary>AST-6b — so a list can show who it is for, not only who asked.</summary>
+    public string? BeneficiaryEmployeeName { get; set; }
     public DateTime RequestDate { get; set; }
     public string AssetTypeName { get; set; } = string.Empty;
     public int Quantity { get; set; }
@@ -1136,6 +1169,16 @@ public class CreateAssetRequisitionDto : CreateDtoBase
 {
     [Required]
     public Guid AssetTypeId { get; set; }
+
+    /// <summary>
+    /// AST-6b — the employee this is for, when raising it on someone else's behalf.
+    /// </summary>
+    /// <remarks>
+    /// Leave null to request for yourself. Naming somebody else requires the HR role or being that
+    /// employee's recorded line manager. The requester is always taken from the token regardless, so
+    /// this field can widen who benefits but never who is recorded as having asked.
+    /// </remarks>
+    public Guid? BeneficiaryEmployeeId { get; set; }
 
     [Required]
     [MaxLength(1000)]
@@ -1164,6 +1207,16 @@ public class UpdateAssetRequisitionDto : UpdateDtoBase
     [Required]
     public Guid AssetTypeId { get; set; }
 
+    /// <summary>
+    /// AST-6b — the employee this is for, when raising it on someone else's behalf.
+    /// </summary>
+    /// <remarks>
+    /// Leave null to request for yourself. Naming somebody else requires the HR role or being that
+    /// employee's recorded line manager. The requester is always taken from the token regardless, so
+    /// this field can widen who benefits but never who is recorded as having asked.
+    /// </remarks>
+    public Guid? BeneficiaryEmployeeId { get; set; }
+
     [Required]
     [MaxLength(1000)]
     public string Description { get; set; } = string.Empty;
@@ -1181,6 +1234,19 @@ public class UpdateAssetRequisitionDto : UpdateDtoBase
     public DateTime? RequiredByDate { get; set; }
 
     public AssetRequisitionStatus? Status { get; set; }
+}
+
+/// <summary>One asset issued against a requisition, and the assignment that issued it — D-e.</summary>
+public class RequisitionFulfilmentDto
+{
+    public Guid AssignmentId { get; set; }
+    public string AssignmentNumber { get; set; } = string.Empty;
+    public Guid AssetId { get; set; }
+    public string AssetNumber { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public DateOnly AssignmentDate { get; set; }
 }
 
 /// <summary>

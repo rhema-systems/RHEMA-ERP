@@ -81,6 +81,9 @@ public interface IAssetAssignmentRepository : IGenericRepository<AssetAssignment
 {
     Task<IEnumerable<AssetAssignment>> GetByTenantAsync(Guid tenantId);
     Task<AssetAssignment?> GetWithDetailsAsync(Guid id);
+
+    /// <summary>Everything a requisition produced, with the asset and holder loaded — D-e.</summary>
+    Task<IEnumerable<AssetAssignment>> GetByRequisitionIdAsync(Guid requisitionId);
     Task<AssetAssignment?> GetByAssignmentNumberAsync(Guid tenantId, string assignmentNumber);
     Task<IEnumerable<AssetAssignment>> GetByAssetIdAsync(Guid assetId);
     Task<IEnumerable<AssetAssignment>> GetByEmployeeIdAsync(Guid employeeId);

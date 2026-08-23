@@ -4284,6 +4284,14 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.ReturnedToId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // D-e. Paired explicitly with the requisition's collection so EF cannot mint a shadow
+            // FK beside it — the trap this module has already been bitten by.
+            entity.HasOne(x => x.Requisition)
+                .WithMany(x => x.FulfilledAssignments)
+                .HasForeignKey(x => x.RequisitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.RequisitionId);
         });
 
         builder.Entity<AssetMaintenance>(entity =>
@@ -4349,10 +4357,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.FulfilledById)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            entity.HasOne(x => x.AssignedAsset)
+            // AST-6b. Indexed because "what has been requested for this employee" is a question the
+            // employee's own screen asks, and it is not the same question as "what did they raise".
+            entity.HasOne(x => x.BeneficiaryEmployee)
                 .WithMany()
-                .HasForeignKey(x => x.AssignedAssetId)
+                .HasForeignKey(x => x.BeneficiaryEmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.BeneficiaryEmployeeId);
         });
 
         builder.Entity<AssetTransfer>(entity =>

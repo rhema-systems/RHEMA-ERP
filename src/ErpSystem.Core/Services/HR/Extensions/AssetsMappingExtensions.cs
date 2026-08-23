@@ -438,6 +438,8 @@ public static class AssetsMappingExtensions
             AssetName = entity.Asset?.AssetName ?? string.Empty,
             AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
             EmployeeId = entity.EmployeeId,
+            RequisitionId = entity.RequisitionId,
+            RequisitionNumber = entity.Requisition?.RequisitionNumber,
             EmployeeName = entity.Employee != null 
                 ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
                 : string.Empty,
@@ -731,6 +733,10 @@ public static class AssetsMappingExtensions
             TenantId = entity.TenantId,
             RequisitionNumber = entity.RequisitionNumber,
             RequestedById = entity.RequestedById,
+            BeneficiaryEmployeeId = entity.BeneficiaryEmployeeId,
+            BeneficiaryEmployeeName = entity.BeneficiaryEmployee != null
+                ? $"{entity.BeneficiaryEmployee.FirstName} {entity.BeneficiaryEmployee.LastName}"
+                : null,
             RequestedByName = entity.RequestedBy != null 
                 ? $"{entity.RequestedBy.FirstName} {entity.RequestedBy.LastName}" 
                 : string.Empty,
@@ -757,8 +763,6 @@ public static class AssetsMappingExtensions
             FulfilledByName = entity.FulfilledBy != null 
                 ? $"{entity.FulfilledBy.FirstName} {entity.FulfilledBy.LastName}" 
                 : null,
-            AssignedAssetId = entity.AssignedAssetId,
-            AssignedAssetName = entity.AssignedAsset?.AssetName,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,

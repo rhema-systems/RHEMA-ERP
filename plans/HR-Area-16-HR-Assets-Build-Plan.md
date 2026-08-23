@@ -39,7 +39,7 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–2b green twice — 265 assertions.** 84 routes, all gated; every refusal speaks; the Fixed Assets link is live |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–3 green twice — 314 assertions.** The requisition pipeline runs end to end for the first time since the port |
 | **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `run-slice0.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
@@ -155,7 +155,8 @@ be reached, for the reason D-k gives.
   can only remember one of them. ⚠ **Reclassified by slice 0 to a SOURCE claim, not a measured
   one**: fulfilment answers 400 because it requires an approved requisition, and D-k means no
   requisition can ever be approved. The mismatch is real in the source but cannot be demonstrated
-  by execution until slice 3 lands.
+  by execution until slice 3 lands. ✅ **Fixed in slice 3** — `AssignedAssetId` is dropped and each
+  assignment cites its `RequisitionId`, so a fulfilment of three assets is three facts.
 - **D-f — 82 routes, zero authorization.** One bare `[Authorize]` on the class. A plain employee can
   create asset types, dispose of assets, approve requisitions and delete assignments. This is the
   W3 sweep's shape, landing inside this area.
@@ -188,6 +189,8 @@ be reached, for the reason D-k gives.
   endpoint 500s **for every actor, on every tenant, always**. Because approval is fulfilment's
   precondition, **the entire requisition → assignment pipeline has never once run end to end** —
   which is precisely the pipeline AST-6 asks to be put on the portal.
+  ✅ **Fixed in slice 3**: both stamps take the actor from the token, and an actor whose login is
+  not linked to an employee is refused in words rather than silently stamped as nobody.
 - **D-l — ⚠ the transfer sub-surface has never created a row.**
   `AssetTransferService.CreateAsync` (`:1536`) calls
   `dto.ToEntity(tenantId, userId, userId, transferNumber)`, passing the **ApplicationUser** id as
@@ -227,6 +230,14 @@ be reached, for the reason D-k gives.
   label: `AssetAttributeValueDto.DataType` is projected **off the navigation**, so a null one did not
   merely blank a name — it **reported the wrong data type for the value being returned**. ✅ Fixed in
   slice 2b with two repository reads that load the navigation.
+
+- **D-p — a converted rule that could never fire.** Fulfilment asked `Status != Available` before
+  `IsCurrentlyAssigned`, and assigning an asset sets **both** flags — so an asset in somebody's hands
+  was always refused as *"not available; its status is Assigned"*, and the `Conflict` rule beside it
+  had no path to it at all. It was one of the four slice 2 converted and printed as unreachable;
+  it turned out to be unreachable for a second reason nobody had noticed. ✅ Fixed in slice 3 by
+  asking the specific question first. Found only because an assertion about one refusal was answered
+  by a different one.
 
 **What slice 0 proved DOES work**, so later slices do not re-litigate it: asset types and their
 attributes; the asset register including attribute values, images and attachments; assignment
@@ -394,7 +405,8 @@ overdue returns; and the full screen set.
 | **1** | ✅ Authorization + the actor | Role/permission gates over all 82 routes; acknowledgement bound to the assignee (D-b); self-or-HR on the ownership reads |
 | **2** | ✅ Refusals that speak | D-m — `AssetsWorkflowException`, 404/409/400, no migration |
 | **2b** | ✅ The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link and the picker that sets it, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` end to end (AST-4, AST-7, AST-11, D-i(b)), **and D-j**. **First migration of the area** |
-| **3** | Requisition on the workflow engine, and on behalf | **D-k first** — a real approver from the token — then D3's workflow chain, `BeneficiaryEmployeeId` (AST-6b), and D-e's fulfilment set |
+| **3** | ✅ The requisition pipeline runs | D-k (a real approver), AST-6b on-behalf, D-e (fulfilment recorded on the assignments), D-p |
+| **3b** | Requisition and transfer approvals on the workflow engine | D3 — the four-step recipe, with the configurable chain and the approvals inbox |
 | **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), **D-l** — transfers made creatable at all — then transfer onto the same engine |
 | **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
 | **6** | The employee's own surface | `/hr/assets/me` + `EmployeePortalController` routes: my assets, acknowledge, request, request on behalf (AST-6, AST-8) |
@@ -600,3 +612,55 @@ the list read agree* — is the one now in the file. Second, the repair that too
 mine: a patch script assigned the second `old`/`new` inside a branch that did not run, so the first
 replacement's text leaked into the second and one service was handed another's method body. The
 compiler caught it only because the return type stopped matching its interface.
+
+---
+
+### Slice 3 — the requisition pipeline runs, end to end, for the first time. 2026-08-23, **49/49, run twice** (stamps 164002, 164003). Migration `AddAssetRequisitionBeneficiaryAndFulfilmentLink`.
+
+Closes **D-k**, **D-e**, **D-p** and delivers **AST-6b**. Slices 1, 2 and 2b re-run at 45/45, 85/85
+and 94/94. ⚠ D3 — the workflow engine — is **not** in this slice; it is slice 3b. This one is about
+making the ported pipeline work at all, and that is a separate thing from routing its approvals.
+
+**D-k is dead.** `ApproveAsync` and `FulfillAsync` both carried
+`Guid.Parse("D1D0261F-934D-4809-95EF-CD76156694A5")` behind a `// TODO`, for an employee that has
+never existed on this database. `ApprovedById` and `FulfilledById` are **Employee** FKs, so SQL
+rejected every UPDATE with error 547 and both endpoints answered 500 — always, for everyone, since
+the port. Both now take the actor from the token. An actor whose login is **not** linked to an
+employee is refused *in words* rather than silently stamped as nobody: that silent stamp is what the
+hard-coded GUID was a clumsy attempt to avoid, and it would have been the same hole with better
+manners.
+
+**The four rules slice 2 could not reach are now proved.** Slice 2 converted them to speaking
+refusals and then printed them as unreachable, because nothing could get past approval to provoke
+them. Three passed on the first attempt. The fourth found **D-p**: it could never fire at all.
+
+**AST-6b, and the consequence that actually matters.** `BeneficiaryEmployeeId` sits beside
+`RequestedById` — two columns, because one cannot answer "who did this, and to whom". The visible
+payoff is at fulfilment: **the asset is assigned to the beneficiary, not to whoever typed the form**,
+and the harness asserts it is emphatically not the HR officer who raised it. The read gate also had
+to widen to both actors: gating on the requester alone would have hidden an employee's own
+requisition from them the moment somebody raised it on their behalf.
+
+**On-behalf is HR, or the beneficiary's recorded line manager — and the second branch will rarely
+fire.** Measured while writing it: **181 of 6,822** live employees carry a `ManagerId`, 2.7%. The
+rule is written against the data model rather than against today's data, so it starts working the
+day the org chart is maintained. The harness mints a fourth actor who genuinely reports to another
+so the branch is *proved* rather than assumed dead — the only honest way to test a rule the live
+data cannot exercise. Same unmaintained-org-data seam that keeps FR-HR-080/181 deferred.
+
+⚠ **The scaffolded migration was wrong and was rewritten.** EF saw one nullable `Guid` column leave
+and another arrive on the same table and inferred a **rename** of `AssignedAssetId` to
+`BeneficiaryEmployeeId`. A rename keeps the data: the old column held a `CompanyAssets.Id` and the
+new one holds an `Employees.Id`, so on any database where fulfilment had ever run, every populated
+row would carry an asset's key in an employee foreign key — and the FK added three lines later would
+fail with 547. It renamed the index too. Measured before deciding: 14 rows, **0 with an
+`AssignedAssetId`**, precisely because D-k meant none was ever fulfilled — so the rename would have
+been harmless *here*. Rewritten as drop-then-add anyway: the next database is not promised to be
+this one. The `Down` says plainly that the old column returns empty, because the fact now lives on
+the assignments and more completely than it ever lived in one column.
+
+**Two more uneven-`.Include` instances, same family as D-n.** `GetByRequestedByIdAsync` never loaded
+`RequestedBy`, so `requestedByName` was blank on an employee's own list of their own requests — the
+one list where it matters most. And the assignment detail read gained `requisitionNumber` in its DTO
+and mapping without the `.Include` that feeds it, so it came back null. That shape has now appeared
+**four times** in this area; the standing lesson is that a mapping and a read are one change.

@@ -277,11 +277,22 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<AssetAssignment>> GetByRequisitionIdAsync(Guid requisitionId)
+    {
+        return await _context.Set<AssetAssignment>()
+            .Include(aa => aa.Asset)
+            .Include(aa => aa.Employee)
+            .Where(aa => aa.RequisitionId == requisitionId && !aa.IsDeleted)
+            .OrderBy(aa => aa.AssignmentDate)
+            .ToListAsync();
+    }
+
     public async Task<AssetAssignment?> GetWithDetailsAsync(Guid id)
     {
         return await _context.Set<AssetAssignment>()
             .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
+            .Include(aa => aa.Requisition)
             .Include(aa => aa.ApprovedBy)
             .Include(aa => aa.ReturnedTo)
             .FirstOrDefaultAsync(aa => aa.Id == id && !aa.IsDeleted);
@@ -480,6 +491,7 @@ public class AssetRequisitionRepository : GenericRepository<AssetRequisition>, I
         return await _context.Set<AssetRequisition>()
             .Include(ar => ar.RequestedBy)
             .Include(ar => ar.AssetType)
+            .Include(ar => ar.BeneficiaryEmployee)
             .Where(ar => ar.TenantId == tenantId && !ar.IsDeleted)
             .OrderByDescending(ar => ar.RequestDate)
             .ToListAsync();
@@ -490,9 +502,9 @@ public class AssetRequisitionRepository : GenericRepository<AssetRequisition>, I
         return await _context.Set<AssetRequisition>()
             .Include(ar => ar.RequestedBy)
             .Include(ar => ar.AssetType)
+            .Include(ar => ar.BeneficiaryEmployee)
             .Include(ar => ar.ApprovedBy)
             .Include(ar => ar.FulfilledBy)
-            .Include(ar => ar.AssignedAsset)
             .FirstOrDefaultAsync(ar => ar.Id == id && !ar.IsDeleted);
     }
 
@@ -506,6 +518,8 @@ public class AssetRequisitionRepository : GenericRepository<AssetRequisition>, I
     {
         return await _context.Set<AssetRequisition>()
             .Include(ar => ar.AssetType)
+            .Include(ar => ar.RequestedBy)
+            .Include(ar => ar.BeneficiaryEmployee)
             .Where(ar => ar.RequestedById == employeeId && !ar.IsDeleted)
             .OrderByDescending(ar => ar.RequestDate)
             .ToListAsync();
@@ -516,6 +530,7 @@ public class AssetRequisitionRepository : GenericRepository<AssetRequisition>, I
         return await _context.Set<AssetRequisition>()
             .Include(ar => ar.RequestedBy)
             .Include(ar => ar.AssetType)
+            .Include(ar => ar.BeneficiaryEmployee)
             .Where(ar => ar.TenantId == tenantId && ar.Status == status && !ar.IsDeleted)
             .ToListAsync();
     }
@@ -525,6 +540,7 @@ public class AssetRequisitionRepository : GenericRepository<AssetRequisition>, I
         return await _context.Set<AssetRequisition>()
             .Include(ar => ar.RequestedBy)
             .Include(ar => ar.AssetType)
+            .Include(ar => ar.BeneficiaryEmployee)
             .Where(ar => ar.TenantId == tenantId 
                 && (ar.Status == AssetRequisitionStatus.Submitted || ar.Status == AssetRequisitionStatus.UnderReview)
                 && !ar.IsDeleted)
