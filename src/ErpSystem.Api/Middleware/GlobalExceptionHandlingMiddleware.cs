@@ -188,6 +188,30 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)awardsStatus;
                 break;
 
+            // Staff / company assets (area 16). The sixth area to need this shape. Without this
+            // case its 28 service rules were flattened to two fixed strings, and — worse — the
+            // eighteen "not found" among them all answered 400, so no caller could tell a disposed
+            // asset from a bad payload. See AssetsWorkflowException, and defect D-m in the area-16
+            // build plan.
+            case AssetsWorkflowException assetsEx:
+                var assetsStatus = assetsEx.Reason switch
+                {
+                    AssetsFailureReason.NotFound => HttpStatusCode.NotFound,
+                    AssetsFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    AssetsFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = assetsStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)assetsStatus;
+                response.Detail = assetsEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)assetsStatus;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Status = (int)HttpStatusCode.Conflict;
@@ -279,7 +303,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException or ProbationWorkflowException => "Warning",
+                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException or ProbationWorkflowException or AssetsWorkflowException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
@@ -449,6 +473,7 @@ public class GlobalExceptionHandlingMiddleware
             case ConflictException:
             case ArgumentException:
             case MedicalWorkflowException:
+            case AssetsWorkflowException:
             case SuccessionConflictException:
             case SuccessionValidationException:
                 // These are expected exceptions - log as warnings

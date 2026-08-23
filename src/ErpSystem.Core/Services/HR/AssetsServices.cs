@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
@@ -107,7 +108,8 @@ public class AssetTypeService : IAssetTypeService
     {
         var entity = await _assetTypeRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetType {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset type was found with id {id}.");
         return entity;
     }
 
@@ -229,7 +231,8 @@ public class AssetTypeAttributeService : IAssetTypeAttributeService
     {
         var entity = await _attributeRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetTypeAttribute {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset type attribute was found with id {id}.");
         return entity;
     }
 
@@ -237,7 +240,8 @@ public class AssetTypeAttributeService : IAssetTypeAttributeService
     {
         var assetType = await _assetTypeRepo.GetByIdAsync(assetTypeId);
         if (assetType == null || assetType.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetType {assetTypeId} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset type was found with id {assetTypeId}.");
     }
 
     public async Task<AssetTypeAttributeDto?> GetByIdAsync(Guid id)
@@ -327,7 +331,8 @@ public class CompanyAssetService : ICompanyAssetService
     {
         var entity = await _assetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {id}.");
         return entity;
     }
 
@@ -568,7 +573,8 @@ public class AssetAttributeValueService : IAssetAttributeValueService
     {
         var entity = await _valueRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetAttributeValue {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset attribute value was found with id {id}.");
         return entity;
     }
 
@@ -576,7 +582,8 @@ public class AssetAttributeValueService : IAssetAttributeValueService
     {
         var asset = await _assetRepo.GetByIdAsync(assetId);
         if (asset == null || asset.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {assetId} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {assetId}.");
     }
 
     public async Task<AssetAttributeValueDto?> GetByIdAsync(Guid id)
@@ -663,7 +670,8 @@ public class AssetAssignmentService : IAssetAssignmentService
     {
         var entity = await _assignmentRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetAssignment {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset assignment was found with id {id}.");
         return entity;
     }
 
@@ -671,7 +679,8 @@ public class AssetAssignmentService : IAssetAssignmentService
     {
         var entity = await _assetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {id}.");
         return entity;
     }
 
@@ -834,7 +843,7 @@ public class AssetAssignmentService : IAssetAssignmentService
             "acknowledge receipt of an asset");
 
         if (entity.Status != AssignmentStatus.Active)
-            throw new InvalidOperationException(
+            throw AssetsWorkflowException.InvalidState(
                 "Only an active assignment can be acknowledged; this one has already been closed.");
 
         entity.EmployeeAcknowledged = true;
@@ -919,7 +928,8 @@ public class AssetMaintenanceService : IAssetMaintenanceService
     {
         var entity = await _maintenanceRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetMaintenance {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No maintenance record was found with id {id}.");
         return entity;
     }
 
@@ -927,7 +937,8 @@ public class AssetMaintenanceService : IAssetMaintenanceService
     {
         var entity = await _assetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {id}.");
         return entity;
     }
 
@@ -1105,7 +1116,8 @@ public class AssetImageService : IAssetImageService
     {
         var entity = await _imageRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetImage {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset image was found with id {id}.");
         return entity;
     }
 
@@ -1113,7 +1125,8 @@ public class AssetImageService : IAssetImageService
     {
         var asset = await _assetRepo.GetByIdAsync(assetId);
         if (asset == null || asset.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {assetId} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {assetId}.");
     }
 
     public async Task<AssetImageDto?> GetByIdAsync(Guid id)
@@ -1186,7 +1199,8 @@ public class AssetAttachmentService : IAssetAttachmentService
     {
         var entity = await _attachmentRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetAttachment {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No attachment was found with id {id}.");
         return entity;
     }
 
@@ -1194,7 +1208,8 @@ public class AssetAttachmentService : IAssetAttachmentService
     {
         var asset = await _assetRepo.GetByIdAsync(assetId);
         if (asset == null || asset.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {assetId} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {assetId}.");
     }
 
     public async Task<AssetAttachmentDto?> GetByIdAsync(Guid id)
@@ -1273,7 +1288,8 @@ public class AssetRequisitionService : IAssetRequisitionService
     {
         var entity = await _requisitionRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetRequisition {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset requisition was found with id {id}.");
         return entity;
     }
 
@@ -1281,7 +1297,8 @@ public class AssetRequisitionService : IAssetRequisitionService
     {
         var entity = await _assetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {id}.");
         return entity;
     }
 
@@ -1378,7 +1395,8 @@ public class AssetRequisitionService : IAssetRequisitionService
         AssetActor.EnsureSelfOrHr(_currentUserService, entity.RequestedById, "edit an asset requisition");
 
         if (entity.Status != AssetRequisitionStatus.Submitted && entity.Status != AssetRequisitionStatus.Draft)
-            throw new InvalidOperationException("Only draft or submitted requisitions can be updated.");
+            throw AssetsWorkflowException.InvalidState(
+                "Only a draft or submitted requisition can be edited; this one has already been decided.");
 
         entity.UpdateEntity(dto, userId);
         await _requisitionRepo.UpdateAsync(entity);
@@ -1399,7 +1417,7 @@ public class AssetRequisitionService : IAssetRequisitionService
         // erase the approval or the rejection along with the request, so it stops being possible
         // once anyone has answered it.
         if (entity.Status != AssetRequisitionStatus.Submitted && entity.Status != AssetRequisitionStatus.Draft)
-            throw new InvalidOperationException(
+            throw AssetsWorkflowException.InvalidState(
                 "Only a draft or submitted requisition can be withdrawn; this one has already been decided.");
 
         await _requisitionRepo.DeleteAsync(entity);
@@ -1453,13 +1471,15 @@ public class AssetRequisitionService : IAssetRequisitionService
         var requisition = await GetOwnedRequisitionAsync(id);
 
         if (requisition.Status != AssetRequisitionStatus.Approved)
-            throw new InvalidOperationException("Only approved requisitions can be fulfilled.");
+            throw AssetsWorkflowException.InvalidState(
+                "Only an approved requisition can be fulfilled; this one has not been approved.");
 
         if (dto.AssignedAssetIds == null || dto.AssignedAssetIds.Count == 0)
-            throw new InvalidOperationException("At least one asset must be assigned.");
+            throw AssetsWorkflowException.Invalid("At least one asset must be assigned.");
 
         if (dto.AssignedAssetIds.Count > requisition.Quantity)
-            throw new InvalidOperationException($"Cannot assign more assets ({dto.AssignedAssetIds.Count}) than requested ({requisition.Quantity}).");
+            throw AssetsWorkflowException.Invalid(
+                $"Cannot assign more assets ({dto.AssignedAssetIds.Count}) than the {requisition.Quantity} requested.");
 
         // Validate all assets exist, are owned, and are available
         var assets = new List<CompanyAsset>();
@@ -1468,10 +1488,12 @@ public class AssetRequisitionService : IAssetRequisitionService
             var asset = await GetOwnedAssetAsync(assetId);
             
             if (asset.Status != CompanyAssetStatus.Available)
-                throw new InvalidOperationException($"Asset {asset.AssetNumber} is not available.");
+                throw AssetsWorkflowException.InvalidState(
+                    $"Asset {asset.AssetNumber} is not available; its status is {asset.Status}.");
             
             if (asset.IsCurrentlyAssigned)
-                throw new InvalidOperationException($"Asset {asset.AssetNumber} is already assigned.");
+                throw AssetsWorkflowException.Conflict(
+                    $"Asset {asset.AssetNumber} is already assigned to someone.");
             
             assets.Add(asset);
         }
@@ -1573,7 +1595,8 @@ public class AssetTransferService : IAssetTransferService
     {
         var entity = await _transferRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"AssetTransfer {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset transfer was found with id {id}.");
         return entity;
     }
 
@@ -1581,7 +1604,8 @@ public class AssetTransferService : IAssetTransferService
     {
         var entity = await _assetRepo.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"CompanyAsset {id} not found.");
+            throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {id}.");
         return entity;
     }
 
@@ -1666,7 +1690,8 @@ public class AssetTransferService : IAssetTransferService
         var entity = await GetOwnedTransferAsync(id);
 
         if (entity.Status != HRAssetTransferStatus.Pending)
-            throw new InvalidOperationException("Only pending transfers can be updated.");
+            throw AssetsWorkflowException.InvalidState(
+                "Only a pending transfer can be edited; this one has already been actioned.");
 
         entity.UpdateEntity(dto, userId);
         await _transferRepo.UpdateAsync(entity);
@@ -1706,7 +1731,8 @@ public class AssetTransferService : IAssetTransferService
         var entity = await GetOwnedTransferAsync(id);
 
         if (entity.Status != HRAssetTransferStatus.Approved && entity.Status != HRAssetTransferStatus.InTransit)
-            throw new InvalidOperationException("Only approved or in-transit transfers can be completed.");
+            throw AssetsWorkflowException.InvalidState(
+                "Only an approved or in-transit transfer can be completed.");
 
         entity.Status = HRAssetTransferStatus.Completed;
         entity.CompletionDate = DateTime.UtcNow;

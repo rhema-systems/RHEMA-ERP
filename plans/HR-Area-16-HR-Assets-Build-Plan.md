@@ -39,7 +39,7 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–1 green twice — 86 assertions.** All 82 routes gated |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–2 green twice — 171 assertions.** All 82 routes gated; every refusal speaks |
 | **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `run-slice0.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
@@ -204,9 +204,10 @@ be reached, for the reason D-k gives.
   these services arrives as an opaque 400. So a rule that fires correctly still cannot tell the user
   what to do about it. `UnauthorizedAccessException` is the exception: it is passed through **with
   its own message**, which is why slice 1's 403s can be asserted on their wording.
-  The fix is an `AssetsException` case in the middleware mirroring the `AwardsException` one area 14
-  added (`response.Detail = ex.Message; // safe to display by design`), plus converting this file's
-  domain throws onto it. **Scheduled into slice 2.**
+  ✅ **Fixed in slice 2** by `AssetsWorkflowException` + a middleware case, mirroring what area 14
+  did for awards. This is the **sixth** HR area to need that same remedy — worth raising at
+  finalization, because the middleware swallowing these messages is a platform default every module
+  has had to work around one at a time.
 
 **What slice 0 proved DOES work**, so later slices do not re-litigate it: asset types and their
 attributes; the asset register including attribute values, images and attachments; assignment
@@ -370,9 +371,10 @@ overdue returns; and the full screen set.
 
 | # | Slice | Delivers |
 |---|---|---|
-| **0** | **Prove the ground** | Call all 82 routes. Confirm or kill D-a … D-i. Diagnostic only, no production code |
-| **1** | Authorization + the actor | Role/permission gates over all 82 routes; acknowledgement bound to the assignee (D-b); self-or-HR on the ownership reads |
-| **2** | The register, and where an asset comes from | **D-m first** — refusals that speak — then `AssetSource` + `FixedAssetId` link, read-through of Finance fields, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` on create (AST-4, AST-7, AST-11, D-i(b)), **and D-j**, the PUT that erases what it omits. First migration of the area |
+| **0** | ✅ **Prove the ground** | Call all 82 routes. Confirm or kill D-a … D-i. Diagnostic only, no production code |
+| **1** | ✅ Authorization + the actor | Role/permission gates over all 82 routes; acknowledgement bound to the assignee (D-b); self-or-HR on the ownership reads |
+| **2** | ✅ Refusals that speak | D-m — `AssetsWorkflowException`, 404/409/400, no migration |
+| **2b** | The register, and where an asset comes from | `AssetSource` + `FixedAssetId` link and the picker that sets it, `AdditionalRemarks`, `InsuranceExpiryDate`, `UnitId` end to end (AST-4, AST-7, AST-11, D-i(b)), **and D-j**. **First migration of the area** |
 | **3** | Requisition on the workflow engine, and on behalf | **D-k first** — a real approver from the token — then D3's workflow chain, `BeneficiaryEmployeeId` (AST-6b), and D-e's fulfilment set |
 | **4** | Assignment integrity | The availability guard (AST-2, D-a), the return consistency check (D-c), **D-l** — transfers made creatable at all — then transfer onto the same engine |
 | **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
@@ -480,3 +482,45 @@ mute text deliberately so the flip is visible when slice 2 lands.
 **`run-slice0.mjs` is a historical record from here on.** Five of its assertions (one D-b, four D-f)
 describe behaviour this slice fixed, so it now fails on exactly the lines it was written to prove.
 That is the design working; its header lists which five.
+
+---
+
+### Slice 2 — refusals that speak. 2026-08-23, **85/85, run twice** (stamps 162001, 162003). No migration.
+
+Three files: a new `AssetsWorkflowException`, one case in `GlobalExceptionHandlingMiddleware`, and
+28 converted throw sites in `AssetsServices.cs`.
+
+**The number that made this a slice of its own: eighteen of the area's twenty-eight refusals were
+"not found" answering 400.** The middleware discards an `ArgumentException`'s message and
+substitutes *"Invalid argument provided."*, and an `InvalidOperationException`'s and substitutes
+*"The operation is not valid for the current state of the object."* So a caller could not
+distinguish a disposed asset from a malformed payload, and no screen could decide whether to
+re-fetch, show "no longer available", or highlight a field. Every one of those is now a **404 that
+names what is missing**; state clashes are **409**; a payload wrong on its own terms is **400**.
+
+**The messages were rewritten, not just re-typed.** The ported text named CLR types —
+*"AssetTypeAttribute 3f2… not found."* Text that reaches a user is written for the user: *"No asset
+type attribute was found with id …"*. A message only became displayable when it started being
+displayed, so this was the moment to fix it.
+
+**Ten guards were deliberately left alone.** The `"No tenant is associated with the current user."`
+checks are not domain rules a caller can act on — the tenant comes from the token, so reaching one
+means the token itself is malformed. A generic 400 is the right answer to a condition that should
+be unreachable. Asserted in the patch script rather than trusted: after conversion, every surviving
+`InvalidOperationException` in the file was checked to be one of those ten.
+
+**The harness declares what it cannot reach.** Four of the ten converted rules cannot be provoked
+today — two live inside fulfilment, which D-k blocks, and two need a transfer to exist, which D-l
+blocks. `run-slice2.mjs` prints them with the slice that will own them (3 and 4) instead of omitting
+them, because a suite that silently skips what it cannot reach reads as coverage it does not have.
+A fifth, *"At least one asset must be assigned"*, is unreachable for a better reason —
+`[MinLength(1)]` on the DTO refuses an empty list before the service runs — and that redundancy is
+asserted rather than assumed.
+
+**Slice 1's one mute assertion was flipped here**, from a 400 with the fixed string to a 409 with
+the real sentence, and slice 1 re-run twice at 45/45. Unlike slice 0, slice 1 stays a live
+regression suite: only that line moved, and the comment on it says why.
+
+⚠ **A known, correct piece of litter:** each slice-2 run leaves one rejected requisition behind,
+because "a decided requisition cannot be withdrawn" is exactly the rule the slice asserts and it
+binds HR too. The row is the rule working, not a cleanup failure.
