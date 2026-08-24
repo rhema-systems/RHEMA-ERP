@@ -41,7 +41,7 @@ No database migration or production data mutation is required by this change.
 
 ## Verification
 
-- Foreign USD bank opening: USD 50,000 at approved GHS/USD rate 15 posts GHS 750,000 while retaining the USD 50,000 bank snapshot.
+- Foreign USD bank opening: USD 50,000 at approved GHS/USD rate 12.5 posts GHS 625,000 while retaining the USD 50,000 bank snapshot.
 - Missing rate evidence is rejected before persistence.
 - Migration sign-off reconciles the native bank snapshot to native posted evidence.
 - Existing functional-currency governed bank, reconciliation, ledger, export, and posting regressions remain green.
