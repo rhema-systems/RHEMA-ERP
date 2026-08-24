@@ -16,64 +16,6 @@ import { buildExchangeRateTemplateCsv, formatImportFileSize, parseExchangeRateIm
 import type { ExchangeRate, ExchangeRateQuoteSide, ExchangeRateType } from '@/types/finance';
 import Link from 'next/link';
 
-
-
-// MOCK DATA
-const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
-    {
-        id: '1',
-        baseCurrencyCode: 'GHS',
-        targetCurrencyCode: 'USD',
-        rate: 12.5,
-        effectiveDate: '2024-03-15T00:00:00Z',
-        rateType: 'Daily',
-        quoteSide: 'Mid',
-        rateSource: 'Bank of Ghana',
-        isActive: true,
-        createdAt: '2024-03-15T08:00:00Z',
-        updatedAt: '2024-03-15T08:00:00Z',
-    },
-    {
-        id: '2',
-        baseCurrencyCode: 'GHS',
-        targetCurrencyCode: 'GBP',
-        rate: 15.8,
-        effectiveDate: '2024-03-15T00:00:00Z',
-        rateType: 'Daily',
-        quoteSide: 'Mid',
-        rateSource: 'Bank of Ghana',
-        isActive: true,
-        createdAt: '2024-03-15T08:00:00Z',
-        updatedAt: '2024-03-15T08:00:00Z',
-    },
-    {
-        id: '3',
-        baseCurrencyCode: 'GHS',
-        targetCurrencyCode: 'EUR',
-        rate: 13.6,
-        effectiveDate: '2024-03-15T00:00:00Z',
-        rateType: 'Daily',
-        quoteSide: 'Mid',
-        rateSource: 'Bank of Ghana',
-        isActive: true,
-        createdAt: '2024-03-15T08:00:00Z',
-        updatedAt: '2024-03-15T08:00:00Z',
-    },
-    {
-        id: '4',
-        baseCurrencyCode: 'GHS',
-        targetCurrencyCode: 'USD',
-        rate: 12.8,
-        effectiveDate: '2024-03-15T00:00:00Z',
-        rateType: 'Spot',
-        quoteSide: 'Selling',
-        rateSource: 'Forex Bureau',
-        isActive: true,
-        createdAt: '2024-03-15T09:00:00Z',
-        updatedAt: '2024-03-15T09:00:00Z',
-    },
-];
-
 const MOCK_CURRENCIES = ['GHS', 'USD', 'EUR', 'GBP'];
 const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string }> = [
     { value: 'Daily', label: 'Daily' },
@@ -97,7 +39,12 @@ const formatRateType = (rateType: ExchangeRateType | string) =>
 export default function ExchangeRatesPage() {
     const { toast } = useToast();
     const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
-    const [rates, setRates] = useState<ExchangeRate[]>(MOCK_EXCHANGE_RATES);
+    // Exchange rates are accounting evidence. Never replace an unavailable API response with
+    // sample values: a plausible-looking mock rate can be frozen into a real posting.
+    const [rates, setRates] = useState<ExchangeRate[]>([]);
+    const [isLoadingRates, setIsLoadingRates] = useState(true);
+    const [rateLoadError, setRateLoadError] = useState<string | null>(null);
+    const [rateReloadToken, setRateReloadToken] = useState(0);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
     const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
@@ -123,22 +70,29 @@ export default function ExchangeRatesPage() {
 
     useEffect(() => {
         let isMounted = true;
+        setIsLoadingRates(true);
+        setRateLoadError(null);
 
         financeService.getExchangeRates()
             .then((apiRates) => {
                 if (isMounted) {
                     setRates(apiRates);
+                    setIsLoadingRates(false);
                 }
             })
             .catch((error) => {
-                // Keep the seeded rows visible in local/demo mode when the API is not reachable.
                 console.error('Failed to load exchange rates', error);
+                if (isMounted) {
+                    setRates([]);
+                    setRateLoadError(error instanceof Error ? error.message : 'The exchange-rate register could not be loaded.');
+                    setIsLoadingRates(false);
+                }
             });
 
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [rateReloadToken]);
 
     const filteredRates = rates.filter((rate) => {
         if (filters.fromCurrency !== 'all' && rate.baseCurrencyCode !== filters.fromCurrency) return false;
@@ -350,7 +304,7 @@ export default function ExchangeRatesPage() {
                     </Button>
                     <Dialog open={isBulkUploadOpen} onOpenChange={handleBulkDialogOpenChange}>
                         <DialogTrigger asChild>
-                            <Button variant="outline">
+                            <Button variant="outline" disabled={isLoadingRates || Boolean(rateLoadError)}>
                                 <Upload className="mr-2 h-4 w-4" />
                                 Bulk Upload
                             </Button>
@@ -479,7 +433,10 @@ export default function ExchangeRatesPage() {
                     </Dialog>
                     <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                         <DialogTrigger asChild>
-                            <Button onClick={() => { resetForm(); setEditingRate(null); }}>
+                            <Button
+                                disabled={isLoadingRates || Boolean(rateLoadError)}
+                                onClick={() => { resetForm(); setEditingRate(null); }}
+                            >
                                 <Plus className="mr-2 h-4 w-4" />
                                 Add Rate
                             </Button>
@@ -617,6 +574,29 @@ export default function ExchangeRatesPage() {
                 </BreadcrumbList>
             </Breadcrumb>
 
+            {rateLoadError && (
+                <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-destructive">
+                    <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-2">
+                            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                            <div>
+                                <p className="font-semibold">Exchange-rate register unavailable</p>
+                                <p className="text-sm">
+                                    {rateLoadError} No sample rates are displayed because only server-retained, approved evidence may be used for Finance transactions.
+                                </p>
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setRateReloadToken((current) => current + 1)}
+                        >
+                            Retry
+                        </Button>
+                    </div>
+                </div>
+            )}
+
             {/* Filters */}
             <Card>
                 <CardHeader>
@@ -722,7 +702,22 @@ export default function ExchangeRatesPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredRates.map((rate) => (
+                                {isLoadingRates && (
+                                    <tr>
+                                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                                            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                                            Loading retained exchange rates…
+                                        </td>
+                                    </tr>
+                                )}
+                                {!isLoadingRates && !rateLoadError && filteredRates.length === 0 && (
+                                    <tr>
+                                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                                            No exchange rates match the selected filters.
+                                        </td>
+                                    </tr>
+                                )}
+                                {!isLoadingRates && !rateLoadError && filteredRates.map((rate) => (
                                     <tr key={rate.id} className="border-b hover:bg-muted/50">
                                         <td className="p-4 font-mono font-semibold">{rate.baseCurrencyCode}/{rate.targetCurrencyCode}</td>
                                         <td className="p-4 text-right font-mono">{rate.rate.toFixed(4)}</td>

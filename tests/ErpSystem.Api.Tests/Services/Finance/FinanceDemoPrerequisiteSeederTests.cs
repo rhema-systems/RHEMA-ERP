@@ -13,6 +13,36 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceDemoPrerequisiteSeederTests
 {
     [Fact]
+    public async Task ExchangeRateSeed_ShouldStoreFunctionalCurrencyPerTargetCurrencyUnit()
+    {
+        await using var context = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var seeder = new FinanceDataSeeder(context, NullLogger<FinanceDataSeeder>.Instance);
+        var seedMethod = typeof(FinanceDataSeeder).GetMethod(
+            "SeedExchangeRatesAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        seedMethod.Should().NotBeNull();
+        await (Task)seedMethod!.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
+        await context.SaveChangesAsync();
+
+        var usd = await context.ExchangeRates.SingleAsync(rate =>
+            rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "USD");
+        usd.Rate.Should().Be(12.5m, "1 USD is seeded as 12.50 GHS under the ExchangeRate entity contract");
+        usd.InverseRate.Should().Be(0.08m);
+
+        var eur = await context.ExchangeRates.SingleAsync(rate =>
+            rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "EUR");
+        eur.Rate.Should().Be(13.1579m);
+        eur.InverseRate.Should().Be(0.076m);
+
+        var gbp = await context.ExchangeRates.SingleAsync(rate =>
+            rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "GBP");
+        gbp.Rate.Should().Be(15.873m);
+        gbp.InverseRate.Should().Be(0.063m);
+    }
+
+    [Fact]
     public void StandardFinanceSeed_ShouldProvisionFixedAssetConfigurationWithoutAssetMasters()
     {
         var root = FindRepositoryRoot();
