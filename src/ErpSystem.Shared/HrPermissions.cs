@@ -23,6 +23,7 @@ public sealed record HrPermissionDefinition(
 public static class HrPermissions
 {
     public const string CategoryLeave = "HR - Leave";
+    public const string CategoryAttendance = "HR - Attendance & Time";
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
@@ -43,6 +44,14 @@ public static class HrPermissions
     public const string LeaveReadPolicy = "HR.Policy.LeaveRead";
     public const string LeaveWritePolicy = "HR.Policy.LeaveWrite";
     public const string LeaveAdminPolicy = "HR.Policy.LeaveAdmin";
+
+    public const string ViewAttendance = "HR.Attendance.Read";
+    public const string MaintainAttendance = "HR.Attendance.Write";
+    public const string AdministerAttendance = "HR.Attendance.Admin";
+
+    public const string AttendanceReadPolicy = "HR.Policy.AttendanceRead";
+    public const string AttendanceWritePolicy = "HR.Policy.AttendanceWrite";
+    public const string AttendanceAdminPolicy = "HR.Policy.AttendanceAdmin";
 
     public const string ViewMedicalRecords = "HR.Medical.Read";
     public const string MaintainMedicalRecords = "HR.Medical.Write";
@@ -127,6 +136,16 @@ public static class HrPermissions
         new(AdministerLeave, "Administer Leave",
             "Run the year-end carry-over and forfeiture jobs, deactivate leave types, and delete adjustments and leave-type configuration. Approving leave is NOT this permission — approval belongs to the workflow assignee and is validated per request by the workflow engine.",
             CategoryLeave),
+
+        new(ViewAttendance, "View Attendance & Time",
+            "View everyone's attendance records, raw device logs, regularizations, remote-work requests, alerts, biometric enrolment, payroll exports, and the consultant/timesheet/invoicing registers. Employees do not need this for their own records — self access is an ownership check on the endpoint.",
+            CategoryAttendance),
+        new(MaintainAttendance, "Maintain Attendance & Time",
+            "Correct attendance records, capture and process device logs, apply approved regularizations, maintain shift/schedule/holiday/pay-period/geofence/device configuration, manage alerts, generate payroll exports, and run consultant, engagement and timesheet-invoice administration.",
+            CategoryAttendance),
+        new(AdministerAttendance, "Administer Attendance & Time",
+            "Delete attendance data — records, logs, alerts, biometric enrolment, configuration rows, engagements and invoices. Approving a regularization, remote-work request or consultant timesheet is NOT this permission — approval belongs to the workflow assignee, validated per request by the workflow engine.",
+            CategoryAttendance),
 
         new(ViewMedicalRecords, "View Medical Records",
             "View employee health profiles, conditions, allergies, exams, claims, and medical documents.",
@@ -289,6 +308,7 @@ public static class HrPermissions
     private static readonly string[] HrStaffGrants =
     {
         ViewLeave, MaintainLeave,
+        ViewAttendance, MaintainAttendance,
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -44,6 +45,7 @@ public class ShiftAssignmentsController : AttendanceControllerBase
         => Ok(await _service.GetActiveAssignmentsAsync(asOf, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftAssignmentDto>> Assign(
         [FromBody] CreateShiftAssignmentDto dto, CancellationToken ct = default)
     {
@@ -55,6 +57,7 @@ public class ShiftAssignmentsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftAssignmentDto>> Update(
         Guid id, [FromBody] UpdateShiftAssignmentDto dto, CancellationToken ct = default)
     {
@@ -66,6 +69,7 @@ public class ShiftAssignmentsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

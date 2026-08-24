@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -86,6 +87,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<HolidayCalendarDto>> Create(
         [FromBody] CreateHolidayCalendarDto dto,
         CancellationToken ct = default)
@@ -98,6 +100,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<HolidayCalendarDto>> Update(
         Guid id,
         [FromBody] UpdateHolidayCalendarDto dto,
@@ -118,6 +121,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         try
@@ -169,6 +173,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/holidays")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PublicHolidayDto>> AddHoliday(
         Guid id,
         [FromBody] CreatePublicHolidayDto dto,
@@ -197,6 +202,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}/holidays/{holidayId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PublicHolidayDto>> UpdateHoliday(
         Guid id,
         Guid holidayId,
@@ -228,6 +234,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}/holidays/{holidayId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> DeleteHoliday(
         Guid id,
         Guid holidayId,

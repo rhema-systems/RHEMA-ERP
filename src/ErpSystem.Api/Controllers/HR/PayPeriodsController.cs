@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -55,6 +56,7 @@ public class PayPeriodsController : AttendanceControllerBase
         => Ok(await _service.GetWithSummariesAsync(id, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PayPeriodDto>> Create(
         [FromBody] CreatePayPeriodDto dto, CancellationToken ct = default)
     {
@@ -66,6 +68,7 @@ public class PayPeriodsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PayPeriodDto>> Update(
         Guid id, [FromBody] UpdatePayPeriodDto dto, CancellationToken ct = default)
     {
@@ -77,6 +80,7 @@ public class PayPeriodsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/close")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PayPeriodDto>> Close(Guid id, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;
@@ -85,6 +89,7 @@ public class PayPeriodsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

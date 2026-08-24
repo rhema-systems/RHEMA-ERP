@@ -1303,6 +1303,25 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerLeave)));
 
+            // HR attendance & time policies (W3 slice 6) — attendance proper plus the consultant
+            // timesheet/engagement/invoicing registers. Same split as leave: org-wide surfaces
+            // authorize here, token-actor acts (punch, raising your own regularization) and own-
+            // record reads stay on InternalOnly with ownership checks, and approvals stay with
+            // the workflow assignee. Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.AttendanceReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewAttendance,
+                        HrPermissions.MaintainAttendance,
+                        HrPermissions.AdministerAttendance)))
+                .AddPolicy(HrPermissions.AttendanceWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainAttendance,
+                        HrPermissions.AdministerAttendance)))
+                .AddPolicy(HrPermissions.AttendanceAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerAttendance)));
+
             // HR occupational-health policies. The medical controllers previously carried a bare
             // [Authorize], so every authenticated employee could read and delete medical records.
             // Administer implies Write implies Read, so an admin does not need all three granted.

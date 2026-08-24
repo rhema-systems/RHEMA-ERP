@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -23,6 +24,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<ClientEngagementSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -30,45 +32,58 @@ public class ClientEngagementsController : AttendanceControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<ClientEngagementDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("code/{engagementCode}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<ClientEngagementDto?>> GetByEngagementCode(
         string engagementCode, CancellationToken ct = default)
         => Ok(await _service.GetByEngagementCodeAsync(engagementCode, ct));
 
     [HttpGet("client/{clientId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ClientEngagementSummaryDto>>> GetByClientId(
         Guid clientId, CancellationToken ct = default)
         => Ok(await _service.GetByClientIdAsync(clientId, ct));
 
+    // W3: self-or-permission — a consultant lists their OWN engagements to file a timesheet.
     [HttpGet("consultant/{consultantEmployeeId:guid}")]
     public async Task<ActionResult<IEnumerable<ClientEngagementSummaryDto>>> GetByConsultantId(
         Guid consultantEmployeeId, CancellationToken ct = default)
-        => Ok(await _service.GetByConsultantIdAsync(consultantEmployeeId, ct));
+    {
+        if (!await SelfOrPolicyAsync(consultantEmployeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetByConsultantIdAsync(consultantEmployeeId, ct));
+    }
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ClientEngagementSummaryDto>>> GetByStatus(
         ClientEngagementStatus status, CancellationToken ct = default)
         => Ok(await _service.GetByStatusAsync(status, ct));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ClientEngagementSummaryDto>>> GetActiveEngagements(
         CancellationToken ct = default)
         => Ok(await _service.GetActiveEngagementsAsync(ct));
 
     [HttpGet("billing-cycle/{cycle}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ClientEngagementSummaryDto>>> GetByBillingCycle(
         BillingCycle cycle, CancellationToken ct = default)
         => Ok(await _service.GetByBillingCycleAsync(cycle, ct));
 
     [HttpGet("ending-within")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ClientEngagementSummaryDto>>> GetEngagementsEndingWithin(
         [FromQuery] int days = 30, CancellationToken ct = default)
         => Ok(await _service.GetEngagementsEndingWithinAsync(days, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Create(
         [FromBody] CreateClientEngagementDto dto, CancellationToken ct = default)
     {
@@ -80,6 +95,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Update(
         Guid id, [FromBody] UpdateClientEngagementDto dto, CancellationToken ct = default)
     {
@@ -91,6 +107,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Activate(Guid id, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;
@@ -99,6 +116,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Complete(
         Guid id, [FromBody] CompleteEngagementRequest request, CancellationToken ct = default)
     {
@@ -108,6 +126,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/suspend")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Suspend(Guid id, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;
@@ -116,6 +135,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/resume")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Resume(Guid id, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;
@@ -124,6 +144,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/terminate")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ClientEngagementDto>> Terminate(
         Guid id, [FromBody] TerminateEngagementRequest request, CancellationToken ct = default)
     {
@@ -133,6 +154,7 @@ public class ClientEngagementsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -50,6 +51,7 @@ public class WorkSchedulesController : AttendanceControllerBase
         => Ok(await _service.GetByTypeAsync(type, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<WorkScheduleDto>> Create(
         [FromBody] CreateWorkScheduleDto dto, CancellationToken ct = default)
     {
@@ -61,6 +63,7 @@ public class WorkSchedulesController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<WorkScheduleDto>> Update(
         Guid id, [FromBody] UpdateWorkScheduleDto dto, CancellationToken ct = default)
     {
@@ -72,6 +75,7 @@ public class WorkSchedulesController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);
@@ -84,6 +88,7 @@ public class WorkSchedulesController : AttendanceControllerBase
         => Ok(await _service.GetShiftsAsync(id, ct));
 
     [HttpPost("{id:guid}/shifts")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftDefinitionDto>> AddShift(
         Guid id, [FromBody] CreateShiftDefinitionDto dto, CancellationToken ct = default)
     {
@@ -96,6 +101,7 @@ public class WorkSchedulesController : AttendanceControllerBase
     }
 
     [HttpPut("shifts/{shiftId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftDefinitionDto>> UpdateShift(
         Guid shiftId, [FromBody] UpdateShiftDefinitionDto dto, CancellationToken ct = default)
     {
@@ -107,6 +113,7 @@ public class WorkSchedulesController : AttendanceControllerBase
     }
 
     [HttpDelete("shifts/{shiftId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> DeleteShift(Guid shiftId, CancellationToken ct = default)
     {
         await _service.DeleteShiftAsync(shiftId, ct);

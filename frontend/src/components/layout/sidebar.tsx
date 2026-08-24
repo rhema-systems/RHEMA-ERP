@@ -473,9 +473,14 @@ export const navigationItems: NavItem[] = [
         icon: ShieldPlus,
       },
       {
+        // W3 slice 6: every child here is a desk surface (org-wide search, monitoring, exports,
+        // biometrics), so the whole section rides on the attendance read tier. Employee
+        // self-service (punch, own records, own regularizations) arrives with area 25's portal
+        // and authorizes by ownership, not by this permission.
         title: 'Attendance & Time',
         href: '/hr/attendance',
         icon: Clock,
+        permissions: ['HR.Attendance.Read'],
         children: [
           { title: 'Daily Attendance', href: '/hr/attendance/daily', icon: CalendarCheck },
           { title: 'Attendance Records', href: '/hr/attendance/records', icon: ClipboardList },
@@ -491,9 +496,12 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // W3 slice 6: management registers (clients, engagements, invoicing) — attendance read
+        // tier. A consultant's own timesheet surface is self-service and comes with area 25.
         title: 'Consulting',
         href: '/hr/consulting',
         icon: Briefcase,
+        permissions: ['HR.Attendance.Read'],
         children: [
           { title: 'Clients', href: '/hr/consulting/clients', icon: Building2 },
           { title: 'Engagements', href: '/hr/consulting/engagements', icon: FileCheck },

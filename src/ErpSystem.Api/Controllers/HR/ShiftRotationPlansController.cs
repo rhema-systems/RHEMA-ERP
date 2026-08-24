@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -54,6 +55,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
         => Ok(await _service.GetWithMembersAsync(id, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftRotationPlanDto>> Create(
         [FromBody] CreateShiftRotationPlanDto dto, CancellationToken ct = default)
     {
@@ -65,6 +67,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftRotationPlanDto>> Update(
         Guid id, [FromBody] UpdateShiftRotationPlanDto dto, CancellationToken ct = default)
     {
@@ -76,6 +79,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);
@@ -83,6 +87,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/stages")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftRotationStageDto>> AddStage(
         Guid id, [FromBody] CreateShiftRotationStageDto dto, CancellationToken ct = default)
     {
@@ -99,6 +104,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
         => Ok(await _service.GetStagesAsync(id, ct));
 
     [HttpPut("stages/{stageId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftRotationStageDto>> UpdateStage(
         Guid stageId, [FromBody] UpdateShiftRotationStageDto dto, CancellationToken ct = default)
     {
@@ -110,6 +116,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
     }
 
     [HttpDelete("stages/{stageId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> DeleteStage(Guid stageId, CancellationToken ct = default)
     {
         await _service.DeleteStageAsync(stageId, ct);
@@ -117,6 +124,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/members")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftRotationMemberDto>> EnrollMember(
         Guid id, [FromBody] AddShiftRotationMemberDto dto, CancellationToken ct = default)
     {
@@ -133,6 +141,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
         => Ok(await _service.GetMembersAsync(id, ct));
 
     [HttpPut("members/{memberId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftRotationMemberDto>> UpdateMember(
         Guid memberId, [FromBody] UpdateShiftRotationMemberDto dto, CancellationToken ct = default)
     {
@@ -144,6 +153,7 @@ public class ShiftRotationPlansController : AttendanceControllerBase
     }
 
     [HttpDelete("members/{memberId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> RemoveMember(Guid memberId, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;

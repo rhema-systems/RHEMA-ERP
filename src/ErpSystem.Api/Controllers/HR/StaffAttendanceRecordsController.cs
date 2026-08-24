@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,35 +23,54 @@ public class StaffAttendanceRecordsController : AttendanceControllerBase
     }
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<StaffAttendanceRecordSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
+    // W3: self-or-permission — ownership is only knowable after the fetch.
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<StaffAttendanceRecordDto>> GetById(Guid id, CancellationToken ct = default)
-        => Ok(await _service.GetByIdAsync(id, ct));
+    {
+        var record = await _service.GetByIdAsync(id, ct);
+        if (!await SelfOrPolicyAsync(record.EmployeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(record);
+    }
 
+    // W3: self-or-permission — an employee reads their own day.
     [HttpGet("employee/{employeeId:guid}/date/{date}")]
     public async Task<ActionResult<StaffAttendanceRecordDto?>> GetByEmployeeAndDate(
         Guid employeeId, DateOnly date, CancellationToken ct = default)
-        => Ok(await _service.GetByEmployeeAndDateAsync(employeeId, date, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetByEmployeeAndDateAsync(employeeId, date, ct));
+    }
 
+    // W3: self-or-permission — an employee reads their own record run.
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffAttendanceRecordSummaryDto>>> GetByEmployeeId(
         Guid employeeId,
         [FromQuery] DateOnly from,
         [FromQuery] DateOnly to,
         CancellationToken ct = default)
-        => Ok(await _service.GetByEmployeeIdAsync(employeeId, from, to, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId, from, to, ct));
+    }
 
     [HttpGet("date/{date}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceRecordSummaryDto>>> GetByDate(
         DateOnly date, CancellationToken ct = default)
         => Ok(await _service.GetByDateAsync(date, ct));
 
     [HttpGet("range")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceRecordSummaryDto>>> GetByDateRange(
         [FromQuery] DateOnly from,
         [FromQuery] DateOnly to,
@@ -58,6 +78,7 @@ public class StaffAttendanceRecordsController : AttendanceControllerBase
         => Ok(await _service.GetByDateRangeAsync(from, to, ct));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceRecordSummaryDto>>> GetByStatus(
         StaffAttendanceStatus status,
         [FromQuery] DateOnly from,
@@ -66,6 +87,7 @@ public class StaffAttendanceRecordsController : AttendanceControllerBase
         => Ok(await _service.GetByStatusAsync(status, from, to, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceRecordDto>> Create(
         [FromBody] CreateStaffAttendanceRecordDto dto, CancellationToken ct = default)
     {
@@ -77,6 +99,7 @@ public class StaffAttendanceRecordsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceRecordDto>> Update(
         Guid id, [FromBody] UpdateStaffAttendanceRecordDto dto, CancellationToken ct = default)
     {
@@ -88,6 +111,7 @@ public class StaffAttendanceRecordsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

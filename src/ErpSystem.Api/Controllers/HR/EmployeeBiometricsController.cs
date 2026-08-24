@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,6 +23,7 @@ public class EmployeeBiometricsController : AttendanceControllerBase
     }
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<EmployeeBiometricSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -29,30 +31,36 @@ public class EmployeeBiometricsController : AttendanceControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<EmployeeBiometricDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("employee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeBiometricSummaryDto>>> GetByEmployeeId(
         Guid employeeId, CancellationToken ct = default)
         => Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
 
     [HttpGet("employee/{employeeId:guid}/active")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeBiometricSummaryDto>>> GetActiveBiometricsForEmployee(
         Guid employeeId, CancellationToken ct = default)
         => Ok(await _service.GetActiveBiometricsForEmployeeAsync(employeeId, ct));
 
     [HttpGet("employee/{employeeId:guid}/type/{type}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<EmployeeBiometricDto?>> GetByEmployeeAndType(
         Guid employeeId, BiometricType type, CancellationToken ct = default)
         => Ok(await _service.GetByEmployeeAndTypeAsync(employeeId, type, ct));
 
     [HttpGet("type/{type}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeBiometricSummaryDto>>> GetByType(
         BiometricType type, CancellationToken ct = default)
         => Ok(await _service.GetByTypeAsync(type, ct));
 
     [HttpPost("enrol")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<EmployeeBiometricDto>> Enrol(
         [FromBody] EnrollBiometricDto dto, CancellationToken ct = default)
     {
@@ -64,6 +72,7 @@ public class EmployeeBiometricsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<EmployeeBiometricDto>> Update(
         Guid id, [FromBody] UpdateEmployeeBiometricDto dto, CancellationToken ct = default)
     {
@@ -75,6 +84,7 @@ public class EmployeeBiometricsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/revoke")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<IActionResult> Revoke(
         Guid id, [FromBody] RevokeBiometricRequest request, CancellationToken ct = default)
     {
@@ -85,6 +95,7 @@ public class EmployeeBiometricsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,10 +25,12 @@ public class StaffAttendanceAlertRulesController : AttendanceControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceAlertRuleSummaryDto>>> GetAll(CancellationToken ct = default)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<StaffAttendanceAlertRuleSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -35,20 +38,24 @@ public class StaffAttendanceAlertRulesController : AttendanceControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<StaffAttendanceAlertRuleDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceAlertRuleSummaryDto>>> GetActiveRules(
         CancellationToken ct = default)
         => Ok(await _service.GetActiveRulesAsync(ct));
 
     [HttpGet("type/{alertType}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceAlertRuleSummaryDto>>> GetByType(
         AttendanceAlertTriggerType alertType, CancellationToken ct = default)
         => Ok(await _service.GetByTypeAsync(alertType, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceAlertRuleDto>> Create(
         [FromBody] CreateStaffAttendanceAlertRuleDto dto, CancellationToken ct = default)
     {
@@ -60,6 +67,7 @@ public class StaffAttendanceAlertRulesController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceAlertRuleDto>> Update(
         Guid id, [FromBody] UpdateStaffAttendanceAlertRuleDto dto, CancellationToken ct = default)
     {
@@ -71,6 +79,7 @@ public class StaffAttendanceAlertRulesController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/toggle-active")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<IActionResult> ToggleActive(Guid id, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;
@@ -80,6 +89,7 @@ public class StaffAttendanceAlertRulesController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

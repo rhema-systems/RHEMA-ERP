@@ -141,7 +141,26 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    ⚠ Recipe note for the next slices: a service method named like `GetOwnedX` may be a plain
    tenant-scoped fetch with no caller check — read it; and an attachment DTO carries
    `LeaveRequestId`, not the nav (`attachment.LeaveRequest` was this slice's one build error).
-2. **Attendance + consultant timesheets** (self clock-in/regularization surfaces)
+2. **Attendance + consultant timesheets** — ✅ **DONE 2026-08-24, harness 47/47 green
+   (+ 23/23 and 39/39 no-regression), grant rows verified in DB.** `HR.Attendance.{Read,Write,Admin}` over all 24 concrete
+   controllers on `AttendanceControllerBase` (~275 actions). The split: org-wide reads
+   (paged/status/pending/date/range, logs, alerts, biometrics, exports, dashboard, the
+   consultant/engagement/invoice registers) → Read; manual corrections, log capture/process,
+   apply-regularization, config writes, invoicing ops → Write; ALL deletes → Admin; punch and
+   the request-shaped creates stay open (token-actor by construction — the base class's
+   `TryGetTenantAndEmployee` resolves the actor); own-record reads, request update/delete
+   (withdrawal), timesheet entries/confirmation → self-or-permission (`SelfOrPolicyAsync` etc.
+   added to `AttendanceControllerBase`, resolving `IAuthorizationService` from RequestServices
+   so 24 derived ctors stay untouched); approve/reject (regularizations, remote-work,
+   timesheets) stay ungated — all three services are workflow-assignee-validated; shift/
+   schedule/holiday/pay-period/geofence config READS stay open (employee-facing reference).
+   Holes closed: any employee could edit/delete anyone's pending regularization or remote-work
+   request (services check status, never the caller), read anyone's punches/records/biometric
+   register, and amend anyone's timesheet entries. Two entity namespaces bit again:
+   `StaffAttendance.ConsultantTimesheet` (the file's folder name is not its namespace).
+   Sidebar: Attendance & Time and Consulting sections ride on HR.Attendance.Read.
+   ⚠ ConsultantTimesheetDto.`ConsultantId` IS the employee FK (verified against the entity
+   doc-comment) — self-checks key on it deliberately.
 3. **Comp & Benefits** (71 bare)
 4. **Training** (266 bare; nominations/self-enrollment are employee acts)
 5. **Recruitment** (147 bare; panelist confirms stay anonymous-tokened)
