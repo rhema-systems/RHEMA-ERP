@@ -39,8 +39,8 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–10 green twice — 1,244 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance is monitored rather than merely recorded, and an exit can no longer close over property the leaver still holds |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice10.mjs`, `probe-slice6-ui.mjs` |
+| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–11 green twice — 1,363 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance and insurance are both monitored rather than merely recorded, an exit can no longer close over property the leaver still holds, and the register can be counted on one page. **Only the screens and the content audit remain** |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice11.mjs`, `probe-slice6-ui.mjs` |
 | **Blocks / unblocks** | ✅ **Unblocked area 9b D4 in slice 10** — asset return is now an enforced clearance gate, and the clearance form is drawn from the register rather than remembered |
 
 ---
@@ -645,7 +645,7 @@ overdue returns; and the full screen set.
 | **9** | ✅ Maintenance monitoring | The schedule anchored on the work, three watchlist reads, the reminder engine, and the handle into the Maintenance module (AST-1; **D-aa, D-bb, D-cc, D-dd, D-ee, D-ff, D-gg, D-hh**; D10). Migration `AddAssetReminderEngine` |
 | **9b** | ✅ The push into Maintenance | D10 — the picker, link/unlink, `send-for-maintenance` on `AssetAdmission`, and completion discharging it. Migration `AddAssetMaintenanceAdmissionLink`. Found cross-module defect **10** |
 | **10** | ✅ Exit clearance | FR-HR-183 — the form drawn from the register, the gate that refuses to clear an asset still out, the money onto the settlement, and `refresh-assets` for the notice period. **D-ii**, and the payroll double-recovery closed. Migration `AddClearanceAssetSourcing` |
-| **11** | Reminders and reports | Insurance expiry, overdue returns, the asset register report |
+| **11** | ✅ Reminders and reports | Insurance expiry (three reads), overdue **and** due-soon returns, five new sweep rungs, and the register report. **D-jj**, **D-kk**, and `AssignmentStatus.Overdue` left deliberately unwritten. No migration |
 | **12+** | Screens, then the content audit | Admin + HR screens, then the endpoint-by-endpoint content audit that areas 11–23 proved is not optional |
 
 Slice numbering is indicative; it will move as slice 0 reports.
@@ -1529,4 +1529,108 @@ plan's trap 5), not a fault here; slice 10 publishes its own. Recorded in both R
 asset lines, the live custody column and a "refresh from the asset register" action when that area's
 screens are revisited. The sourcing flag belongs on
 `/administration/hr/separation`'s clearance-template editor.
+
+---
+
+### Slice 11 — insurance, overdue returns, and the register report. 2026-08-24, **119/119, run twice** (stamps 240002, 240003). No migration.
+
+Slice 9 gave maintenance three reads and a sweep. This gives the same treatment to the other two
+things a register has to chase, and then counts the estate on one page. Slices 1–10 re-run green —
+**1,363 assertions** for the area.
+
+**Insurance was a field nothing read.** Slice 2b put `InsuranceExpiryDate` on the register end to
+end — create, update, both read DTOs — and no query has ever asked for it back. Three reads now,
+mirroring the maintenance trio because they are three jobs: `insurance/expiring` (a renewal plan),
+`insurance/expired` (an exception list, worst first) and `insurance/undated` (marked insured, never
+dated). The third is the one that could not have existed: both other reads filter
+`InsuranceExpiryDate != null`, so an undated policy appeared nowhere and could never become due —
+slice 9's unscheduled-maintenance shape, one surface across.
+
+**⚠ One rule deliberately differs from maintenance.** `Disposed` is excluded from the insurance
+reads and **`LostStolen` is not**. Nobody renews cover on something they have sold; they very much
+keep it on something that was stolen, because the policy is what the claim runs against and a lapse
+mid-claim is the loss twice over. Slice 9's `NotServiceable` excludes both, correctly, because
+nobody services a stolen laptop. The harness asserts the difference with a control on the **same
+expiry date**, so what is measured is the status and not the window.
+
+**Returns had an exception list and no plan — and the list had no ordering at all.**
+`assignments/overdue` sorted by nothing, so the worst row could sit at the bottom of two hundred;
+it also took no `asOf`, which is why nothing had ever tested it. Both fixed, and
+`assignments/due-for-return` added: until now a return appeared on exactly one screen and only once
+it was already late, so "what is coming back this fortnight" — the question somebody arranging a
+handover actually has — had no answer anywhere.
+
+**Five new rungs on slice 9's engine, not a seventh engine.** Insurance expiring / expired /
+undated, and returns due / overdue: eight rungs over three subjects now, sharing one run history,
+one dedupe index, one escalation ladder and one answer to "did the sweep run last night".
+⚠ The return rungs are keyed on the **assignment**, not the asset — keyed on the asset, a
+replacement laptop issued under a new custody would share a dedupe key with the old one and be
+silently swallowed.
+
+**Three defects, all found by reading and all confirmed by execution** — which is the point, because
+slice 9's D-h was a defect deduced from source that execution proved wrong:
+
+- **D-jj — a field that promised a value and gave a cost.** `CompanyAssetSummaryDto.CurrentValue`
+  was mapped from `entity.PurchaseCost`. Every register list answered the acquisition price under a
+  name promising a depreciated one, and totalling that column produced a figure wrong in a direction
+  nobody could see. Renamed to `PurchaseCost` rather than made true: HR has no valuation to give —
+  depreciation and net book value are Finance's under **D1**, reachable on a linked asset through
+  `CompanyAssetDetailDto.FixedAsset` and simply absent on an HR-created one. No frontend consumer,
+  so the rename was clean.
+- **D-kk — the screen and the sweep answering different questions under the same name.** Slice 9's
+  sweep has always skipped `Disposed` and `LostStolen`; `GetDueForMaintenanceAsync` skipped neither
+  and `GetUnscheduledMaintenanceAsync` skipped only `Disposed` — **three queries, three different
+  answers** to "which assets still need servicing". A disposed asset with a stale date sat on the
+  due and overdue screens for ever while the engine correctly ignored it. Slice 9 wrote that the
+  horizon is shared *"so what the sweep chases and what the screen shows cannot drift apart"*; they
+  had already drifted on status.
+- **`AssignmentStatus.Overdue` has no writer anywhere** — the `Lost`/`Damaged` shape from slice 7
+  again, and this time the answer is to leave it unwritten. Being late is derived from a date, and a
+  derived fact stored in a status column is stale the moment the day turns. What writing it *would*
+  have done is worth recording: `GetOverdueAssignmentsAsync` asked `Status == Active`, so a sweep
+  that helpfully flipped late custodies would have **emptied the very list that reports them** — and
+  `ReturnAsync` and `ReportIncidentAsync` both refuse anything not `Active`, so a late asset could
+  then never be handed back at all. The watchlists now tolerate both statuses so the trap is
+  defused; §8 of the harness returns a 40-day-late custody to prove it.
+
+**The register report, and the one word that was wrong.** `reports/register` gives totals, five
+breakdowns and the watchlist counts, all from **one** filtered population so the page cannot
+contradict itself — and the filter reaches the exception counts too, so a report about one location
+carries that location's overdue numbers rather than the organisation's. Rows with no unit and no
+location are **grouped and named, not dropped**: an unplaced asset is exactly what a register report
+should surface, and a breakdown that silently omits it produces columns that do not add up to its
+own header. The harness asserts every breakdown sums to the total for that reason.
+
+⚠ **Its counts are disjoint and the watchlist reads are not**, and the first version of the harness
+asserted they were the same number. They are not meant to be. A LIST opened by "what is expiring?"
+must not hide the rows already lapsed, so `insurance/expiring` and `due-maintenance` both mean "on
+or before then" — slice 9 asserts exactly that for maintenance. A COUNT on a summary page is read
+differently: three numbers in a row get added up, and "due 12, overdue 5" where the 12 contains the
+5 misleads a reader doing arithmetic they were entitled to do. So the counts follow the **sweep's**
+vocabulary, which was already disjoint, and are named for it — `MaintenanceDueSoonCount`,
+`InsuranceExpiringSoonCount`. Neither behaviour changed; one word did. What the harness asserts is
+the **identity** that ties the two together, which is stronger than either number alone and would
+catch a drift in either definition — which is what D-kk was:
+
+```
+expiring-soon + expired  ==  what `insurance/expiring` returns
+due-soon      + overdue  ==  what `due-maintenance` returns
+```
+
+**Money without a currency, recorded rather than solved.** `CompanyAsset.PurchaseCost` and
+`InsuredValue` carry no currency code, unlike the surcharge and rental amounts which do. The report
+totals them, which is only safe because nothing in the register can express a second currency.
+Stated on the DTO and registered for the HR↔Finance sweep rather than fixed here.
+
+**Four of the first run's five failures were the probe's, and two had warnings already written
+down.** `nextMaintenanceDate` is not on `CreateCompanyAssetDto`, so passing it bound to nothing,
+returned 201 and left the column null — the fixture came out *unscheduled* and landed on no due
+list, exactly the "a payload key the endpoint does not know is a hole" trap the README has carried
+since slice 0, and slice 9's own harness sets that field with a separate edit for this reason. And
+`status: 5` is `LostStolen`; `Disposed` is 6 — so the "disposed" fixture was stolen, and the D-kk
+assertion **passed anyway, for the wrong reason**. A fixture that is not what it is named proves
+whatever it happens to prove.
+
+**Screen.** None. The three insurance lists, the two return lists and the register report are part
+of the HR register screens at slice 12; the report is the one that wants a print layout.
 

@@ -63,6 +63,32 @@ public interface ICompanyAssetService
     /// <summary>AST-1 — assets that require regular maintenance and have never been scheduled.</summary>
     Task<IEnumerable<AssetMaintenanceDueDto>> GetUnscheduledMaintenanceAsync();
 
+    // ── insurance and the register report, area 16 slice 11 ───────────────────
+
+    /// <summary>
+    /// Insured assets whose cover lapses inside the window — the renewal plan.
+    /// </summary>
+    /// <remarks>
+    /// The default horizon is 60 days rather than maintenance's 30: a service can be booked in a
+    /// fortnight and an insurance renewal is a quotation, an approval and a payment. ⚠ An assumed
+    /// number, not TDC's — flagged with the other assumed windows.
+    /// </remarks>
+    Task<IEnumerable<AssetInsuranceWatchItemDto>> GetInsuranceExpiringAsync(
+        int daysAhead = 60, DateOnly? asOf = null);
+
+    /// <summary>Assets whose cover has already lapsed, worst first — the exception list.</summary>
+    Task<IEnumerable<AssetInsuranceWatchItemDto>> GetInsuranceExpiredAsync(DateOnly? asOf = null);
+
+    /// <summary>Assets marked insured with no expiry date — the data-quality list.</summary>
+    Task<IEnumerable<AssetInsuranceWatchItemDto>> GetInsuranceUndatedAsync();
+
+    /// <summary>
+    /// The register counted and totalled, with the watchlists that say what needs attention.
+    /// </summary>
+    Task<AssetRegisterReportDto> GetRegisterReportAsync(
+        Guid? assetTypeId = null, Guid? unitId = null, Guid? locationId = null,
+        CompanyAssetStatus? status = null, DateOnly? asOf = null);
+
     // ── the seam with the Maintenance module — slice 9b, decision D10 ──────────────────────
 
     /// <summary>
@@ -128,7 +154,15 @@ public interface IAssetAssignmentService
     Task<AssetAssignmentDto?> GetActiveAssignmentForAssetAsync(Guid assetId);
     Task<IEnumerable<AssetAssignmentSummaryDto>> GetByEmployeeIdAsync(Guid employeeId);
     Task<IEnumerable<AssetAssignmentSummaryDto>> GetActiveAssignmentsForEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<AssetAssignmentSummaryDto>> GetOverdueAssignmentsAsync();
+    /// <summary>Custodies past their expected return date, most overdue first.</summary>
+    Task<IEnumerable<AssetAssignmentSummaryDto>> GetOverdueAssignmentsAsync(DateOnly? asOf = null);
+
+    /// <summary>
+    /// Custodies coming due back inside a window — slice 11, the plan to the overdue exception
+    /// list. Anything already late belongs to the other read.
+    /// </summary>
+    Task<IEnumerable<AssetAssignmentSummaryDto>> GetAssignmentsDueForReturnAsync(
+        int daysAhead = 14, DateOnly? asOf = null);
     Task<AssetAssignmentDto> CreateAsync(CreateAssetAssignmentDto dto);
     Task<AssetAssignmentDto> UpdateAsync(Guid id, UpdateAssetAssignmentDto dto);
     Task DeleteAsync(Guid id);

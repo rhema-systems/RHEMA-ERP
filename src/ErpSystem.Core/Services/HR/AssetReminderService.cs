@@ -12,9 +12,17 @@ using Microsoft.Extensions.Logging;
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// Sweeps the asset register for maintenance that needs chasing and dispatches a reminder for each,
-/// once. Area 16, slice 9, AST-1.
+/// Sweeps the asset register for anything that needs chasing and dispatches a reminder for each,
+/// once. Area 16, slice 9 (AST-1) and slice 11.
 /// </summary>
+/// <remarks>
+/// <para><b>Eight rungs over three subjects</b>, and deliberately one engine rather than three.
+/// Slice 9 brought maintenance due, overdue and unscheduled; slice 11 added insurance expiring,
+/// expired and undated, and returns due and overdue. A second engine would have meant a second run
+/// history, a second dedupe index and a second answer to "did the sweep run last night" — and this
+/// system already carries six of these. Every rung shares the escalation ladder, the backlog floor
+/// and the send-once guarantee, which is the whole reason they belong together.</para>
+/// </remarks>
 /// <remarks>
 /// <para><b>Why this exists.</b> AST-1 asks that an asset requiring maintenance can be
 /// <i>monitored</i>. Slice 9's three reads are half of that; this is the half that goes and finds
@@ -70,6 +78,24 @@ public class AssetReminderService : IAssetReminderService
     /// unscheduled rung catches those assets anyway once their stale date is cleared.
     /// </summary>
     private const int BacklogHorizonDays = 90;
+
+    /// <summary>How far ahead an insurance policy starts being chased for renewal.</summary>
+    /// <remarks>
+    /// 60 days rather than maintenance's 30, and the same number the register's own
+    /// <c>insurance/expiring</c> read defaults to — the two are deliberately identical so what the
+    /// sweep chases and what the screen shows cannot drift apart. A service can be booked in a
+    /// fortnight; a renewal is a quotation, an approval and a payment, and a broker who is told
+    /// four weeks before expiry is being told late. ⚠ Assumed, not TDC's.
+    /// </remarks>
+    private const int InsuranceExpiryHorizonDays = 60;
+
+    /// <summary>How far ahead a custody starts being chased for return.</summary>
+    /// <remarks>
+    /// 14 days, matching <c>assignments/due-for-return</c>. Shorter than either of the others on
+    /// purpose: an expected return date is an arrangement between two people, and a reminder six
+    /// weeks out is a reminder nobody acts on and everybody learns to skip.
+    /// </remarks>
+    private const int ReturnDueHorizonDays = 14;
 
     // ---- the sweep ---------------------------------------------------------
 
@@ -338,6 +364,117 @@ public class AssetReminderService : IAssetReminderService
                 $"/hr/assets/{a.Id}"));
         }
 
+        // 4 & 5. Insurance, lapsing soon or already lapsed. ONE query and two rungs for the reason
+        //        the maintenance pair gives: they select the same rows under the same rule and
+        //        differ only in the sign of the gap, so two queries would let them disagree about
+        //        the boundary day — and the boundary day is the one a policy is either live or not.
+        //
+        // ⚠ Disposed is excluded and LostStolen is NOT, which is the opposite of NotServiceable.
+        // Nobody renews cover on something they have sold; they very much do keep it on something
+        // that was stolen, because the policy is what the claim runs against and a lapse mid-claim
+        // is the loss twice over.
+        var insured = await _unitOfWork.Repository<CompanyAsset>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted
+                            && a.IsInsured
+                            && a.InsuranceExpiryDate != null
+                            && a.InsuranceExpiryDate <= today.AddDays(InsuranceExpiryHorizonDays)
+                            && a.InsuranceExpiryDate >= backlogFloor
+                            && a.Status != CompanyAssetStatus.Disposed)
+            .Select(a => new { a.Id, a.AssetNumber, a.AssetName, a.InsuranceExpiryDate })
+            .ToListAsync(cancellationToken);
+
+        foreach (var a in insured)
+        {
+            var days = a.InsuranceExpiryDate!.Value.DayNumber - today.DayNumber;
+            var tier = TierFor(days);
+            var lapsed = days < 0;
+            var kind = lapsed ? "InsuranceExpired" : "InsuranceExpiringSoon";
+
+            results.Add(new Candidate(
+                kind,
+                lapsed ? "InsuranceExpired" : "InsuranceExpiring",
+                "Company asset",
+                a.Id,
+                a.Id,
+                $"{a.AssetNumber} {a.AssetName}".Trim(),
+                a.InsuranceExpiryDate.Value.ToDateTime(TimeOnly.MinValue),
+                days,
+                tier,
+                $"{kind}:{a.Id}:{a.InsuranceExpiryDate:yyyy-MM-dd}:{tier}",
+                $"/hr/assets/{a.Id}"));
+        }
+
+        // 6. Assets marked insured with no expiry date — the insurance twin of the unscheduled
+        //    maintenance rung, keyed on the MONTH for the same reason: there is no due date to key
+        //    on, so per-asset would fire once in the register's lifetime and per-day would arrive
+        //    every morning until somebody muted the engine.
+        var undated = await _unitOfWork.Repository<CompanyAsset>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted
+                            && a.IsInsured
+                            && a.InsuranceExpiryDate == null
+                            && a.Status != CompanyAssetStatus.Disposed)
+            .Select(a => new { a.Id, a.AssetNumber, a.AssetName })
+            .ToListAsync(cancellationToken);
+
+        foreach (var a in undated)
+        {
+            results.Add(new Candidate(
+                "InsuranceUndated",
+                "InsuranceUndated",
+                "Company asset",
+                a.Id,
+                a.Id,
+                $"{a.AssetNumber} {a.AssetName}".Trim(),
+                null,
+                0,
+                0,
+                $"InsuranceUndated:{a.Id}:{today:yyyy-MM}",
+                $"/hr/assets/{a.Id}"));
+        }
+
+        // 7 & 8. Custodies coming due back, and custodies already late. The reminder goes to HR
+        //        rather than to the holder: the topic recipient is the HR role, as every rung here
+        //        is, and chasing the employee directly is a decision about tone that belongs with
+        //        TDC rather than with a sweep.
+        //
+        // ⚠ Keyed on the ASSIGNMENT, not the asset, and the Reference names the asset. An employee
+        // who is issued a replacement laptop under a new assignment must be chased for the new one
+        // on its own dates; keyed on the asset the two custodies would share a dedupe key and the
+        // second would be silently swallowed by the first.
+        var custodies = await _unitOfWork.Repository<AssetAssignment>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted
+                            && (a.Status == AssignmentStatus.Active || a.Status == AssignmentStatus.Overdue)
+                            && a.ExpectedReturnDate != null
+                            && a.ExpectedReturnDate <= today.AddDays(ReturnDueHorizonDays)
+                            && a.ExpectedReturnDate >= backlogFloor)
+            .Select(a => new
+            {
+                a.Id, a.AssetId, a.ExpectedReturnDate,
+                a.Asset.AssetNumber, a.Asset.AssetName,
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var c in custodies)
+        {
+            var days = c.ExpectedReturnDate!.Value.DayNumber - today.DayNumber;
+            var tier = TierFor(days);
+            var late = days < 0;
+            var kind = late ? "ReturnOverdue" : "ReturnDueSoon";
+
+            results.Add(new Candidate(
+                kind,
+                late ? "ReturnOverdue" : "ReturnDueSoon",
+                "Asset assignment",
+                c.Id,
+                c.AssetId,
+                $"{c.AssetNumber} {c.AssetName}".Trim(),
+                c.ExpectedReturnDate.Value.ToDateTime(TimeOnly.MinValue),
+                days,
+                tier,
+                $"{kind}:{c.Id}:{c.ExpectedReturnDate:yyyy-MM-dd}:{tier}",
+                $"/hr/assets/{c.AssetId}"));
+        }
+
         return results;
     }
 
@@ -365,6 +502,28 @@ public class AssetReminderService : IAssetReminderService
             "System-seeded asset reminder — an asset requires regular maintenance and has no next date.",
             "No maintenance scheduled: {{Reference}}",
             "{{ItemType}} {{Reference}} is marked as requiring regular maintenance but has no next maintenance date."),
+
+        // ── slice 11 ──────────────────────────────────────────────────────────
+        new("InsuranceExpiring", "Assets: Insurance expiring",
+            "System-seeded asset reminder — an asset's insurance cover is approaching its expiry date.",
+            "Insurance expiring: {{Reference}}",
+            "{{ItemType}} {{Reference}} has insurance cover expiring on {{DueDate}} — {{Days}} day(s) remaining."),
+        new("InsuranceExpired", "Assets: Insurance expired",
+            "System-seeded asset reminder — an asset's insurance cover has lapsed.",
+            "Insurance expired: {{Reference}}",
+            "{{ItemType}} {{Reference}} has been uninsured since {{DueDate}} — {{Days}} day(s) (tier {{EscalationTier}})."),
+        new("InsuranceUndated", "Assets: Insurance has no expiry date",
+            "System-seeded asset reminder — an asset is marked insured and carries no expiry date.",
+            "No insurance expiry recorded: {{Reference}}",
+            "{{ItemType}} {{Reference}} is marked as insured but has no expiry date, so its cover cannot be renewed on time."),
+        new("ReturnDueSoon", "Assets: Return due",
+            "System-seeded asset reminder — an issued asset is due back.",
+            "Asset due back: {{Reference}}",
+            "{{ItemType}} {{Reference}} is due back on {{DueDate}} — {{Days}} day(s) remaining."),
+        new("ReturnOverdue", "Assets: Return overdue",
+            "System-seeded asset reminder — an issued asset is past its expected return date.",
+            "Asset return overdue: {{Reference}}",
+            "{{ItemType}} {{Reference}} was due back on {{DueDate}} — {{Days}} day(s) overdue (tier {{EscalationTier}})."),
     };
 
     private async Task EnsureTopicsAsync(Guid tenantId, CancellationToken cancellationToken)

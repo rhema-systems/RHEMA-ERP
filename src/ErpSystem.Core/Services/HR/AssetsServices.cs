@@ -546,13 +546,23 @@ public class CompanyAssetService : ICompanyAssetService
     private readonly ILogger<CompanyAssetService> _logger;
     private readonly IFixedAssetService _fixedAssetService;
 
+    // Slice 11's register report counts overdue returns and outstanding charges beside the asset
+    // totals. It reads them through the repositories that OWN those predicates rather than
+    // restating "overdue" and "outstanding" here — the same rule the exit-clearance bridge follows,
+    // and for the same reason: two definitions of owed money drift, and only one of them is on the
+    // screen somebody signs.
+    private readonly IAssetAssignmentRepository _assignmentRepo;
+    private readonly IAssetSurchargeRepository _surchargeRepo;
+
     public CompanyAssetService(
         ICompanyAssetRepository assetRepo,
         IAssetAttributeValueRepository attributeValueRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
         ILogger<CompanyAssetService> logger,
-        IFixedAssetService fixedAssetService)
+        IFixedAssetService fixedAssetService,
+        IAssetAssignmentRepository assignmentRepo,
+        IAssetSurchargeRepository surchargeRepo)
     {
         _assetRepo = assetRepo;
         _attributeValueRepo = attributeValueRepo;
@@ -560,6 +570,8 @@ public class CompanyAssetService : ICompanyAssetService
         _currentUserService = currentUserService;
         _logger = logger;
         _fixedAssetService = fixedAssetService;
+        _assignmentRepo = assignmentRepo;
+        _surchargeRepo = surchargeRepo;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -748,6 +760,184 @@ public class CompanyAssetService : ICompanyAssetService
         var at = DateOnly.FromDateTime(DateTime.UtcNow);
         var assets = await _assetRepo.GetUnscheduledMaintenanceAsync(tenantId);
         return assets.ToMaintenanceDueDtoList(at);
+    }
+
+    // ── insurance, area 16 slice 11 ───────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<AssetInsuranceWatchItemDto>> GetInsuranceExpiringAsync(
+        int daysAhead = 60, DateOnly? asOf = null)
+    {
+        var tenantId = GetTenantId();
+
+        // The D-gg guards, applied at birth rather than discovered. A negative horizon pushes the
+        // cut-off into the past and the read answers 200 with an empty list — indistinguishable
+        // from an estate with every policy in order, which is the one answer an insurance screen
+        // must never receive by accident.
+        if (daysAhead < 0)
+            throw AssetsWorkflowException.Invalid(
+                "daysAhead cannot be negative. Use the expired read for cover that has already lapsed.");
+        if (daysAhead > 3650)
+            throw AssetsWorkflowException.Invalid("daysAhead cannot exceed 3650 (ten years).");
+
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var assets = await _assetRepo.GetInsuranceExpiringAsync(tenantId, at.AddDays(daysAhead));
+        return assets.ToInsuranceWatchItemDtoList(at);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<AssetInsuranceWatchItemDto>> GetInsuranceExpiredAsync(DateOnly? asOf = null)
+    {
+        var tenantId = GetTenantId();
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Strictly before today: cover that runs out today is still cover.
+        var assets = await _assetRepo.GetInsuranceExpiringAsync(tenantId, at.AddDays(-1));
+
+        // Worst first. The expiring read is ordered by date ascending, which for lapsed rows is the
+        // same order — stated anyway, because an exception list that buries its worst row is the
+        // failure this rule exists for.
+        return assets.ToInsuranceWatchItemDtoList(at)
+            .OrderBy(a => a.DaysRemaining)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<AssetInsuranceWatchItemDto>> GetInsuranceUndatedAsync()
+    {
+        var tenantId = GetTenantId();
+        var at = DateOnly.FromDateTime(DateTime.UtcNow);
+        var assets = await _assetRepo.GetInsuranceUndatedAsync(tenantId);
+        return assets.ToInsuranceWatchItemDtoList(at);
+    }
+
+    // ── the register report, area 16 slice 11 ─────────────────────────────────
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Counted from the register, not from the watchlists' own reads.</b> The filtered
+    /// population is loaded once and every total, breakdown and count is taken from that one set,
+    /// so the report is internally consistent by construction: a page whose header says 40 assets
+    /// and whose maintenance count was fetched from an unfiltered read would be a page that
+    /// contradicts itself, and nobody would be able to say which half was wrong.</para>
+    ///
+    /// <para>⚠ <b>The watchlist counts therefore honour the filter too.</b> "Overdue maintenance in
+    /// the Accra store" is the number a store report should carry, not the organisation's total
+    /// printed on a page about one location.</para>
+    /// </remarks>
+    public async Task<AssetRegisterReportDto> GetRegisterReportAsync(
+        Guid? assetTypeId = null, Guid? unitId = null, Guid? locationId = null,
+        CompanyAssetStatus? status = null, DateOnly? asOf = null)
+    {
+        var tenantId = GetTenantId();
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var assets = (await _assetRepo.GetByTenantAsync(tenantId))
+            .Where(a => assetTypeId is not { } t || a.AssetTypeId == t)
+            .Where(a => unitId is not { } u || a.UnitId == u)
+            .Where(a => locationId is not { } l || a.LocationId == l)
+            .Where(a => status is not { } st || a.Status == st)
+            .ToList();
+
+        var ids = assets.Select(a => a.Id).ToHashSet();
+
+        // Custody and money come from their own stores; both are scoped to the filtered assets so
+        // the whole page describes one population.
+        var overdueReturns = (await _assignmentRepo.GetOverdueAssignmentsAsync(tenantId, at))
+            .Count(a => ids.Contains(a.AssetId));
+
+        var charges = (await _surchargeRepo.GetOutstandingAsync(tenantId))
+            .Where(c => c.Assignment != null && ids.Contains(c.Assignment.AssetId))
+            .ToList();
+
+        static AssetRegisterGroupDto Group(Guid? id, string name, IEnumerable<CompanyAsset> rows)
+        {
+            var list = rows.ToList();
+            return new AssetRegisterGroupDto
+            {
+                Id = id,
+                Name = name,
+                AssetCount = list.Count,
+                TotalPurchaseCost = list.Sum(a => a.PurchaseCost ?? 0m),
+                AssignedCount = list.Count(a => a.IsCurrentlyAssigned),
+            };
+        }
+
+        var maintenanceWatched = assets.Where(a =>
+            a.RequiresRegularMaintenance
+            && a.Status != CompanyAssetStatus.Disposed
+            && a.Status != CompanyAssetStatus.LostStolen).ToList();
+
+        var insuranceWatched = assets.Where(a =>
+            a.IsInsured && a.Status != CompanyAssetStatus.Disposed).ToList();
+
+        return new AssetRegisterReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            AsOf = at,
+
+            AssetTypeId = assetTypeId,
+            AssetTypeName = assets.FirstOrDefault(a => a.AssetTypeId == assetTypeId)?.AssetType?.Name,
+            UnitId = unitId,
+            UnitName = assets.FirstOrDefault(a => a.UnitId == unitId)?.Unit?.Name,
+            LocationId = locationId,
+            LocationName = assets.FirstOrDefault(a => a.LocationId == locationId)?.Location?.Name,
+            Status = status,
+            StatusName = status?.ToString(),
+
+            AssetCount = assets.Count,
+            AssignedCount = assets.Count(a => a.IsCurrentlyAssigned),
+            UnassignedCount = assets.Count(a => !a.IsCurrentlyAssigned),
+            AssignableCount = assets.Count(a => a.IsAssignable),
+            RentableCount = assets.Count(a => a.IsRentable),
+            InsuredCount = assets.Count(a => a.IsInsured),
+            UninsuredCount = assets.Count(a => !a.IsInsured),
+            FromFixedAssetsCount = assets.Count(a => a.Source == AssetSource.FixedAssetsModule),
+            HrCreatedCount = assets.Count(a => a.Source == AssetSource.HrCreated),
+            LinkedToMaintenanceCount = assets.Count(a => a.MaintenanceAssetId != null),
+
+            TotalPurchaseCost = assets.Sum(a => a.PurchaseCost ?? 0m),
+            TotalInsuredValue = assets.Sum(a => a.InsuredValue ?? 0m),
+            AssetsWithoutPurchaseCost = assets.Count(a => a.PurchaseCost is null),
+
+            ByStatus = assets.GroupBy(a => a.Status)
+                .Select(g => Group(null, g.Key.ToString(), g))
+                .OrderByDescending(g => g.AssetCount).ThenBy(g => g.Name).ToList(),
+            ByAssetType = assets.GroupBy(a => new { a.AssetTypeId, Name = a.AssetType?.Name })
+                .Select(g => Group(g.Key.AssetTypeId, g.Key.Name ?? "(unnamed type)", g))
+                .OrderByDescending(g => g.AssetCount).ThenBy(g => g.Name).ToList(),
+            ByCondition = assets.GroupBy(a => a.Condition)
+                .Select(g => Group(null, g.Key.ToString(), g))
+                .OrderByDescending(g => g.AssetCount).ThenBy(g => g.Name).ToList(),
+            // ⚠ Rows with no unit and no location are GROUPED, not dropped. An asset nobody has
+            // placed is the row a register report most needs to surface, and a breakdown that
+            // silently omits it produces columns that do not add up to the header.
+            ByUnit = assets.GroupBy(a => new { a.UnitId, Name = a.Unit?.Name })
+                .Select(g => Group(g.Key.UnitId, g.Key.Name ?? "(no unit set)", g))
+                .OrderByDescending(g => g.AssetCount).ThenBy(g => g.Name).ToList(),
+            ByLocation = assets.GroupBy(a => new { a.LocationId, Name = a.Location?.Name })
+                .Select(g => Group(g.Key.LocationId, g.Key.Name ?? "(no location set)", g))
+                .OrderByDescending(g => g.AssetCount).ThenBy(g => g.Name).ToList(),
+
+            // Disjoint by design — see the remarks on AssetRegisterReportDto. The watchlist READS
+            // are inclusive of the late rows; these counts are not, and the two are reconciled by
+            // the identity stated there.
+            MaintenanceDueSoonCount = maintenanceWatched.Count(a =>
+                a.NextMaintenanceDate is { } d && d >= at && d <= at.AddDays(30)),
+            MaintenanceOverdueCount = maintenanceWatched.Count(a =>
+                a.NextMaintenanceDate is { } d && d < at),
+            MaintenanceUnscheduledCount = maintenanceWatched.Count(a => a.NextMaintenanceDate is null),
+
+            InsuranceExpiringSoonCount = insuranceWatched.Count(a =>
+                a.InsuranceExpiryDate is { } d && d >= at && d <= at.AddDays(60)),
+            InsuranceExpiredCount = insuranceWatched.Count(a =>
+                a.InsuranceExpiryDate is { } d && d < at),
+            InsuranceUndatedCount = insuranceWatched.Count(a => a.InsuranceExpiryDate is null),
+
+            ReturnsOverdueCount = overdueReturns,
+            OutstandingSurchargeCount = charges.Count,
+            OutstandingSurchargeAmount = charges.Sum(c => c.AssessedAmount - c.AmountRecovered),
+        };
     }
 
     public async Task<CompanyAssetDto> CreateAsync(CreateCompanyAssetDto dto)
@@ -1382,10 +1572,33 @@ public class AssetAssignmentService : IAssetAssignmentService
         return assignments.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<AssetAssignmentSummaryDto>> GetOverdueAssignmentsAsync()
+    /// <inheritdoc />
+    public async Task<IEnumerable<AssetAssignmentSummaryDto>> GetOverdueAssignmentsAsync(DateOnly? asOf = null)
     {
         var tenantId = GetTenantId();
-        var assignments = await _assignmentRepo.GetOverdueAssignmentsAsync(tenantId);
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var assignments = await _assignmentRepo.GetOverdueAssignmentsAsync(tenantId, at);
+        return assignments.ToSummaryDtoList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<AssetAssignmentSummaryDto>> GetAssignmentsDueForReturnAsync(
+        int daysAhead = 14, DateOnly? asOf = null)
+    {
+        var tenantId = GetTenantId();
+
+        // The same two guards the maintenance and insurance windows carry, for the same reason: a
+        // negative horizon would answer 200 with an empty list, which reads as "nothing is coming
+        // back" — the most reassuring possible way to be wrong.
+        if (daysAhead < 0)
+            throw AssetsWorkflowException.Invalid(
+                "daysAhead cannot be negative. Use the overdue read for returns that are already late.");
+        if (daysAhead > 3650)
+            throw AssetsWorkflowException.Invalid("daysAhead cannot exceed 3650 (ten years).");
+
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var assignments = await _assignmentRepo.GetAssignmentsDueForReturnAsync(
+            tenantId, at, at.AddDays(daysAhead));
         return assignments.ToSummaryDtoList();
     }
 

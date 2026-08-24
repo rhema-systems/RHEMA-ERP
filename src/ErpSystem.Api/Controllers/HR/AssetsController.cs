@@ -364,6 +364,80 @@ public class AssetsController : ControllerBase
         return Ok(result);
     }
 
+    // ── insurance — area 16 slice 11 ──────────────────────────────────────────
+    //
+    // The same three jobs the maintenance reads answer, over the field slice 2b added and nothing
+    // has ever read back: a renewal plan, an exception list, and the data-quality list of assets
+    // ticked as insured that nobody ever dated.
+
+    /// <summary>Insured assets whose cover lapses inside the window — the renewal plan.</summary>
+    /// <remarks>
+    /// The default horizon is 60 days, not maintenance's 30: a service can be booked in a
+    /// fortnight, and a renewal is a quotation, an approval and a payment. ⚠ An assumed number
+    /// rather than TDC's — flagged with the area's other assumed windows.
+    /// </remarks>
+    [HttpGet("insurance/expiring")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetInsuranceWatchItemDto>>> GetInsuranceExpiring(
+        [FromQuery] int daysAhead = 60,
+        [FromQuery] DateOnly? asOf = null)
+    {
+        var result = await _companyAssetService.GetInsuranceExpiringAsync(daysAhead, asOf);
+        return Ok(result);
+    }
+
+    /// <summary>Assets whose cover has already lapsed, worst first.</summary>
+    /// <remarks>
+    /// Its own read rather than a filter on the one above, for the reason the overdue-maintenance
+    /// read gives: "what do I renew this quarter" and "what are we running uninsured" are different
+    /// jobs for different people, and four lapsed rows inside a list of eighty upcoming ones are
+    /// lost rows.
+    /// </remarks>
+    [HttpGet("insurance/expired")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetInsuranceWatchItemDto>>> GetInsuranceExpired(
+        [FromQuery] DateOnly? asOf = null)
+    {
+        var result = await _companyAssetService.GetInsuranceExpiredAsync(asOf);
+        return Ok(result);
+    }
+
+    /// <summary>Assets marked insured that have never been given an expiry date.</summary>
+    /// <remarks>
+    /// The rows both reads above filter away — each needs <c>InsuranceExpiryDate != null</c> — so
+    /// an asset somebody ticked as insured and never dated appears on no list anywhere and can
+    /// never become due. The insurance twin of <c>unscheduled-maintenance</c>, and the shape most
+    /// likely to be a claim nobody can actually make.
+    /// </remarks>
+    [HttpGet("insurance/undated")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetInsuranceWatchItemDto>>> GetInsuranceUndated()
+    {
+        var result = await _companyAssetService.GetInsuranceUndatedAsync();
+        return Ok(result);
+    }
+
+    /// <summary>The register counted and totalled, with what needs attention — area 16 slice 11.</summary>
+    /// <remarks>
+    /// A summary, not a listing: the rows are already on <c>GET api/Assets/paged</c> under the same
+    /// filters, and repeating them would make the document unbounded in exactly the case it is most
+    /// wanted. ⚠ The watchlist counts honour the filter, so a report about one location carries
+    /// that location's overdue count and not the organisation's.
+    /// </remarks>
+    [HttpGet("reports/register")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetRegisterReportDto>> GetRegisterReport(
+        [FromQuery] Guid? assetTypeId = null,
+        [FromQuery] Guid? unitId = null,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] CompanyAssetStatus? status = null,
+        [FromQuery] DateOnly? asOf = null)
+    {
+        var result = await _companyAssetService.GetRegisterReportAsync(
+            assetTypeId, unitId, locationId, status, asOf);
+        return Ok(result);
+    }
+
     // ── the seam with the Maintenance module — slice 9b, decision D10 ──────────────────────
 
     /// <summary>The Maintenance module's assets HR can point at, already-linked ones flagged.</summary>
@@ -630,12 +704,33 @@ public class AssetsController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Overdue assignments.</summary>
+    /// <summary>Custodies past their expected return date, most overdue first.</summary>
+    /// <remarks>
+    /// Slice 11 gave this an <c>asOf</c> and an ordering. It had neither, and an exception list
+    /// that cannot put its worst row at the top is a list somebody reads once.
+    /// </remarks>
     [HttpGet("assignments/overdue")]
     [Authorize(Roles = HrRoles)]
-    public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetOverdueAssignments()
+    public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetOverdueAssignments(
+        [FromQuery] DateOnly? asOf = null)
     {
-        var result = await _assignmentService.GetOverdueAssignmentsAsync();
+        var result = await _assignmentService.GetOverdueAssignmentsAsync(asOf);
+        return Ok(result);
+    }
+
+    /// <summary>Custodies coming due back inside a window — area 16 slice 11.</summary>
+    /// <remarks>
+    /// The plan to the read above's exception list. Until this, a return appeared on exactly one
+    /// list and only once it was already late, so "what is coming back this fortnight" — the
+    /// question somebody arranging a handover actually has — had no answer anywhere.
+    /// </remarks>
+    [HttpGet("assignments/due-for-return")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetAssignmentsDueForReturn(
+        [FromQuery] int daysAhead = 14,
+        [FromQuery] DateOnly? asOf = null)
+    {
+        var result = await _assignmentService.GetAssignmentsDueForReturnAsync(daysAhead, asOf);
         return Ok(result);
     }
 

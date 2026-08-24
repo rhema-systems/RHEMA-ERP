@@ -192,6 +192,16 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
     /// service can offer an <c>asOf</c> seam and the reminder sweep and the read agree by
     /// construction rather than by coincidence.
     /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Defect D-kk.</b> The <c>Disposed</c> / <c>LostStolen</c> exclusion arrived in slice 11. Slice 9's sweep
+    /// has always skipped those two (<c>AssetReminderService.NotServiceable</c>) and this read did
+    /// not, so a disposed asset with a stale maintenance date sat on the due and overdue screens
+    /// for ever while the engine correctly ignored it — the screen and the sweep answering
+    /// different questions under the same name. Slice 9 wrote that the horizon is shared
+    /// "so what the sweep chases and what the screen shows cannot drift apart"; they had already
+    /// drifted on status. <c>GetUnscheduledMaintenanceAsync</c> excluded <c>Disposed</c> and not
+    /// <c>LostStolen</c>, which was a third answer again.
+    /// </remarks>
     public async Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, DateOnly onOrBefore)
     {
         return await _context.Set<CompanyAsset>()
@@ -203,6 +213,8 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
                 && ca.RequiresRegularMaintenance 
                 && ca.NextMaintenanceDate != null 
                 && ca.NextMaintenanceDate <= onOrBefore
+                && ca.Status != CompanyAssetStatus.Disposed
+                && ca.Status != CompanyAssetStatus.LostStolen
                 && !ca.IsDeleted)
             .OrderBy(ca => ca.NextMaintenanceDate)
             .ToListAsync();
@@ -227,6 +239,63 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
             .Where(ca => ca.TenantId == tenantId
                 && ca.RequiresRegularMaintenance
                 && ca.NextMaintenanceDate == null
+                && ca.Status != CompanyAssetStatus.Disposed
+                // Slice 11, D-kk: the third of three different answers to "which assets still
+                // need servicing" is now the same one.
+                && ca.Status != CompanyAssetStatus.LostStolen
+                && !ca.IsDeleted)
+            .OrderBy(ca => ca.AssetNumber)
+            .ToListAsync();
+    }
+
+    // ── insurance, area 16 slice 11 ───────────────────────────────────────────
+
+    /// <summary>
+    /// Insured assets whose cover lapses on or before a date, soonest first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Disposed</c> is excluded and <c>LostStolen</c> is <b>not</b>, and the difference is
+    /// deliberate. Nobody renews cover on something they have sold; they very much do keep it on
+    /// something that was stolen, because the policy is what the claim runs against and a lapse
+    /// mid-claim is the loss twice over. Slice 9's maintenance rule excludes both, correctly for
+    /// maintenance — nobody services a stolen laptop.
+    /// </remarks>
+    public async Task<IEnumerable<CompanyAsset>> GetInsuranceExpiringAsync(Guid tenantId, DateOnly onOrBefore)
+    {
+        return await _context.Set<CompanyAsset>()
+            .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
+            .Where(ca => ca.TenantId == tenantId
+                && ca.IsInsured
+                && ca.InsuranceExpiryDate != null
+                && ca.InsuranceExpiryDate <= onOrBefore
+                && ca.Status != CompanyAssetStatus.Disposed
+                && !ca.IsDeleted)
+            .OrderBy(ca => ca.InsuranceExpiryDate)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Assets marked insured that have never been given an expiry date.
+    /// </summary>
+    /// <remarks>
+    /// The insurance twin of the unscheduled-maintenance read, and it exists for the same reason:
+    /// every other insurance query filters <c>InsuranceExpiryDate != null</c>, so an asset somebody
+    /// ticked as insured and never dated appears on no list anywhere and can never become due. It
+    /// is also the shape most likely to be a lie — a tick with no policy date behind it.
+    /// </remarks>
+    public async Task<IEnumerable<CompanyAsset>> GetInsuranceUndatedAsync(Guid tenantId)
+    {
+        return await _context.Set<CompanyAsset>()
+            .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
+            .Where(ca => ca.TenantId == tenantId
+                && ca.IsInsured
+                && ca.InsuranceExpiryDate == null
                 && ca.Status != CompanyAssetStatus.Disposed
                 && !ca.IsDeleted)
             .OrderBy(ca => ca.AssetNumber)
@@ -387,17 +456,62 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(Guid tenantId)
+    /// <summary>
+    /// Custodies past their expected return date as at a given day, <b>most overdue first</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Three things changed in slice 11. It takes an <c>asOf</c>, so the read can be aimed at
+    /// a date rather than only at today — which is what makes it testable at all. It is
+    /// <b>ordered</b>: slice 9's rule is that the one thing an exception list cannot do is put the
+    /// worst row at the bottom, and this had no ordering whatsoever.</para>
+    ///
+    /// <para>And it accepts <c>Overdue</c> as well as <c>Active</c>. ⚠ <b>Nothing in the codebase
+    /// writes <c>AssignmentStatus.Overdue</c></b> — it came from the port with no writer, the same
+    /// shape as <c>Lost</c> and <c>Damaged</c> before slice 7 gave them one. It stays unwritten on
+    /// purpose (see the note on the enum member: being late is derived from a date, and a derived
+    /// fact stored in a status column goes stale the moment the day turns). But this query asked
+    /// <c>== Active</c>, so anything that ever did set it would have emptied the very list that
+    /// reports it — a guard that holds by accident, again.</para>
+    /// </remarks>
+    public async Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(
+        Guid tenantId, DateOnly? asOf = null)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
         return await _context.Set<AssetAssignment>()
             .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
-            .Where(aa => aa.TenantId == tenantId 
-                && aa.Status == AssignmentStatus.Active 
-                && aa.ExpectedReturnDate != null 
-                && aa.ExpectedReturnDate < today
+            .Where(aa => aa.TenantId == tenantId
+                && (aa.Status == AssignmentStatus.Active || aa.Status == AssignmentStatus.Overdue)
+                && aa.ExpectedReturnDate != null
+                && aa.ExpectedReturnDate < at
                 && !aa.IsDeleted)
+            .OrderBy(aa => aa.ExpectedReturnDate)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Custodies coming due back inside a window — the plan to the overdue read's exception list.
+    /// </summary>
+    /// <remarks>
+    /// Slice 11. Until this, a return had exactly one list and appeared on it only once already
+    /// late: there was no way to ask what is coming back this fortnight, which is the question
+    /// somebody planning a handover actually has. Deliberately excludes anything already overdue —
+    /// that is the other read's job, and eleven late rows inside a list of two hundred upcoming
+    /// ones are lost rows.
+    /// </remarks>
+    public async Task<IEnumerable<AssetAssignment>> GetAssignmentsDueForReturnAsync(
+        Guid tenantId, DateOnly from, DateOnly toInclusive)
+    {
+        return await _context.Set<AssetAssignment>()
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
+            .Include(aa => aa.Employee)
+            .Where(aa => aa.TenantId == tenantId
+                && (aa.Status == AssignmentStatus.Active || aa.Status == AssignmentStatus.Overdue)
+                && aa.ExpectedReturnDate != null
+                && aa.ExpectedReturnDate >= from
+                && aa.ExpectedReturnDate <= toInclusive
+                && !aa.IsDeleted)
+            .OrderBy(aa => aa.ExpectedReturnDate)
             .ToListAsync();
     }
 

@@ -6176,6 +6176,25 @@ public enum AssignmentStatus
     [Description("Returned")]
     Returned = 2,
 
+    /// <summary>
+    /// ⚠ <b>Nothing writes this, and nothing should.</b> Whether a custody is late is derived from
+    /// <c>ExpectedReturnDate</c> against today, and a derived fact stored in a status column is
+    /// stale the moment the day turns.
+    /// </summary>
+    /// <remarks>
+    /// <para>Measured in area 16 slice 11: the only references anywhere are reads that TOLERATE it.
+    /// It came from the port with no writer — the same shape as <see cref="Lost"/> and
+    /// <see cref="Damaged"/>, which slice 7 did give one because those record something that
+    /// happened rather than something a calendar implies.</para>
+    ///
+    /// <para><b>Writing it would break the feature that reports it.</b> Before slice 11,
+    /// <c>GetOverdueAssignmentsAsync</c> asked <c>Status == Active</c>, so a sweep that helpfully
+    /// flipped late custodies to <c>Overdue</c> would have emptied the overdue list itself — and
+    /// <c>ReturnAsync</c> and <c>ReportIncidentAsync</c> both refuse anything that is not
+    /// <c>Active</c>, so a late asset could then never be handed back at all. The return
+    /// watchlists now accept both statuses so that trap is defused, but the rule stands: this
+    /// member is tolerated on read and never set.</para>
+    /// </remarks>
     [Description("Overdue")]
     Overdue = 3,
 

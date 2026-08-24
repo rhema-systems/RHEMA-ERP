@@ -280,7 +280,21 @@ public class CompanyAssetSummaryDto
     public string? UnitName { get; set; }
     public bool IsCurrentlyAssigned { get; set; }
     public string? CurrentAssignedToName { get; set; }
-    public decimal? CurrentValue { get; set; }
+
+    /// <summary>
+    /// What the asset cost to acquire. <b>Not</b> a current or book value — defect D-jj.
+    /// </summary>
+    /// <remarks>
+    /// This field was called <c>CurrentValue</c> and was mapped from <c>entity.PurchaseCost</c>,
+    /// so every register list answered the acquisition cost under a name that promised a
+    /// depreciated one. Nobody reading a column headed "current value" expects the price paid four
+    /// years ago, and totalling that column gave a figure that was wrong in a direction nobody
+    /// could see. Renamed rather than made true: HR has no valuation to give. Depreciation, net
+    /// book value and disposal accounting are Finance's under decision <b>D1</b>, reachable on a
+    /// linked asset through <c>CompanyAssetDetailDto.FixedAsset</c> and simply absent on an
+    /// HR-created one.
+    /// </remarks>
+    public decimal? PurchaseCost { get; set; }
 
     /// <summary>AST-9 — so the register can answer "what do we let to staff" from a list.</summary>
     public bool IsRentable { get; set; }
@@ -780,6 +794,22 @@ public class AssetAssignmentDto : BaseDto
     public AssignmentStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateTime? ReturnDate { get; set; }
+
+    /// <summary>
+    /// Days until the asset is due back; negative once it is late. Null where no return was
+    /// expected, or where it has already come back — area 16 slice 11.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Derived, not mapped</b>, and deliberately so: this area has produced a blank field
+    /// six separate times from a DTO property that a mapper forgot. A property computed from data
+    /// already on the row cannot be forgotten by anything.</para>
+    ///
+    /// <para>Signed for the reason the maintenance watchlists give: an absolute number plus a flag
+    /// lets a caller sort an exception list and put the worst row at the bottom.</para>
+    /// </remarks>
+    public int? DaysUntilReturnDue => ExpectedReturnDate is not { } due || ReturnDate is not null
+        ? null
+        : due.DayNumber - DateOnly.FromDateTime(DateTime.UtcNow).DayNumber;
     public HRAssetCondition? ConditionAtReturn { get; set; }
     public string? ConditionAtReturnName => ConditionAtReturn?.ToString();
     public string? ReturnNotes { get; set; }
@@ -850,6 +880,11 @@ public class AssetAssignmentSummaryDto
     public AssignmentStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateTime? ReturnDate { get; set; }
+
+    /// <summary>See <see cref="AssetAssignmentDto.DaysUntilReturnDue"/>.</summary>
+    public int? DaysUntilReturnDue => ExpectedReturnDate is not { } due || ReturnDate is not null
+        ? null
+        : due.DayNumber - DateOnly.FromDateTime(DateTime.UtcNow).DayNumber;
 
     /// <summary>Whether the holder has signed for it, and when — AST-8.</summary>
     /// <remarks>
@@ -2146,6 +2181,215 @@ public class AssetMaintenanceDueDto
 
     /// <summary>The date the read was taken as at, echoed back so a stale screen is detectable.</summary>
     public DateOnly AsOf { get; set; }
+}
+
+#endregion
+
+#region Insurance, returns and the register report — area 16 slice 11
+
+/// <summary>
+/// An asset whose insurance is expiring, has lapsed, or is claimed without a date.
+/// </summary>
+/// <remarks>
+/// <para><b>Its own type, for the reason <see cref="AssetMaintenanceDueDto"/> exists.</b>
+/// <c>CompanyAssetSummaryDto</c> carries no insurance field at all, so a watchlist answered with it
+/// could say <i>that</i> cover needed attention and never <i>whose policy</i>, <i>for how much</i>,
+/// or <i>by when</i> — defect D-ff one surface across. Slice 2b put
+/// <c>InsuranceExpiryDate</c> on the register end to end and nothing has ever read it back;
+/// this is the read.</para>
+///
+/// <para><b><see cref="DaysRemaining"/> is signed</b>, negative meaning already lapsed, so an
+/// exception list can be sorted worst-first. Same rule as the maintenance watchlists, stated once
+/// in each so the two cannot drift.</para>
+/// </remarks>
+public class AssetInsuranceWatchItemDto
+{
+    public Guid Id { get; set; }
+    public string AssetNumber { get; set; } = string.Empty;
+    public string AssetTag { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetTypeName { get; set; } = string.Empty;
+
+    public CompanyAssetStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    public HRAssetCondition Condition { get; set; }
+    public string ConditionName => Condition.ToString();
+
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
+    public Guid? UnitId { get; set; }
+    public string? UnitName { get; set; }
+
+    /// <summary>
+    /// Who is holding it, when somebody is.
+    /// </summary>
+    /// <remarks>
+    /// Renewing cover on an issued asset needs the holder as much as booking a service does — an
+    /// insurer asks where the thing is kept, and the register cannot answer that without naming
+    /// the person who has it.
+    /// </remarks>
+    public bool IsCurrentlyAssigned { get; set; }
+    public Guid? CurrentAssignedToId { get; set; }
+    public string? CurrentAssignedToName { get; set; }
+
+    public bool IsInsured { get; set; }
+    public string? InsurancePolicyNumber { get; set; }
+
+    /// <summary>
+    /// What the asset is insured for.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Carries <b>no currency</b>, because <c>CompanyAsset.InsuredValue</c> does not — unlike the
+    /// surcharge and rental amounts, which do. Nothing in the register can express another
+    /// currency, so nothing here is losing one; but a figure with no currency beside one that has
+    /// is worth knowing about before somebody totals a column of them. Recorded for the
+    /// HR↔Finance sweep.
+    /// </remarks>
+    public decimal? InsuredValue { get; set; }
+
+    /// <summary>Null only on the undated read — see <see cref="IsDated"/>.</summary>
+    public DateOnly? InsuranceExpiryDate { get; set; }
+
+    /// <summary>False when the asset is marked insured and no expiry date has ever been set.</summary>
+    public bool IsDated { get; set; }
+
+    /// <summary>Signed: negative means cover lapsed that many days ago. Zero on the undated read.</summary>
+    public int DaysRemaining { get; set; }
+
+    public bool IsExpired { get; set; }
+
+    /// <summary>The date the read was taken as at, echoed back so a stale screen is detectable.</summary>
+    public DateOnly AsOf { get; set; }
+}
+
+/// <summary>
+/// One grouped line of the register report — a count and its money, under some heading.
+/// </summary>
+public class AssetRegisterGroupDto
+{
+    /// <summary>Null on a grouping that has no record behind it, such as "no unit set".</summary>
+    public Guid? Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public int AssetCount { get; set; }
+
+    public decimal TotalPurchaseCost { get; set; }
+
+    /// <summary>How many of this group are in somebody's hands right now.</summary>
+    public int AssignedCount { get; set; }
+}
+
+/// <summary>
+/// The asset register, counted and totalled — area 16 slice 11.
+/// </summary>
+/// <remarks>
+/// <para><b>A summary, not a listing.</b> The rows are already available through
+/// <c>GET api/Assets/paged</c> with the same filters; repeating them here would produce a
+/// document that is unbounded in exactly the situation it is most wanted — a large register.
+/// What a register report adds is the arithmetic nobody can do from a paged screen.</para>
+///
+/// <para><b>The watchlist counts are here on purpose.</b> A register report that says how many
+/// assets exist and not how many of them are uninsured, unscheduled or overdue is a stocktake,
+/// and this area already has the three maintenance reads and the three insurance reads that
+/// answer those. Counting them beside the totals is what turns the page into something worth
+/// signing.</para>
+///
+/// <para>⚠ <b>The money is purchase cost and carries no currency</b> — see
+/// <see cref="TotalPurchaseCost"/>. Nothing here is a book value: depreciation and valuation are
+/// Finance's under decision D1, and for an HR-created asset there is no valuation at all.</para>
+/// </remarks>
+public class AssetRegisterReportDto
+{
+    public DateTime GeneratedAt { get; set; }
+
+    public DateOnly AsOf { get; set; }
+
+    // ── what was asked for, echoed back so a printed page says what it covers ──
+    public Guid? AssetTypeId { get; set; }
+    public string? AssetTypeName { get; set; }
+    public Guid? UnitId { get; set; }
+    public string? UnitName { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
+    public CompanyAssetStatus? Status { get; set; }
+    public string? StatusName { get; set; }
+
+    // ── the totals ────────────────────────────────────────────────────────────
+    public int AssetCount { get; set; }
+    public int AssignedCount { get; set; }
+    public int UnassignedCount { get; set; }
+    public int AssignableCount { get; set; }
+    public int RentableCount { get; set; }
+    public int InsuredCount { get; set; }
+    public int UninsuredCount { get; set; }
+    public int FromFixedAssetsCount { get; set; }
+    public int HrCreatedCount { get; set; }
+    public int LinkedToMaintenanceCount { get; set; }
+
+    /// <summary>
+    /// The sum of every asset's purchase cost, in whatever the organisation's money is.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>CompanyAsset.PurchaseCost</c> carries no currency code, so this total is only safe
+    /// because nothing in the register can express a second currency. It is not a book value and
+    /// must not be presented as one.
+    /// </remarks>
+    public decimal TotalPurchaseCost { get; set; }
+
+    public decimal TotalInsuredValue { get; set; }
+
+    /// <summary>How many rows carry no purchase cost at all, so a nil total is readable as one.</summary>
+    /// <remarks>
+    /// Without this the report cannot distinguish "the estate cost nothing" from "nobody entered
+    /// what it cost" — and on a register that has just been migrated, the second is the answer.
+    /// </remarks>
+    public int AssetsWithoutPurchaseCost { get; set; }
+
+    // ── the breakdowns ────────────────────────────────────────────────────────
+    public List<AssetRegisterGroupDto> ByStatus { get; set; } = new();
+    public List<AssetRegisterGroupDto> ByAssetType { get; set; } = new();
+    public List<AssetRegisterGroupDto> ByCondition { get; set; } = new();
+    public List<AssetRegisterGroupDto> ByUnit { get; set; } = new();
+    public List<AssetRegisterGroupDto> ByLocation { get; set; } = new();
+
+    // ── what needs attention ──────────────────────────────────────────────────
+    //
+    // ⚠ THESE COUNTS ARE DISJOINT AND THE WATCHLIST READS ARE NOT, which is why they are named
+    // "…DueSoon" and "…ExpiringSoon" rather than "…Due" and "…Expiring".
+    //
+    // A LIST is opened by somebody asking "what is due?", and it would be a poor answer to hide the
+    // rows that are already late — so `GET due-maintenance?daysAhead=30` means "due on or before
+    // then", overdue rows included, and slice 9 asserts exactly that. A COUNT on a summary page is
+    // read differently: three numbers in a row get added up, and a reader who sees "due 12,
+    // overdue 5" and is given 12 that already contains the 5 has been misled by arithmetic they
+    // were entitled to do.
+    //
+    // So the report counts what the SWEEP counts — `MaintenanceDueSoon` and `MaintenanceOverdue`
+    // are already separate rungs there — and the identity that ties the two vocabularies together
+    // is worth stating, because it is what the harness asserts:
+    //
+    //     due-soon + overdue  ==  what `due-maintenance` returns for the same window
+    //     expiring-soon + expired  ==  what `insurance/expiring` returns
+    //
+    // Renaming rather than changing either behaviour: the lists are right for lists, the counts are
+    // right for counts, and the only thing that was wrong was one word.
+
+    /// <summary>Scheduled inside the window and <b>not yet late</b>. Excludes overdue.</summary>
+    public int MaintenanceDueSoonCount { get; set; }
+
+    public int MaintenanceOverdueCount { get; set; }
+    public int MaintenanceUnscheduledCount { get; set; }
+
+    /// <summary>Cover lapsing inside the window and <b>not yet lapsed</b>. Excludes expired.</summary>
+    public int InsuranceExpiringSoonCount { get; set; }
+
+    public int InsuranceExpiredCount { get; set; }
+    public int InsuranceUndatedCount { get; set; }
+    public int ReturnsOverdueCount { get; set; }
+    public int OutstandingSurchargeCount { get; set; }
+    public decimal OutstandingSurchargeAmount { get; set; }
 }
 
 #endregion

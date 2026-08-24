@@ -226,7 +226,9 @@ public static class AssetsMappingExtensions
             CurrentAssignedToName = entity.CurrentAssignedTo != null 
                 ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}" 
                 : null,
-            CurrentValue = entity.PurchaseCost,
+            // D-jj. It was called CurrentValue and mapped from PurchaseCost, so every register
+            // list answered the acquisition cost under a name promising a depreciated one.
+            PurchaseCost = entity.PurchaseCost,
             IsRentable = entity.IsRentable,
             Source = entity.Source
         };
@@ -739,6 +741,55 @@ public static class AssetsMappingExtensions
         this IEnumerable<CompanyAsset> entities, DateOnly asOf)
     {
         return entities.Select(e => e.ToMaintenanceDueDto(asOf)).ToList();
+    }
+
+    /// <summary>
+    /// An asset as an insurance watchlist row — area 16 slice 11.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the same shape as <see cref="ToMaintenanceDueDto"/>: the same identity, the
+    /// same placement, the same holder, and a signed day count with a flag beside it. Two
+    /// watchlists over one register that disagreed about how to describe a row would make every
+    /// screen that shows both write the difference out twice.
+    /// </remarks>
+    public static AssetInsuranceWatchItemDto ToInsuranceWatchItemDto(this CompanyAsset entity, DateOnly asOf)
+    {
+        var expiry = entity.InsuranceExpiryDate;
+        var days = expiry.HasValue ? expiry.Value.DayNumber - asOf.DayNumber : 0;
+
+        return new AssetInsuranceWatchItemDto
+        {
+            Id = entity.Id,
+            AssetNumber = entity.AssetNumber,
+            AssetTag = entity.AssetTag,
+            AssetName = entity.AssetName,
+            AssetTypeName = entity.AssetType?.Name ?? string.Empty,
+            Status = entity.Status,
+            Condition = entity.Condition,
+            LocationId = entity.LocationId,
+            LocationName = entity.Location?.Name,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            IsCurrentlyAssigned = entity.IsCurrentlyAssigned,
+            CurrentAssignedToId = entity.CurrentAssignedToId,
+            CurrentAssignedToName = entity.CurrentAssignedTo != null
+                ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}"
+                : null,
+            IsInsured = entity.IsInsured,
+            InsurancePolicyNumber = entity.InsurancePolicyNumber,
+            InsuredValue = entity.InsuredValue,
+            InsuranceExpiryDate = expiry,
+            IsDated = expiry.HasValue,
+            DaysRemaining = days,
+            IsExpired = expiry.HasValue && days < 0,
+            AsOf = asOf,
+        };
+    }
+
+    public static List<AssetInsuranceWatchItemDto> ToInsuranceWatchItemDtoList(
+        this IEnumerable<CompanyAsset> entities, DateOnly asOf)
+    {
+        return entities.Select(e => e.ToInsuranceWatchItemDto(asOf)).ToList();
     }
 
     public static List<AssetMaintenanceSummaryDto> ToSummaryDtoList(this IEnumerable<AssetMaintenance> entities)

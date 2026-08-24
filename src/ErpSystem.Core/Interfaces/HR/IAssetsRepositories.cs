@@ -51,6 +51,14 @@ public interface ICompanyAssetRepository : IGenericRepository<CompanyAsset>
 
     /// <summary>Assets that require regular maintenance and have no next date at all. Area 16 slice 9.</summary>
     Task<IEnumerable<CompanyAsset>> GetUnscheduledMaintenanceAsync(Guid tenantId);
+
+    // ── insurance, area 16 slice 11 ───────────────────────────────────────────
+
+    /// <summary>Insured assets whose cover lapses on or before a date, soonest first.</summary>
+    Task<IEnumerable<CompanyAsset>> GetInsuranceExpiringAsync(Guid tenantId, DateOnly onOrBefore);
+
+    /// <summary>Assets marked insured that have never been given an expiry date.</summary>
+    Task<IEnumerable<CompanyAsset>> GetInsuranceUndatedAsync(Guid tenantId);
     Task<IEnumerable<CompanyAsset>> GetWarrantyExpiringAsync(Guid tenantId, int daysAhead = 30);
 }
 
@@ -93,7 +101,12 @@ public interface IAssetAssignmentRepository : IGenericRepository<AssetAssignment
     Task<IEnumerable<AssetAssignment>> GetByEmployeeIdAsync(Guid employeeId);
     Task<AssetAssignment?> GetActiveAssignmentForAssetAsync(Guid assetId);
     Task<IEnumerable<AssetAssignment>> GetActiveAssignmentsForEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(Guid tenantId);
+    /// <summary>Custodies past their expected return date as at a day, most overdue first.</summary>
+    Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(Guid tenantId, DateOnly? asOf = null);
+
+    /// <summary>Custodies coming due back inside a window — slice 11.</summary>
+    Task<IEnumerable<AssetAssignment>> GetAssignmentsDueForReturnAsync(
+        Guid tenantId, DateOnly from, DateOnly toInclusive);
     Task<IEnumerable<AssetAssignment>> GetByStatusAsync(Guid tenantId, AssignmentStatus status);
 
     /// <summary>
