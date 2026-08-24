@@ -866,6 +866,7 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
             SaleProceeds = 900m,
             NetProceeds = 900m,
             ProceedsCurrencyCode = "GHS",
+            ProceedsFunctionalAmount = 900m,
             ProceedsAccountId = fixture.Accounts.ProceedsClearing.Id,
             CostAtDisposal = 800m,
             AccumulatedDepreciationAtDisposal = 0m,
