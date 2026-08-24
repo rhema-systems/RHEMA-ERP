@@ -1,4 +1,5 @@
 ﻿using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 
@@ -980,6 +981,132 @@ public static class AssetsMappingExtensions
     public static List<AssetTransferSummaryDto> ToSummaryDtoList(this IEnumerable<AssetTransfer> entities)
     {
         return entities.Select(e => e.ToSummaryDto()).ToList();
+    }
+
+    #endregion
+
+
+    #region Asset Surcharges — area 16 slice 7
+
+    private static string PersonName(Employee? e)
+        => e is null ? string.Empty : $"{e.FirstName} {e.LastName}";
+
+    public static AssetSurchargeDto ToDto(this AssetSurcharge entity)
+    {
+        return new AssetSurchargeDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            SurchargeNumber = entity.SurchargeNumber,
+
+            AssignmentId = entity.AssignmentId,
+            AssignmentNumber = entity.Assignment?.AssignmentNumber ?? string.Empty,
+            AssetId = entity.Assignment?.AssetId ?? Guid.Empty,
+            AssetName = entity.Assignment?.Asset?.AssetName ?? string.Empty,
+            AssetNumber = entity.Assignment?.Asset?.AssetNumber ?? string.Empty,
+
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = PersonName(entity.Employee),
+
+            Reason = entity.Reason,
+            Description = entity.Description,
+
+            AssessedAmount = entity.AssessedAmount,
+            CurrencyCode = entity.CurrencyCode,
+            BasisRepairCost = entity.BasisRepairCost,
+            BasisReplacementCost = entity.BasisReplacementCost,
+            AmountRecovered = entity.AmountRecovered,
+
+            Status = entity.Status,
+            RaisedById = entity.RaisedById,
+            RaisedByName = entity.RaisedBy is null ? null : PersonName(entity.RaisedBy),
+            RaisedAt = entity.RaisedAt,
+
+            NotifiedAt = entity.NotifiedAt,
+            EmployeeResponse = entity.EmployeeResponse,
+            EmployeeRespondedAt = entity.EmployeeRespondedAt,
+            EmployeeResponseComments = entity.EmployeeResponseComments,
+            ProceededWithoutResponseReason = entity.ProceededWithoutResponseReason,
+
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy is null ? null : PersonName(entity.ApprovedBy),
+            ApprovalDate = entity.ApprovalDate,
+            ApprovalComments = entity.ApprovalComments,
+            RejectedDate = entity.RejectedDate,
+            RejectionReason = entity.RejectionReason,
+
+            RecoveryMethod = entity.RecoveryMethod,
+            InstalmentCount = entity.InstalmentCount,
+            RecoveryStartDate = entity.RecoveryStartDate,
+            Recoveries = entity.Recoveries?
+                .Where(r => !r.IsDeleted)
+                .OrderBy(r => r.RecoveredOn)
+                .Select(r => r.ToDto())
+                .ToList() ?? [],
+
+            WaivedById = entity.WaivedById,
+            WaivedByName = entity.WaivedBy is null ? null : PersonName(entity.WaivedBy),
+            WaivedAt = entity.WaivedAt,
+            WaiverReason = entity.WaiverReason,
+            CancelledAt = entity.CancelledAt,
+            CancellationReason = entity.CancellationReason,
+
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    /// <summary>
+    /// The list row. ⚠ Every field it carries is one the by-id read carries identically — the rule
+    /// this area has been bitten by six times is that the two must be asserted to agree.
+    /// </summary>
+    public static AssetSurchargeSummaryDto ToSummaryDto(this AssetSurcharge entity)
+    {
+        return new AssetSurchargeSummaryDto
+        {
+            Id = entity.Id,
+            SurchargeNumber = entity.SurchargeNumber,
+            AssignmentId = entity.AssignmentId,
+            AssignmentNumber = entity.Assignment?.AssignmentNumber ?? string.Empty,
+            AssetId = entity.Assignment?.AssetId ?? Guid.Empty,
+            AssetName = entity.Assignment?.Asset?.AssetName ?? string.Empty,
+            AssetNumber = entity.Assignment?.Asset?.AssetNumber ?? string.Empty,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = PersonName(entity.Employee),
+            Reason = entity.Reason,
+            AssessedAmount = entity.AssessedAmount,
+            CurrencyCode = entity.CurrencyCode,
+            AmountRecovered = entity.AmountRecovered,
+            Status = entity.Status,
+            EmployeeResponse = entity.EmployeeResponse,
+            RaisedAt = entity.RaisedAt,
+            RecoveryStartDate = entity.RecoveryStartDate
+        };
+    }
+
+    public static List<AssetSurchargeSummaryDto> ToSummaryDtoList(this IEnumerable<AssetSurcharge> entities)
+        => entities.Select(e => e.ToSummaryDto()).ToList();
+
+    public static AssetSurchargeRecoveryDto ToDto(this AssetSurchargeRecovery entity)
+    {
+        return new AssetSurchargeRecoveryDto
+        {
+            Id = entity.Id,
+            SurchargeId = entity.SurchargeId,
+            Amount = entity.Amount,
+            RecoveredOn = entity.RecoveredOn,
+            Method = entity.Method,
+            Reference = entity.Reference,
+            Notes = entity.Notes,
+            RecordedById = entity.RecordedById,
+            RecordedByName = entity.RecordedBy is null ? null : PersonName(entity.RecordedBy),
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
     }
 
     #endregion

@@ -158,9 +158,34 @@ Harness residue that will appear in any register or report until it is removed, 
   grades (`M1 General Managers`, `M2 Heads of Department`). ⚠ These are the more damaging of the
   two: a salary grade appears in pay-related pickers.
 
+### Area 16 — Staff / Company Assets (recorded 2026-08-24, slice 7)
+
+The money in this area is **recovery from an employee**, not spend on one — the only place in the
+HR module where the employer is the creditor rather than the payer, which is why it needs stating
+plainly rather than filing under "HR costs".
+
+| # | money event | entity | what is missing |
+|---|---|---|---|
+| 16.1 | Surcharge assessed | `AssetSurcharge.AssessedAmount` + `CurrencyCode` | An approved surcharge is an **employee receivable**: a balance-sheet figure living only in HR, in no trial balance and no ageing. `CurrencyCode` **is** validated against Finance's `ICurrencyService` — that is the read-side integration this register permits now. |
+| 16.2 | Surcharge recovered | `AssetSurchargeRecovery.Amount` | Each collection clears part of that receivable and has no accounting counterpart. `Reference` holds the payroll period or receipt number as free text. |
+| 16.3 | Recovery declared to payroll | `AssetSurcharge.RecoveryMethod` / `InstalmentCount` / `RecoveryStartDate`, read through `GET Assets/surcharges/payroll-deductions` | HR **declares**; payroll deducts. The projection exists and nothing consumes it yet — wiring it into a payroll run is the sweep's, not HR's, and payroll is another dev's module. |
+| 16.4 | Surcharge waived | `AssetSurcharge.WaiverReason` | Forgiving a balance is a write-off. No GL treatment, no approval-limit rule beyond the workflow definition. |
+| 16.5 | Outstanding balance deducted at exit | `AssetSurcharge` → `SeparationClearanceItem.OutstandingAmount` (slice 10) | The link is HR-internal; the settlement that pays it out is unavoidably an accounting event. |
+| 16.6 | Rental / benefit-in-kind deduction | AST-9 / AST-10, **slice 8** | ⏳ not yet built. Decision D2: HR declares rental terms and exposes a read-only projection, never writes payroll. |
+| 16.7 | Asset sourced from Finance's fixed-asset register | `CompanyAsset.FixedAssetId` + `AssetSource` | Custody is HR's; depreciation, valuation and disposal accounting stay Finance's (decision D1). The sweep should confirm that a surcharge for a *destroyed* fixed asset does not double-count against Finance's own write-off. |
+
+⚠ **The one question this area raises that no other does:** a surcharge is money owed *by* an
+employee, so the sweep must decide whether it is an employee receivable, a payroll deduction, or
+both in sequence — and TDC's answer to the payroll-vs-direct-payment question below now has a
+second surface depending on it.
+
+⚠ **What slice 7 deliberately did NOT build**, so the sweep does not have to unpick it: no
+instalment schedule, no deduction run, no payment status machine of its own. HR records the amount,
+how it was said to be recovered, and what somebody else actually collected.
+
 ### Areas not yet built ⏳
 
-14 awards · 16 assets · 19–23 · 25–27 portals · plus the deferred separation/exit
+14 awards · 19–23 · 25–27 portals · plus the deferred separation/exit
 module, whose **final settlement** is unavoidably an accounting event.
 
 ---
@@ -172,7 +197,10 @@ module, whose **final settlement** is unavoidably an accounting event.
       development activities, and `ManpowerBudget.TrainingBudget`.
 - [ ] Decide who writes `ManpowerBudget.ActualSpent` and `.Variance` — nothing does today.
 - [ ] Decide whether a manpower budget carries a currency at all, and if so which.
-- [ ] Get TDC's answer on payroll-vs-direct-payment reimbursement.
+- [ ] Get TDC's answer on payroll-vs-direct-payment reimbursement — it now governs **two**
+      surfaces: travel claims paid *to* an employee and asset surcharges recovered *from* one.
+- [ ] Decide whether an approved asset surcharge is an employee receivable, a payroll deduction, or
+      both in sequence (area 16.1–16.3).
 - [ ] Get TDC's answer on cost attribution (project / cost centre dimensions).
 - [ ] Confirm the Finance module's posting entry point and who owns it — Finance is not this
       module's to modify without agreement, the same rule that governs payroll.

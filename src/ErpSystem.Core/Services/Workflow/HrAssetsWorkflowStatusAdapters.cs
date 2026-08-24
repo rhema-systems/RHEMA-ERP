@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.Assets;
+﻿using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -172,4 +172,78 @@ public sealed class HrAssetTransferWorkflowStatusAdapter : IWorkflowStatusAdapte
 
     private static AssetTransfer Require(object entity)
         => entity as AssetTransfer ?? throw new InvalidOperationException("Expected AssetTransfer entity.");
+}
+
+/// <summary>
+/// Workflow status adapter for <see cref="AssetSurcharge"/> — charging an employee for a company
+/// asset. Area 16, slice 7 (AST-3, decision D9).
+/// </summary>
+/// <remarks>
+/// See the collision warning on <see cref="AssetRequisitionWorkflowStatusAdapter"/> before touching
+/// the entity-type names: this is <c>HrAssetSurcharge</c>, not <c>AssetSurcharge</c>.
+/// </remarks>
+public sealed class HrAssetSurchargeWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "HrAssetSurcharge",
+        "HR Asset Surcharge",
+        "HR_ASSET_SURCHARGE"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => Apply(Require(entity), outcome, null);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(Require(entity), outcome, rejectionReason);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => Apply(Require(entity), WorkflowOutcome.Recalled, reason);
+
+    /// <summary>
+    /// Maps all four outcomes onto <see cref="AssetSurchargeStatus"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>A recall goes back to <c>WithEmployee</c>, not to <c>Draft</c></b>, wherever the
+    /// charge has already been put to the employee. This is the one place this adapter differs from
+    /// its two siblings and the difference is load-bearing: dropping to Draft would discard the fact
+    /// that the employee was notified and what they answered, and the record would then read as
+    /// though they had never been asked. The right of reply that decision D9 exists to protect is
+    /// evidenced by those very fields.</para>
+    ///
+    /// <para><c>Rejected</c> is terminal — somebody ruled that the employee should not be charged,
+    /// and that ruling is the point. <c>Recovering</c>, <c>Recovered</c>, <c>Waived</c> and
+    /// <c>Cancelled</c> are never written here: collecting money and forgiving it are the module
+    /// carrying out what was decided, not somebody deciding it.</para>
+    /// </remarks>
+    private static void Apply(AssetSurcharge surcharge, WorkflowOutcome outcome, string? reason)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                surcharge.Status = AssetSurchargeStatus.Approved;
+                surcharge.ApprovalDate = DateTime.UtcNow;
+                break;
+            case WorkflowOutcome.Rejected:
+                surcharge.Status = AssetSurchargeStatus.Rejected;
+                surcharge.RejectedDate = DateTime.UtcNow;
+                if (!string.IsNullOrWhiteSpace(reason))
+                    surcharge.RejectionReason = Trim(reason);
+                break;
+            case WorkflowOutcome.Recalled:
+                surcharge.Status = surcharge.NotifiedAt is null
+                    ? AssetSurchargeStatus.Draft
+                    : AssetSurchargeStatus.WithEmployee;
+                break;
+            default:
+                surcharge.Status = AssetSurchargeStatus.Submitted;
+                break;
+        }
+    }
+
+    private static string Trim(string value)
+        => value.Trim().Length > 1000 ? value.Trim()[..1000] : value.Trim();
+
+    private static AssetSurcharge Require(object entity)
+        => entity as AssetSurcharge ?? throw new InvalidOperationException("Expected AssetSurcharge entity.");
 }

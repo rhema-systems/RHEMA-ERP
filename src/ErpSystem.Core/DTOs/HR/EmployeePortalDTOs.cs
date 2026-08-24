@@ -88,7 +88,24 @@ public sealed class EmployeePortalAssetSummaryDto
     /// <summary>Requisitions still in draft — raised and then never sent for approval.</summary>
     public int DraftRequisitionCount { get; set; }
 
+    /// <summary>
+    /// Charges raised against them that they have not yet answered — AST-3, decision D9.
+    /// </summary>
+    /// <remarks>
+    /// On the portal summary because it is the one thing on this surface where the employee's own
+    /// silence has a consequence. A charge they never answer goes to an approver anyway, with a
+    /// note saying why — so "you have not replied to this" belongs where they will see it.
+    /// </remarks>
+    public int SurchargesAwaitingMyResponseCount { get; set; }
+
+    /// <summary>Charges against them that are still live — not rejected, waived or fully recovered.</summary>
+    public int OpenSurchargeCount { get; set; }
+
+    /// <summary>What they still owe across every approved charge, in the tenant's currency.</summary>
+    public decimal OutstandingSurchargeAmount { get; set; }
+
     public IEnumerable<AssetAssignmentSummaryDto> Held { get; set; } = [];
     public IEnumerable<AssetAssignmentSummaryDto> AwaitingAcknowledgement { get; set; } = [];
     public IEnumerable<AssetRequisitionSummaryDto> OpenRequisitions { get; set; } = [];
+    public IEnumerable<AssetSurchargeSummaryDto> SurchargesAwaitingMyResponse { get; set; } = [];
 }

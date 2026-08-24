@@ -1,4 +1,4 @@
-// RHEMA-only HR enums — kept OUT of HREnums.cs on purpose.
+﻿// RHEMA-only HR enums — kept OUT of HREnums.cs on purpose.
 //
 // ⚠ THE OTHER HALF OF THIS ARRANGEMENT: members RHEMA has added to enums that HRApi DOES own.
 // Those cannot live here — a C# enum cannot be declared in two files — so they sit in HREnums.cs
@@ -382,5 +382,126 @@ public enum WarningType
     FinalWritten = 4
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AREA 16 SLICE 7 — damage, loss, and the surcharge (AST-3, defect D-d, decision D9)
+// ─────────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// How a custody ended badly — what a "report an incident" call is declaring.
+/// </summary>
+/// <remarks>
+/// Separate from <see cref="AssignmentStatus"/> because the caller states an OUTCOME and the
+/// service decides what that means for the assignment and for the asset. `AssignmentStatus.Lost`
+/// and `.Damaged` existed from the port with <b>no writer anywhere</b>: nothing in the codebase
+/// could ever set them, so an asset that never came back had no way of being recorded as such and
+/// the clearest surcharge case of all was unreachable.
+/// </remarks>
+public enum AssetIncidentOutcome
+{
+    [Description("Lost or Stolen")]
+    Lost = 1,
 
+    [Description("Damaged Beyond Return")]
+    Damaged = 2
+}
+
+/// <summary>Why an employee is being charged for a company asset — AST-3.</summary>
+public enum AssetSurchargeReason
+{
+    [Description("Damage")]
+    Damage = 1,
+
+    [Description("Loss or Theft")]
+    Loss = 2,
+
+    [Description("Not Returned")]
+    NotReturned = 3,
+
+    [Description("Other")]
+    Other = 4
+}
+
+/// <summary>
+/// Where a surcharge has got to.
+/// </summary>
+/// <remarks>
+/// <para>The employee's answer is deliberately <b>not</b> a status. Accepting and disputing lead to
+/// the same next step — the charge goes for approval either way — and they differ only in what the
+/// approver is looking at. Modelling them as states would imply a dispute stops the employer, which
+/// is not true and would be a promise the code could not keep; it obliges them to consider it. The
+/// answer therefore lives in <see cref="AssetSurchargeEmployeeResponse"/> on the record.</para>
+///
+/// <para><c>Recovering</c> is distinct from <c>Approved</c> on purpose: "decided, nothing collected
+/// yet" and "part-collected" are different facts to a finance desk and to an exit settlement.</para>
+/// </remarks>
+public enum AssetSurchargeStatus
+{
+    [Description("Draft")]
+    Draft = 0,
+
+    /// <summary>
+    /// The charge has been put to the employee. They may or may not have answered yet — that is
+    /// <see cref="AssetSurchargeEmployeeResponse"/>'s question, not this one.
+    /// </summary>
+    /// <remarks>
+    /// Named for where the record IS rather than for what is being waited on. "AwaitingResponse"
+    /// would read as a lie the moment the employee answered, on precisely the record where the
+    /// employee's answer is the thing that matters.
+    /// </remarks>
+    [Description("With Employee")]
+    WithEmployee = 1,
+
+    [Description("Submitted")]
+    Submitted = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    [Description("Rejected")]
+    Rejected = 4,
+
+    [Description("Recovering")]
+    Recovering = 5,
+
+    [Description("Recovered")]
+    Recovered = 6,
+
+    [Description("Waived")]
+    Waived = 7,
+
+    [Description("Cancelled")]
+    Cancelled = 8
+}
+
+/// <summary>What the employee said when the charge was put to them — decision D9.</summary>
+public enum AssetSurchargeEmployeeResponse
+{
+    [Description("Not Yet Given")]
+    NotYetGiven = 0,
+
+    [Description("Accepted")]
+    Accepted = 1,
+
+    [Description("Disputed")]
+    Disputed = 2
+}
+
+/// <summary>
+/// How the money is to come back.
+/// </summary>
+/// <remarks>
+/// A <b>declaration</b>, not a mechanism. HR states what should be recovered and how; payroll runs
+/// the deduction and the exit settlement applies the balance. Nothing here computes a payslip —
+/// see the payroll ownership boundary and decision D2, which draws the same line for rental.
+/// </remarks>
+public enum AssetSurchargeRecoveryMethod
+{
+    [Description("Payroll Deduction")]
+    PayrollDeduction = 1,
+
+    [Description("Direct Payment")]
+    DirectPayment = 2,
+
+    [Description("Deduct at Exit")]
+    ExitSettlement = 3
+}

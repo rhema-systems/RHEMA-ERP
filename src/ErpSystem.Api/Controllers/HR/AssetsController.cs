@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
@@ -67,6 +67,7 @@ public class AssetsController : ControllerBase
     private readonly IAssetRequisitionService _requisitionService;
     private readonly IAssetTransferService _transferService;
     private readonly IAssetTermsLetterService _termsLetterService;
+    private readonly IAssetSurchargeService _surchargeService;
 
     public AssetsController(
         IAssetTypeService assetTypeService,
@@ -79,7 +80,8 @@ public class AssetsController : ControllerBase
         IAssetAttachmentService attachmentService,
         IAssetRequisitionService requisitionService,
         IAssetTransferService transferService,
-        IAssetTermsLetterService termsLetterService)
+        IAssetTermsLetterService termsLetterService,
+        IAssetSurchargeService surchargeService)
     {
         _assetTypeService = assetTypeService;
         _assetTypeAttributeService = assetTypeAttributeService;
@@ -92,6 +94,7 @@ public class AssetsController : ControllerBase
         _requisitionService = requisitionService;
         _transferService = transferService;
         _termsLetterService = termsLetterService;
+        _surchargeService = surchargeService;
     }
 
     #region Asset Types
@@ -598,6 +601,24 @@ public class AssetsController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Report an assigned asset lost or damaged beyond return — slice 7.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of the return below, for the assets that never come back. HR-only for the
+    /// same reason the return is: it closes a custody and changes what the register says an asset is.
+    /// </remarks>
+    [HttpPost("assignments/{id:guid}/report-incident")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<IActionResult> ReportAssignmentIncident(
+        Guid id,
+        [FromBody] ReportAssetIncidentDto dto)
+    {
+        dto.AssignmentId = id;
+        await _assignmentService.ReportIncidentAsync(dto);
+        return Ok(new { message = "Incident recorded" });
+    }
+
     /// <summary>Return assigned asset.</summary>
     [HttpPost("assignments/{id:guid}/return")]
     [Authorize(Roles = HrRoles)]
@@ -1082,5 +1103,175 @@ public class AssetsController : ControllerBase
     }
 
     #endregion
-}
 
+    #region Surcharges — AST-3, defect D-d, decision D9 (slice 7)
+
+    // Charging an employee money is HR's act throughout, with exactly two exceptions: an employee
+    // may READ a charge once it has been put to them, and only they may ANSWER it. Both are gated
+    // in the service, on the record — an attribute cannot express "the person this is about".
+
+    /// <summary>One surcharge, in full. Self-or-HR, and invisible to the employee until served.</summary>
+    [HttpGet("surcharges/{id:guid}")]
+    [Authorize]
+    public async Task<ActionResult<AssetSurchargeDto>> GetSurcharge(Guid id)
+    {
+        var result = await _surchargeService.GetByIdAsync(id);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    /// <summary>Every surcharge on the tenant.</summary>
+    [HttpGet("surcharges")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetSurcharges()
+        => Ok(await _surchargeService.GetAllAsync());
+
+    [HttpGet("surcharges/paged")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<PagedResult<AssetSurchargeSummaryDto>>> GetSurchargesPaged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? searchTerm = null,
+        [FromQuery] AssetSurchargeStatus? status = null)
+        => Ok(await _surchargeService.GetPagedAsync(page, pageSize, searchTerm, status));
+
+    /// <summary>Charges raised against one employee. Self-or-HR.</summary>
+    [HttpGet("surcharges/employee/{employeeId:guid}")]
+    [Authorize]
+    public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetSurchargesForEmployee(Guid employeeId)
+        => Ok(await _surchargeService.GetByEmployeeIdAsync(employeeId));
+
+    [HttpGet("assignments/{assignmentId:guid}/surcharges")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetSurchargesForAssignment(Guid assignmentId)
+        => Ok(await _surchargeService.GetByAssignmentIdAsync(assignmentId));
+
+    /// <summary>Decided charges that still carry a balance — what this module says is owed.</summary>
+    [HttpGet("surcharges/outstanding")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetOutstandingSurcharges()
+        => Ok(await _surchargeService.GetOutstandingAsync());
+
+    /// <summary>
+    /// The read-only projection payroll consumes — AST-3's second half.
+    /// </summary>
+    /// <remarks>
+    /// HR declares what is owed and how it was said to be recovered; payroll runs the deduction.
+    /// Nothing here computes a payslip. See the payroll ownership boundary and decision D2.
+    /// </remarks>
+    [HttpGet("surcharges/payroll-deductions")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetSurchargePayrollLineDto>>> GetSurchargePayrollLines()
+        => Ok(await _surchargeService.GetPayrollDeductionLinesAsync());
+
+    [HttpPost("surcharges")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> CreateSurcharge([FromBody] CreateAssetSurchargeDto dto)
+    {
+        var created = await _surchargeService.CreateAsync(dto);
+        return CreatedAtAction(nameof(GetSurcharge), new { id = created.Id }, created);
+    }
+
+    [HttpPut("surcharges/{id:guid}")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> UpdateSurcharge(
+        Guid id,
+        [FromBody] UpdateAssetSurchargeDto dto)
+        => Ok(await _surchargeService.UpdateAsync(id, dto));
+
+    [HttpDelete("surcharges/{id:guid}")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<IActionResult> DeleteSurcharge(Guid id)
+    {
+        await _surchargeService.DeleteAsync(id);
+        return Ok(new { message = "Surcharge deleted" });
+    }
+
+    /// <summary>Puts the charge to the employee. Until this, they cannot see it — decision D9.</summary>
+    [HttpPost("surcharges/{id:guid}/notify-employee")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> NotifySurchargeEmployee(Guid id)
+        => Ok(await _surchargeService.NotifyEmployeeAsync(id));
+
+    /// <summary>
+    /// The employee's own answer — refused for everybody else, <b>HR included</b>.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as acknowledging receipt of an asset, and for the same reason: HR entering an
+    /// employee's acceptance on their behalf is not a right of reply, it is the absence of one.
+    /// </remarks>
+    [HttpPost("surcharges/{id:guid}/respond")]
+    [Authorize]
+    public async Task<ActionResult<AssetSurchargeDto>> RespondToSurcharge(
+        Guid id,
+        [FromBody] RespondToAssetSurchargeDto dto)
+        => Ok(await _surchargeService.RespondAsync(id, dto));
+
+    /// <summary>Sends the charge for approval — refused until the employee has been asked.</summary>
+    [HttpPost("surcharges/{id:guid}/submit")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> SubmitSurcharge(
+        Guid id,
+        [FromBody] SubmitAssetSurchargeDto? dto = null)
+        => Ok(await _surchargeService.SubmitAsync(id, dto ?? new SubmitAssetSurchargeDto()));
+
+    [HttpPost("surcharges/{id:guid}/recall")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> RecallSurcharge(
+        Guid id,
+        [FromBody] RecallAssetRequestDto? dto = null)
+        => Ok(await _surchargeService.RecallAsync(id, dto?.Reason));
+
+    [HttpPost("surcharges/{id:guid}/approve")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<IActionResult> ApproveSurcharge(
+        Guid id,
+        [FromBody] ApproveAssetSurchargeDto dto)
+    {
+        await _surchargeService.ApproveAsync(id, dto);
+        return Ok(new { message = "Surcharge approved" });
+    }
+
+    [HttpPost("surcharges/{id:guid}/reject")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<IActionResult> RejectSurcharge(
+        Guid id,
+        [FromBody] RejectAssetSurchargeDto dto)
+    {
+        await _surchargeService.RejectAsync(id, dto);
+        return Ok(new { message = "Surcharge rejected" });
+    }
+
+    /// <summary>How the approved amount is to be recovered — declared, not deducted.</summary>
+    [HttpPut("surcharges/{id:guid}/recovery-plan")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> SetSurchargeRecoveryPlan(
+        Guid id,
+        [FromBody] SetAssetSurchargeRecoveryPlanDto dto)
+        => Ok(await _surchargeService.SetRecoveryPlanAsync(id, dto));
+
+    /// <summary>Records money actually collected. Cannot take more than is outstanding.</summary>
+    [HttpPost("surcharges/{id:guid}/recoveries")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> RecordSurchargeRecovery(
+        Guid id,
+        [FromBody] RecordAssetSurchargeRecoveryDto dto)
+        => Ok(await _surchargeService.RecordRecoveryAsync(id, dto));
+
+    /// <summary>Forgives what is still outstanding. What was collected stays collected.</summary>
+    [HttpPost("surcharges/{id:guid}/waive")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> WaiveSurcharge(
+        Guid id,
+        [FromBody] WaiveAssetSurchargeDto dto)
+        => Ok(await _surchargeService.WaiveAsync(id, dto));
+
+    /// <summary>Withdraws a charge raised in error, before anybody has ruled on it.</summary>
+    [HttpPost("surcharges/{id:guid}/cancel")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetSurchargeDto>> CancelSurcharge(
+        Guid id,
+        [FromBody] CancelAssetSurchargeDto dto)
+        => Ok(await _surchargeService.CancelAsync(id, dto));
+
+    #endregion
+}

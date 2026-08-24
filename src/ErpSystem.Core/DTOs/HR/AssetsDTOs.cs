@@ -1514,3 +1514,337 @@ public class CompleteAssetTransferDto
 
 #endregion
 
+#region Asset Incident and Surcharge DTOs — area 16 slice 7 (AST-3, D-d, decision D9)
+
+/// <summary>
+/// Reports that a company asset was lost or damaged beyond return, closing the custody.
+/// </summary>
+/// <remarks>
+/// The counterpart of <see cref="ReturnAssetDto"/> for the assets that never come back.
+/// <c>AssignmentStatus.Lost</c> and <c>.Damaged</c> existed from the port with no writer anywhere,
+/// so an asset that was never returned could only be recorded by pretending it had been.
+/// </remarks>
+public class ReportAssetIncidentDto
+{
+    [Required]
+    public Guid AssignmentId { get; set; }
+
+    [Required]
+    public AssetIncidentOutcome Outcome { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Description { get; set; } = string.Empty;
+
+    public DateOnly? OccurredOn { get; set; }
+
+    /// <summary>Whether the holder is answerable for it. The surcharge decision is separate and later.</summary>
+    public bool EmployeeLiable { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? RepairCost { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? ReplacementCost { get; set; }
+}
+
+public class AssetSurchargeDto : BaseDto
+{
+    public Guid TenantId { get; set; }
+    public string SurchargeNumber { get; set; } = string.Empty;
+
+    public Guid AssignmentId { get; set; }
+    public string AssignmentNumber { get; set; } = string.Empty;
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+
+    public AssetSurchargeReason Reason { get; set; }
+    public string ReasonName => Reason.ToString();
+    public string Description { get; set; } = string.Empty;
+
+    // ── the money ────────────────────────────────────────────────────────────
+    public decimal AssessedAmount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>What the assignment said the damage cost when this was raised — the basis, kept.</summary>
+    public decimal? BasisRepairCost { get; set; }
+    public decimal? BasisReplacementCost { get; set; }
+
+    public decimal AmountRecovered { get; set; }
+
+    /// <summary>
+    /// What is still owed. Computed here so no screen re-derives it and gets it subtly wrong, and
+    /// so the exit settlement (FR-HR-184) has one number to read.
+    /// </summary>
+    public decimal AmountOutstanding => AssessedAmount - AmountRecovered;
+
+    /// <summary>True where the charge was set below what the damage actually cost.</summary>
+    public bool IsBelowAssessedCost =>
+        BasisReplacementCost is { } r ? AssessedAmount < r
+        : BasisRepairCost is { } p && AssessedAmount < p;
+
+    // ── state ────────────────────────────────────────────────────────────────
+    public AssetSurchargeStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+    public Guid? RaisedById { get; set; }
+    public string? RaisedByName { get; set; }
+    public DateTime RaisedAt { get; set; }
+
+    // ── the employee's side ──────────────────────────────────────────────────
+    public DateTime? NotifiedAt { get; set; }
+    public AssetSurchargeEmployeeResponse EmployeeResponse { get; set; }
+    public string EmployeeResponseName => EmployeeResponse.ToString();
+    public DateTime? EmployeeRespondedAt { get; set; }
+    public string? EmployeeResponseComments { get; set; }
+    public string? ProceededWithoutResponseReason { get; set; }
+
+    /// <summary>The employee has been told and has not answered — the gate that holds a submit.</summary>
+    public bool IsAwaitingEmployee =>
+        Status == AssetSurchargeStatus.WithEmployee
+        && EmployeeResponse == AssetSurchargeEmployeeResponse.NotYetGiven;
+
+    public bool IsDisputed => EmployeeResponse == AssetSurchargeEmployeeResponse.Disputed;
+
+    // ── the decision ─────────────────────────────────────────────────────────
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ApprovalDate { get; set; }
+    public string? ApprovalComments { get; set; }
+    public DateTime? RejectedDate { get; set; }
+    public string? RejectionReason { get; set; }
+
+    // ── recovery, declared ───────────────────────────────────────────────────
+    public AssetSurchargeRecoveryMethod? RecoveryMethod { get; set; }
+    public string? RecoveryMethodName => RecoveryMethod?.ToString();
+    public int? InstalmentCount { get; set; }
+    public DateOnly? RecoveryStartDate { get; set; }
+
+    /// <summary>What one instalment comes to, where a plan says how many. Payroll deducts, not this.</summary>
+    public decimal? InstalmentAmount =>
+        InstalmentCount is > 0 ? decimal.Round(AssessedAmount / InstalmentCount.Value, 2) : null;
+
+    public IEnumerable<AssetSurchargeRecoveryDto> Recoveries { get; set; } = [];
+
+    // ── other endings ────────────────────────────────────────────────────────
+    public Guid? WaivedById { get; set; }
+    public string? WaivedByName { get; set; }
+    public DateTime? WaivedAt { get; set; }
+    public string? WaiverReason { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancellationReason { get; set; }
+}
+
+public class AssetSurchargeSummaryDto
+{
+    public Guid Id { get; set; }
+    public string SurchargeNumber { get; set; } = string.Empty;
+    public Guid AssignmentId { get; set; }
+    public string AssignmentNumber { get; set; } = string.Empty;
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public AssetSurchargeReason Reason { get; set; }
+    public string ReasonName => Reason.ToString();
+    public decimal AssessedAmount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal AmountRecovered { get; set; }
+    public decimal AmountOutstanding => AssessedAmount - AmountRecovered;
+    public AssetSurchargeStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+    public AssetSurchargeEmployeeResponse EmployeeResponse { get; set; }
+    public string EmployeeResponseName => EmployeeResponse.ToString();
+    public bool IsDisputed => EmployeeResponse == AssetSurchargeEmployeeResponse.Disputed;
+    public DateTime RaisedAt { get; set; }
+    public DateOnly? RecoveryStartDate { get; set; }
+}
+
+public class AssetSurchargeRecoveryDto : BaseDto
+{
+    public Guid SurchargeId { get; set; }
+    public decimal Amount { get; set; }
+    public DateOnly RecoveredOn { get; set; }
+    public AssetSurchargeRecoveryMethod Method { get; set; }
+    public string MethodName => Method.ToString();
+    public string? Reference { get; set; }
+    public string? Notes { get; set; }
+    public Guid? RecordedById { get; set; }
+    public string? RecordedByName { get; set; }
+}
+
+public class CreateAssetSurchargeDto : CreateDtoBase
+{
+    [Required]
+    public Guid AssignmentId { get; set; }
+
+    [Required]
+    public AssetSurchargeReason Reason { get; set; }
+
+    [Required]
+    [MaxLength(2000)]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the employee is asked to pay.
+    /// </summary>
+    /// <remarks>
+    /// Leave null to take the assignment's replacement cost, or its repair cost where there is no
+    /// replacement cost — a default, never a rule. An employer routinely charges less than the
+    /// damage cost, and the basis is kept on the record either way so the two can be compared.
+    /// </remarks>
+    [Range(0, double.MaxValue)]
+    public decimal? AssessedAmount { get; set; }
+
+    /// <summary>Defaults to the tenant's base currency when omitted. Validated against Finance.</summary>
+    [MaxLength(3)]
+    public string? CurrencyCode { get; set; }
+}
+
+public class UpdateAssetSurchargeDto : UpdateDtoBase
+{
+    [Required]
+    public AssetSurchargeReason Reason { get; set; }
+
+    [Required]
+    [MaxLength(2000)]
+    public string Description { get; set; } = string.Empty;
+
+    [Required]
+    [Range(0, double.MaxValue)]
+    public decimal AssessedAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? CurrencyCode { get; set; }
+}
+
+/// <summary>The employee's answer to a charge put to them — decision D9.</summary>
+public class RespondToAssetSurchargeDto
+{
+    /// <summary>True to accept the charge, false to dispute it. Both send it on for approval.</summary>
+    [Required]
+    public bool Accepted { get; set; }
+
+
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+}
+
+public class ApproveAssetSurchargeDto
+{
+    [MaxLength(1000)]
+    public string? ApprovalComments { get; set; }
+
+    /// <summary>
+    /// The amount finally charged, where the approver settles on a different figure.
+    /// </summary>
+    /// <remarks>
+    /// Reducing a charge on approval is the ordinary outcome of a dispute the employee won in part.
+    /// Omit to approve the amount as assessed; it may be lowered, never raised — a figure the
+    /// employee was never given a chance to answer is not one they can be charged.
+    /// </remarks>
+    [Range(0, double.MaxValue)]
+    public decimal? ApprovedAmount { get; set; }
+}
+
+public class RejectAssetSurchargeDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string RejectionReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Sends a charge for approval.
+/// </summary>
+public class SubmitAssetSurchargeDto
+{
+    /// <summary>
+    /// Required only where the employee has been asked and has not answered.
+    /// </summary>
+    /// <remarks>
+    /// The right of reply is a right to be asked, not a veto exercised by silence — but proceeding
+    /// past it is a decision somebody makes, so it is stated and recorded rather than defaulted.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? ProceedWithoutResponseReason { get; set; }
+}
+
+/// <summary>How the approved amount is to be recovered — a declaration to payroll, not a deduction.</summary>
+public class SetAssetSurchargeRecoveryPlanDto
+{
+    [Required]
+    public AssetSurchargeRecoveryMethod RecoveryMethod { get; set; }
+
+    [Range(1, 120)]
+    public int? InstalmentCount { get; set; }
+
+    public DateOnly? RecoveryStartDate { get; set; }
+}
+
+public class RecordAssetSurchargeRecoveryDto
+{
+    [Required]
+    [Range(0.01, double.MaxValue)]
+    public decimal Amount { get; set; }
+
+    [Required]
+    public DateOnly RecoveredOn { get; set; }
+
+    [Required]
+    public AssetSurchargeRecoveryMethod Method { get; set; }
+
+    [MaxLength(200)]
+    public string? Reference { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+public class WaiveAssetSurchargeDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string WaiverReason { get; set; } = string.Empty;
+}
+
+public class CancelAssetSurchargeDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string CancellationReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// The read-only projection payroll consumes — one line per employee with something to deduct.
+/// </summary>
+/// <remarks>
+/// HR states what is owed and how it was declared to be recovered. It computes no payslip, writes
+/// nothing to payroll, and holds no deduction of its own — the same boundary decision D2 draws for
+/// rental. Only <b>approved</b> charges with an outstanding balance and a payroll-deduction plan
+/// appear; a disputed-but-unapproved charge is not yet a debt.
+/// </remarks>
+public class AssetSurchargePayrollLineDto
+{
+    public Guid SurchargeId { get; set; }
+    public string SurchargeNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal AssessedAmount { get; set; }
+    public decimal AmountRecovered { get; set; }
+    public decimal AmountOutstanding { get; set; }
+    public int? InstalmentCount { get; set; }
+    public decimal? InstalmentAmount { get; set; }
+    public DateOnly? RecoveryStartDate { get; set; }
+    public DateTime? ApprovalDate { get; set; }
+}
+
+#endregion
+

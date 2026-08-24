@@ -691,4 +691,81 @@ public class AssetTransferRepository : GenericRepository<AssetTransfer>, IAssetT
 
 #endregion
 
+#region Asset Surcharge Repositories — area 16 slice 7
+
+public class AssetSurchargeRepository : GenericRepository<AssetSurcharge>, IAssetSurchargeRepository
+{
+    public AssetSurchargeRepository(ApplicationDbContext context) : base(context) { }
+
+    /// <summary>
+    /// The graph every surcharge read needs.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Stated once and reused by all four reads below, rather than copied. Four queries feeding
+    /// one mapping is how this area produced a blank field six times over — a list read that loads
+    /// less than the by-id read renders the same record differently, and only an assertion that the
+    /// two agree ever catches it. There is no reason for them to differ here, so they do not.
+    /// </remarks>
+    private IQueryable<AssetSurcharge> WithGraph() =>
+        _context.Set<AssetSurcharge>()
+            .Include(x => x.Assignment).ThenInclude(a => a.Asset)
+            .Include(x => x.Employee)
+            .Include(x => x.RaisedBy)
+            .Include(x => x.ApprovedBy)
+            .Include(x => x.WaivedBy)
+            .Include(x => x.Recoveries.Where(r => !r.IsDeleted)).ThenInclude(r => r.RecordedBy);
+
+    public async Task<IEnumerable<AssetSurcharge>> GetByTenantAsync(Guid tenantId)
+        => await WithGraph()
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted)
+            .OrderByDescending(x => x.RaisedAt)
+            .ToListAsync();
+
+    public async Task<AssetSurcharge?> GetWithDetailsAsync(Guid id)
+        => await WithGraph().FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
+
+    public async Task<IEnumerable<AssetSurcharge>> GetByEmployeeIdAsync(Guid employeeId)
+        => await WithGraph()
+            .Where(x => x.EmployeeId == employeeId && !x.IsDeleted)
+            .OrderByDescending(x => x.RaisedAt)
+            .ToListAsync();
+
+    public async Task<IEnumerable<AssetSurcharge>> GetByAssignmentIdAsync(Guid assignmentId)
+        => await WithGraph()
+            .Where(x => x.AssignmentId == assignmentId && !x.IsDeleted)
+            .OrderByDescending(x => x.RaisedAt)
+            .ToListAsync();
+
+    /// <summary>
+    /// Charges that have been decided and still carry a balance.
+    /// </summary>
+    /// <remarks>
+    /// Draft, with-employee and submitted charges are deliberately absent: a figure nobody has
+    /// ruled on is not a debt, and putting it in an outstanding list would show a proposal as
+    /// though it were money owed.
+    /// </remarks>
+    public async Task<IEnumerable<AssetSurcharge>> GetOutstandingAsync(Guid tenantId)
+        => await WithGraph()
+            .Where(x => x.TenantId == tenantId
+                && !x.IsDeleted
+                && (x.Status == AssetSurchargeStatus.Approved || x.Status == AssetSurchargeStatus.Recovering)
+                && x.AmountRecovered < x.AssessedAmount)
+            .OrderBy(x => x.RecoveryStartDate)
+            .ToListAsync();
+}
+
+public class AssetSurchargeRecoveryRepository
+    : GenericRepository<AssetSurchargeRecovery>, IAssetSurchargeRecoveryRepository
+{
+    public AssetSurchargeRecoveryRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<IEnumerable<AssetSurchargeRecovery>> GetBySurchargeIdAsync(Guid surchargeId)
+        => await _context.Set<AssetSurchargeRecovery>()
+            .Include(x => x.RecordedBy)
+            .Where(x => x.SurchargeId == surchargeId && !x.IsDeleted)
+            .OrderBy(x => x.RecoveredOn)
+            .ToListAsync();
+}
+
+#endregion
 

@@ -27,6 +27,7 @@ public class EmployeePortalController : ControllerBase
     private readonly IAssetAssignmentService       _assignmentService;
     private readonly IAssetRequisitionService      _requisitionService;
     private readonly IAssetTermsLetterService      _termsLetterService;
+    private readonly IAssetSurchargeService        _surchargeService;
     private readonly ICurrentUserService           _currentUser;
 
     public EmployeePortalController(
@@ -35,6 +36,7 @@ public class EmployeePortalController : ControllerBase
         IAssetAssignmentService        assignmentService,
         IAssetRequisitionService       requisitionService,
         IAssetTermsLetterService       termsLetterService,
+        IAssetSurchargeService         surchargeService,
         ICurrentUserService            currentUser)
     {
         _movementService    = movementService;
@@ -42,6 +44,7 @@ public class EmployeePortalController : ControllerBase
         _assignmentService  = assignmentService;
         _requisitionService = requisitionService;
         _termsLetterService = termsLetterService;
+        _surchargeService   = surchargeService;
         _currentUser        = currentUser;
     }
 
@@ -371,6 +374,9 @@ public class EmployeePortalController : ControllerBase
 
         var held         = (await _assignmentService.GetActiveAssignmentsForEmployeeAsync(empId)).ToList();
         var requisitions = (await _requisitionService.GetForEmployeeAsync(empId)).ToList();
+        // Only charges that have been PUT to the employee come back here — the service hides HR's
+        // own drafts from their subject, which is why this reads the same list they can open.
+        var surcharges   = (await _surchargeService.GetByEmployeeIdAsync(empId)).ToList();
 
         var today    = DateOnly.FromDateTime(DateTime.UtcNow);
         var unsigned = held.Where(a => !a.EmployeeAcknowledged).ToList();
@@ -384,6 +390,20 @@ public class EmployeePortalController : ControllerBase
         };
         var open = requisitions.Where(r => openStatuses.Contains(r.Status)).ToList();
 
+        var awaitingResponse = surcharges
+            .Where(x => x.Status == AssetSurchargeStatus.WithEmployee
+                && x.EmployeeResponse == AssetSurchargeEmployeeResponse.NotYetGiven)
+            .ToList();
+
+        // Live means the charge can still cost them something: rejected, waived, cancelled and
+        // fully recovered ones are over, and showing them as outstanding would be a debt that is not.
+        var liveSurcharges = surcharges
+            .Where(x => x.Status is AssetSurchargeStatus.WithEmployee
+                or AssetSurchargeStatus.Submitted
+                or AssetSurchargeStatus.Approved
+                or AssetSurchargeStatus.Recovering)
+            .ToList();
+
         return Ok(new EmployeePortalAssetSummaryDto
         {
             EmployeeId                   = empId,
@@ -395,9 +415,17 @@ public class EmployeePortalController : ControllerBase
             OverdueReturnCount           = held.Count(a => a.ExpectedReturnDate is { } due && due < today),
             OpenRequisitionCount         = open.Count,
             DraftRequisitionCount        = requisitions.Count(r => r.Status == AssetRequisitionStatus.Draft),
+
+            // AST-3 / D9. "Awaiting my response" is the only figure on this payload that means the
+            // employee's own inaction has a consequence, so it is counted separately from the rest.
+            SurchargesAwaitingMyResponseCount = awaitingResponse.Count,
+            OpenSurchargeCount                = liveSurcharges.Count,
+            OutstandingSurchargeAmount        = liveSurcharges.Sum(x => x.AmountOutstanding),
+
             Held                         = held,
             AwaitingAcknowledgement      = unsigned,
-            OpenRequisitions             = open
+            OpenRequisitions             = open,
+            SurchargesAwaitingMyResponse = awaitingResponse
         });
     }
 
@@ -507,6 +535,48 @@ public class EmployeePortalController : ControllerBase
 
         await _requisitionService.DeleteAsync(id);
         return Ok(new { message = "Asset requisition withdrawn" });
+    }
+
+    // -- Surcharges (AST-3, decision D9) --------------------------------------
+    //
+    // The employee sees a charge only once it has been PUT to them; HR's drafts are invisible here
+    // and answer 404 rather than 403, because a 403 would confirm that a charge against them is
+    // being written. Answering is theirs alone — HR is refused, exactly as it is for acknowledging
+    // receipt of an asset.
+
+    /// <summary>Charges raised against the employee that have been served on them.</summary>
+    [HttpGet("asset-surcharges")]
+    public async Task<IActionResult> GetMyAssetSurcharges()
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        return Ok(await _surchargeService.GetByEmployeeIdAsync(empId));
+    }
+
+    /// <summary>One charge against the employee, in full — what it is for, and what they answered.</summary>
+    [HttpGet("asset-surcharges/{id:guid}")]
+    public async Task<IActionResult> GetMyAssetSurcharge(Guid id)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+
+        var surcharge = await _surchargeService.GetByIdAsync(id);
+        return surcharge is null ? NotFound() : Ok(surcharge);
+    }
+
+    /// <summary>
+    /// The employee accepts or disputes a charge — their right of reply, decision D9.
+    /// </summary>
+    /// <remarks>
+    /// Both answers send the charge on for approval; they differ in what the approver reads. A
+    /// dispute does not stop the employer, and it was never going to — what it does is oblige them
+    /// to decide with the employee's account in front of them, and leave a record that they did.
+    /// </remarks>
+    [HttpPost("asset-surcharges/{id:guid}/respond")]
+    public async Task<IActionResult> RespondToMyAssetSurcharge(
+        Guid id,
+        [FromBody] RespondToAssetSurchargeDto dto)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+        return Ok(await _surchargeService.RespondAsync(id, dto));
     }
 
 }

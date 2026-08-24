@@ -69,6 +69,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAssetAttachmentRepository, AssetAttachmentRepository>();
         services.AddScoped<IAssetRequisitionRepository, AssetRequisitionRepository>();
         services.AddScoped<IAssetTransferRepository, AssetTransferRepository>();
+        // AST-3 — the surcharge and what has been collected against it (slice 7).
+        services.AddScoped<IAssetSurchargeRepository, AssetSurchargeRepository>();
+        services.AddScoped<IAssetSurchargeRecoveryRepository, AssetSurchargeRecoveryRepository>();
         services.AddScoped<IAwardTypeRepository, AwardTypeRepository>();
         services.AddScoped<IAwardLevelRepository, AwardLevelRepository>();
         services.AddScoped<IAwardBudgetRepository, AwardBudgetRepository>();
@@ -502,6 +505,8 @@ public static class HrModuleServiceRegistration
         // AST-5 / AST-5b — the responsibility document, rendered from the HR-editable template.
         // Its email-event catalog is registered with the other catalogs further down.
         services.AddScoped<IAssetTermsLetterService, AssetTermsLetterService>();
+        // AST-3 / D-d — charging an employee for an asset they damaged, lost or never returned.
+        services.AddScoped<IAssetSurchargeService, AssetSurchargeService>();
         services.AddScoped<IAwardTypeService, AwardTypeService>();
         services.AddScoped<IAwardCycleService, AwardCycleService>();
         services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();

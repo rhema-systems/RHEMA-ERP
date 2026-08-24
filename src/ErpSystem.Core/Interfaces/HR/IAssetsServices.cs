@@ -88,6 +88,17 @@ public interface IAssetAssignmentService
     Task DeleteAsync(Guid id);
     Task AcknowledgeAssignmentAsync(AcknowledgeAssignmentDto dto);
     Task ReturnAssetAsync(ReturnAssetDto dto);
+
+    /// <summary>
+    /// Closes a custody that ended badly — the asset was lost, or damaged beyond returning.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="ReturnAssetAsync"/> for the assets that never come back.
+    /// <c>AssignmentStatus.Lost</c> and <c>.Damaged</c> existed from the port with no writer
+    /// anywhere, so until slice 7 the only way to record a lost asset was to pretend it had been
+    /// returned.
+    /// </remarks>
+    Task ReportIncidentAsync(ReportAssetIncidentDto dto);
 }
 
 #endregion

@@ -35,12 +35,12 @@ decision — record the change where it happened.
 | **Branch** | `hrdev` |
 | **FRD requirements** | **FR-HR-183 (M)** — exit clearance across "outstanding loans, salary advances, **company property, office equipment**, duty-post keys, documents and payroll recoveries". That is the only FRD line that touches this area. |
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
-| **Backend today** | 10 entities, **84 endpoints** on `AssetsController` (82 ported + 2 added in slice 2b) plus **13 employee-portal routes** added in slice 6, 1,634 lines of service, 1,193 lines of DTOs, 939 lines of mapping, 584 lines of repositories |
+| **Backend today** | **12 entities**, **103 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7) plus **16 employee-portal routes** (13 in slice 6, 3 in slice 7) |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–6 green twice — 647 assertions.** The register and the asset agree with each other, and the employee can now see what is in their hands, sign for it, print what they signed and ask for more — through routes that take no employee id |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice6.mjs`, `probe-slice6-ui.mjs` |
+| **Status** | 🔨 In progress. Decisions **D1–D9** settled. **Slices 0–7 green twice — 799 assertions.** An asset can now be reported lost, and an employee charged for it — but only after being asked, and only for an amount they were shown |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice7.mjs`, `probe-slice6-ui.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -325,7 +325,7 @@ an ID below so slices can cite it. Nothing is inferred that the document does no
 |---|---|---|
 | **AST-1** | If an asset requires maintenance, there must be a way to **monitor** it | Fields + one read exist; no scheduling, no reminder (D-h) |
 | **AST-2** | Once assigned, an asset is **no longer available for further assignment** | ❌ absent (D-a) |
-| **AST-3** | An employee may be **surcharged for damage** | Fields exist, inert (D-d) |
+| **AST-3** | An employee may be **surcharged for damage** | ✅ **slice 7** — `AssetSurcharge` + `AssetSurchargeRecovery`, on the workflow engine, with a right of reply (D9) and a read-only payroll projection |
 | **AST-4** | **Insurance expiry** field on the asset details | ❌ absent (D-g) |
 | **AST-5** | **Print** the responsibility-and-terms document for physical signature, for employees who cannot use the portal | ❌ absent |
 | **AST-5b** | …or **email** that document to the employee's email address | ❌ absent |
@@ -467,6 +467,41 @@ what an employee is financially liable for, and the send is stamped onto the rec
 to rest on something durable, so delivery goes through `ITransactionalEmailQueue`'s outbox where a
 dispatcher retries and an administrator can see whether it left.
 
+### D9 — the shape of a surcharge (AST-3, D-d). ✅ **DECIDED 2026-08-24.**
+
+Three questions, all three answered with the recommendation.
+
+**Does the employee get a right of reply before approval?** *Yes.* `Draft → WithEmployee →
+Submitted → Approved`. A charge cannot reach an approver until it has been put to the employee and
+they have answered — **or** until somebody states, on the record, why it is going without one
+(`ProceededWithoutResponseReason`). Silence must not be a veto, and must not be invisible either.
+The answer is **data on the record, not a status**: accepting and disputing lead to the same next
+step and differ only in what the approver is reading, so modelling them as states would imply a
+dispute stops the employer — a promise the code could not keep.
+
+**Does slice 7 also give loss and damage a way to be recorded?** *Yes*, and it had to — see D-z.
+
+**How far does HR go on recovery?** *Declare and record; do not compute.* `RecoveryMethod`,
+`InstalmentCount` and `RecoveryStartDate` are a declaration payroll consumes through
+`GET Assets/surcharges/payroll-deductions`; `AssetSurchargeRecovery` rows record what somebody else
+actually collected. No instalment schedule, no deduction run, no payment-status machine — the same
+line D2 draws for rental, and the reason is the payroll ownership boundary.
+
+**Why an entity rather than five more columns on the assignment.** `EmployeeLiable`, `RepairCost`
+and `ReplacementCost` are *facts about an asset*: what it would cost to mend or replace it. A
+surcharge is a *decision about a person*: that this employee owes this amount, taken by somebody,
+on a date, after they were given the chance to answer. An employer routinely charges less than the
+repair cost, so the two are not the same number and neither is derivable from the other. Both cost
+figures are copied onto the charge as its **basis**, so a decision to charge less stays visible.
+
+Two consequences of the right of reply worth stating, because they are asymmetric on purpose:
+
+- **An approver may lower the charge and may never raise it.** Reducing is the ordinary outcome of
+  a dispute the employee partly won; raising would charge them a figure they were never shown.
+- **A recall returns the charge to `WithEmployee`, not to `Draft`** — the one place the surcharge
+  adapter differs from its two siblings. Dropping to Draft would discard the fact that they were
+  asked and what they said, on the record whose whole point is that they were asked.
+
 ### D8 — the exit-clearance hook (FR-HR-183, closing 9b D4). *Recommendation, taken unless contradicted.*
 
 When a separation's clearance form is generated, every `ClearanceItemKind.CompanyProperty` and
@@ -511,7 +546,7 @@ overdue returns; and the full screen set.
 | **4** | ✅ Assignment integrity | The availability guard (AST-2, **D-a**), the return consistency check (**D-c**), the transfer-completion gap, and two holes that made an asset unusable: a deleted assignment that never released it, and a return that could be taken twice. Migration `AddAssetAssignmentTransferLink` |
 | **5** | ✅ Responsibility and terms | The document rendered from an **HR-editable template** + the per-tenant `CompanyProfile`, printable and emailable, recorded on the assignment (AST-5, AST-5b). Migration `AddAssetAssignmentTermsDocumentSend` |
 | **6** | ✅ The employee's own surface | `/hr/assets/me` + 13 `EmployeePortalController` routes: my assets, acknowledge, print the terms, request, request on behalf (AST-6, AST-6b, AST-8, D4). **D-w, D-x, D-y** |
-| **7** | Damage and surcharge | The surcharge record, its approval, its recovery route (AST-3, D-d) |
+| **7** | ✅ Damage and surcharge | `AssetSurcharge` + `AssetSurchargeRecovery` on the engine, the right of reply, the payroll projection (AST-3, **D-d**, D9) — and **D-z**, the incident route without which loss could not be recorded at all. Migration `AddAssetSurchargeAndIncident` |
 | **8** | Rental and the payroll seam | `IsRentable`, the assignment's rental terms, the read-only projection (AST-9, AST-10) |
 | **9** | Maintenance monitoring | Schedule written from the interval, due/overdue reads, the reminder sweep (AST-1, D-h) |
 | **10** | Exit clearance | FR-HR-183 — clearance lines sourced from unreturned assignments, closing 9b D4 |
@@ -1050,3 +1085,61 @@ request dialog whose on-behalf picker only renders when the caller actually has 
 entry, "My Assets"; the HR register joins it as children at slice 12. Verified by `tsc` (19
 pre-existing errors, all in `inventory`, none in these files) and `eslint` (clean) — there is still
 no browser-automation tool.
+
+### Slice 7 — damage, loss and the surcharge. 2026-08-24, **152/152, run twice** (stamps 190003, 190004). Migration `AddAssetSurchargeAndIncident`.
+
+Delivers **AST-3**, closes **D-d**, and settles **D9**. Slices 1–6 re-run at 45/45, 85/85, 94/94,
+49/49, 135/135, 73/73, 48/48 and 118/118 — **799 assertions** for the area.
+
+**D-d was never really about three inert columns.** `EmployeeLiable`, `RepairCost` and
+`ReplacementCost` have been on the assignment since the port, written by the return path and read
+by nothing; slice 4 made them *coherent* and the defect stayed open because coherent is not the
+same as used. The reading this slice gives them is deliberately narrow: they establish that a charge
+is **permissible** and they seed its **default**. What the employee is actually asked to pay is a
+separate decision, recorded as one — which is why the surcharge is an entity and not five more
+columns. §5 D9 carries the argument.
+
+**D-z — the defect that had to be fixed before AST-3 was reachable at all.**
+`AssignmentStatus.Lost` and `.Damaged` came from the port and **nothing in the codebase ever set
+either**. The only closing act on a custody was a return, so an asset that never came back could be
+recorded only by pretending it had — and the clearest surcharge case of all, a lost laptop, had no
+record to hang off. `POST assignments/{id}/report-incident` closes it honestly. Two details in it
+matter more than the route:
+
+- **No return date is stamped.** Nothing came back. Writing one would make every "was it returned"
+  query answer yes for an asset nobody can find — including the exit clearance slice 10 builds on it.
+- **The asset does not go back to `Available`.** It becomes `LostStolen` or `Damaged`, so slice 4's
+  availability guard refuses to issue it to the next person. An asset nobody can find is not stock.
+
+**The gate that makes the right of reply real.** A charge cannot be submitted before the employee
+has been asked (refused *in words*), and cannot be submitted after they were asked but never
+answered unless a reason is stated and stored. And the assertion that keeps the whole thing from
+being ceremony: **HR cannot answer in the employee's name.** The role that can do everything else to
+this record is refused the one act that is theirs — the same shape as acknowledging receipt, and for
+the same reason. A charge is also **404 to its subject until it is served**, not 403: a 403 would
+confirm that a charge against them is being drafted.
+
+**What the harness caught about itself, and why it is worth writing down.** The first full run was
+147/152 and **all five failures were the probe's, not the product's** — three rules measured on
+records that a *different* rule already refused. The currency check was sent to an assignment that
+already carried a live charge (the duplicate guard answered first), the return-consistency check was
+sent to a nil id (not-found answered first), and the incident-description check was answered by
+`[Required]` before the service saw it. That last one is now asserted as it actually behaves, with
+the service guard declared **unreachable through the API** rather than quietly deleted — the slice-2
+convention. The general rule, and it is the third time this area has met it: *a rule measured on a
+record that another rule already refuses is a rule not measured at all.*
+
+**The payroll seam, stated exactly.** `GET Assets/surcharges/payroll-deductions` carries only
+**approved** charges with a balance and a `PayrollDeduction` plan. A disputed-but-undecided charge is
+not a debt, and one to be settled at exit or paid directly is not payroll's to deduct — either in
+that list would have payroll collecting money nobody has ruled is owed. `InstalmentAmount` is the
+assessed amount over the declared count: a statement of intent, not a schedule, because HR does not
+know payroll's periods, its rounding or its net-pay floor. Registered as **16.1–16.7** in
+`docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, with the one question no other area raises — a surcharge
+is the only place in the HR module where the employer is the **creditor**.
+
+**Screen.** `/hr/assets/me` gains a Charges tab, a fifth counter, and the accept/dispute dialog. The
+copy is blunt on purpose: *disputing does not cancel the charge; your account goes to the approver
+with it, and they may reduce the amount — they cannot increase it.* A button that reads like a veto
+and behaves like a comment is worse than no button. `tsc` (19 pre-existing errors, all in
+`inventory`, none in these files) and `eslint` clean.

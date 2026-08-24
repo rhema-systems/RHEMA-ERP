@@ -11,7 +11,9 @@ import {
   PenLine,
   Plus,
   Printer,
+  Receipt,
   Send,
+  ThumbsUp,
   Trash2,
   Undo2,
 } from 'lucide-react';
@@ -52,9 +54,16 @@ import { assetPortalService } from '@/services/hr/asset-portal.service';
 import { employeeService } from '@/services/hr/employee.service';
 import { useToast } from '@/hooks/use-toast';
 import { ASSET_REQUISITION_PRIORITIES } from '@/types/hr/assets';
-import type { AssetAssignmentSummary, AssetRequisitionSummary } from '@/types/hr/assets';
+import type {
+  AssetAssignmentSummary,
+  AssetRequisitionSummary,
+  AssetSurchargeSummary,
+} from '@/types/hr/assets';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
+
+const fmtMoney = (amount: number, currency: string) =>
+  `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const SELF = '__self__';
 
@@ -88,6 +97,8 @@ export default function MyAssetsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [recalling, setRecalling] = useState<AssetRequisitionSummary | null>(null);
   const [recallReason, setRecallReason] = useState('');
+  const [answering, setAnswering] = useState<{ row: AssetSurchargeSummary; accepted: boolean } | null>(null);
+  const [answerComments, setAnswerComments] = useState('');
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['hr', 'assets', 'mine'] });
@@ -106,6 +117,11 @@ export default function MyAssetsPage() {
   const { data: requisitions = [] } = useQuery({
     queryKey: ['hr', 'assets', 'mine', 'requisitions'],
     queryFn: () => assetPortalService.getMyRequisitions(),
+  });
+
+  const { data: surcharges = [] } = useQuery({
+    queryKey: ['hr', 'assets', 'mine', 'surcharges'],
+    queryFn: () => assetPortalService.getMySurcharges(),
   });
 
   // Only fetched once the form is open — most employees are nobody's manager, and this is a
@@ -233,6 +249,37 @@ export default function MyAssetsPage() {
       toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
   });
 
+  /**
+   * The employee's right of reply — AST-3, decision D9.
+   *
+   * Disputing does not cancel the charge and the copy says so, because a button that reads like a
+   * veto and behaves like a comment is worse than no button. What it does is put their account in
+   * front of the approver, who may then lower the charge and may never raise it.
+   */
+  const answerSurcharge = useMutation({
+    mutationFn: () => {
+      if (!answering) throw new Error('No charge selected.');
+      return assetPortalService.respondToSurcharge(
+        answering.row.id,
+        answering.accepted,
+        answerComments || undefined,
+      );
+    },
+    onSuccess: () => {
+      toast({
+        title: answering?.accepted ? 'Charge accepted' : 'Response recorded',
+        description: answering?.accepted
+          ? undefined
+          : 'Your account goes to the approver with the charge.',
+      });
+      setAnswering(null);
+      setAnswerComments('');
+      invalidate();
+    },
+    onError: (error: any) =>
+      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+  });
+
   const openNew = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -353,6 +400,18 @@ export default function MyAssetsPage() {
                   ? `${summary?.draftRequisitionCount} still a draft`
                   : undefined,
             },
+            {
+              label: 'Charges to answer',
+              value: summary?.surchargesAwaitingMyResponseCount ?? 0,
+              icon: Receipt,
+              // The one figure on this page where the employee's own silence has a consequence:
+              // a charge they never answer goes to an approver anyway, with a note saying why.
+              tone: (summary?.surchargesAwaitingMyResponseCount ?? 0) > 0 ? 'danger' : 'default',
+              hint:
+                (summary?.openSurchargeCount ?? 0) > 0
+                  ? `${summary?.openSurchargeCount} charge(s) open`
+                  : undefined,
+            },
           ]}
         />
       )}
@@ -362,6 +421,7 @@ export default function MyAssetsPage() {
           <TabsTrigger value="held">In your hands ({held.length})</TabsTrigger>
           <TabsTrigger value="history">Previously held ({returned.length})</TabsTrigger>
           <TabsTrigger value="requests">Requests ({requisitions.length})</TabsTrigger>
+          <TabsTrigger value="charges">Charges ({surcharges.length})</TabsTrigger>
         </TabsList>
 
         {/* ── what I hold ─────────────────────────────────────────────────── */}
@@ -549,6 +609,103 @@ export default function MyAssetsPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ── charges raised against me ────────────────────────────────────── */}
+        <TabsContent value="charges" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Charges raised against you</CardTitle>
+              <CardDescription>
+                If a company asset in your care is damaged or lost, you may be asked to pay towards
+                it. You will always be asked before a charge goes to an approver — and what you say
+                goes with it.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {surcharges.length === 0 ? (
+                <EmptyState
+                  icon={Receipt}
+                  title="Nothing has been charged to you"
+                  description="Charges appear here as soon as they are put to you."
+                />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Charge</TableHead>
+                      <TableHead>Asset</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Outstanding</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Your response</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {surcharges.map((c) => {
+                      const mustAnswer =
+                        c.status === 'WithEmployee' && c.employeeResponse === 'NotYetGiven';
+                      return (
+                        <TableRow key={c.id}>
+                          <TableCell className="font-medium">
+                            {c.surchargeNumber}
+                            <div className="text-xs text-muted-foreground">
+                              {c.reasonName} · {fmtDate(c.raisedAt)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {c.assetName}
+                            <div className="text-xs text-muted-foreground">{c.assetNumber}</div>
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {fmtMoney(c.assessedAmount, c.currencyCode)}
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {fmtMoney(c.amountOutstanding, c.currencyCode)}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={c.statusName} />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {mustAnswer ? (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setAnswering({ row: c, accepted: true });
+                                    setAnswerComments('');
+                                  }}
+                                >
+                                  <ThumbsUp className="mr-1 h-4 w-4" />
+                                  Accept
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setAnswering({ row: c, accepted: false });
+                                    setAnswerComments('');
+                                  }}
+                                >
+                                  Dispute
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                {c.employeeResponse === 'NotYetGiven'
+                                  ? 'You did not respond'
+                                  : c.employeeResponseName}
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* ── the request form ──────────────────────────────────────────────── */}
@@ -713,6 +870,63 @@ export default function MyAssetsPage() {
             <Button onClick={() => recallRequest.mutate()} disabled={recallRequest.isPending}>
               {recallRequest.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Pull back to draft
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── answering a charge (AST-3, decision D9) ───────────────────────── */}
+      <Dialog open={!!answering} onOpenChange={(open) => !open && setAnswering(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {answering?.accepted ? 'Accept this charge' : 'Dispute this charge'}
+            </DialogTitle>
+            <DialogDescription>
+              {answering
+                ? `${answering.row.surchargeNumber} — ${fmtMoney(
+                    answering.row.assessedAmount,
+                    answering.row.currencyCode,
+                  )} for ${answering.row.assetName}.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/*
+            Said plainly, because the alternative is a button that reads like a veto and behaves
+            like a comment. A dispute does not cancel the charge; it goes to the approver with it,
+            and they may reduce it. They cannot increase it.
+          */}
+          <p className="text-sm text-muted-foreground">
+            {answering?.accepted
+              ? 'Accepting confirms you agree to pay this amount. It still goes to an approver before anything is recovered.'
+              : 'Disputing does not cancel the charge. Your account goes to the approver together with it, and they may reduce the amount — they cannot increase it.'}
+          </p>
+
+          <div className="space-y-2">
+            <Label>
+              {answering?.accepted ? 'Anything to add (optional)' : 'What happened, in your words'}
+            </Label>
+            <Textarea
+              rows={4}
+              value={answerComments}
+              onChange={(e) => setAnswerComments(e.target.value)}
+              placeholder={
+                answering?.accepted ? '' : 'The approver reads this before deciding.'
+              }
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAnswering(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => answerSurcharge.mutate()}
+              disabled={answerSurcharge.isPending || (!answering?.accepted && !answerComments.trim())}
+            >
+              {answerSurcharge.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {answering?.accepted ? 'Accept the charge' : 'Submit my response'}
             </Button>
           </DialogFooter>
         </DialogContent>

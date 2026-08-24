@@ -1281,6 +1281,81 @@ public class AssetAssignmentService : IAssetAssignmentService
 
         await _unitOfWork.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// Closes a custody that ended badly — the asset was lost, or damaged beyond returning.
+    /// Area 16, slice 7.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this route had to exist before a surcharge could.</b> <c>AssignmentStatus.Lost</c>
+    /// and <c>.Damaged</c> came from the port and <b>nothing in the codebase ever set either</b>: the
+    /// only closing act was a return, so an asset that never came back could be recorded only by
+    /// pretending it had. That made the clearest surcharge case of all — a lost laptop —
+    /// unreachable, because a charge is raised against the assignment that records what happened.</para>
+    ///
+    /// <para>The asset is released either way: it is no longer in anybody's hands. But it does
+    /// <b>not</b> return to <c>Available</c> — it becomes <c>LostStolen</c> or <c>Damaged</c>, so
+    /// the availability guard slice 4 added refuses to issue it to the next person. An asset nobody
+    /// can find is not stock.</para>
+    ///
+    /// <para>Liability is recorded here and charged later, on purpose. Whether the employee is
+    /// answerable is a judgement about what happened; what they pay is a separate decision with a
+    /// right of reply attached to it (decision D9). Recording the first does not commit the second.</para>
+    /// </remarks>
+    public async Task ReportIncidentAsync(ReportAssetIncidentDto dto)
+    {
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
+        var entity = await GetOwnedAssignmentAsync(dto.AssignmentId);
+
+        if (entity.Status != AssignmentStatus.Active)
+            throw AssetsWorkflowException.InvalidState(
+                $"Only an active assignment can be reported lost or damaged; this one is {entity.Status}.");
+
+        if (string.IsNullOrWhiteSpace(dto.Description))
+            throw AssetsWorkflowException.Invalid(
+                "Describe what happened. An incident with no description cannot be acted on.");
+
+        // The same rule the return path carries (slice 4, D-c): a cost is a consequence of the
+        // incident, and liability is a consequence of the employee's part in it. Neither may be
+        // recorded where the record does not support it.
+        if (!dto.EmployeeLiable && (dto.RepairCost is > 0 || dto.ReplacementCost is > 0))
+            throw AssetsWorkflowException.Invalid(
+                "A repair or replacement cost recorded against an employee who is not liable has "
+                + "nobody to be recovered from. Either record the liability or leave the costs out.");
+
+        entity.Status = dto.Outcome == AssetIncidentOutcome.Lost
+            ? AssignmentStatus.Lost
+            : AssignmentStatus.Damaged;
+
+        // ⚠ Deliberately NOT stamped with a return date. The asset did not come back, and writing
+        // one would make every "was it returned" query — including the exit clearance in slice 10 —
+        // answer yes for an asset nobody can find.
+        entity.DamageReported = true;
+        entity.DamageDescription = dto.Description.Trim();
+        entity.EmployeeLiable = dto.EmployeeLiable;
+        entity.RepairCost = dto.RepairCost;
+        entity.ReplacementCost = dto.ReplacementCost;
+        entity.ReturnNotes = dto.OccurredOn is { } on
+            ? $"Reported {(dto.Outcome == AssetIncidentOutcome.Lost ? "lost" : "damaged")} on {on:yyyy-MM-dd}."
+            : entity.ReturnNotes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
+        await _assignmentRepo.UpdateAsync(entity);
+
+        var asset = await GetOwnedAssetAsync(entity.AssetId);
+        asset.IsCurrentlyAssigned = false;
+        asset.CurrentAssignedToId = null;
+        asset.Status = dto.Outcome == AssetIncidentOutcome.Lost
+            ? CompanyAssetStatus.LostStolen
+            : CompanyAssetStatus.Damaged;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = userId.ToString();
+        await _assetRepo.UpdateAsync(asset);
+
+        await _unitOfWork.SaveChangesAsync();
+    }
 }
 
 #endregion

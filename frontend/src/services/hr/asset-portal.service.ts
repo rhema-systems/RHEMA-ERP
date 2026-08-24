@@ -4,6 +4,8 @@ import type {
   AssetAssignmentSummary,
   AssetRequisition,
   AssetRequisitionSummary,
+  AssetSurcharge,
+  AssetSurchargeSummary,
   AssetTermsLetter,
   AssetTypeSummary,
   CreateAssetRequisitionRequest,
@@ -104,6 +106,38 @@ class AssetPortalService {
 
   withdrawRequisition(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/asset-requisitions/${id}`);
+  }
+
+  // ── What I am being charged for (AST-3, decision D9) ───────────────────────
+
+  /**
+   * Charges raised against the employee that have been **served on them**.
+   *
+   * A charge HR is still drafting is invisible here and answers 404 rather than 403 — a 403 would
+   * confirm that a charge against them is being written, which is the one thing a draft is not
+   * ready to say.
+   */
+  getMySurcharges(): Promise<AssetSurchargeSummary[]> {
+    return apiService.get<AssetSurchargeSummary[]>(`${this.baseUrl}/asset-surcharges`);
+  }
+
+  getMySurcharge(id: string): Promise<AssetSurcharge> {
+    return apiService.get<AssetSurcharge>(`${this.baseUrl}/asset-surcharges/${id}`);
+  }
+
+  /**
+   * Accept or dispute a charge — the employee's right of reply.
+   *
+   * Refused for everybody else, **HR included**. Both answers send the charge on for approval;
+   * they differ in what the approver reads. A dispute does not stop the employer — what it does is
+   * oblige them to decide with the employee's account in front of them, and leave a record that
+   * they did. An approver may then lower the charge; they may never raise it.
+   */
+  respondToSurcharge(id: string, accepted: boolean, comments?: string): Promise<AssetSurcharge> {
+    return apiService.post<AssetSurcharge>(`${this.baseUrl}/asset-surcharges/${id}/respond`, {
+      accepted,
+      comments,
+    });
   }
 
   // ── The one picker that is not on the portal ───────────────────────────────

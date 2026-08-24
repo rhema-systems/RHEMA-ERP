@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
@@ -1764,6 +1764,27 @@ public class SimpleWorkflowService : IWorkflowService
             context["initiatedById"] = transfer.InitiatedById;
             context["transferDate"] = transfer.TransferDate;
             context["status"] = transfer.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_ASSET_SURCHARGE", "HrAssetSurcharge", "HR Asset Surcharge"))
+        {
+            var surcharge = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetSurcharge>()
+                .FirstOrDefaultAsync(x => x.Id == entityId)
+                ?? throw new InvalidOperationException("Asset surcharge not found");
+
+            // What a definition could reasonably branch on: how much, why, and — the fact that most
+            // deserves a higher authority — whether the employee disputed it. A charge somebody has
+            // contested is not the same decision as one they signed.
+            context["surchargeNumber"] = surcharge.SurchargeNumber;
+            context["employeeId"] = surcharge.EmployeeId;
+            context["reason"] = surcharge.Reason.ToString();
+            context["assessedAmount"] = surcharge.AssessedAmount;
+            context["currencyCode"] = surcharge.CurrencyCode;
+            context["employeeResponse"] = surcharge.EmployeeResponse.ToString();
+            context["isDisputed"] = surcharge.EmployeeResponse == Core.Enums.AssetSurchargeEmployeeResponse.Disputed;
+            context["proceededWithoutResponse"] = surcharge.ProceededWithoutResponseReason != null;
+            context["raisedById"] = surcharge.RaisedById;
+            context["status"] = surcharge.Status.ToString();
         }
 
         if (IsEntityType(entityTypeRecord, "EMPLOYEE_SEPARATION", "EmployeeSeparation", "Employee Separation"))

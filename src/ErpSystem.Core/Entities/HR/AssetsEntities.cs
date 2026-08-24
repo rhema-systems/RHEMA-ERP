@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 
@@ -637,3 +637,214 @@ public class AssetTransfer : TenantEntity
     [ForeignKey(nameof(ApprovedById))]
     public virtual Employee? ApprovedBy { get; set; }
 }
+
+#region Asset Surcharges — area 16 slice 7 (AST-3, defect D-d, decision D9)
+
+/// <summary>
+/// A charge raised against an employee for a company asset they damaged, lost or never returned —
+/// <b>AST-3</b>, and the reader that <b>defect D-d</b> had been waiting for.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this is an entity and not five more columns on the assignment.</b>
+/// <c>EmployeeLiable</c>, <c>RepairCost</c> and <c>ReplacementCost</c> already sit on
+/// <see cref="AssetAssignment"/>, and slice 4 made them coherent — they cannot be set on a return
+/// that reports no damage. But they are <i>facts about the asset</i>: what it would cost to mend or
+/// replace. A surcharge is a <i>decision about a person</i>: that this employee owes this amount,
+/// taken by somebody, on a date, after they were given a chance to answer. The two are not the same
+/// and one is not derivable from the other — an employer routinely charges less than the repair
+/// cost, or nothing at all. Recording the decision as though it were the cost is how a record ends
+/// up unable to explain a number somebody was actually asked to pay.</para>
+///
+/// <para><b>The right of reply is load-bearing.</b> A surcharge cannot go for approval until it has
+/// been put to the employee: <c>Draft → AwaitingEmployeeResponse → Submitted → Approved</c>. The
+/// answer is data on this record rather than a status, because accepting and disputing lead to the
+/// same next step and differ only in what the approver is reading (decision D9).</para>
+///
+/// <para><b>What this does NOT do.</b> It does not deduct anything. <c>RecoveryMethod</c>,
+/// <c>InstalmentCount</c> and <c>RecoveryStartDate</c> are a <i>declaration to payroll</i>, and
+/// <see cref="AssetSurchargeRecovery"/> records what was actually collected. Payroll owns the
+/// deduction; the exit settlement (FR-HR-184) applies whatever is still outstanding. No GL posting
+/// happens here — it is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the one
+/// comprehensive sweep after the module.</para>
+/// </remarks>
+public class AssetSurcharge : TenantEntity
+{
+    [MaxLength(70)]
+    public string SurchargeNumber { get; set; } = string.Empty;
+
+    /// <summary>The custody this arises from. Always present — a charge with no custody is a claim about nobody.</summary>
+    public Guid AssignmentId { get; set; }
+
+    /// <summary>
+    /// The employee being charged.
+    /// </summary>
+    /// <remarks>
+    /// Derivable from the assignment and stamped anyway. The subject of a financial claim is not a
+    /// thing to infer through a join two years later, and area 9's lesson stands: a record with one
+    /// actor column cannot answer "who did this to whom".
+    /// </remarks>
+    public Guid EmployeeId { get; set; }
+
+    public AssetSurchargeReason Reason { get; set; }
+
+    [MaxLength(2000)]
+    public string Description { get; set; } = string.Empty;
+
+    // ── The money ────────────────────────────────────────────────────────────
+
+    /// <summary>What the employee is being asked to pay. A decision, not a cost.</summary>
+    public decimal AssessedAmount { get; set; }
+
+    /// <summary>
+    /// The currency of every amount on this record.
+    /// </summary>
+    /// <remarks>
+    /// Validated against Finance's canonical currency list on the write path. That is the read-side
+    /// integration this module is allowed to do now (area 13 recorded what happens without it:
+    /// <c>"ZZZ"</c> was accepted and stored). GL posting is what waits for the sweep, not this.
+    /// </remarks>
+    [MaxLength(3)]
+    public string CurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The repair and replacement costs on the assignment when the charge was raised.
+    /// </summary>
+    /// <remarks>
+    /// Copied rather than read through, so that the decision can still be compared to what it was
+    /// based on after somebody edits the assignment. This is the whole of what D-d's inert fields
+    /// now feed: they seed a default and they are kept as the basis, and the amount charged remains
+    /// the employer's to set.
+    /// </remarks>
+    public decimal? BasisRepairCost { get; set; }
+
+    public decimal? BasisReplacementCost { get; set; }
+
+    /// <summary>What has actually been collected, accumulated from the recovery rows.</summary>
+    public decimal AmountRecovered { get; set; }
+
+    // ── State ────────────────────────────────────────────────────────────────
+
+    public AssetSurchargeStatus Status { get; set; } = AssetSurchargeStatus.Draft;
+
+    public Guid? RaisedById { get; set; }
+
+    public DateTime RaisedAt { get; set; }
+
+    // ── The employee's side (decision D9) ────────────────────────────────────
+
+    /// <summary>When the charge was put to the employee. Null until it has been.</summary>
+    public DateTime? NotifiedAt { get; set; }
+
+    public AssetSurchargeEmployeeResponse EmployeeResponse { get; set; }
+        = AssetSurchargeEmployeeResponse.NotYetGiven;
+
+    public DateTime? EmployeeRespondedAt { get; set; }
+
+    [MaxLength(2000)]
+    public string? EmployeeResponseComments { get; set; }
+
+    /// <summary>
+    /// Why the charge went for approval although the employee never answered.
+    /// </summary>
+    /// <remarks>
+    /// The right of reply is a right to be <b>asked</b>, not a veto exercised by silence. Without
+    /// this, an employee who simply never responds blocks the charge for ever; with it, HR can
+    /// proceed but must say why, on the record, where the approver reads it. Required by
+    /// <c>SubmitAsync</c> exactly when <c>EmployeeResponse</c> is still <c>NotYetGiven</c>.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? ProceededWithoutResponseReason { get; set; }
+
+    // ── The decision ─────────────────────────────────────────────────────────
+
+    public Guid? ApprovedById { get; set; }
+
+    public DateTime? ApprovalDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ApprovalComments { get; set; }
+
+    public DateTime? RejectedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    // ── Recovery — declared, not computed ────────────────────────────────────
+
+    public AssetSurchargeRecoveryMethod? RecoveryMethod { get; set; }
+
+    /// <summary>How many pay periods the deduction is to be spread over, where that is the method.</summary>
+    public int? InstalmentCount { get; set; }
+
+    public DateOnly? RecoveryStartDate { get; set; }
+
+    // ── Endings other than recovery ──────────────────────────────────────────
+
+    public Guid? WaivedById { get; set; }
+
+    public DateTime? WaivedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? WaiverReason { get; set; }
+
+    public DateTime? CancelledAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
+    [ForeignKey(nameof(AssignmentId))]
+    public virtual AssetAssignment Assignment { get; set; } = null!;
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+
+    [ForeignKey(nameof(RaisedById))]
+    public virtual Employee? RaisedBy { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    [ForeignKey(nameof(WaivedById))]
+    public virtual Employee? WaivedBy { get; set; }
+
+    public virtual ICollection<AssetSurchargeRecovery> Recoveries { get; set; }
+        = new List<AssetSurchargeRecovery>();
+}
+
+/// <summary>
+/// One instalment or payment actually collected against a surcharge.
+/// </summary>
+/// <remarks>
+/// A record of what happened, not an instruction for what should. HR needs it to know the
+/// outstanding balance — which the exit settlement then deducts — and a single accumulating column
+/// could not say when, how much or against what payroll period, which is exactly what somebody
+/// disputing a deduction asks.
+/// </remarks>
+public class AssetSurchargeRecovery : TenantEntity
+{
+    public Guid SurchargeId { get; set; }
+
+    public decimal Amount { get; set; }
+
+    public DateOnly RecoveredOn { get; set; }
+
+    public AssetSurchargeRecoveryMethod Method { get; set; }
+
+    /// <summary>The payroll period, receipt number or settlement this came through.</summary>
+    [MaxLength(200)]
+    public string? Reference { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    public Guid? RecordedById { get; set; }
+
+    [ForeignKey(nameof(SurchargeId))]
+    public virtual AssetSurcharge Surcharge { get; set; } = null!;
+
+    [ForeignKey(nameof(RecordedById))]
+    public virtual Employee? RecordedBy { get; set; }
+}
+
+#endregion
+

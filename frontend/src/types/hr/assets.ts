@@ -189,6 +189,118 @@ export interface CreateAssetRequisitionRequest {
 
 export type UpdateAssetRequisitionRequest = CreateAssetRequisitionRequest;
 
+// ── Surcharges — AST-3, decision D9 ────────────────────────────────────────────
+
+export type AssetSurchargeStatus =
+  | 'Draft'
+  /** Put to the employee. They may or may not have answered — see `employeeResponse`. */
+  | 'WithEmployee'
+  | 'Submitted'
+  | 'Approved'
+  | 'Rejected'
+  | 'Recovering'
+  | 'Recovered'
+  | 'Waived'
+  | 'Cancelled';
+
+export type AssetSurchargeReason = 'Damage' | 'Loss' | 'NotReturned' | 'Other';
+
+export type AssetSurchargeEmployeeResponse = 'NotYetGiven' | 'Accepted' | 'Disputed';
+
+export type AssetSurchargeRecoveryMethod = 'PayrollDeduction' | 'DirectPayment' | 'ExitSettlement';
+
+/**
+ * One row of "what I am being charged for".
+ *
+ * ⚠ A charge is invisible to its subject until it has been served on them — the backend answers
+ * 404, not 403, so nothing here ever shows an employee a draft being written about them.
+ */
+export interface AssetSurchargeSummary {
+  id: string;
+  surchargeNumber: string;
+  assignmentId: string;
+  assignmentNumber: string;
+  assetId: string;
+  assetName: string;
+  assetNumber: string;
+  employeeId: string;
+  employeeName: string;
+  reason: AssetSurchargeReason;
+  reasonName: string;
+  assessedAmount: number;
+  currencyCode: string;
+  amountRecovered: number;
+  amountOutstanding: number;
+  status: AssetSurchargeStatus;
+  statusName: string;
+  employeeResponse: AssetSurchargeEmployeeResponse;
+  employeeResponseName: string;
+  isDisputed: boolean;
+  raisedAt: string;
+  recoveryStartDate: string | null;
+}
+
+export interface AssetSurcharge extends AssetSurchargeSummary {
+  tenantId: string;
+  description: string;
+  /** What the assignment said the damage cost when this was raised — the basis, kept. */
+  basisRepairCost: number | null;
+  basisReplacementCost: number | null;
+  /** True where the charge was set below what the damage actually cost. */
+  isBelowAssessedCost: boolean;
+  raisedById: string | null;
+  raisedByName: string | null;
+  /** When the charge was put to the employee. Null means it has not been. */
+  notifiedAt: string | null;
+  employeeRespondedAt: string | null;
+  employeeResponseComments: string | null;
+  /** Why it went for approval although the employee never answered. */
+  proceededWithoutResponseReason: string | null;
+  isAwaitingEmployee: boolean;
+  approvedById: string | null;
+  approvedByName: string | null;
+  approvalDate: string | null;
+  approvalComments: string | null;
+  rejectedDate: string | null;
+  rejectionReason: string | null;
+  recoveryMethod: AssetSurchargeRecoveryMethod | null;
+  recoveryMethodName: string | null;
+  instalmentCount: number | null;
+  recoveryStartDate: string | null;
+  /** What one instalment comes to — a statement of intent to payroll, not a schedule. */
+  instalmentAmount: number | null;
+  recoveries: AssetSurchargeRecovery[];
+  waivedById: string | null;
+  waivedByName: string | null;
+  waivedAt: string | null;
+  waiverReason: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface AssetSurchargeRecovery {
+  id: string;
+  surchargeId: string;
+  amount: number;
+  recoveredOn: string;
+  method: AssetSurchargeRecoveryMethod;
+  methodName: string;
+  reference: string | null;
+  notes: string | null;
+  recordedById: string | null;
+  recordedByName: string | null;
+}
+
+/** The employee's answer. Both outcomes send the charge on for approval. */
+export interface RespondToAssetSurchargeRequest {
+  accepted: boolean;
+  comments?: string | null;
+}
+
 /** The counters the portal landing opens with, and the short lists behind them. */
 export interface EmployeeAssetSummary {
   employeeId: string;
@@ -197,9 +309,15 @@ export interface EmployeeAssetSummary {
   overdueReturnCount: number;
   openRequisitionCount: number;
   draftRequisitionCount: number;
+  /** Charges served on them that they have not yet answered — AST-3, decision D9. */
+  surchargesAwaitingMyResponseCount: number;
+  /** Charges against them that are still live: not rejected, waived or fully recovered. */
+  openSurchargeCount: number;
+  outstandingSurchargeAmount: number;
   held: AssetAssignmentSummary[];
   awaitingAcknowledgement: AssetAssignmentSummary[];
   openRequisitions: AssetRequisitionSummary[];
+  surchargesAwaitingMyResponse: AssetSurchargeSummary[];
 }
 
 /**

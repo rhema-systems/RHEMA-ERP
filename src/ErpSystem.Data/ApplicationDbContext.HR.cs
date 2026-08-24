@@ -158,6 +158,8 @@ public partial class ApplicationDbContext
     public DbSet<AssetAssignment> AssetAssignments { get; set; } = null!;
     public DbSet<AssetMaintenance> AssetMaintenances { get; set; } = null!;
     public DbSet<AssetRequisition> AssetRequisitions { get; set; } = null!;
+    public DbSet<AssetSurcharge> AssetSurcharges { get; set; } = null!;
+    public DbSet<AssetSurchargeRecovery> AssetSurchargeRecoveries { get; set; } = null!;
     public DbSet<AwardType> AwardTypes { get; set; } = null!;
     public DbSet<AwardLevel> AwardLevels { get; set; } = null!;
     public DbSet<AwardTypeTarget> AwardTypeTargets { get; set; } = null!;
@@ -4307,6 +4309,71 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.TermsDocumentSentBy)
                 .WithMany()
                 .HasForeignKey(x => x.TermsDocumentSentById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Area 16 slice 7 — AST-3, the surcharge. Every employee link is configured EXPLICITLY,
+        // for the reason recorded on AssetAssignment above: an unpaired navigation is how this
+        // module ended up with duplicate shadow FK columns before.
+        builder.Entity<AssetSurcharge>(entity =>
+        {
+            entity.HasIndex(x => x.SurchargeNumber);
+            entity.HasIndex(x => x.AssignmentId);
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+
+            entity.Property(x => x.Reason).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.EmployeeResponse).HasConversion<int>();
+            entity.Property(x => x.RecoveryMethod).HasConversion<int>();
+            entity.Property(x => x.AssessedAmount).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.AmountRecovered).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.BasisRepairCost).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.BasisReplacementCost).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(x => x.Assignment)
+                .WithMany()
+                .HasForeignKey(x => x.AssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RaisedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RaisedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.WaivedBy)
+                .WithMany()
+                .HasForeignKey(x => x.WaivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AssetSurchargeRecovery>(entity =>
+        {
+            entity.HasIndex(x => x.SurchargeId);
+            entity.HasIndex(x => x.RecoveredOn);
+
+            entity.Property(x => x.Method).HasConversion<int>();
+            entity.Property(x => x.Amount).HasColumnType("decimal(18,2)");
+
+            // Paired with the collection on purpose, so EF cannot mint a shadow FK beside it.
+            entity.HasOne(x => x.Surcharge)
+                .WithMany(x => x.Recoveries)
+                .HasForeignKey(x => x.SurchargeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

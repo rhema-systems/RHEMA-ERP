@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces.Workflow;
+﻿using ErpSystem.Core.Interfaces.Workflow;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -57,6 +57,7 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             // staff-asset records are a third thing with the same names — see the build plan §3.3.
             new("HrAssetRequisition", "Human Resources", "Staff requests for a company asset, approved before HR issues one (AST-6)", "ClipboardList", "#0891B2", 79),
             new("HrAssetTransfer", "Human Resources", "Company assets moved between employees, locations or units, approved before the move (AST-2)", "ArrowRightLeft", "#7C3AED", 79),
+            new("HrAssetSurcharge", "Human Resources", "Charges raised against an employee for a company asset damaged, lost or not returned (AST-3)", "Receipt", "#B45309", 79),
             new("Project", "Projects", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Projects", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Projects", "Project closure approval and close-out governance", "Flag", "#15803D", 84),

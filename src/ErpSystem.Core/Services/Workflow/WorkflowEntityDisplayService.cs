@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces.Maintenance;
+﻿using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces;
@@ -449,6 +449,25 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                         ? transfer.TransferNumber
                         : $"{transfer.TransferNumber} — {transfer.Asset.AssetName}";
                 info.ActionUrl = $"/hr/assets/transfers/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("HrAssetSurcharge") || key == Normalize("HR_ASSET_SURCHARGE") || key == Normalize("HR Asset Surcharge"))
+            {
+                var surcharge = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetSurcharge>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "HrAssetSurcharge";
+                info.EntityNumber = surcharge?.SurchargeNumber;
+                // Who is being charged and how much, because that is the whole of what an approver
+                // is being asked to sign. A reference alone would make a decision about somebody's
+                // pay look like a filing action.
+                info.EntityName = surcharge == null
+                    ? null
+                    : surcharge.Employee == null
+                        ? surcharge.SurchargeNumber
+                        : $"{surcharge.SurchargeNumber} — {surcharge.Employee.FirstName} {surcharge.Employee.LastName}, "
+                          + $"{surcharge.CurrencyCode} {surcharge.AssessedAmount:0.00}";
+                info.ActionUrl = $"/hr/assets/surcharges/{entityId}";
                 return info;
             }
 
