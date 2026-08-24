@@ -392,6 +392,59 @@ export interface JournalEntryAttachment {
     uploadedBy: string;
 }
 
+export interface FinanceBudgetControlLine {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    fiscalPeriodId: string;
+    fiscalPeriodCode: string;
+    budgetScenarioId?: string | null;
+    budgetScenarioName?: string | null;
+    budgetReturnId?: string | null;
+    budgetEntryId?: string | null;
+    segmentValueId?: string | null;
+    segmentValue?: string | null;
+    requestedAmount: number;
+    budgetAmount: number;
+    postedActualAmount: number;
+    reservedAmount: number;
+    availableAmount: number;
+    shortfallAmount: number;
+    decisionCode: string;
+    message: string;
+}
+
+export interface FinanceBudgetControlEvaluation {
+    sourceDocumentId: string;
+    entryDate: string;
+    currencyCode: string;
+    evaluationHash: string;
+    hasTrackedExpenseLines: boolean;
+    isAllowed: boolean;
+    requiresOverride: boolean;
+    hasApprovedOverride: boolean;
+    overrideStatus?: string | null;
+    totalRequestedAmount: number;
+    totalShortfallAmount: number;
+    lines: FinanceBudgetControlLine[];
+}
+
+export interface FinanceBudgetOverrideRequest {
+    id: string;
+    sourceDocumentId: string;
+    evaluationHash: string;
+    reason: string;
+    requestedAmount: number;
+    currencyCode: string;
+    shortfallAmount: number;
+    status: string;
+    workflowInstanceId?: string | null;
+    requestedByUserId: string;
+    requestedAt: string;
+    approvedByUserId?: string | null;
+    approvedAt?: string | null;
+}
+
 export interface FinanceJournalAuditLog {
     id: string;
     action: string;

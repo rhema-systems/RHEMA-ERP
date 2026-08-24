@@ -1253,6 +1253,8 @@ namespace ErpSystem.Web.Services
                     "Budget scenario approval before locking, activation, or archival."),
                 new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
                     "Department budget worksheet approval workflow before consolidation."),
+                new("FinanceBudgetOverride", "Finance Budget Override", typeof(FinanceBudgetOverrideRequest).FullName, "Finance Budget Override Approval",
+                    "Independent Finance approval of a precise manual-journal budget shortfall. Approval is bound to the immutable evaluation hash and expires when the journal changes."),
                 new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",
                     "Unit accounting journal approval before posting quantity balances."),
                 new("UnitAccountBudget", "Unit Budget", typeof(UnitAccountBudget).FullName, "Unit Budget Approval",

@@ -29,6 +29,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IDocumentNumberingService? _documentNumberingService;
+        private readonly IFinanceBudgetControlService? _budgetControl;
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -40,7 +41,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IAccountingBookService accountingBookService,
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
-            IDocumentNumberingService? documentNumberingService = null)
+            IDocumentNumberingService? documentNumberingService = null,
+            IFinanceBudgetControlService? budgetControl = null)
         {
             _context = context;
             _currentUserService = currentUserService;
@@ -51,6 +53,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
             _documentNumberingService = documentNumberingService;
+            _budgetControl = budgetControl;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -351,6 +354,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 () => LogJournalAuditAsync(FinanceAuditEvents.JournalUpdated, entry, before, BuildJournalAuditSnapshot(entry)),
                 cancellationToken);
 
+            if (_budgetControl != null)
+            {
+                await _budgetControl.InvalidateManualJournalOverridesAsync(
+                    entry.Id,
+                    "The source journal was edited after the budget override was evaluated.",
+                    cancellationToken);
+            }
+
             var updatedEntry = await LoadJournalEntryAsync(entry.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Journal entry was updated but could not be reloaded.");
 
@@ -382,6 +393,14 @@ namespace ErpSystem.Api.Services.Finance.GL
             await PersistJournalMutationWithAuditAsync(
                 () => LogJournalAuditAsync(FinanceAuditEvents.JournalDeleted, entry, before, BuildJournalAuditSnapshot(entry)),
                 cancellationToken);
+
+            if (_budgetControl != null)
+            {
+                await _budgetControl.InvalidateManualJournalOverridesAsync(
+                    entry.Id,
+                    "The source journal was deleted after the budget override was evaluated.",
+                    cancellationToken);
+            }
         }
 
         public Task<JournalEntryDto> PostJournalEntryAsync(
@@ -465,8 +484,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 await ValidateManualJournalEntryAsync(entry, requireApproved: true, cancellationToken);
 
+                if (_budgetControl == null)
+                    throw new InvalidOperationException("Finance budget control is not configured for manual-journal posting.");
+                var budgetReservationIds = (await _budgetControl
+                    .ValidateManualJournalForPostingAsync(entry.Id, cancellationToken))
+                    .ToArray();
+
                 var functionalCurrency = await GetBaseCurrencyCodeForTenantAsync(entry.TenantId, cancellationToken);
-                postingResult = await _financePostingEngine.PostAsync(BuildManualJournalPostingRequest(entry, functionalCurrency), cancellationToken);
+                postingResult = await _financePostingEngine.PostAsync(
+                    BuildManualJournalPostingRequest(entry, functionalCurrency, budgetReservationIds),
+                    cancellationToken);
             }
             catch (Exception ex)
             {
@@ -780,7 +807,10 @@ namespace ErpSystem.Api.Services.Finance.GL
             await EnsureFiscalPeriodOpenAsync(entry.FiscalPeriodId, entry.TenantId, entry.EntryDate, cancellationToken);
         }
 
-        private FinancePostingRequestDto BuildManualJournalPostingRequest(JournalEntry entry, string functionalCurrency)
+        private FinancePostingRequestDto BuildManualJournalPostingRequest(
+            JournalEntry entry,
+            string functionalCurrency,
+            IReadOnlyList<Guid> budgetReservationIds)
         {
             return new FinancePostingRequestDto
             {
@@ -797,6 +827,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 JournalType = entry.JournalType,
                 BookClassification = entry.BookClassification,
                 FunctionalCurrencyCode = functionalCurrency,
+                BudgetReservationIds = budgetReservationIds,
                 Lines = entry.Transactions
                     .Where(t => !t.IsDeleted)
                     .OrderBy(t => t.LineNumber)
@@ -1469,6 +1500,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var before = BuildJournalAuditSnapshot(entry);
 
+            if (approvalStatus == "Approved" && _budgetControl != null)
+                await _budgetControl.ValidateManualJournalForPostingAsync(id, cancellationToken);
+
             entry.PostingStatus = postingStatus;
             entry.ApprovalStatus = approvalStatus;
 
@@ -1489,6 +1523,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             await _context.SaveChangesAsync(cancellationToken);
+
+            if ((approvalStatus == "Rejected" || approvalStatus == "Withdrawn") && _budgetControl != null)
+                await _budgetControl.ReleaseManualJournalAsync(id, rejectionReason ?? $"Journal approval status changed to {approvalStatus}.", cancellationToken);
             await LogJournalAuditAsync(
                 GetApprovalAuditAction(approvalStatus),
                 entry,
