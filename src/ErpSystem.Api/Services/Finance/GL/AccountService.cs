@@ -789,6 +789,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 TransactionQuoteSide = link.TransactionQuoteSide.ToString(),
                 RevaluationRateType = link.RevaluationRateType,
                 RevaluationQuoteSide = link.RevaluationQuoteSide.ToString(),
+                EffectiveDate = link.EffectiveDate,
+                EffectiveEndDate = link.EffectiveEndDate,
                 LastRevaluationDate = link.LastRevaluationDate,
                 LastRevaluationRate = currentExchangeRate,
                 LastRevaluationAdjustment = link.LastRevaluationAdjustment,

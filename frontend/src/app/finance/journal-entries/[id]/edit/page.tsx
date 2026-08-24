@@ -10,8 +10,18 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { ArrowLeft, Save, Plus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import type { JournalType, Account, JournalEntry, CreateJournalEntryDto, CreateAccountTransactionDto } from '@/types/finance';
+import type {
+    Account,
+    AccountCurrencyLink,
+    CreateAccountTransactionDto,
+    CreateJournalEntryDto,
+    Currency,
+    FinanceSettings,
+    JournalEntry,
+    JournalType,
+} from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { financeService } from '@/services/finance.service';
 import { useToast } from '@/hooks/use-toast';
 import { validateJournalEntryForm } from '@/lib/finance/journal-entry-mapper';
 import {
@@ -22,6 +32,14 @@ import {
     isAccountEligibleForBook,
     isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
+import {
+    applyCanonicalJournalRate,
+    getAllowedJournalCurrencies,
+    getManualJournalFxBlocker,
+    getManualJournalRateRequest,
+    normalizeCurrencyCode,
+    requireFunctionalCurrency,
+} from '@/lib/finance/manual-journal-fx';
 
 interface JournalLine {
     id: string;
@@ -33,6 +51,11 @@ interface JournalLine {
     credit: number;
     foreignDebit?: number;
     foreignCredit?: number;
+    rateStatus?: 'idle' | 'loading' | 'ready' | 'error';
+    rateError?: string;
+    rateSource?: string;
+    rateDate?: string;
+    rateRequestKey?: string;
 }
 
 const toDateInputValue = (dateString?: string) => {
@@ -40,18 +63,18 @@ const toDateInputValue = (dateString?: string) => {
     return new Date(dateString).toISOString().split('T')[0];
 };
 
-const mapEntryToLines = (entry: JournalEntry): JournalLine[] => {
+const mapEntryToLines = (entry: JournalEntry, functionalCurrency: string): JournalLine[] => {
     const transactions = entry.transactions || [];
     if (transactions.length === 0) {
         return [
-            { id: '1', accountId: '', description: '', currencyCode: 'GHS', exchangeRate: 1, debit: 0, credit: 0 },
-            { id: '2', accountId: '', description: '', currencyCode: 'GHS', exchangeRate: 1, debit: 0, credit: 0 },
+            { id: '1', accountId: '', description: '', currencyCode: functionalCurrency, exchangeRate: 1, debit: 0, credit: 0, rateStatus: 'ready' },
+            { id: '2', accountId: '', description: '', currencyCode: functionalCurrency, exchangeRate: 1, debit: 0, credit: 0, rateStatus: 'ready' },
         ];
     }
 
     return transactions.map((transaction, index) => {
         const raw = transaction as any;
-        const currencyCode = raw.currencyCode || raw.transactionCurrency || entry.primaryCurrency || 'GHS';
+        const currencyCode = normalizeCurrencyCode(raw.currencyCode || raw.transactionCurrency || entry.primaryCurrency) || functionalCurrency;
         const exchangeRate = raw.exchangeRate ?? 1;
         const foreignAmount = raw.foreignAmount ?? raw.foreignCurrencyAmount;
         const debit = transaction.transactionType === 'Debit' ? transaction.amount : 0;
@@ -67,6 +90,7 @@ const mapEntryToLines = (entry: JournalEntry): JournalLine[] => {
             credit,
             foreignDebit: transaction.transactionType === 'Debit' ? foreignAmount : 0,
             foreignCredit: transaction.transactionType === 'Credit' ? foreignAmount : 0,
+            rateStatus: currencyCode === functionalCurrency ? 'ready' : 'idle',
         };
     });
 };
@@ -75,14 +99,18 @@ export default function EditJournalEntryPage() {
     const router = useRouter();
     const params = useParams();
     const { toast } = useToast();
-    const BASE_CURRENCY = 'GHS';
     const id = params.id as string;
 
     const [entry, setEntry] = useState<JournalEntry | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
+    const [financeSettings, setFinanceSettings] = useState<FinanceSettings | null>(null);
+    const [currencies, setCurrencies] = useState<Currency[]>([]);
+    const [currencyLinksByAccount, setCurrencyLinksByAccount] = useState<Record<string, AccountCurrencyLink[]>>({});
+    const [currencyReferenceError, setCurrencyReferenceError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const functionalCurrency = financeSettings ? normalizeCurrencyCode(financeSettings.baseCurrency) : '';
 
     const [header, setHeader] = useState({
         entryDate: new Date().toISOString().split('T')[0],
@@ -94,21 +122,70 @@ export default function EditJournalEntryPage() {
     });
 
     const [lines, setLines] = useState<JournalLine[]>([
-        { id: '1', accountId: '', description: '', currencyCode: BASE_CURRENCY, exchangeRate: 1, debit: 0, credit: 0 },
-        { id: '2', accountId: '', description: '', currencyCode: BASE_CURRENCY, exchangeRate: 1, debit: 0, credit: 0 },
+        { id: '1', accountId: '', description: '', currencyCode: '', exchangeRate: 1, debit: 0, credit: 0 },
+        { id: '2', accountId: '', description: '', currencyCode: '', exchangeRate: 1, debit: 0, credit: 0 },
     ]);
 
     useEffect(() => {
         const loadData = async () => {
             try {
                 setLoading(true);
-                const [journalEntry, allAccounts, books] = await Promise.all([
+                const [journalEntry, allAccounts, books, settings, activeCurrencies] = await Promise.all([
                     financeDataService.getJournalEntryById(id),
                     financeDataService.getAccounts(),
                     financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
+                    financeDataService.getFinanceSettings(),
+                    financeDataService.getCurrencies({ isActive: true }),
                 ]);
+                const baseCurrency = requireFunctionalCurrency(settings);
+                if (!activeCurrencies.some(currency =>
+                    currency.isActive && normalizeCurrencyCode(currency.currencyCode) === baseCurrency)) {
+                    throw new Error(`Functional currency ${baseCurrency} is not active in the Finance currency catalogue.`);
+                }
+
+                const mappedLines = mapEntryToLines(journalEntry, baseCurrency);
+                const loadedLinks: Record<string, AccountCurrencyLink[]> = {};
+                const hydratedLines = await Promise.all(mappedLines.map(async line => {
+                    if (!line.accountId || normalizeCurrencyCode(line.currencyCode) === baseCurrency) return line;
+                    const account = allAccounts.find(item => item.id === line.accountId);
+                    if (!account) {
+                        return { ...line, exchangeRate: '' as const, rateStatus: 'error' as const, rateError: 'The journal account is no longer available.' };
+                    }
+
+                    try {
+                        const links = account.isMultiCurrency
+                            ? await financeDataService.getAccountCurrencyLinks(account.id)
+                            : [];
+                        loadedLinks[account.id] = links;
+                        const allowedCurrencies = getAllowedJournalCurrencies(
+                            account,
+                            links,
+                            activeCurrencies,
+                            baseCurrency,
+                            toDateInputValue(journalEntry.entryDate || journalEntry.transactionDate),
+                        );
+                        if (!allowedCurrencies.includes(normalizeCurrencyCode(line.currencyCode))) {
+                            throw new Error(`${line.currencyCode} is not an active permitted currency for account ${account.accountNumber || account.accountCode}.`);
+                        }
+                        const request = getManualJournalRateRequest(account, line.currencyCode, links, settings, toDateInputValue(journalEntry.entryDate || journalEntry.transactionDate));
+                        if (!request) throw new Error(`No rate policy exists for ${line.currencyCode}.`);
+                        const snapshot = await financeService.getCurrentExchangeRate(line.currencyCode, request);
+                        return applyCanonicalJournalRate(line, snapshot);
+                    } catch (error) {
+                        return {
+                            ...line,
+                            exchangeRate: '' as const,
+                            rateStatus: 'error' as const,
+                            rateError: error instanceof Error ? error.message : `No approved ${line.currencyCode} rate is available.`,
+                        };
+                    }
+                }));
 
                 setEntry(journalEntry);
+                setFinanceSettings(settings);
+                setCurrencies(activeCurrencies);
+                setCurrencyLinksByAccount(loadedLinks);
+                setCurrencyReferenceError(null);
                 setHeader({
                     entryDate: toDateInputValue(journalEntry.entryDate || journalEntry.transactionDate),
                     journalType: (journalEntry.journalType || 'General') as JournalType,
@@ -117,7 +194,7 @@ export default function EditJournalEntryPage() {
                     notes: journalEntry.notes || '',
                     bookClassification: journalEntry.bookClassification || 'IFRS',
                 });
-                setLines(mapEntryToLines(journalEntry));
+                setLines(hydratedLines);
                 if (books.length > 0) {
                     setAccountingBooks(books);
                 }
@@ -126,6 +203,7 @@ export default function EditJournalEntryPage() {
                     return account.status === 'Active' && canPost;
                 }));
             } catch (error: any) {
+                setCurrencyReferenceError(error?.message || 'Failed to load Finance currency settings.');
                 toast({ title: 'Error', description: error?.message || 'Failed to load journal entry for editing', variant: 'destructive' });
             } finally {
                 setLoading(false);
@@ -162,6 +240,11 @@ export default function EditJournalEntryPage() {
             })
             .filter((v): v is { id: string; index: number; accountLabel: string } => v !== null);
     }, [accounts, header.bookClassification, lines, targetAccountingBooks]);
+    const fxBlockingMessage = useMemo(() => lines
+        .filter(line => line.accountId && (line.debit > 0 || line.credit > 0 || line.foreignDebit || line.foreignCredit))
+        .map(line => getManualJournalFxBlocker(line, functionalCurrency))
+        .find((message): message is string => Boolean(message)) ?? null,
+    [functionalCurrency, lines]);
 
     const handleAddLine = () => {
         setLines([
@@ -170,10 +253,11 @@ export default function EditJournalEntryPage() {
                 id: crypto.randomUUID(),
                 accountId: '',
                 description: '',
-                currencyCode: BASE_CURRENCY,
+                currencyCode: functionalCurrency,
                 exchangeRate: 1,
                 debit: 0,
                 credit: 0,
+                rateStatus: functionalCurrency ? 'ready' : 'idle',
             },
         ]);
     };
@@ -184,58 +268,180 @@ export default function EditJournalEntryPage() {
         }
     };
 
-    const updateLine = (id: string, field: keyof JournalLine, value: any) => {
-        setLines(lines.map(line => {
-            if (line.id !== id) return line;
+    const loadAccountCurrencyLinks = async (account: Account): Promise<AccountCurrencyLink[]> => {
+        if (!account.isMultiCurrency) return [];
+        const cached = currencyLinksByAccount[account.id];
+        if (cached) return cached;
 
-            const updatedLine = { ...line, [field]: value };
-            const isForeign = updatedLine.currencyCode !== BASE_CURRENCY;
+        const links = await financeDataService.getAccountCurrencyLinks(account.id);
+        setCurrencyLinksByAccount(current => ({ ...current, [account.id]: links }));
+        return links;
+    };
 
-            if (field === 'accountId') {
-                const account = accounts.find(a => a.id === value);
-                if (account) {
-                    const eligible = targetAccountingBooks.length > 0
-                        ? targetAccountingBooks.every(book => isAccountEligibleForBook(account, book.code))
-                        : isAccountEligibleForBook(account, header.bookClassification);
-                    if (!eligible) return line;
-                    if (account.currencyCode && account.currencyCode !== BASE_CURRENCY) {
-                        updatedLine.currencyCode = account.currencyCode;
-                        updatedLine.exchangeRate = 1;
-                    } else if (!account.isMultiCurrency) {
-                        updatedLine.currencyCode = BASE_CURRENCY;
-                        updatedLine.exchangeRate = 1;
+    const resolveCanonicalRate = async (
+        lineId: string,
+        account: Account,
+        currencyCode: string,
+        links: AccountCurrencyLink[],
+        effectiveDate: string,
+    ) => {
+        if (!financeSettings) return;
+        const currency = normalizeCurrencyCode(currencyCode);
+        const allowedCurrencies = getAllowedJournalCurrencies(
+            account,
+            links,
+            currencies,
+            functionalCurrency,
+            effectiveDate,
+        );
+        if (!allowedCurrencies.includes(currency)) {
+            setLines(current => current.map(line => line.id === lineId ? {
+                ...line,
+                currencyCode: currency,
+                exchangeRate: '',
+                rateStatus: 'error',
+                rateError: `${currency} is not effective for account ${account.accountNumber || account.accountCode} on ${effectiveDate}.`,
+                rateSource: undefined,
+                rateDate: undefined,
+                rateRequestKey: undefined,
+            } : line));
+            return;
+        }
+        if (currency === functionalCurrency) {
+            setLines(current => current.map(line => line.id === lineId ? {
+                ...line,
+                currencyCode: currency,
+                exchangeRate: 1,
+                rateStatus: 'ready',
+                rateError: undefined,
+                rateSource: undefined,
+                rateDate: effectiveDate,
+                rateRequestKey: undefined,
+            } : line));
+            return;
+        }
+
+        const request = getManualJournalRateRequest(account, currency, links, financeSettings, effectiveDate);
+        if (!request) return;
+        const requestKey = [account.id, currency, effectiveDate, request.rateType, request.quoteSide].join('|');
+        setLines(current => current.map(line => line.id === lineId ? {
+            ...line,
+            currencyCode: currency,
+            exchangeRate: '',
+            rateStatus: 'loading',
+            rateError: undefined,
+            rateRequestKey: requestKey,
+        } : line));
+
+        try {
+            const snapshot = await financeService.getCurrentExchangeRate(currency, request);
+            setLines(current => current.map(line =>
+                line.id === lineId && line.rateRequestKey === requestKey
+                    ? { ...applyCanonicalJournalRate(line, snapshot), rateRequestKey: undefined }
+                    : line));
+        } catch (error) {
+            const message = error instanceof Error
+                ? error.message
+                : `No approved ${currency} ${request.rateType}/${request.quoteSide} rate exists for ${effectiveDate}.`;
+            setLines(current => current.map(line =>
+                line.id === lineId && line.rateRequestKey === requestKey
+                    ? {
+                        ...line,
+                        exchangeRate: '',
+                        rateStatus: 'error',
+                        rateError: message,
+                        rateSource: undefined,
+                        rateDate: undefined,
+                        rateRequestKey: undefined,
                     }
-                }
+                    : line));
+        }
+    };
+
+    const handleAccountChange = async (lineId: string, accountId: string) => {
+        const account = accounts.find(item => item.id === accountId);
+        if (!account || !financeSettings) return;
+        const eligible = targetAccountingBooks.length > 0
+            ? targetAccountingBooks.every(book => isAccountEligibleForBook(account, book.code))
+            : isAccountEligibleForBook(account, header.bookClassification);
+        if (!eligible) return;
+
+        try {
+            const links = await loadAccountCurrencyLinks(account);
+            const allowedCurrencies = getAllowedJournalCurrencies(account, links, currencies, functionalCurrency, header.entryDate);
+            const accountCurrency = normalizeCurrencyCode(account.currencyCode) || functionalCurrency;
+            const currency = allowedCurrencies.includes(accountCurrency) ? accountCurrency : allowedCurrencies[0];
+            if (!currency) {
+                throw new Error(`Account ${account.accountNumber || account.accountCode} has no active permitted transaction currency.`);
             }
 
-            if (field === 'currencyCode') {
-                if (value === BASE_CURRENCY) {
-                    updatedLine.exchangeRate = 1;
-                    updatedLine.foreignDebit = 0;
-                    updatedLine.foreignCredit = 0;
-                } else {
-                    updatedLine.exchangeRate = 1;
-                    updatedLine.foreignDebit = 0;
-                    updatedLine.foreignCredit = 0;
-                    updatedLine.debit = 0;
-                    updatedLine.credit = 0;
-                }
-            }
+            setLines(current => current.map(line => line.id === lineId ? {
+                ...line,
+                accountId,
+                currencyCode: currency,
+                exchangeRate: currency === functionalCurrency ? 1 : '',
+                foreignDebit: currency === functionalCurrency ? undefined : 0,
+                foreignCredit: currency === functionalCurrency ? undefined : 0,
+                debit: currency === functionalCurrency ? line.debit : 0,
+                credit: currency === functionalCurrency ? line.credit : 0,
+                rateStatus: currency === functionalCurrency ? 'ready' : 'idle',
+                rateError: undefined,
+            } : line));
+            await resolveCanonicalRate(lineId, account, currency, links, header.entryDate);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to load the account currency policy.';
+            setLines(current => current.map(line => line.id === lineId ? {
+                ...line,
+                accountId,
+                exchangeRate: '',
+                rateStatus: 'error',
+                rateError: message,
+            } : line));
+        }
+    };
 
-            if (field === 'exchangeRate') {
-                const rate = typeof value === 'number' ? value : 1;
-                if (updatedLine.foreignDebit) updatedLine.debit = updatedLine.foreignDebit * rate;
-                if (updatedLine.foreignCredit) updatedLine.credit = updatedLine.foreignCredit * rate;
-            }
+    const handleCurrencyChange = async (lineId: string, currencyCode: string) => {
+        const line = lines.find(item => item.id === lineId);
+        const account = accounts.find(item => item.id === line?.accountId);
+        if (!line || !account) return;
+        const links = await loadAccountCurrencyLinks(account);
+        const currency = normalizeCurrencyCode(currencyCode);
+        setLines(current => current.map(item => item.id === lineId ? {
+            ...item,
+            currencyCode: currency,
+            exchangeRate: currency === functionalCurrency ? 1 : '',
+            foreignDebit: currency === functionalCurrency ? undefined : 0,
+            foreignCredit: currency === functionalCurrency ? undefined : 0,
+            debit: 0,
+            credit: 0,
+            rateStatus: currency === functionalCurrency ? 'ready' : 'idle',
+            rateError: undefined,
+        } : item));
+        await resolveCanonicalRate(lineId, account, currency, links, header.entryDate);
+    };
 
+    const handleEntryDateChange = (effectiveDate: string) => {
+        setHeader(current => ({ ...current, entryDate: effectiveDate }));
+        for (const line of lines) {
+            const account = accounts.find(item => item.id === line.accountId);
+            if (!account || normalizeCurrencyCode(line.currencyCode) === functionalCurrency) continue;
+            void loadAccountCurrencyLinks(account)
+                .then(links => resolveCanonicalRate(line.id, account, line.currencyCode, links, effectiveDate));
+        }
+    };
+
+    const updateLine = (id: string, field: keyof JournalLine, value: any) => {
+        setLines(current => current.map(line => {
+            if (line.id !== id) return line;
+            const updatedLine = { ...line, [field]: value };
+            const isForeign = normalizeCurrencyCode(updatedLine.currencyCode) !== functionalCurrency;
             if (isForeign) {
+                const rate = typeof updatedLine.exchangeRate === 'number' ? updatedLine.exchangeRate : 0;
                 if (field === 'foreignDebit') {
-                    const rate = typeof updatedLine.exchangeRate === 'number' ? updatedLine.exchangeRate : 1;
                     updatedLine.debit = (value || 0) * rate;
                     updatedLine.foreignCredit = 0;
                     updatedLine.credit = 0;
                 } else if (field === 'foreignCredit') {
-                    const rate = typeof updatedLine.exchangeRate === 'number' ? updatedLine.exchangeRate : 1;
                     updatedLine.credit = (value || 0) * rate;
                     updatedLine.foreignDebit = 0;
                     updatedLine.debit = 0;
@@ -244,7 +450,6 @@ export default function EditJournalEntryPage() {
                 if (field === 'debit' && value > 0) updatedLine.credit = 0;
                 if (field === 'credit' && value > 0) updatedLine.debit = 0;
             }
-
             return updatedLine;
         }));
     };
@@ -258,7 +463,8 @@ export default function EditJournalEntryPage() {
             transactions: lines
                 .filter(line => line.accountId && (line.debit > 0 || line.credit > 0))
                 .map((line, index) => {
-                    const isForeign = line.currencyCode !== BASE_CURRENCY;
+                    const transactionCurrency = normalizeCurrencyCode(line.currencyCode);
+                    const isForeign = transactionCurrency !== functionalCurrency;
                     const exchangeRate = typeof line.exchangeRate === 'number' ? line.exchangeRate : 1;
                     const transactionType = line.debit > 0 ? 'Debit' : 'Credit';
                     const amount = transactionType === 'Debit' ? line.debit : line.credit;
@@ -269,7 +475,7 @@ export default function EditJournalEntryPage() {
                         transactionType,
                         description: line.description || undefined,
                         reference: header.referenceNumber || entry?.journalEntryNumber || 'JE',
-                        currencyCode: isForeign ? line.currencyCode : undefined,
+                        currencyCode: isForeign ? transactionCurrency : undefined,
                         exchangeRate: isForeign ? exchangeRate : undefined,
                         foreignAmount: isForeign ? foreignAmount || undefined : undefined,
                         lineNumber: index + 1,
@@ -282,6 +488,24 @@ export default function EditJournalEntryPage() {
 
     const handleSaveDraft = async () => {
         if (!entry) return;
+
+        if (currencyReferenceError || !functionalCurrency) {
+            toast({
+                title: 'Currency Configuration',
+                description: currencyReferenceError || 'Finance currency configuration is unavailable.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const fxBlocker = lines
+            .filter(line => line.accountId && (line.debit > 0 || line.credit > 0 || line.foreignDebit || line.foreignCredit))
+            .map(line => getManualJournalFxBlocker(line, functionalCurrency))
+            .find((message): message is string => Boolean(message));
+        if (fxBlocker) {
+            toast({ title: 'Exchange Rate Required', description: fxBlocker, variant: 'destructive' });
+            return;
+        }
 
         if (invalidLines.length > 0) {
                 toast({
@@ -336,7 +560,7 @@ export default function EditJournalEntryPage() {
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Cancel
                     </Button>
-                    <Button onClick={handleSaveDraft} disabled={saving || !isBalanced || totalDebit === 0}>
+                    <Button onClick={handleSaveDraft} disabled={saving || !isBalanced || totalDebit === 0 || Boolean(currencyReferenceError) || Boolean(fxBlockingMessage)}>
                         {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                         Save Draft
                     </Button>
@@ -365,6 +589,20 @@ export default function EditJournalEntryPage() {
                         Total Debits ({formatAmount(totalDebit)}) must equal Total Credits ({formatAmount(totalCredit)}).
                         Difference: {formatAmount(Math.abs(totalDebit - totalCredit))}
                     </AlertDescription>
+                </Alert>
+            )}
+            {currencyReferenceError && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Currency configuration unavailable</AlertTitle>
+                    <AlertDescription>{currencyReferenceError}</AlertDescription>
+                </Alert>
+            )}
+            {fxBlockingMessage && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Exchange rate required</AlertTitle>
+                    <AlertDescription>{fxBlockingMessage}</AlertDescription>
                 </Alert>
             )}
             {invalidLines.length > 0 && (
@@ -397,7 +635,7 @@ export default function EditJournalEntryPage() {
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="entryDate">Date *</Label>
-                            <Input id="entryDate" type="date" value={header.entryDate} onChange={(event) => setHeader({ ...header, entryDate: event.target.value })} required />
+                            <Input id="entryDate" type="date" value={header.entryDate} onChange={(event) => handleEntryDateChange(event.target.value)} required />
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="journalType">Type</Label>
@@ -448,21 +686,28 @@ export default function EditJournalEntryPage() {
                                     <th className="p-3 text-right font-medium w-[8%]">Ex. Rate</th>
                                     <th className="p-3 text-right font-medium w-[10%]">F. Debit</th>
                                     <th className="p-3 text-right font-medium w-[10%]">F. Credit</th>
-                                    <th className="p-3 text-right font-medium w-[10%]">Debit ({BASE_CURRENCY})</th>
-                                    <th className="p-3 text-right font-medium w-[10%]">Credit ({BASE_CURRENCY})</th>
+                                    <th className="p-3 text-right font-medium w-[10%]">Debit ({functionalCurrency || '—'})</th>
+                                    <th className="p-3 text-right font-medium w-[10%]">Credit ({functionalCurrency || '—'})</th>
                                     <th className="p-3 text-center w-[2%]"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {lines.map((line) => {
-                                    const isForeign = line.currencyCode !== BASE_CURRENCY;
+                                    const isForeign = normalizeCurrencyCode(line.currencyCode) !== functionalCurrency;
                                     const account = accounts.find(a => a.id === line.accountId);
-                                    const isCurrencyEditable = !account || account.isMultiCurrency;
+                                    const allowedCurrencies = getAllowedJournalCurrencies(
+                                        account,
+                                        account ? currencyLinksByAccount[account.id] ?? [] : [],
+                                        currencies,
+                                        functionalCurrency,
+                                        header.entryDate,
+                                    );
+                                    const isCurrencyEditable = Boolean(account?.isMultiCurrency && allowedCurrencies.length > 1);
 
                                     return (
                                         <tr key={line.id} className="border-b last:border-0">
                                             <td className="p-3">
-                                                <Select value={line.accountId} onValueChange={(value) => updateLine(line.id, 'accountId', value)}>
+                                                <Select value={line.accountId} onValueChange={(value) => void handleAccountChange(line.id, value)}>
                                                     <SelectTrigger><SelectValue placeholder="Select Account" /></SelectTrigger>
                                                     <SelectContent>
                                                         {accounts.map((acc) => {
@@ -483,18 +728,38 @@ export default function EditJournalEntryPage() {
                                                 <Input value={line.description} onChange={(event) => updateLine(line.id, 'description', event.target.value)} placeholder="Line description" />
                                             </td>
                                             <td className="p-3">
-                                                <Select value={line.currencyCode} onValueChange={(value) => updateLine(line.id, 'currencyCode', value)} disabled={!isCurrencyEditable}>
+                                                <Select value={line.currencyCode} onValueChange={(value) => void handleCurrencyChange(line.id, value)} disabled={!isCurrencyEditable}>
                                                     <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="GHS">GHS</SelectItem>
-                                                        <SelectItem value="USD">USD</SelectItem>
-                                                        <SelectItem value="EUR">EUR</SelectItem>
+                                                        {allowedCurrencies.map(currency => (
+                                                            <SelectItem key={currency} value={currency}>{currency}</SelectItem>
+                                                        ))}
                                                     </SelectContent>
                                                 </Select>
                                             </td>
                                             <td className="p-3">
                                                 {isForeign && (
-                                                    <Input type="number" step="0.0001" value={line.exchangeRate} onChange={(event) => updateLine(line.id, 'exchangeRate', parseFloat(event.target.value) || 1)} className="text-right w-full" />
+                                                    <div className="space-y-1">
+                                                        <Input
+                                                            type="number"
+                                                            step="0.000001"
+                                                            value={line.exchangeRate}
+                                                            readOnly
+                                                            aria-label={`${line.currencyCode} canonical exchange rate`}
+                                                            className="text-right w-full bg-muted"
+                                                        />
+                                                        {line.rateStatus === 'loading' && (
+                                                            <p className="text-[10px] text-muted-foreground">Loading approved rate…</p>
+                                                        )}
+                                                        {line.rateStatus === 'error' && (
+                                                            <p className="text-[10px] text-red-600">{line.rateError}</p>
+                                                        )}
+                                                        {line.rateStatus === 'ready' && line.rateSource && (
+                                                            <p className="text-[10px] text-muted-foreground" title={line.rateDate}>
+                                                                {line.rateSource}
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="p-3">
@@ -520,7 +785,7 @@ export default function EditJournalEntryPage() {
                             </tbody>
                             <tfoot>
                                 <tr className="bg-muted/50 font-bold">
-                                    <td colSpan={6} className="p-3 text-right">Totals ({BASE_CURRENCY}):</td>
+                                    <td colSpan={6} className="p-3 text-right">Totals ({functionalCurrency || '—'}):</td>
                                     <td className="p-3 text-right">{formatAmount(totalDebit)}</td>
                                     <td className="p-3 text-right">{formatAmount(totalCredit)}</td>
                                     <td></td>
