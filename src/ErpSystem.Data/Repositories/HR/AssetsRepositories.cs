@@ -298,6 +298,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
             .Include(aa => aa.Transfer)
             .Include(aa => aa.ApprovedBy)
             .Include(aa => aa.ReturnedTo)
+            .Include(aa => aa.TermsDocumentSentBy)
             .FirstOrDefaultAsync(aa => aa.Id == id && !aa.IsDeleted);
     }
 

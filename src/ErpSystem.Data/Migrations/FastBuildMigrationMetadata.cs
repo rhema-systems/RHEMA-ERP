@@ -209,3 +209,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260823192437_AddHrAssetSourceAndFixedAssetLink")] partial class AddHrAssetSourceAndFixedAssetLink { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260823203035_AddAssetRequisitionBeneficiaryAndFulfilmentLink")] partial class AddAssetRequisitionBeneficiaryAndFulfilmentLink { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260823223410_AddAssetAssignmentTransferLink")] partial class AddAssetAssignmentTransferLink { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824010739_AddAssetAssignmentTermsDocumentSend")] partial class AddAssetAssignmentTermsDocumentSend { }

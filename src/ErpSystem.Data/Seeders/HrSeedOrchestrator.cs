@@ -185,11 +185,14 @@ public class HrSeedOrchestrator
             "Still carry generic sample data from the standalone HR solution. The TDC HR questionnaire " +
             "supplies real values (leave, allowances, pensions, orientation checklist, separation and " +
             "loan types) — these should be rewritten against it before being seeded."),
-        ("RecruitmentEmailTemplateSeeder, ProbationEmailTemplateSeeder",
-            "Templates are not TDC-branded yet; enable once the wording is agreed. Both seed editable "
-            + "EmailTemplate rows from their module catalog; until they run, the transactional emails "
-            + "and the FR-HR-032 confirmation letter render from the built-in catalog defaults and are "
-            + "not listed in the email-template designer. Enable them together."),
+        ("EmailTemplateCatalogSeeder",
+            "Templates are not TDC-branded yet; enable once the wording is agreed. Seeds editable "
+            + "EmailTemplate rows from EVERY registered IEmailEventCatalog — recruitment's "
+            + "transactional emails, the FR-HR-032 confirmation letter, and AST-5's asset "
+            + "responsibility-and-terms form. Until it runs, all of them render from their built-in "
+            + "catalog defaults and none is listed in the email-template designer. It replaces the "
+            + "per-module RecruitmentEmailTemplateSeeder and ProbationEmailTemplateSeeder, which were "
+            + "identical but for the catalog they read."),
     };
 
     private ILogger<T> Log<T>() => _loggerFactory.CreateLogger<T>();

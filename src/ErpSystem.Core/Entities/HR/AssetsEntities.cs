@@ -333,6 +333,23 @@ public class AssetAssignment : TenantEntity
     [MaxLength(2000)]
     public string? TermsAndConditions { get; set; }
 
+    /// <summary>
+    /// When the responsibility-and-terms document was last emailed to the holder — AST-5b.
+    /// </summary>
+    /// <remarks>
+    /// Three columns rather than a boolean, because "was it sent?" is really three questions and a
+    /// flag answers none of them well: <b>when</b>, <b>to which address</b> (an employee's recorded
+    /// email changes, and the copy went to whatever it was that day) and <b>by whom</b>. The
+    /// download route deliberately does not stamp these: printing a copy is not serving it on
+    /// somebody, and recording it as though it were would let an unsent form look sent.
+    /// </remarks>
+    public DateTime? TermsDocumentSentAt { get; set; }
+
+    [MaxLength(256)]
+    public string? TermsDocumentSentTo { get; set; }
+
+    public Guid? TermsDocumentSentById { get; set; }
+
     // Return
     public AssignmentStatus Status { get; set; }
     
@@ -376,6 +393,9 @@ public class AssetAssignment : TenantEntity
 
     [ForeignKey(nameof(TransferId))]
     public virtual AssetTransfer? Transfer { get; set; }
+
+    [ForeignKey(nameof(TermsDocumentSentById))]
+    public virtual Employee? TermsDocumentSentBy { get; set; }
 }
 
 /// <summary>

@@ -446,6 +446,59 @@ name column is non-null, and that is the entire defect.
 
 ---
 
+## 7. Email templates — the designer cannot create a template the renderer will ever use
+
+### What is broken
+
+`TemplatedEmailService.ResolveAsync` matches a stored template on **`Module` + `EventKey`**, falling
+back to the module catalog's built-in default when it finds none. But `CreateEmailTemplateDto`
+(`EmailTemplateController`) has **no `EventKey` field**, and `CreateTemplate` does not set one — so
+every template created through the designer at `/administration/settings/email` is stored with a null
+`EventKey` and can never be resolved for any event.
+
+The row appears in the designer, saves cleanly, previews correctly, and is dead.
+
+### What was proven
+
+Read from the source while wiring area 16 slice 5 (the AST-5 asset responsibility document):
+
+- `EmailTemplateController.CreateTemplate` constructs `new EmailTemplate { Name, Module, TableName,
+  Subject, HtmlBody, PlainTextBody, SelectedFields, Description, Category }` — no `EventKey`.
+- `TemplatedEmailService.ResolveAsync` filters
+  `t.Module == module && t.EventKey == eventKey && t.IsActive`.
+- **Editing is unaffected**, and that is the saving grace: `EmailTemplateService.UpdateTemplateAsync`
+  loads the existing row and copies only the editable fields, so a seeded row keeps its `EventKey`
+  through an edit and continues to resolve. Reword-a-shipped-document works; author-a-new-one does
+  not.
+
+### What it blocks
+
+Any module shipping an editable document — recruitment's transactional emails, probation's FR-HR-032
+confirmation letter, HR assets' responsibility-and-terms form — is editable **only** through a row
+that the seeder wrote. A tenant who deletes one, or who tries to author a variant, cannot get back to
+a working template through the UI.
+
+It is also invisible: nothing errors. The event silently falls back to the built-in default, so the
+tenant sees the old wording and reasonably concludes the editor is broken rather than the row.
+
+⚠ Compounding it, `EmailTemplateCatalogSeeder` — which is what writes those rows — sits on
+`HrSeedOrchestrator`'s deliberately-skipped list ("templates are not TDC-branded yet"). Until it is
+enabled, *no* module's documents are listed in the designer at all.
+
+### What a fix needs
+
+1. Add `EventKey` to `CreateEmailTemplateDto` and set it in `CreateTemplate`. One field, one
+   assignment.
+2. Have the designer offer the **event catalogue** when creating a template, rather than free text:
+   the descriptors already exist (`IEmailEventCatalog`, with per-event token palettes and sample
+   values), and nothing exposes them over HTTP. The interface docs describe a "token-catalogue API
+   that drives the authoring palette" — **that endpoint does not exist**. Adding it is what turns the
+   token list from documentation into an authoring aid.
+3. Consider refusing to save a template whose `Module` matches a catalog but whose `EventKey` matches
+   no event in it. A template bound to nothing should not look saved.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

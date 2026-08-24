@@ -684,6 +684,11 @@ public class AssetAssignmentDto : BaseDto
     /// <summary>The transfer that produced this assignment, where it came from one — slice 4.</summary>
     public Guid? TransferId { get; set; }
     public string? TransferNumber { get; set; }
+
+    /// <summary>Whether the responsibility document has been served, and how — AST-5b.</summary>
+    public DateTime? TermsDocumentSentAt { get; set; }
+    public string? TermsDocumentSentTo { get; set; }
+    public string? TermsDocumentSentByName { get; set; }
     public string? EmployeeNumber { get; set; }
     
     // Assignment Details
@@ -1258,6 +1263,39 @@ public class RecallAssetRequestDto
 {
     [MaxLength(1000)]
     public string? Reason { get; set; }
+}
+
+/// <summary>The rendered responsibility-and-terms document — AST-5.</summary>
+public class AssetTermsLetterDto
+{
+    public Guid AssignmentId { get; set; }
+    public string AssignmentNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public Guid AssetId { get; set; }
+    public string AssetNumber { get; set; } = string.Empty;
+
+    /// <summary>Rendered subject line, used when the document is emailed.</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Self-contained HTML document body, suitable for display and print-to-PDF.</summary>
+    public string HtmlBody { get; set; } = string.Empty;
+
+    /// <summary>Whether this document has already been served, and to which address.</summary>
+    public DateTime? TermsDocumentSentAt { get; set; }
+    public string? TermsDocumentSentTo { get; set; }
+}
+
+/// <summary>What happened when the document was emailed to the holder — AST-5b.</summary>
+public class AssetTermsLetterSendResultDto
+{
+    public Guid AssignmentId { get; set; }
+    public string AssignmentNumber { get; set; } = string.Empty;
+
+    /// <summary>The address it actually went to, which is what the record keeps.</summary>
+    public string SentTo { get; set; } = string.Empty;
+    public DateTime SentAt { get; set; }
+    public string SentByName { get; set; } = string.Empty;
 }
 
 /// <summary>One asset issued against a requisition, and the assignment that issued it — D-e.</summary>

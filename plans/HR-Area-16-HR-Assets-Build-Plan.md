@@ -39,8 +39,8 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–4 green twice — 481 assertions.** The register and the asset now agree with each other: an asset cannot be in two people's hands, a return cannot contradict itself, and a completed transfer moves the custody record rather than a pointer |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice4.mjs` |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–5 green twice — 529 assertions.** The register and the asset now agree with each other: an asset cannot be in two people's hands, a return cannot contradict itself, and a completed transfer moves the custody record rather than a pointer |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice5.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -426,14 +426,39 @@ the change document treats the two as different things. **Add `AdditionalRemarks
 and label it "Additional Remarks" on the form.** If TDC meant a field on a *different* screen, say
 which and it moves — the cost is one column.
 
-### D7 — the responsibility-and-terms document (AST-5, AST-5b). *Recommendation, taken unless contradicted.*
+### D7 — the responsibility-and-terms document (AST-5, AST-5b). ✅ **REVISED AND DECIDED 2026-08-24.**
 
-Generated as a **PDF with QuestPDF**, the way the repo already generates documents
-(`Services/Documents/**`, `AwardLetterService`), from the assignment's `TermsAndConditions`,
-`ResponsibleForLoss` and `ResponsibleForDamage`, with the asset, the holder and a signature block.
-Two routes: download (print and sign) and email to the employee's address via the existing
-`ITransactionalEmailQueue`. The emailed copy is recorded on the assignment so "was it sent?" has an
-answer.
+*Originally recommended as a **PDF with QuestPDF**, "the way the repo already generates documents
+(`Services/Documents/**`, `AwardLetterService`)". **That was the wrong exemplar and the
+recommendation was wrong.*** `AwardLetterService` is procurement's. **HR** generates letters a
+different way, and it had two working examples: `OfferLetterService` and `ProbationLetterService`
+render a **self-contained HTML document from an HR-editable template** (`ITemplatedEmailService`
+resolving `Module`+`EventKey`) plus the per-tenant **`CompanyProfile`** (`ICompanyProfileProvider`).
+
+The PDF version was built, reviewed, and replaced. The user caught both of its defects:
+
+1. **Company identity from `IConfiguration`** rather than from `CompanyProfile` — the per-tenant
+   legal-employer master, which exists precisely for "document-presentation details reused across
+   generated documents" and carries the legal name, registered address, footer text, logo and
+   default signatory. The provider already falls back to the `Tenant` record when no profile row
+   exists, so the hand-written config fallback was a worse copy of something one level down.
+2. **The clause wording hard-coded in C#**, including the conditional liability sentences — the part
+   a client is most likely to want in their own words, and the last part anyone would want to need a
+   deployment for.
+
+**Taken instead:** `AssetsEmailCatalog` ships the document as the `Assets/AssetResponsibilityTerms`
+event with a default subject, a full letter body and a 23-token palette. The liability clauses are
+`{{#if ResponsibleForLoss}} … {{else}} … {{/if}}` blocks **inside the template** — the merge engine
+supports nested conditionals — so the flags stay in code and the wording does not. Two routes over
+one render: `GET` returns `{Subject, HtmlBody}` for display and print-to-PDF (the physical signature
+AST-5 asks for), `POST …/email` sends the same render. Three columns record the send.
+
+⚠ **Rendered by the template service, delivered by the durable outbox.**
+`ITemplatedEmailService.SendAsync` would do both, but it hands straight to SMTP and by its own
+contract "never throws for a send failure — returns false and logs". This is the document stating
+what an employee is financially liable for, and the send is stamped onto the record; that claim has
+to rest on something durable, so delivery goes through `ITransactionalEmailQueue`'s outbox where a
+dispatcher retries and an administrator can see whether it left.
 
 ### D8 — the exit-clearance hook (FR-HR-183, closing 9b D4). *Recommendation, taken unless contradicted.*
 
@@ -477,7 +502,7 @@ overdue returns; and the full screen set.
 | **3** | ✅ The requisition pipeline runs | D-k (a real approver), AST-6b on-behalf, D-e (fulfilment recorded on the assignments), D-p |
 | **3b** | ✅ Both approvals on the workflow engine | D3 — the four-step recipe on `HrAssetRequisition` and `HrAssetTransfer`, Draft → submit → decide → recall; **D-l** pulled forward so transfers exist at all; D-q, D-r, D-s, D-t |
 | **4** | ✅ Assignment integrity | The availability guard (AST-2, **D-a**), the return consistency check (**D-c**), the transfer-completion gap, and two holes that made an asset unusable: a deleted assignment that never released it, and a return that could be taken twice. Migration `AddAssetAssignmentTransferLink` |
-| **5** | Responsibility and terms | QuestPDF document, download + email, recorded on the assignment (AST-5, AST-5b) |
+| **5** | ✅ Responsibility and terms | The document rendered from an **HR-editable template** + the per-tenant `CompanyProfile`, printable and emailable, recorded on the assignment (AST-5, AST-5b). Migration `AddAssetAssignmentTermsDocumentSend` |
 | **6** | The employee's own surface | `/hr/assets/me` + `EmployeePortalController` routes: my assets, acknowledge, request, request on behalf (AST-6, AST-8) |
 | **7** | Damage and surcharge | The surcharge record, its approval, its recovery route (AST-3, D-d) |
 | **8** | Rental and the payroll seam | `IsRentable`, the assignment's rental terms, the read-only projection (AST-9, AST-10) |
@@ -887,3 +912,57 @@ while the old one still cascades — so the correction is a **precondition** of 
 a side effect. Kept, guarded on `delete_referential_action <> 0` so it is a no-op on a database
 already in the right state, and deliberately **not** undone by `Down`, which would leave the database
 in a state the model has never described.
+
+### Slice 5 — the responsibility-and-terms document. 2026-08-24, **48/48, run twice** (stamps 172002, 173001). Migration `AddAssetAssignmentTermsDocumentSend`.
+
+Delivers **AST-5** and **AST-5b**. Slices 1, 2, 2b, 3, 3b and 4 re-run at 45/45, 85/85, 94/94, 49/49,
+135/135 and 73/73 — 529 assertions for the area.
+
+**The slice was built twice, and the second build is the one worth reading about.** The first
+followed D7 as written — QuestPDF, clauses in C#, company name from `IConfiguration` — and the user
+asked two questions about it: *why is Compose reading company details from configuration when there
+is a per-tenant company profile entity?* and *can the hardcoded clause text be exposed via the UI and
+made editable?* Both answers were yes, both already had machinery, and both had a working exemplar in
+HR that the survey had missed by taking procurement's `AwardLetterService` as "how the repo generates
+documents". §5 D7 now records the correction; the short version is that **HR letters are HTML from an
+editable template plus `CompanyProfile`**, and this one now is too.
+
+**What the template buys, precisely.** The merge engine (`EmailTemplateRenderer`) supports
+`{{Token}}`, `{{{RawHtml}}}` and nested `{{#if Token}} … {{else}} … {{/if}}`. That last one is what
+makes the liability wording editable rather than merely parameterised: the service passes
+`ResponsibleForLoss` and `ResponsibleForDamage` as tokens and the **template** decides what each
+says. The `{{else}}` branches state non-liability explicitly rather than falling silent, because
+silence on a signed form reads as the standard clause to whoever signs it.
+
+**How far the editability actually reaches — stated exactly, because two links are outside this
+area.** The catalog default makes the document render on a tenant that has never opened the editor.
+`EmailTemplateCatalogSeeder` writes the editable row, and `TemplatedEmailService` prefers a stored
+row over the default. Editing that row works — `UpdateTemplateAsync` loads the existing row and
+copies only the editable fields, so `EventKey` survives an edit. ⚠ But the seeder is on
+`HrSeedOrchestrator`'s deliberately-skipped list ("templates are not TDC-branded yet"), so no row
+exists yet; and **`CreateEmailTemplateDto` carries no `EventKey`**, so a template authored from
+scratch in the designer can never resolve. That last one is a defect in the shared surface, recorded
+as **cross-module defect 7**, not fixed here.
+
+**One seeder replaced two.** `ProbationEmailTemplateSeeder` carried a written instruction — *"if a
+third module ships documents, merge the two into one seeder driven by the registered
+IEmailEventCatalog set rather than adding a third copy"* — and staff assets is the third module. The
+two per-module copies are gone, replaced by `EmailTemplateCatalogSeeder`, which seeds from every
+registered catalog. Both copies were already inert (never invoked, on the skipped list), so this
+carries no behavioural risk; the orchestrator's note now names all three modules.
+
+**Printing is not serving.** The download route deliberately records nothing. Only the email stamps
+`TermsDocumentSentAt` / `SentTo` / `SentById` — three columns rather than a flag, because "was it
+sent?" is three questions and a boolean answers none of them well: when, to which address (a recorded
+email changes, and the copy went to whatever it was that day), and by whom.
+
+**The two assertions that would have caught a silent failure.** No merge token may survive into the
+rendered document — an unresolved `{{Token}}` on a form somebody is about to sign is invisible to
+every status code. And the emailed body must equal the rendered letter byte for byte, because "one
+render, two routes" is a claim about the code that only an assertion keeps true.
+
+**A harness lesson re-learned the hard way.** Reshaping `run-slice5.mjs` used a script whose
+replacements were not asserted; two matched nothing, the script reported success, and the file was
+left half-migrated. The harness README has warned about exactly this since slice 2b. Every patch
+script in this area asserts its match count — including the one that then found the earlier pass had
+already applied part of the change.

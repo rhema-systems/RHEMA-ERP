@@ -442,6 +442,11 @@ public static class AssetsMappingExtensions
             RequisitionNumber = entity.Requisition?.RequisitionNumber,
             TransferId = entity.TransferId,
             TransferNumber = entity.Transfer?.TransferNumber,
+            TermsDocumentSentAt = entity.TermsDocumentSentAt,
+            TermsDocumentSentTo = entity.TermsDocumentSentTo,
+            TermsDocumentSentByName = entity.TermsDocumentSentBy != null
+                ? $"{entity.TermsDocumentSentBy.FirstName} {entity.TermsDocumentSentBy.LastName}"
+                : null,
             EmployeeName = entity.Employee != null 
                 ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
                 : string.Empty,

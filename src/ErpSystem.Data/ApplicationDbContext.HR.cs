@@ -4302,6 +4302,12 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.TransferId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.TransferId);
+
+            // AST-5b. Explicit for the same reason as every other employee link on this entity.
+            entity.HasOne(x => x.TermsDocumentSentBy)
+                .WithMany()
+                .HasForeignKey(x => x.TermsDocumentSentById)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AssetMaintenance>(entity =>

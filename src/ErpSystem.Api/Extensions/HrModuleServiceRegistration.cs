@@ -499,6 +499,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAssetAttachmentService, AssetAttachmentService>();
         services.AddScoped<IAssetRequisitionService, AssetRequisitionService>();
         services.AddScoped<IAssetTransferService, AssetTransferService>();
+        // AST-5 / AST-5b — the responsibility document, rendered from the HR-editable template.
+        // Its email-event catalog is registered with the other catalogs further down.
+        services.AddScoped<IAssetTermsLetterService, AssetTermsLetterService>();
         services.AddScoped<IAwardTypeService, AwardTypeService>();
         services.AddScoped<IAwardCycleService, AwardCycleService>();
         services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();
@@ -774,6 +777,10 @@ public static class HrModuleServiceRegistration
         // catalog is what gives TemplatedEmailService a built-in default, so the letter renders on a
         // tenant that has never opened the template editor.
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Probation.ProbationEmailEventCatalog>();
+        // Staff assets ship one document too (AST-5's responsibility-and-terms form), and register
+        // for the same reason: the built-in default is what makes it render before anyone has
+        // opened the template editor.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Assets.AssetsEmailEventCatalog>();
         services.AddScoped<ErpSystem.Core.Interfaces.Common.ITemplatedEmailService, ErpSystem.Core.Services.Common.TemplatedEmailService>();
         services.AddScoped<ErpSystem.Core.Interfaces.INumberSequenceService, ErpSystem.Data.Services.NumberSequenceService>();
         services.AddScoped<ErpSystem.Core.Interfaces.ICandidateJwtService, ErpSystem.Api.Services.CandidateJwtService>();

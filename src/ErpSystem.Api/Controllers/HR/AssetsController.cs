@@ -66,6 +66,7 @@ public class AssetsController : ControllerBase
     private readonly IAssetAttachmentService _attachmentService;
     private readonly IAssetRequisitionService _requisitionService;
     private readonly IAssetTransferService _transferService;
+    private readonly IAssetTermsLetterService _termsLetterService;
 
     public AssetsController(
         IAssetTypeService assetTypeService,
@@ -77,7 +78,8 @@ public class AssetsController : ControllerBase
         IAssetMaintenanceService maintenanceService,
         IAssetAttachmentService attachmentService,
         IAssetRequisitionService requisitionService,
-        IAssetTransferService transferService)
+        IAssetTransferService transferService,
+        IAssetTermsLetterService termsLetterService)
     {
         _assetTypeService = assetTypeService;
         _assetTypeAttributeService = assetTypeAttributeService;
@@ -89,6 +91,7 @@ public class AssetsController : ControllerBase
         _attachmentService = attachmentService;
         _requisitionService = requisitionService;
         _transferService = transferService;
+        _termsLetterService = termsLetterService;
     }
 
     #region Asset Types
@@ -566,6 +569,33 @@ public class AssetsController : ControllerBase
         dto.AssignmentId = id;
         await _assignmentService.AcknowledgeAssignmentAsync(dto);
         return Ok(new { message = "Assignment acknowledged" });
+    }
+
+    /// <summary>The responsibility-and-terms document, to display and print for signature (AST-5).</summary>
+    /// <remarks>
+    /// <para>Rendered on demand from the HR-editable <c>Assets/AssetResponsibilityTerms</c> template
+    /// as a self-contained HTML document — the same shape as the probation confirmation letter, and
+    /// printable to PDF from the browser for physical signature.</para>
+    ///
+    /// <para>Self-service: self-or-HR in the service. The document states what one named employee is
+    /// responsible for, and it is theirs to print as much as it is HR's to serve. It records nothing
+    /// on the assignment — printing a copy is not serving it on somebody.</para>
+    /// </remarks>
+    [HttpGet("assignments/{id:guid}/terms-document")]
+    [Authorize]
+    public async Task<ActionResult<AssetTermsLetterDto>> GetAssignmentTermsDocument(Guid id)
+    {
+        var letter = await _termsLetterService.GenerateAsync(id);
+        return Ok(letter);
+    }
+
+    /// <summary>Email the responsibility-and-terms document to the holder (AST-5b).</summary>
+    [HttpPost("assignments/{id:guid}/terms-document/email")]
+    [Authorize]
+    public async Task<ActionResult<AssetTermsLetterSendResultDto>> EmailAssignmentTermsDocument(Guid id)
+    {
+        var result = await _termsLetterService.EmailAsync(id);
+        return Ok(result);
     }
 
     /// <summary>Return assigned asset.</summary>
