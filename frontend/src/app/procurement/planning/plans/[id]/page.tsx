@@ -822,8 +822,6 @@ export default function ProcurementPlanDetailPage() {
     );
   }
 
-  const linkedBudget = plan.budgets?.find((budget) => budget.id === plan.budgetId) ?? plan.budgets?.[0];
-
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
