@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,6 +8,12 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <summary>
 /// Leave type configuration: types, sub-types, allocations, eligibility rules, accrual policies
 /// </summary>
+/// <remarks>
+/// W3 slice 5: READS stay on InternalOnly — an employee filing a request has to name a leave
+/// type, the same reason medical keeps its facility register open. Maintaining the catalogue is
+/// the leave WRITE tier (HR's own reference data, matching the admin.hr decision), while
+/// deactivation and deletion are ADMIN.
+/// </remarks>
 [ApiController]
 [Route("api/hr/leave-types")]
 [Authorize(Policy = "InternalOnly")]
@@ -53,6 +60,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveTypeDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LeaveTypeDto>> Create([FromBody] CreateLeaveTypeDto dto)
@@ -71,6 +79,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveTypeDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -90,6 +99,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Deactivate(Guid id)
@@ -110,6 +120,7 @@ public class LeaveTypesController : ControllerBase
         => Ok(await _service.GetSubTypesAsync(leaveTypeId));
 
     [HttpPost("sub-types")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveSubTypeDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LeaveSubTypeDto>> CreateSubType([FromBody] CreateLeaveSubTypeDto dto)
@@ -129,6 +140,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpPut("sub-types/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveSubTypeDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeaveSubTypeDto>> UpdateSubType(Guid id, [FromBody] CreateLeaveSubTypeDto dto)
@@ -146,6 +158,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpDelete("sub-types/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteSubType(Guid id)
@@ -166,6 +179,7 @@ public class LeaveTypesController : ControllerBase
         => Ok(await _service.GetAllocationsAsync(leaveTypeId));
 
     [HttpPost("allocations")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveCategoryAllocationDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LeaveCategoryAllocationDto>> CreateAllocation([FromBody] CreateLeaveCategoryAllocationDto dto)
@@ -183,6 +197,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpPut("allocations/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveCategoryAllocationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeaveCategoryAllocationDto>> UpdateAllocation(Guid id, [FromBody] CreateLeaveCategoryAllocationDto dto)
@@ -200,6 +215,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpDelete("allocations/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAllocation(Guid id)
@@ -220,6 +236,7 @@ public class LeaveTypesController : ControllerBase
         => Ok(await _service.GetEligibilityRulesAsync(leaveTypeId));
 
     [HttpPost("eligibility")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveTypeEligibilityDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LeaveTypeEligibilityDto>> CreateEligibilityRule([FromBody] CreateLeaveTypeEligibilityDto dto)
@@ -236,6 +253,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpDelete("eligibility/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteEligibilityRule(Guid id)
@@ -256,6 +274,7 @@ public class LeaveTypesController : ControllerBase
         => Ok(await _service.GetAccrualPoliciesAsync(leaveTypeId));
 
     [HttpPost("accrual-policies")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveAccrualPolicyDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LeaveAccrualPolicyDto>> CreateAccrualPolicy([FromBody] CreateLeaveAccrualPolicyDto dto)
@@ -272,6 +291,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpPut("accrual-policies/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
     [ProducesResponseType(typeof(LeaveAccrualPolicyDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeaveAccrualPolicyDto>> UpdateAccrualPolicy(Guid id, [FromBody] CreateLeaveAccrualPolicyDto dto)
@@ -289,6 +309,7 @@ public class LeaveTypesController : ControllerBase
     }
 
     [HttpDelete("accrual-policies/{id:guid}")]
+    [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAccrualPolicy(Guid id)

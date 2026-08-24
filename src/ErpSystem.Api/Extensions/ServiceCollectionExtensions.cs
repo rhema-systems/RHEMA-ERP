@@ -1282,6 +1282,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
 
+            // HR leave policies (W3 slice 5). The organisation-wide surface — every request,
+            // everyone's balances, the adjustment ledger, the type catalogue's writes and the
+            // year-end jobs — authorizes on these. Employee self-service (file, amend, cancel,
+            // view OWN leave) deliberately does NOT: those stay on InternalOnly with a
+            // self-or-permission ownership check at the endpoint, and approve/reject stay with
+            // the workflow assignee, validated per request by CanUserApproveAsync.
+            // Same ladder — Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.LeaveReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewLeave,
+                        HrPermissions.MaintainLeave,
+                        HrPermissions.AdministerLeave)))
+                .AddPolicy(HrPermissions.LeaveWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainLeave,
+                        HrPermissions.AdministerLeave)))
+                .AddPolicy(HrPermissions.LeaveAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerLeave)));
+
             // HR occupational-health policies. The medical controllers previously carried a bare
             // [Authorize], so every authenticated employee could read and delete medical records.
             // Administer implies Write implies Read, so an admin does not need all three granted.

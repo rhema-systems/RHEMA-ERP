@@ -22,6 +22,7 @@ public sealed record HrPermissionDefinition(
 /// </remarks>
 public static class HrPermissions
 {
+    public const string CategoryLeave = "HR - Leave";
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
@@ -34,6 +35,14 @@ public static class HrPermissions
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
+
+    public const string ViewLeave = "HR.Leave.Read";
+    public const string MaintainLeave = "HR.Leave.Write";
+    public const string AdministerLeave = "HR.Leave.Admin";
+
+    public const string LeaveReadPolicy = "HR.Policy.LeaveRead";
+    public const string LeaveWritePolicy = "HR.Policy.LeaveWrite";
+    public const string LeaveAdminPolicy = "HR.Policy.LeaveAdmin";
 
     public const string ViewMedicalRecords = "HR.Medical.Read";
     public const string MaintainMedicalRecords = "HR.Medical.Write";
@@ -109,6 +118,16 @@ public static class HrPermissions
 
     public static readonly HrPermissionDefinition[] All =
     {
+        new(ViewLeave, "View Leave",
+            "View all leave requests, balances and their adjustments, leave plans, encashments and mandatory-leave compliance across the organisation. Employees do not need this to see their own leave — self access is an ownership check on the endpoint, not a permission.",
+            CategoryLeave),
+        new(MaintainLeave, "Maintain Leave",
+            "Raise and amend leave on behalf of staff, record balance adjustments, close completed leave, recalculate balances, process encashment payments, and maintain the leave-type catalogue (sub-types, allocations, eligibility, accrual policies).",
+            CategoryLeave),
+        new(AdministerLeave, "Administer Leave",
+            "Run the year-end carry-over and forfeiture jobs, deactivate leave types, and delete adjustments and leave-type configuration. Approving leave is NOT this permission — approval belongs to the workflow assignee and is validated per request by the workflow engine.",
+            CategoryLeave),
+
         new(ViewMedicalRecords, "View Medical Records",
             "View employee health profiles, conditions, allergies, exams, claims, and medical documents.",
             CategoryMedical),
@@ -269,6 +288,7 @@ public static class HrPermissions
     /// </remarks>
     private static readonly string[] HrStaffGrants =
     {
+        ViewLeave, MaintainLeave,
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,

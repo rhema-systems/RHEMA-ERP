@@ -126,7 +126,21 @@ probe 403'd where the model said it would be admitted; chasing that found
 Extend `HrPermissions` per area, register policies, convert class gates, extend `RoleGrants`
 (both the seed and the fallback read it — never let them drift), swap the area's screens from
 role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-heavy last):
-1. **Leave** (68 bare actions; watch: employees file their own requests)
+1. **Leave** — ✅ **DONE 2026-08-24, harness 23/23 green + 39/39 no-regression, grant rows
+   verified in DB.** `HR.Leave.{Read,Write,Admin}`: org-wide reads → Read; adjustments, close,
+   recalculate, encashment payment, type-catalogue writes → Write; year-end jobs, deactivate,
+   deletes → Admin; file/amend/submit/cancel/own-reads → **self-or-permission** (ownership
+   helpers on all three controllers, evaluated via `IAuthorizationService` so seed AND fallback
+   count); approve/reject/suggest-changes deliberately ungated — the workflow engine validates
+   the assignee per request, and a permission would break line-manager approvers; leave-type
+   READS stay open (the request form feeds on them — medical's facility-register precedent).
+   Real holes closed en route: anyone could file leave AS anyone (body employeeId, unchecked),
+   cancel anyone's approved leave, delete anyone's leave attachment, run tenant-wide year-end.
+   Sidebar: HR-desk leave items gate on HR.Leave.Read, Year-End on Admin; Requests/Approvals
+   stay open (self-service and manager surfaces).
+   ⚠ Recipe note for the next slices: a service method named like `GetOwnedX` may be a plain
+   tenant-scoped fetch with no caller check — read it; and an attachment DTO carries
+   `LeaveRequestId`, not the nav (`attachment.LeaveRequest` was this slice's one build error).
 2. **Attendance + consultant timesheets** (self clock-in/regularization surfaces)
 3. **Comp & Benefits** (71 bare)
 4. **Training** (266 bare; nominations/self-enrollment are employee acts)

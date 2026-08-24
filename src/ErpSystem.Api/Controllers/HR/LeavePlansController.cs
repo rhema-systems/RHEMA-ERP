@@ -1,24 +1,67 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
 /// Leave plan management endpoints
 /// </summary>
+/// <remarks>
+/// W3 slice 5: a plan belongs to its employee — drafting, submitting, responding to a manager's
+/// suggestion and cancelling are self-or-write acts; the organisation-wide year view is the
+/// leave read tier; approve/reject/suggest-changes stay with the workflow assignee, validated
+/// per plan by the service.
+/// </remarks>
 [ApiController]
 [Route("api/hr/leave-plans")]
 [Authorize(Policy = "InternalOnly")]
 public class LeavePlansController : ControllerBase
 {
     private readonly ILeavePlanService _service;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IAuthorizationService _authorization;
     private readonly ILogger<LeavePlansController> _logger;
 
-    public LeavePlansController(ILeavePlanService service, ILogger<LeavePlansController> logger)
+    public LeavePlansController(
+        ILeavePlanService service,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
+        IAuthorizationService authorization,
+        ILogger<LeavePlansController> logger)
     {
         _service = service;
+        _db = db;
+        _currentUserService = currentUserService;
+        _authorization = authorization;
         _logger = logger;
+    }
+
+    /// <summary>Self-or-permission, as on LeavesController — see the remarks there.</summary>
+    private async Task<bool> CanActForEmployeeAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+            return true;
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>Self-or-permission resolved through the plan's owner.</summary>
+    private async Task<bool> CanActOnPlanAsync(Guid planId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty &&
+            _currentUserService.TenantId is Guid tenantId)
+        {
+            var mine = await _db.Set<Core.Entities.HR.StaffLeave.LeavePlan>()
+                .AsNoTracking()
+                .AnyAsync(p => p.Id == planId && p.TenantId == tenantId && p.EmployeeId == me);
+            if (mine) return true;
+        }
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
     [HttpGet("employee/{employeeId:guid}")]
@@ -27,11 +70,15 @@ public class LeavePlansController : ControllerBase
         Guid employeeId,
         [FromQuery] int year = 0)
     {
+        if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
+            return Forbid();
+
         if (year == 0) year = DateTime.Today.Year;
         return Ok(await _service.GetByEmployeeAndYearAsync(employeeId, year));
     }
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<LeavePlanDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<LeavePlanDto>>> GetByYear([FromQuery] int year = 0)
     {
@@ -44,6 +91,9 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeavePlanDto>> GetById(Guid id)
     {
+        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveReadPolicy))
+            return Forbid();
+
         try { return Ok(await _service.GetByIdAsync(id)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
     }
@@ -53,6 +103,10 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LeavePlanDto>> Create([FromBody] CreateLeavePlanDto dto)
     {
+        // W3: an employee plans their OWN leave; planning for someone else is the HR desk.
+        if (!await CanActForEmployeeAsync(dto.EmployeeId, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
         try
         {
             var result = await _service.CreateLeavePlanAsync(dto);
@@ -73,6 +127,9 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeavePlanDto>> Update(Guid id, [FromBody] CreateLeavePlanDto dto)
     {
+        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
         try { return Ok(await _service.UpdateLeavePlanAsync(id, dto)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
@@ -89,11 +146,16 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeavePlanDto>> Submit(Guid id)
     {
+        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
         try { return Ok(await _service.SubmitLeavePlanAsync(id)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    // W3: approve, reject and suggest-changes are deliberately NOT permission-gated — they are
+    // the workflow assignee's acts, validated per plan by the service (CanUserApproveAsync).
     [HttpPatch("{id:guid}/approve")]
     [ProducesResponseType(typeof(LeavePlanDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -139,6 +201,10 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeavePlanDto>> RespondToSuggestion(Guid id, [FromBody] RespondToLeaveSuggestionDto dto)
     {
+        // W3: answering the manager's suggestion is the plan owner's act.
+        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
         try { return Ok(await _service.RespondToSuggestionAsync(id, dto)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
@@ -150,6 +216,9 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Cancel(Guid id)
     {
+        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
         try
         {
             await _service.CancelLeavePlanAsync(id);

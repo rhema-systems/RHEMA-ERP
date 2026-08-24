@@ -443,18 +443,23 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // W3 slice 5: the org-wide surfaces authorize on HR.Leave.* (SuperAdmin/TenantAdmin
+        // auto-pass). Requests stays open — it is per-employee and the API's self-or-permission
+        // check lets anyone work their own history — and Approvals is the workflow assignee's
+        // queue, deliberately not an HR permission. Year-End is the admin tier: it rewrites
+        // every balance in the tenant, so plain HR staff do not see it.
         title: 'Leave Management',
         href: '/hr/leave',
         icon: CalendarDays,
         children: [
           { title: 'Requests', href: '/hr/leave/requests', icon: CalendarDays },
           { title: 'Approvals', href: '/hr/leave/approvals', icon: CheckSquare },
-          { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock },
-          { title: 'Balances', href: '/hr/leave/balances', icon: Database },
-          { title: 'Adjustments', href: '/hr/leave/adjustments', icon: RotateCcw },
-          { title: 'Encashments', href: '/hr/leave/encashments', icon: DollarSign },
-          { title: 'Compliance', href: '/hr/leave/compliance', icon: FileCheck },
-          { title: 'Year-End', href: '/hr/leave/year-end', icon: CalendarClock },
+          { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock, permissions: ['HR.Leave.Read'] },
+          { title: 'Balances', href: '/hr/leave/balances', icon: Database, permissions: ['HR.Leave.Read'] },
+          { title: 'Adjustments', href: '/hr/leave/adjustments', icon: RotateCcw, permissions: ['HR.Leave.Read'] },
+          { title: 'Encashments', href: '/hr/leave/encashments', icon: DollarSign, permissions: ['HR.Leave.Read'] },
+          { title: 'Compliance', href: '/hr/leave/compliance', icon: FileCheck, permissions: ['HR.Leave.Read'] },
+          { title: 'Year-End', href: '/hr/leave/year-end', icon: CalendarClock, permissions: ['HR.Leave.Admin'] },
         ],
       },
       {
