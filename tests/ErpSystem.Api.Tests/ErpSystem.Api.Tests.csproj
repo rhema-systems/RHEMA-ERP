@@ -123,6 +123,7 @@
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
+    <Compile Include="Services\Finance\FinanceBudgetControlServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />

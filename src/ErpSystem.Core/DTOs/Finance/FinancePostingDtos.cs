@@ -51,6 +51,12 @@ public sealed class FinancePostingRequestDto
     /// </summary>
     public bool AllowPostingToClosedPeriod { get; set; }
 
+    /// <summary>
+    /// Exact Finance budget commitments validated for this manual journal. The central
+    /// posting engine consumes them in the same transaction as the GL posting.
+    /// </summary>
+    public IReadOnlyList<Guid> BudgetReservationIds { get; set; } = Array.Empty<Guid>();
+
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
     public IReadOnlyList<FinanceTaxCalculationSnapshotDto> TaxCalculationSnapshots { get; set; } = Array.Empty<FinanceTaxCalculationSnapshotDto>();
 }
