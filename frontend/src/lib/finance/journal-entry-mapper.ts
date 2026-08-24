@@ -81,8 +81,12 @@ export function mapJournalEntryFormToCreateDto(
     header: JournalEntryFormHeader,
     lines: JournalEntryFormLine[],
     journalNumber: string | undefined,
-    baseCurrency: string = 'GHS',
+    baseCurrency: string,
 ): CreateJournalEntryDto {
+    if (!/^[A-Z]{3}$/.test(baseCurrency.trim().toUpperCase())) {
+        throw new Error('A valid Finance functional currency is required to map a journal entry.');
+    }
+    const functionalCurrency = baseCurrency.trim().toUpperCase();
     // Filter to only lines with an account and at least one amount
     const validLines = lines.filter(
         l => l.accountId && (l.debit > 0 || l.credit > 0)
@@ -93,8 +97,21 @@ export function mapJournalEntryFormToCreateDto(
     let lineNo = 1;
 
     for (const l of validLines) {
-        const isForeign = l.currencyCode !== baseCurrency;
-        const rate = typeof l.exchangeRate === 'number' ? l.exchangeRate : 1;
+        const transactionCurrency = l.currencyCode.trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(transactionCurrency)) {
+            throw new Error('Every journal line requires a valid transaction currency.');
+        }
+        const isForeign = transactionCurrency !== functionalCurrency;
+        const rate = typeof l.exchangeRate === 'number' ? l.exchangeRate : 0;
+        if (isForeign && rate <= 0) {
+            throw new Error(`An approved ${transactionCurrency} exchange rate is required.`);
+        }
+        if (isForeign && l.debit > 0 && !(l.foreignDebit && l.foreignDebit > 0)) {
+            throw new Error(`The original ${transactionCurrency} debit amount is required.`);
+        }
+        if (isForeign && l.credit > 0 && !(l.foreignCredit && l.foreignCredit > 0)) {
+            throw new Error(`The original ${transactionCurrency} credit amount is required.`);
+        }
 
         if (l.debit > 0) {
             transactions.push({
@@ -103,7 +120,7 @@ export function mapJournalEntryFormToCreateDto(
                 transactionType: 'Debit',
                 description: l.description || undefined,
                 reference: header.referenceNumber || 'JE',
-                currencyCode: isForeign ? l.currencyCode : undefined,
+                currencyCode: isForeign ? transactionCurrency : undefined,
                 foreignAmount: isForeign ? (l.foreignDebit || undefined) : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
@@ -117,7 +134,7 @@ export function mapJournalEntryFormToCreateDto(
                 transactionType: 'Credit',
                 description: l.description || undefined,
                 reference: header.referenceNumber || 'JE',
-                currencyCode: isForeign ? l.currencyCode : undefined,
+                currencyCode: isForeign ? transactionCurrency : undefined,
                 foreignAmount: isForeign ? (l.foreignCredit || undefined) : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,

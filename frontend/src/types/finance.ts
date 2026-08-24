@@ -218,6 +218,8 @@ export interface AccountCurrencyLink {
     transactionQuoteSide: ExchangeRateQuoteSide;
     revaluationRateType: string;
     revaluationQuoteSide: ExchangeRateQuoteSide;
+    effectiveDate?: string;
+    effectiveEndDate?: string;
     foreignCurrencyBalance: number;
     baseCurrencyBalance: number;
     currentExchangeRate?: number;
