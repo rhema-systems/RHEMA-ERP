@@ -13,6 +13,7 @@ import {
   Tags,
   Globe,
   Building,
+  Boxes,
   CreditCard,
   Clock,
   CalendarDays,
@@ -123,6 +124,12 @@ export default function HrAdministrationPage() {
               description: 'Read-only lookup shared with other modules.',
               href: '/administration/hr/departments',
               icon: Building,
+            },
+            {
+              title: 'Asset Types',
+              description: 'The categories the company-asset register is built on.',
+              href: '/administration/hr/asset-types',
+              icon: Boxes,
             },
           ]}
         />

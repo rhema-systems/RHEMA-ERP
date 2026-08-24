@@ -103,6 +103,8 @@ import {
   GitBranch,
   Search,
   ArrowRightLeft,
+  Boxes,
+  Undo2,
   Repeat2,
   KeyRound,
   PackageCheck,
@@ -619,12 +621,29 @@ export const navigationItems: NavItem[] = [
         // Area 16. Company property in a named employee's hands: the register, the requisition that
         // asks for one, and the responsibility document they sign for it.
         //
-        // Only the employee's own screen exists so far (slice 6) — the HR register and its
-        // approval queues arrive with slice 12, and join this entry as children then. A parent
-        // pointing at the register before the register exists would be a link to a 404.
-        title: 'My Assets',
-        href: '/hr/assets/me',
+        // The parent now points at the HR register hub, which answers 403 without HR — so
+        // "My Assets" keeps its own entry below it, as staff movements and travel do, because it
+        // is the one screen in this group every employee can reach.
+        title: 'Company Assets',
+        href: '/hr/assets',
         icon: Package,
+        children: [
+          { title: 'Register', href: '/hr/assets/register', icon: Boxes },
+          { title: 'Assignments', href: '/hr/assets/assignments', icon: Package },
+          { title: 'Requisitions', href: '/hr/assets/requisitions', icon: ClipboardList },
+          { title: 'Transfers', href: '/hr/assets/transfers', icon: ArrowRightLeft },
+          { title: 'Surcharges', href: '/hr/assets/surcharges', icon: Receipt },
+          // The three watchlist groups get their own entries rather than living behind the
+          // register: each is somebody's worklist, and a list you have to go looking for is a list
+          // nobody works.
+          { title: 'Maintenance', href: '/hr/assets/maintenance', icon: Wrench },
+          { title: 'Insurance', href: '/hr/assets/insurance', icon: ShieldCheck },
+          { title: 'Returns', href: '/hr/assets/returns', icon: Undo2 },
+          { title: 'Register Report', href: '/hr/assets/report', icon: FileText },
+          { title: 'Reminders', href: '/hr/assets/reminders', icon: BellRing },
+          // Open to every employee; the register above answers 403 without HR.
+          { title: 'My Assets', href: '/hr/assets/me', icon: UserCheck },
+        ],
       },
       {
         // Area 8. One record covers promotion, transfer, demotion, secondment, acting appointment,
@@ -1671,6 +1690,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
+          // Area 16. The categories the company-asset register is built on — nothing can be
+          // added to that register until at least one exists, so it is setup, not casework.
+          { title: 'Asset Types', href: '/administration/hr/asset-types', icon: Boxes },
           { title: 'Leave Types', href: '/administration/hr/leave-types', icon: CalendarDays },
           {
             title: 'Compensation & Benefits',

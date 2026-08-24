@@ -37,10 +37,10 @@ decision — record the change where it happened.
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
 | **Backend today** | **14 entities**, **108 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7 + 3 in slice 8 + 2 in slice 9) plus **16 employee-portal routes** and **4 on `AssetRemindersController`** |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
-| **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
+| **Frontend today** | **the employee's own screen plus the full HR register** — 19 routes: `/hr/assets` (hub), the register (list/new/detail/edit), assignments, requisitions, transfers, surcharges, the three maintenance watchlists, the three insurance ones, the two return lists, the register report (the print screen), the reminder console, `/hr/assets/me`, and the asset-type catalogue at `/administration/hr/asset-types`. `asset-register.service.ts` + `asset-portal.service.ts` + `types/hr/assets.ts` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–11 green twice — 1,363 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance and insurance are both monitored rather than merely recorded, an exit can no longer close over property the leaver still holds, and the register can be counted on one page. **Only the screens and the content audit remain** |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice11.mjs`, `probe-slice6-ui.mjs` |
+| **Status** | ✅ **COMPLETE 2026-08-24.** Decisions **D1–D10** settled. **Slices 0–12 green twice — 2,076 assertions** (1,363 across slices 0–11, 59 on the UI probe, 654 on the content audit). Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance and insurance are both monitored rather than merely recorded, an exit can no longer close over property the leaver still holds, and the register can be counted on one page. **Only the screens and the content audit are done: 19 screens, and 77 GET route templates asserted by id, run twice** |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice11.mjs`, `probe-slice6-ui.mjs`, **`probe-slice12-ui.mjs`**, **`audit-content.mjs`**, `cleanup-s12-litter.mjs` |
 | **Blocks / unblocks** | ✅ **Unblocked area 9b D4 in slice 10** — asset return is now an enforced clearance gate, and the clearance form is drawn from the register rather than remembered |
 
 ---
@@ -646,7 +646,7 @@ overdue returns; and the full screen set.
 | **9b** | ✅ The push into Maintenance | D10 — the picker, link/unlink, `send-for-maintenance` on `AssetAdmission`, and completion discharging it. Migration `AddAssetMaintenanceAdmissionLink`. Found cross-module defect **10** |
 | **10** | ✅ Exit clearance | FR-HR-183 — the form drawn from the register, the gate that refuses to clear an asset still out, the money onto the settlement, and `refresh-assets` for the notice period. **D-ii**, and the payroll double-recovery closed. Migration `AddClearanceAssetSourcing` |
 | **11** | ✅ Reminders and reports | Insurance expiry (three reads), overdue **and** due-soon returns, five new sweep rungs, and the register report. **D-jj**, **D-kk**, and `AssignmentStatus.Overdue` left deliberately unwritten. No migration |
-| **12+** | Screens, then the content audit | Admin + HR screens, then the endpoint-by-endpoint content audit that areas 11–23 proved is not optional |
+| **12** | ✅ Screens, then the content audit | The 19 HR register screens (the report with a real print layout), the UI-payload probe that preceded them, and the endpoint-by-endpoint content audit — **77 GET route templates asserted by id**. Found **D-ll**, and four payload fictions of the harness's own. No migration |
 
 Slice numbering is indicative; it will move as slice 0 reports.
 
@@ -1634,3 +1634,111 @@ whatever it happens to prove.
 **Screen.** None. The three insurance lists, the two return lists and the register report are part
 of the HR register screens at slice 12; the report is the one that wants a print layout.
 
+
+### Slice 12 — the screens, and the content audit. 2026-08-24. Probe **59/59 twice**; audit **654/654, run twice** (stamps au9201, au9202). One defect: **D-ll**. No migration.
+
+Delivers the HR register screens and the endpoint-by-endpoint content audit areas 11–23 proved is
+not optional. **77 GET route templates executed and asserted by id** — the register controller, the
+reminder controller and the employee portal's asset half — against a fixture that gives every one of
+them something real to return.
+
+**Two instruments, and they catch different things.**
+
+`probe-slice12-ui.mjs` runs **before** a line of TypeScript and measures what each read actually
+answers. `audit-content.mjs` runs after and asserts every GET by id. Between them they caught five
+things a route name would have got wrong, and only one of the five was the product's:
+
+1. **The employee picker is `POST /hr/Employees/paged?page=`.** The guess — `GET …?pageNumber=` —
+   answered **405**. Both halves wrong: the verb and the parameter name.
+2. **The register report's population total is `assetCount`, not `totalAssets`.** A header bound to
+   the guess renders `undefined` over a 200 response, which is the blank-screen failure the probe
+   exists to prevent.
+3. **A served surcharge is cancelled, never deleted** — the delete answers 409 by design, so the
+   record survives. A cleanup step that used the delete reported a failure that was the product
+   being right.
+4. **`send-for-maintenance` requires `description`, not `reason`.** ⚠ And it *hid*: the fixture call
+   400'd in the setup and the symptom surfaced four assertions later as an empty workshop history.
+   **A write payload written from a route's name is the same fiction as a type written from one** —
+   this area had only ever applied that rule to reads.
+5. **`AssetAttachment` has no `attachmentType`.** The probe measured that read as EMPTY, and *an
+   empty list is not a shape*, so the type got filled from the fact that an `AssetAttachmentType`
+   enum exists. It is not used by the file table. The audit created a file and the truth appeared —
+   which is the argument for an audit that builds its own fixtures rather than reading what happens
+   to be there. Its sibling `AssetImage` returns `createdAt: "0001-01-01"`; `uploadDate` carries the
+   real timestamp.
+
+**D-ll — the seventh time a field has existed on one side of a read pair and not the other.**
+`AssetAssignmentDto` had no `AssetTypeName`, while `AssetAssignmentSummaryDto` has carried one since
+slice 6. So the assignment detail screen could say **less** about an asset than the list row that
+opened it, and three routes were affected (`assignments/{id}`, `assignments/asset/{id}/current`, and
+the portal's `assets/{id}`). The `.Include` for `Asset.AssetType` was already on
+`GetWithDetailsAsync` — only the property and its mapping were missing, the same half-a-change shape
+as D-w. Joins D-n, D-o, D-o(b), `requisitionNumber` (slice 3), D-t and D-w. **This is why the rule
+is "assert that a by-id read and its list read agree" and not "assert the field is there":** the
+TypeScript declared `AssetAssignment extends AssetAssignmentSummary`, which type-checked perfectly
+against a record that did not have the field.
+
+**Two identities the audit asserts rather than either number.** A watchlist READ is inclusive of the
+rows already lapsed; the report COUNT is disjoint. Both are correct, and asserting either alone
+passes through a drift in the other:
+
+```
+report.insuranceExpiringSoonCount + report.insuranceExpiredCount  ==  insurance/expiring
+report.maintenanceDueSoonCount    + report.maintenanceOverdueCount ==  due-maintenance
+```
+
+…plus the containment that gives the first identity its meaning — every lapsed row is IN the
+expiring read. And every breakdown on the report must sum to `assetCount`, with every group named,
+because an unplaced asset is grouped and named rather than dropped.
+
+**The screens.** Nineteen routes. `/hr/assets` (hub, counters from one report call rather than six
+list reads counted client-side — the two vocabularies would otherwise print different numbers for
+the same words); the register list, create, detail and edit; assignments list and detail; requisitions,
+transfers and surcharges, each list plus detail; the three maintenance watchlists, the three
+insurance ones and the two return lists, each as tabs with the inclusive/disjoint distinction stated
+on the page; the register report; the reminder console; and the asset-type catalogue at
+`/administration/hr/asset-types`, which is setup and therefore Administration's.
+
+⚠ **The report is the print screen, and `print:hidden` is not enough.** A Tailwind `print:hidden` on
+the page's own header hides the header and nothing else — the sidebar and the top bar still land on
+the paper. The repo's established pattern (finance's PO and GRV, payroll's payslip) is a body class
+that hides everything and re-shows one print root, and a `printing-hr-asset-report` block was added
+to `globals.css` beside them. The printed header states every filter in force, because the watchlist
+counts honour the filters and a page showing them without their scope reads as the whole estate.
+
+⚠ **The write payloads take numbers; every read gives names back.** Status, condition, assignment
+type, purpose, transfer type, maintenance type, rental frequency and attribute data type are all
+numeric on the way in and string on the way out, and three of the ladders run against reading order —
+`HRAssetRequisitionPriority` is Urgent=1…Low=4, `AssetAttributeDataType` is **alphabetical**
+(Checkbox=1 … Text=6, although the C# default is Text), and `HRAssetTransferType` has a member the
+API refuses (`DepartmentToDepartment`, because nothing anywhere records a department). Every one is a
+named constant in `types/hr/assets.ts` and no screen writes a literal.
+
+⚠ **`AssignmentStatus.Overdue` is deliberately absent from the assignments filter**, although the
+enum has it. Nothing writes it and nothing should, so offering it would produce a permanently empty
+list that reads as "nothing is late" — which is exactly wrong. Lateness lives on the returns
+watchlists, computed server-side, and no screen recomputes `daysUntilReturnDue` in the browser: a
+page left open past midnight would start disagreeing with the list it was opened from.
+
+**Also corrected on the way through**: `daysUntilReturnDue` was missing from the slice-6
+`AssetAssignmentSummary` type (added in slice 11 and never typed), and `return` / `acknowledge` /
+`report-incident` answer `{ message }` rather than the updated assignment — the opposite of every
+other write on the surface, so a caller reading the response as a record would get `undefined` for
+every field and no error to explain it.
+
+**Full regression after the D-ll fix: slices 1–11 re-run, 1,363 assertions, 0 failures**
+(`run-regression-s12.sh`, stamps 9301–9314) — 45, 85, 94, 49, 135, 73, 48, 118, 152, 88, 156, 91,
+110, 119. ⚠ Slice 0 is excluded on purpose: it is a historical record from slice 1 onwards and fails
+five assertions by design.
+
+⚠ **The platform's notification background service congests the database while any of this runs** —
+it processes 200 due notifications a cycle, every one failing on "No email settings configured", and
+its 90-day cleanup `UPDATE` times out repeatedly. Harness runs that take a minute normally took five.
+Not this area's, and not a harness fault: read the API log before blaming a slow run. A concurrent
+`next build` on the same machine made it markedly worse.
+
+**Cross-module dependencies the audit asserts HARD rather than skipping.**
+`fixed-assets/linkable` (Finance) and `maintenance-assets/linkable` (Maintenance) are both required
+to return rows. The Maintenance register's only live row is **HR's own litter from area 12**, ours to
+clear at finalization — so the day it is cleared these assertions go red. That is the intent: an
+audit that skipped them would report full coverage over a route that had never executed.

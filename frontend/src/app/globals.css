@@ -339,6 +339,41 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
     background: white !important;
     color: black !important;
   }
+
+  /*
+   * HR area 16 — the company-asset register report.
+   *
+   * Same shape as the two above, and for the same reason: a Tailwind `print:hidden` on the page's
+   * own header hides the header and nothing else, so the sidebar and the top bar still land on the
+   * paper. Hiding everything and re-showing one root is the only version that actually prints a
+   * document rather than a screenshot of the application.
+   */
+  body.printing-hr-asset-report > * {
+    visibility: hidden;
+  }
+
+  body.printing-hr-asset-report .hr-asset-report-print-root,
+  body.printing-hr-asset-report .hr-asset-report-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-hr-asset-report .hr-asset-report-no-print {
+    display: none !important;
+  }
+
+  body.printing-hr-asset-report .hr-asset-report-print-root {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    box-sizing: border-box;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: none;
+    padding: 12mm !important;
+    overflow: visible;
+    background: white !important;
+    color: black !important;
+  }
 }
 @keyframes mobile-scanner-sweep {
   0%, 100% {

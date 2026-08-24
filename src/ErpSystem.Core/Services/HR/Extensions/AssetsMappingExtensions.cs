@@ -457,6 +457,9 @@ public static class AssetsMappingExtensions
             AssetId = entity.AssetId,
             AssetName = entity.Asset?.AssetName ?? string.Empty,
             AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
+            // D-ll. Both halves land together: the `.Include` for `Asset.AssetType` was already on
+            // `GetWithDetailsAsync`, so this line is the whole fix and the field was blank without it.
+            AssetTypeName = entity.Asset?.AssetType?.Name ?? string.Empty,
             EmployeeId = entity.EmployeeId,
             RequisitionId = entity.RequisitionId,
             RequisitionNumber = entity.Requisition?.RequisitionNumber,

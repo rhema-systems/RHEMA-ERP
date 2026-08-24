@@ -744,6 +744,19 @@ public class AssetAssignmentDto : BaseDto
     public Guid AssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What kind of thing it is — defect <b>D-ll</b>, found by the slice-12 content audit.
+    /// </summary>
+    /// <remarks>
+    /// The SUMMARY has carried this since slice 6 and the full record did not, so the detail screen
+    /// could say less about an asset than the list row that opened it. The <c>.Include</c> that
+    /// feeds it was already there (<c>Asset.AssetType</c> on <c>GetWithDetailsAsync</c>) — only the
+    /// property and its mapping were missing, which is the same half-a-change shape as D-w, and the
+    /// seventh time in this area that a field existed on one side of a pair and not the other.
+    /// </remarks>
+    public string AssetTypeName { get; set; } = string.Empty;
+
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
 
