@@ -39,7 +39,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/awards/me")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AwardsMeController : HrControllerBase
 {
     private readonly IAwardCycleService _cycleService;

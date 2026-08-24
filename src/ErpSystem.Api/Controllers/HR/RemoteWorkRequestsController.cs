@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/remote-work-requests")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class RemoteWorkRequestsController : AttendanceControllerBase
 {
     private readonly IRemoteWorkRequestService _service;

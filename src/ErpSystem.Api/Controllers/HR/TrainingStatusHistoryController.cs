@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/training-status-history")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [TrainingBusinessRulesAttribute]
 public class TrainingStatusHistoryController : ControllerBase
 {

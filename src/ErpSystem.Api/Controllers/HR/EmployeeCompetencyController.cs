@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/employee-competencies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeCompetencyController : ControllerBase
 {
     private readonly IEmployeeCompetencyService _service;
@@ -102,7 +102,7 @@ public class EmployeeCompetencyController : ControllerBase
     // the token is what says so.
 
     /// <summary>The signed-in employee's own competency profile.</summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpGet("me/profile")]
     public async Task<ActionResult<EmployeeCompetencyProfileDto>> GetMyProfile()
     {
@@ -120,7 +120,7 @@ public class EmployeeCompetencyController : ControllerBase
     /// role asks for and where they currently stand against it, which is the thing they need in
     /// order to close it.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpGet("me/gaps")]
     public async Task<ActionResult<EmployeePositionCompetencyGapSummaryDto>> GetMyGaps()
     {

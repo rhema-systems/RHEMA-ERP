@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-attendance-alert-rules")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffAttendanceAlertRulesController : AttendanceControllerBase
 {
     private readonly IStaffAttendanceAlertRuleService _service;

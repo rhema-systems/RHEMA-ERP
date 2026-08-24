@@ -12,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/holiday-calendars")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class HolidayCalendarsController : AttendanceControllerBase
 {
     private readonly IHolidayCalendarService _calendarService;

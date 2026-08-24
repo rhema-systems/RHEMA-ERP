@@ -25,7 +25,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalConversationsController : ControllerBase
 {
     private readonly IAppraisalConversationService _conversationService;

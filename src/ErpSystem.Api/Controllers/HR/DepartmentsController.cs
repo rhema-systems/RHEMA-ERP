@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/departments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class DepartmentsController : ControllerBase
 {
     private readonly IDepartmentService _departmentService;

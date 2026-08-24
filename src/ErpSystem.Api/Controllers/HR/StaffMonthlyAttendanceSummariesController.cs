@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-monthly-attendance-summaries")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffMonthlyAttendanceSummariesController : AttendanceControllerBase
 {
     private readonly IStaffMonthlyAttendanceSummaryService _service;

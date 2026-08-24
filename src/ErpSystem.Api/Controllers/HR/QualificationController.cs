@@ -12,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/qualifications")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public sealed class QualificationController : ControllerBase
 {
     private readonly IQualificationCatalogueService _service;

@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-bulk-attendance-imports")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffBulkAttendanceImportsController : AttendanceControllerBase
 {
     private readonly IStaffBulkAttendanceImportService _service;

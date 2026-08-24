@@ -27,7 +27,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/discipline/cases")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [DisciplineBusinessRules]
 public class StaffDisciplineCasesController : ControllerBase
 {

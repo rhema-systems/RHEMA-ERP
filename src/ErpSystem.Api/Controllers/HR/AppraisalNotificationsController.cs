@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalNotificationsController : ControllerBase
 {
     private readonly IAppraisalNotificationService _notificationService;

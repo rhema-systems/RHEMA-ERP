@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class CountryController : ControllerBase
 {
     private readonly ICountryService _countryService;

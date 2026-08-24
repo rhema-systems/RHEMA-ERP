@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/consultant-timesheets")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ConsultantTimesheetsController : AttendanceControllerBase
 {
     private readonly IConsultantTimesheetService _service;

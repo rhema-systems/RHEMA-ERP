@@ -29,7 +29,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/job-vacancies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class JobVacancyController : ControllerBase
 {

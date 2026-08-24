@@ -22,7 +22,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/discipline")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [DisciplineBusinessRules]
 public class StaffDisciplineSubEntityController : ControllerBase
 {

@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalCycleController : ControllerBase
 {
     private readonly IAppraisalCycleService _cycleService;

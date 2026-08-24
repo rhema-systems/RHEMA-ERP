@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/learning-paths")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [TrainingBusinessRulesAttribute]
 public class LearningPathsController : ControllerBase
 {

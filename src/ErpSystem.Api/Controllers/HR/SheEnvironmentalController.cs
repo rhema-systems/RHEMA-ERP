@@ -20,7 +20,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/environmental")]
 [SafetyBusinessRules]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class SheEnvironmentalController : SheApiControllerBase
 {
     // Gated per action rather than on the class: authorize attributes stack as AND, so a class-level

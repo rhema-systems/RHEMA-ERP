@@ -27,7 +27,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/hr/unions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class UnionController : ControllerBase
 {
     private const string WriteRoles =

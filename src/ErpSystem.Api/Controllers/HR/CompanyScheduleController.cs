@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class CompanyScheduleController : ControllerBase
 {
     private readonly ICompanyEventService _eventService;

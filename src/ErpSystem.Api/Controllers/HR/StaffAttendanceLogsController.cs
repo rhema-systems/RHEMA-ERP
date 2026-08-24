@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-attendance-logs")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffAttendanceLogsController : AttendanceControllerBase
 {
     private readonly IStaffAttendanceLogService _service;

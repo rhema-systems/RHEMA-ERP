@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/shift-assignments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ShiftAssignmentsController : AttendanceControllerBase
 {
     private readonly IShiftAssignmentService _service;

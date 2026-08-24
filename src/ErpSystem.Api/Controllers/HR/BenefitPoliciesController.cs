@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/hr/benefit-policies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class BenefitPoliciesController : ControllerBase
 {
     private readonly IBenefitPolicyService _benefitPolicyService;

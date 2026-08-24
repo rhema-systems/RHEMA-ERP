@@ -17,7 +17,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/facility-services")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class FacilityServicesController : MedicalControllerBase
 {
     private readonly IHealthcareFacilityService _service;

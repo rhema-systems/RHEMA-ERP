@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/leave-encashments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class LeaveEncashmentsController : ControllerBase
 {
     private readonly ILeaveEncashmentService _service;

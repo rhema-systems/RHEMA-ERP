@@ -16,7 +16,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class UnitGoalsController : ControllerBase
 {
     private readonly IUnitGoalService _unitGoalService;

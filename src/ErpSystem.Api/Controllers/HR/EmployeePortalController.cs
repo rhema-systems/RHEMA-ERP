@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/employee-portal")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeePortalController : ControllerBase
 {
     private readonly IStaffMovementService         _movementService;

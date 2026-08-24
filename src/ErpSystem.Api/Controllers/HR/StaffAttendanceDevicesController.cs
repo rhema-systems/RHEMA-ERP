@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-attendance-devices")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffAttendanceDevicesController : AttendanceControllerBase
 {
     private readonly IStaffAttendanceDeviceService _service;

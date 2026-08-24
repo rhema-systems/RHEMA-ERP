@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/pay-components")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PayComponentsController : ControllerBase
 {
     private readonly IEmolumentService _service;

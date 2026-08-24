@@ -15,7 +15,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [OrientationBusinessRules]
 [Route("api/orientation-notifications")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OrientationNotificationsController : ControllerBase
 {
     private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;

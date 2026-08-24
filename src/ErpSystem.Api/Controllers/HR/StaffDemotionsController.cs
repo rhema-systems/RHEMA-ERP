@@ -22,7 +22,7 @@ public record DemotionResponseRequest(string Response);
 /// </summary>
 [ApiController]
 [Route("api/staff-demotions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class StaffDemotionsController : ControllerBase
 {

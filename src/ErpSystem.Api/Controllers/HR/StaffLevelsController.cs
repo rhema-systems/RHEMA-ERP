@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [Route("api/hr/staff-levels")]
 // No global fallback policy exists, so require authentication explicitly (matches sibling HR
 // controllers) — otherwise these endpoints, including writes, are reachable anonymously.
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffLevelsController : ControllerBase
 {
     private readonly IStaffLevelService _staffLevelService;

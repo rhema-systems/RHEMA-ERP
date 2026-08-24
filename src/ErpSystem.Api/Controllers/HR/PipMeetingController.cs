@@ -18,7 +18,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/PipMeeting")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PipMeetingController : ControllerBase
 {
     private readonly IPerformanceImprovementPlanService _pipService;

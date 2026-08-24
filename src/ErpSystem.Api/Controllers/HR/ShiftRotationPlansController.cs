@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/shift-rotation-plans")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ShiftRotationPlansController : AttendanceControllerBase
 {
     private readonly IShiftRotationPlanService _service;

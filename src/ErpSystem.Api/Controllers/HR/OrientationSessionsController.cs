@@ -18,7 +18,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [OrientationBusinessRules]
 [Route("api/orientation-sessions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OrientationSessionsController : ControllerBase
 {
     // Gated per action rather than on the class: authorize attributes stack as AND, so a class-level
@@ -40,7 +40,7 @@ public class OrientationSessionsController : ControllerBase
 
     /// <summary>Open to any authenticated user — participants need their session's time, venue and joining link.</summary>
     [HttpGet("{id:guid}")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<OrientationSessionDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 

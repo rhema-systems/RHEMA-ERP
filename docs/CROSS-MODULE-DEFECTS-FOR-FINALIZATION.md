@@ -734,6 +734,106 @@ It also broke two consecutive runs of HR's slice-9b harness in two different pla
 
 ---
 
+## 11. Platform-wide — bare `[Authorize]` behind the external-user allowlist: one prefix is exposed TODAY (procurement, proven), the rest are one allowlist edit away
+
+**Registered 2026-08-24 by the HR W3 permissions sweep; corrected the same day after the sweep's
+harness surfaced `ExternalUserAccessMiddleware`. Part (a) is a live defect in procurement's
+surface now; part (b) is the prerequisite HR area 26 (candidate portal) must not ship without.**
+
+### The two layers, and what each actually covers
+
+The platform already has a **deny-by-default allowlist** for external accounts:
+`Middleware/ExternalUserAccessMiddleware.cs`, registered between `UseAuthentication` and
+`UseAuthorization`. A token carrying the `ExternalUser` role is refused (403 "External users are
+not permitted to access this resource") on every path except a curated prefix list — `/api/auth`,
+`/api/tenant`, **`/api/procurement` (the whole prefix)**, `/api/notifications`, `/api/hubs`,
+`/api/fileupload`, `/api/ehc/external`, `/api/projects/external`, `/api/estate/external`,
+`/api/user/profile`, `/api/user/change-password`, `/health`, `/swagger`.
+
+So a bare `[Authorize]` (which admits *any* authenticated user) is shielded from external
+accounts **only by that middleware**, and the shield has two failure modes:
+
+**(a) LIVE NOW — endpoints under an allowlisted prefix.** The middleware waves externals through
+the whole prefix; a bare `[Authorize]` endpoint underneath has no second gate. **Proven
+2026-08-24** with a freshly self-registered `ExternalUser`-role account:
+
+| Probe | Result |
+|---|---|
+| `GET /api/procurement/business-partners` | **200** — the internal business-partner register, paged |
+| `GET /api/procurement/partner-categories` | **200** |
+| `GET /api/PurchaseOrders` (outside the prefix) | 403 (middleware) |
+
+Procurement has **61 bare-`[Authorize]` controller classes** and the entire `/api/procurement`
+prefix is allowlisted ("existing supplier/external portal features live under procurement" — the
+comment allowlists far more than the portal features). Also bare under allowlisted prefixes:
+`NotificationsController` (`/api/notifications`), `FileUploadController` (`/api/fileupload` —
+possibly by design for portal uploads, but then the *endpoint* should say so), and
+`TenantController` (`/api/tenant`). Each needs its owner's judgment: gate the endpoint, or narrow
+the prefix.
+
+**(b) LATENT — everything else, until area 26 widens the allowlist.** The candidate-portal
+decision puts self-registering job candidates on the main JWT scheme as `ExternalUser`s, and
+serving them will require **adding recruitment/candidate prefixes to this allowlist** — at which
+moment every bare `[Authorize]` under a newly allowed prefix goes live to the public, exactly as
+procurement's did. HR closed its own surface on 2026-08-24 precisely for that day: every bare
+`[Authorize]` in `Controllers/HR` (1,834 actions across 156 files) is now
+`[Authorize(Policy = "InternalOnly")]` (authenticated AND NOT `ExternalUser`,
+`ServiceCollectionExtensions.cs` ~1207) — a second gate that holds even where the middleware is
+told to stand aside. The rest of the API was measured the same day and **not** edited, because
+the files belong to other teams:
+
+| Module (Controllers/…) | Classes | Bare `[Authorize]` at class level | No class attribute |
+|---|---|---|---|
+| (root — shared platform: Documents, FileUpload, Reports, Notifications, …) | 39 | **28** | 2 |
+| Procurement | 72 | **61** | 1 |
+| Finance | 55 | **52** | 1 |
+| Maintenance | 56 | **33** | 2 |
+| Sales | 18 | **17** | 0 |
+| Inventory | 24 | **11** | 0 |
+| Estate | 10 | **9** | 0 |
+| Pricing | 4 | 4 | 0 |
+| Crm / DocumentManagement / Legal / Optimized / Planning / Procedures / Projects | 9 | 7 | 0 |
+| Ehc (already largely on `InternalOnly`) | 30 | 0 | 23* |
+| **Total non-HR** | **319** | **222** | **29** |
+
+\* "No class attribute" is not proven-anonymous — most gate per-method (Ehc does) — but each one
+needs its owner's eyes, because a method added without an attribute there is anonymous by default.
+
+**One HR-adjacent exception remains open inside HR's own folder:**
+`Controllers/HR/PayrollController.cs` (`api/hr/payroll`, 87 actions) is the payroll developer's
+file and was deliberately left out of HR's sweep. Today the middleware shields it (`api/hr/*` is
+not allowlisted); it becomes the single unswept surface behind `api/hr/*` the day the allowlist
+is widened near it. The entire fix is one line:
+`[Authorize]` → `[Authorize(Policy = "InternalOnly")]` at the class level.
+
+### What it blocks
+
+Part (a) blocks nothing — it is a **live exposure** in procurement's surface, reachable today by
+anyone who completes the public business-partner self-registration. Part (b) blocks HR area 26:
+the allowlist cannot be widened for candidates until the prefixes being widened — and anything
+else opened with them — carry their own gates. HR's sweep protects HR only.
+
+### What a fix needs
+
+1. **Procurement (now):** audit what under `/api/procurement` external portal users actually need,
+   gate the rest (role/policy per endpoint, or the one-line `InternalOnly` sweep per class), or
+   narrow the middleware prefix to the portal-facing routes. The two proven-open endpoints above
+   are the starting list, not the whole of it — 61 bare classes sit under the prefix.
+2. **Platform (with area 26):** every module owner makes the same one-line-per-file change HR made
+   (a scripted, line-exact, BOM/CRLF-preserving replace; HR's run is in the W3 plan,
+   `plans/HR-W3-Permissions-Sweep-Build-Plan.md`), **or** the platform decides once: register
+   `InternalOnly` as the authorization **FallbackPolicy** (catches attribute-less endpoints)
+   and/or fold "not ExternalUser" into the default policy — preceded by an audit of every
+   endpoint the external portal legitimately calls with bare `[Authorize]`, or it takes the
+   portal down in one deploy. The middleware then remains what it is today — a good outer wall —
+   instead of the only wall.
+3. Keep the two layers keyed to the same fact (`ExternalUser` role) in sync deliberately: the
+   middleware allowlist says where externals may go; endpoint gates say what they may do there.
+   A prefix added to the allowlist without endpoint-level gates underneath is exactly how (a)
+   happened.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

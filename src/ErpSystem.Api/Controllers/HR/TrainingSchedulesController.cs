@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/training-schedules")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [TrainingBusinessRulesAttribute]
 public class TrainingSchedulesController : ControllerBase
 {

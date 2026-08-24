@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR
     /// </summary>
     [ApiController]
     [Route("api/hr/leave-year-end")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public class LeaveYearEndController : ControllerBase
     {
         private readonly ILeaveYearEndService _yearEndService;

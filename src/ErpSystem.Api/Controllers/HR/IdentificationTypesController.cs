@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/hr/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class IdentificationTypesController : ControllerBase
 {
     private readonly IIdentificationTypeService _identificationTypeService;

@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/work-schedules")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class WorkSchedulesController : AttendanceControllerBase
 {
     private readonly IWorkScheduleService _service;

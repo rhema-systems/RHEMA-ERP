@@ -412,6 +412,10 @@ export const navigationItems: NavItem[] = [
     title: 'Human Resources',
     href: '/hr',
     icon: UserCheck,
+    // W3: mirrors the /hr layout's AuthGuard. hr.access is granted to every general internal
+    // role by the seeder — the gate exists to exclude external (candidate/business-partner)
+    // accounts, not to hide HR from staff. SuperAdmin/TenantAdmin auto-pass.
+    permissions: ['hr.access'],
     children: [
       { title: 'Employees', href: '/hr/employees', icon: Users },
       // Read-only view of the org's own records. Lives here rather than under Administration
@@ -1584,7 +1588,9 @@ export const navigationItems: NavItem[] = [
     icon: Settings,
     navigationSurface: 'settings',
     roles: ADMINISTRATION_ROLES,
-    permissions: ['Finance.Admin'],
+    // admin.hr (W3): an HR practitioner holding the seeded admin.hr grant must see the parent
+    // node, or the HR child below would be filtered out with it.
+    permissions: ['Finance.Admin', 'admin.hr'],
     accessMode: 'any',
     children: [
       { title: 'Message Queue', href: '/administration/notifications', icon: Bell, roles: ADMINISTRATION_ROLES },
@@ -1644,7 +1650,12 @@ export const navigationItems: NavItem[] = [
         title: 'HR',
         href: '/administration/hr',
         icon: UserCheck,
+        // W3: admins by role, HR practitioners by the seeded admin.hr grant — HR maintains its
+        // own reference data (leave types, org structures). Matches the administration
+        // layout's /administration/hr route gate.
         roles: ADMINISTRATION_ROLES,
+        permissions: ['admin.hr'],
+        accessMode: 'any',
         children: [
           {
             title: 'Organization',

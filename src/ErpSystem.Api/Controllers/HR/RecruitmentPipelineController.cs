@@ -26,7 +26,7 @@ public record ClonePipelineRequest(string NewName);
 /// </summary>
 [ApiController]
 [Route("api/recruitment-pipelines")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class RecruitmentPipelineController : ControllerBase
 {

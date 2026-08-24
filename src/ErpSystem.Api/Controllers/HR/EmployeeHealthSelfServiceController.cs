@@ -24,7 +24,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/employee-health/me")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeHealthSelfServiceController : MedicalControllerBase
 {
     private readonly ApplicationDbContext _db;

@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/shift-definitions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ShiftDefinitionsController : AttendanceControllerBase
 {
     private readonly IShiftDefinitionService _service;

@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/talent-pool")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class TalentPoolController : ControllerBase
 {
     private readonly IJobCandidateService _candidateService;

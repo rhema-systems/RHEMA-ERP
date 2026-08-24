@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/hr/skills")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public sealed class SkillsController : ControllerBase
 {
     private readonly ISkillService _service;

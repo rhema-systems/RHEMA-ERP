@@ -24,6 +24,12 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
     requiredPermissions = ['admin.fleet-management'];
   } else if (pathname.startsWith('/administration/maintenance')) {
     requiredPermissions = ['admin.maintenance'];
+  } else if (pathname.startsWith('/administration/hr')) {
+    // W3: seeded to SuperAdmin/TenantAdmin/Admin and to HR (+ legacy "HR User") — HR
+    // practitioners maintain their own reference data (leave types, org structures).
+    // Previously this path had no route gate at all; the sidebar was the only thing
+    // hiding it, and any authenticated user could reach it by URL.
+    requiredPermissions = ['admin.hr'];
   }
 
   return (

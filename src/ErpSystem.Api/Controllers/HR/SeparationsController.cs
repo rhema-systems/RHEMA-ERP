@@ -37,6 +37,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/hr/separations")]
+[Authorize(Policy = "InternalOnly")] // W3 backstop: ANDed with the per-action gates below
 public class SeparationsController : ControllerBase
 {
     private readonly ISeparationService _service;
@@ -206,7 +207,7 @@ public class SeparationsController : ControllerBase
     /// would AND them and admit nobody. The service reads entitlement off the record and answers
     /// 403 with the reason.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -241,7 +242,7 @@ public class SeparationsController : ControllerBase
     /// approve action carries a comment and nothing else. A decision that changes what the leaver
     /// is paid does not belong in a comment.</para>
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("{id:guid}/notice-decision")]
     [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -264,7 +265,7 @@ public class SeparationsController : ControllerBase
     }
 
     /// <summary>Refuse a separation awaiting approval. Same entitlement rule as approving.</summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("{id:guid}/reject")]
     [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

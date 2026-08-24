@@ -15,7 +15,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/competencies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class CompetencyController : ControllerBase
 {
     private readonly ICompetencyService _service;
@@ -169,7 +169,7 @@ public class CompetencyController : ControllerBase
 
 [ApiController]
 [Route("api/competency-skill-indicators")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class CompetencySkillIndicatorController : ControllerBase
 {
     private readonly ICompetencySkillIndicatorService _service;

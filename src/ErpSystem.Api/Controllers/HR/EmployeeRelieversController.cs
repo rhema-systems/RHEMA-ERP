@@ -23,7 +23,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/hr/employee-relievers")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeRelieversController : ControllerBase
 {
     private readonly IEmployeeRelieverService _service;

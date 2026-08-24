@@ -13,7 +13,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/position-vacancies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PositionVacanciesController : ControllerBase
 {
     private readonly IPositionVacancyService _service;

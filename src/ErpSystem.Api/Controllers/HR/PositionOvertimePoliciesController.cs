@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/position-overtime-policies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PositionOvertimePoliciesController : AttendanceControllerBase
 {
     private readonly IPositionOvertimePolicyService _service;

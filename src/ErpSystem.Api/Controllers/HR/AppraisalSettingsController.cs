@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalSettingsController : ControllerBase
 {
     private readonly IAppraisalSettingsService _settingsService;

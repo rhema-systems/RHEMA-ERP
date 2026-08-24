@@ -16,7 +16,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PerformanceAppraisalsController : ControllerBase
 {
     private readonly IPerformanceAppraisalService _appraisalService;
@@ -1792,7 +1792,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// Get employee read-only view of final appeal outcome
     /// </summary>
     [HttpGet("{id:guid}/appeal-outcome")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<EmployeeAppealOutcomeDto>> GetEmployeeAppealOutcome(Guid id, CancellationToken cancellationToken = default)
     {
         try

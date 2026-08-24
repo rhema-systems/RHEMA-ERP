@@ -14,7 +14,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/salary-notches")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class SalaryNotchesController : ControllerBase
 {
     private const string ReadOnlyMessage =

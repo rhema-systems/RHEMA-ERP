@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class JobAnalysisController : ControllerBase
 {
     private readonly IJobDescriptionService _jobDescriptionService;
@@ -143,7 +143,7 @@ public class JobAnalysisController : ControllerBase
     /// step in front of <i>this record</i>. Trap 3 in <c>hr-area-authz-pattern</c>: a permission
     /// gate is the wrong tool when the actor is defined by the record.</para>
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("descriptions/{id:guid}/workflow/approve")]
     public async Task<IActionResult> ApproveJobDescriptionOnWorkflow(Guid id)
     {
@@ -158,7 +158,7 @@ public class JobAnalysisController : ControllerBase
     /// Rejects the current workflow step, returning the job description to its author. Plain
     /// <c>[Authorize]</c> for the same reason as the approval above.
     /// </summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("descriptions/{id:guid}/workflow/reject")]
     public async Task<IActionResult> RejectJobDescriptionOnWorkflow(Guid id, [FromBody] RejectJobDescriptionDto dto)
     {
@@ -815,7 +815,7 @@ public class JobAnalysisController : ControllerBase
     /// then the Managing Director — and the engine's <c>CanUserApproveAsync</c> is the check. A
     /// permission gate here would refuse exactly those people; see the job description equivalent.
     /// </summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("budgets/{id:guid}/workflow/approve")]
     public async Task<IActionResult> ApproveBudgetOnWorkflow(Guid id)
     {
@@ -827,7 +827,7 @@ public class JobAnalysisController : ControllerBase
     }
 
     /// <summary>Rejects the current workflow step for a manpower budget, keeping the reason.</summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("budgets/{id:guid}/workflow/reject")]
     public async Task<IActionResult> RejectBudgetOnWorkflow(Guid id, [FromBody] RejectManpowerBudgetDto dto)
     {

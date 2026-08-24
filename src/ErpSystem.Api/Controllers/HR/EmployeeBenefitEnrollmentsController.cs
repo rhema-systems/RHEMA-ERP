@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/employee-benefit-enrollments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeBenefitEnrollmentsController : ControllerBase
 {
     private readonly IEmployeeBenefitEnrollmentService _service;

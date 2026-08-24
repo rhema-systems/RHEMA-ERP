@@ -32,7 +32,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PerformanceJournalController : ControllerBase
 {
     private readonly IPerformanceJournalService _journalService;

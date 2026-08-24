@@ -34,7 +34,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/[controller]")]
 [Route("api/Pip")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PerformanceImprovementPlansController : ControllerBase
 {
     private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;

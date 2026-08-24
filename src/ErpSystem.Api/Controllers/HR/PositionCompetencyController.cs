@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/position-competencies")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PositionCompetencyController : ControllerBase
 {
     private readonly IPositionCompetencyService _service;

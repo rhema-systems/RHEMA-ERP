@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-attendance-payroll-exports")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffAttendancePayrollExportsController : AttendanceControllerBase
 {
     private readonly IStaffAttendancePayrollExportService _service;

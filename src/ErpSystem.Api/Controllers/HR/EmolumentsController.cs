@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/emoluments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmolumentsController : ControllerBase
 {
     private readonly IEmolumentService _service;

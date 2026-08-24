@@ -28,7 +28,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/job-interviews")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class JobInterviewController : ControllerBase
 {

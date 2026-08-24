@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/employee-biometrics")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeBiometricsController : AttendanceControllerBase
 {
     private readonly IEmployeeBiometricService _service;

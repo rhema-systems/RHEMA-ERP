@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/client-engagements")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ClientEngagementsController : AttendanceControllerBase
 {
     private readonly IClientEngagementService _service;

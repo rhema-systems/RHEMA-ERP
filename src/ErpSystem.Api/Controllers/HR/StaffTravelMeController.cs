@@ -36,7 +36,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/staff-travel/me")]
 [StaffTravelBusinessRules]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffTravelMeController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;

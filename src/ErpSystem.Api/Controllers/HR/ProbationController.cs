@@ -55,6 +55,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/probations")]
+[Authorize(Policy = "InternalOnly")] // W3 backstop: ANDed with the per-action gates below
 public class ProbationController : ControllerBase
 {
     private readonly IProbationService _service;
@@ -224,13 +225,13 @@ public class ProbationController : ControllerBase
     /// and the engine — not a role — decides whether this caller may act. Same reasoning as the
     /// reviewer actions; see the note on the class.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("{id:guid}/confirmation/approve")]
     public async Task<ActionResult<ProbationPeriodDto>> ApproveConfirmation(Guid id)
         => Ok(await _service.ApproveConfirmationAsync(id));
 
     /// <summary>The confirming authority declines. The probation stays open.</summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("{id:guid}/confirmation/reject")]
     public async Task<ActionResult<ProbationPeriodDto>> RejectConfirmation(
         Guid id, [FromBody] TerminateProbationPeriodDto? body = null)
@@ -303,7 +304,7 @@ public class ProbationController : ControllerBase
     /// gate would have hidden this queue from everyone who uses it. You may read your own; HR may
     /// read anyone's.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpGet("reviews/reviewer/{reviewerEmployeeId:guid}")]
     public async Task<ActionResult<IEnumerable<ProbationReviewDto>>> GetReviewsByReviewer(Guid reviewerEmployeeId)
     {
@@ -321,14 +322,14 @@ public class ProbationController : ControllerBase
     /// Building the queue screen is what surfaced that, the same way building a create form
     /// surfaced the actor holes in area 12.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpGet("reviews/to-conduct")]
     public async Task<ActionResult<IEnumerable<ProbationReviewDto>>> GetMyReviewerQueue()
         => Ok(await _service.GetMyReviewerQueueAsync(RequireEmployeeId()));
 
     /// <summary>The reviews of the caller's own probation.</summary>
     /// <remarks>Token-derived: there is no id here to point at someone else's record.</remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpGet("reviews/mine")]
     public async Task<ActionResult<IEnumerable<ProbationReviewDto>>> GetMyReviews()
         => Ok(await _service.GetMyReviewsAsync(RequireEmployeeId()));
@@ -368,7 +369,7 @@ public class ProbationController : ControllerBase
     /// could only be scheduled and then completed while empty. Only the named reviewer or the
     /// second reviewer may submit; HR schedules reviews, it does not conduct them.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("reviews/{reviewId:guid}/submit")]
     public async Task<ActionResult<ProbationReviewDto>> SubmitReview(
         Guid reviewId, [FromBody] SubmitProbationReviewDto dto)
@@ -382,7 +383,7 @@ public class ProbationController : ControllerBase
     /// Plain <c>[Authorize]</c>, and the service admits <b>only the employee the review is
     /// about</b> — not HR, not the reviewer. The acknowledgement date is stamped server-side.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("reviews/{reviewId:guid}/acknowledge")]
     public async Task<ActionResult<ProbationReviewDto>> AcknowledgeReview(
         Guid reviewId, [FromBody] AcknowledgeProbationReviewDto dto)
@@ -403,7 +404,7 @@ public class ProbationController : ControllerBase
 
     /// <summary>Marks a review conducted. Refuses a review that carries no assessment.</summary>
     /// <remarks>The reviewer, or HR on their behalf — see the note on the class.</remarks>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("reviews/{reviewId:guid}/complete")]
     public async Task<IActionResult> CompleteReview(Guid reviewId)
     {

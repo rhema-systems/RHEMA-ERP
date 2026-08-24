@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/timesheet-invoices")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class TimesheetInvoicesController : AttendanceControllerBase
 {
     private readonly ITimesheetInvoiceService _service;

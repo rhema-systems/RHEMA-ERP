@@ -26,7 +26,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/staff-movements")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class StaffMovementsController : ControllerBase
 {

@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/consultant-clients")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ConsultantClientsController : AttendanceControllerBase
 {
     private readonly IConsultantClientService _service;

@@ -15,7 +15,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/attendance-dashboard")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AttendanceDashboardController : AttendanceControllerBase
 {
     private readonly IAttendanceDashboardService _service;

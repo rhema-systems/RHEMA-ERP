@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/pay-periods")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PayPeriodsController : AttendanceControllerBase
 {
     private readonly IPayPeriodService _service;

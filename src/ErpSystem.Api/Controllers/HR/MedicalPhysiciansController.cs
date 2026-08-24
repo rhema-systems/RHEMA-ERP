@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/medical-physicians")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class MedicalPhysiciansController : MedicalControllerBase
 {
     private readonly IHealthcareFacilityService _service;

@@ -49,7 +49,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AssetsController : ControllerBase
 {
     /// <summary>Who may act on anyone's assets: HR, and the two admin roles above it.</summary>
@@ -129,7 +129,7 @@ public class AssetsController : ControllerBase
     [HttpGet("types")]
     // Self-service: the picker every asset-request form needs; the type catalogue is not sensitive and the
     // writes beside it are HR-only.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<AssetTypeSummaryDto>>> GetAssetTypes()
     {
         var result = await _assetTypeService.GetAllAsync();
@@ -332,7 +332,7 @@ public class AssetsController : ControllerBase
     /// <summary>Assets by employee.</summary>
     [HttpGet("employee/{employeeId:guid}")]
     // Self-service: self-or-HR in CompanyAssetService.GetByEmployeeAsync.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<CompanyAssetSummaryDto>>> GetAssetsByEmployee(Guid employeeId)
     {
         var result = await _companyAssetService.GetByEmployeeAsync(employeeId);
@@ -663,7 +663,7 @@ public class AssetsController : ControllerBase
     /// <summary>Get assignment by id.</summary>
     [HttpGet("assignments/{id:guid}")]
     // Self-service: self-or-HR in AssetAssignmentService.GetByIdAsync — the holder may read their own.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetAssignmentDto>> GetAssignment(Guid id)
     {
         var result = await _assignmentService.GetByIdAsync(id);
@@ -713,7 +713,7 @@ public class AssetsController : ControllerBase
     /// <summary>Assignments by employee.</summary>
     [HttpGet("assignments/employee/{employeeId:guid}")]
     // Self-service: self-or-HR in AssetAssignmentService.GetByEmployeeIdAsync.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetAssignmentsByEmployee(Guid employeeId)
     {
         var result = await _assignmentService.GetByEmployeeIdAsync(employeeId);
@@ -723,7 +723,7 @@ public class AssetsController : ControllerBase
     /// <summary>Active assignments for employee.</summary>
     [HttpGet("assignments/employee/{employeeId:guid}/active")]
     // Self-service: self-or-HR in AssetAssignmentService.GetActiveAssignmentsForEmployeeAsync.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetActiveAssignments(Guid employeeId)
     {
         var result = await _assignmentService.GetActiveAssignmentsForEmployeeAsync(employeeId);
@@ -797,7 +797,7 @@ public class AssetsController : ControllerBase
     [HttpPost("assignments/{id:guid}/acknowledge")]
     // Self-service: AST-8. The ASSIGNEE ONLY — HR included in the exclusion. See
     // AssetActor.EnsureIsSubject and defect D-b.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<IActionResult> AcknowledgeAssignment(
         Guid id,
         [FromBody] AcknowledgeAssignmentDto dto)
@@ -818,7 +818,7 @@ public class AssetsController : ControllerBase
     /// on the assignment — printing a copy is not serving it on somebody.</para>
     /// </remarks>
     [HttpGet("assignments/{id:guid}/terms-document")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetTermsLetterDto>> GetAssignmentTermsDocument(Guid id)
     {
         var letter = await _termsLetterService.GenerateAsync(id);
@@ -827,7 +827,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Email the responsibility-and-terms document to the holder (AST-5b).</summary>
     [HttpPost("assignments/{id:guid}/terms-document/email")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetTermsLetterSendResultDto>> EmailAssignmentTermsDocument(Guid id)
     {
         var result = await _termsLetterService.EmailAsync(id);
@@ -1186,7 +1186,7 @@ public class AssetsController : ControllerBase
     /// <summary>Get requisition by id.</summary>
     [HttpGet("requisitions/{id:guid}")]
     // Self-service: self-or-HR in AssetRequisitionService.GetByIdAsync.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetRequisitionDto>> GetRequisition(Guid id)
     {
         var result = await _requisitionService.GetByIdAsync(id);
@@ -1218,7 +1218,7 @@ public class AssetsController : ControllerBase
     /// <summary>Requisitions by requester.</summary>
     [HttpGet("requisitions/requested-by/{employeeId:guid}")]
     // Self-service: self-or-HR in AssetRequisitionService.GetByRequestedByIdAsync.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<AssetRequisitionSummaryDto>>> GetRequisitionsByRequester(Guid employeeId)
     {
         var result = await _requisitionService.GetByRequestedByIdAsync(employeeId);
@@ -1238,7 +1238,7 @@ public class AssetsController : ControllerBase
     [HttpPost("requisitions")]
     // Self-service: AST-6. Anyone may request an asset for themselves; the requester is taken from the
     // token, never from the payload.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetRequisitionDto>> CreateRequisition([FromBody] CreateAssetRequisitionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -1249,7 +1249,7 @@ public class AssetsController : ControllerBase
     /// <summary>Update requisition.</summary>
     [HttpPut("requisitions/{id:guid}")]
     // Self-service: the requester may correct their own request while it is undecided; HR may correct anyone's.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetRequisitionDto>> UpdateRequisition(
         Guid id,
         [FromBody] UpdateAssetRequisitionDto dto)
@@ -1264,7 +1264,7 @@ public class AssetsController : ControllerBase
     /// <summary>Delete requisition.</summary>
     [HttpDelete("requisitions/{id:guid}")]
     // Self-service: the requester may withdraw their own undecided request; HR may withdraw anyone's.
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<IActionResult> DeleteRequisition(Guid id)
     {
         await _requisitionService.DeleteAsync(id);
@@ -1278,7 +1278,7 @@ public class AssetsController : ControllerBase
     /// not this controller's.
     /// </remarks>
     [HttpPost("requisitions/{id:guid}/submit")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetRequisitionDto>> SubmitRequisition(Guid id)
     {
         var result = await _requisitionService.SubmitAsync(id);
@@ -1288,7 +1288,7 @@ public class AssetsController : ControllerBase
     /// <summary>Recall a submitted requisition back to draft.</summary>
     /// <remarks>Self-service: only the person who raised it, checked on the record.</remarks>
     [HttpPost("requisitions/{id:guid}/recall")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetRequisitionDto>> RecallRequisition(
         Guid id,
         [FromBody] RecallAssetRequestDto? dto = null)
@@ -1473,7 +1473,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>One surcharge, in full. Self-or-HR, and invisible to the employee until served.</summary>
     [HttpGet("surcharges/{id:guid}")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetSurchargeDto>> GetSurcharge(Guid id)
     {
         var result = await _surchargeService.GetByIdAsync(id);
@@ -1497,7 +1497,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Charges raised against one employee. Self-or-HR.</summary>
     [HttpGet("surcharges/employee/{employeeId:guid}")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetSurchargesForEmployee(Guid employeeId)
         => Ok(await _surchargeService.GetByEmployeeIdAsync(employeeId));
 
@@ -1561,7 +1561,7 @@ public class AssetsController : ControllerBase
     /// employee's acceptance on their behalf is not a right of reply, it is the absence of one.
     /// </remarks>
     [HttpPost("surcharges/{id:guid}/respond")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<AssetSurchargeDto>> RespondToSurcharge(
         Guid id,
         [FromBody] RespondToAssetSurchargeDto dto)

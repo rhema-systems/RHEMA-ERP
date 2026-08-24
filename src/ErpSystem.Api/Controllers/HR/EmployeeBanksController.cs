@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// Manages bank (financial institution) and bank branch reference data.
 /// </summary>
 [ApiController]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeBanksController : ControllerBase
 {
     private readonly IEmployeeBankService _bankService;

@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class GoalLibraryController : ControllerBase
 {
     private readonly IGoalLibraryService _goalLibraryService;

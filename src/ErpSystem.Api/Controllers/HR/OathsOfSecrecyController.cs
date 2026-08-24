@@ -29,6 +29,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/hr/oaths-of-secrecy")]
+[Authorize(Policy = "InternalOnly")] // W3 backstop: ANDed with the per-action gates below
 public class OathsOfSecrecyController : ControllerBase
 {
     private readonly IEmployeeOathOfSecrecyService _service;
@@ -69,7 +70,7 @@ public class OathsOfSecrecyController : ControllerBase
         => Ok(await _service.GetForEmployeeAsync(employeeId));
 
     /// <summary>The caller's own oaths. Token-derived — no id to point elsewhere.</summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpGet("mine")]
     public async Task<ActionResult<IEnumerable<EmployeeOathOfSecrecyDto>>> GetMine()
         => Ok(await _service.GetForEmployeeAsync(RequireEmployeeId()));
@@ -85,7 +86,7 @@ public class OathsOfSecrecyController : ControllerBase
         => Ok(await _service.GetOutstandingAsync());
 
     /// <summary>The employee affirms their own oath.</summary>
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     [HttpPost("affirm")]
     public async Task<ActionResult<EmployeeOathOfSecrecyDto>> Affirm([FromBody] AffirmOathOfSecrecyDto dto)
     {

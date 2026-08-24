@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/grievances")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 [DisciplineBusinessRules]
 public class StaffGrievancesController : ControllerBase
 {

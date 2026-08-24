@@ -21,7 +21,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [OrientationBusinessRules]
 [Route("api/employee-orientations")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeOrientationsController : ControllerBase
 {
     private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;

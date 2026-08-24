@@ -7097,6 +7097,15 @@ namespace ErpSystem.Web.Services
             }
         }
 
+        /// <summary>
+        /// The HR module gates (W3). <c>hr.access</c> admits a user to the /hr UI shell —
+        /// granted broadly to internal roles because its purpose is excluding ExternalUser, not
+        /// rationing HR between staff. <c>admin.hr</c> admits to Administration → HR setup.
+        /// Split into two arrays because most roles get the first without the second.
+        /// </summary>
+        private static readonly string[] HrModuleAccessGrants = { "hr.access" };
+        private static readonly string[] HrModuleAdminGrants = { "admin.hr" };
+
         private async Task SeedRolePermissionAssignmentsAsync()
         {
             var permissionSeeds = new[]
@@ -7382,6 +7391,30 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            // HR module-access permissions (W3). These are the platform's lowercase dotted
+            // module gates (like project.access / admin.maintenance in ApplicationDbContext's
+            // HasData block), NOT HR.* policy permissions — the HR role-fallback handler
+            // deliberately ignores them, so the frontend route gates they feed have no backend
+            // stand-in and depend on these rows being seeded and granted below. Seeded here at
+            // runtime rather than via HasData because the HasData block's fixed sequential GUIDs
+            // make mid-list insertion fragile and would demand a migration for no gain.
+            .Concat(new[]
+            {
+                new
+                {
+                    Name = "hr.access",
+                    DisplayName = "Access Human Resources",
+                    Description = "Access the human resources module",
+                    Category = "Module Access"
+                },
+                new
+                {
+                    Name = "admin.hr",
+                    DisplayName = "Admin Human Resources",
+                    Description = "Manage HR administration and reference-data settings",
+                    Category = "Administration Modules"
+                }
+            })
             .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Last())
             .ToArray();
@@ -7427,9 +7460,11 @@ namespace ErpSystem.Web.Services
                 // authorization handler also reads — the fallback stands in for this seed, so the
                 // two must not drift.
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
-                    .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin)).ToArray(),
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
-                    .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin)).ToArray(),
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -7698,6 +7733,11 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.PostAfterApproval",
                     "Finance.Reports.Run"
                 },
+                // ⚠ "Managing Director" and Constants.Roles.ManagingDirector are the SAME string,
+                // and this initializer's [key] = value syntax silently overwrites duplicates. The
+                // Finance and HR grants for the MD therefore live in ONE entry here — a second
+                // entry lower down would erase this one (which is exactly what happened between
+                // area 9b and W3: the HR entry clobbered the Finance set until they were merged).
                 ["Managing Director"] = new[]
                 {
                     // Deliberately narrow: executive approvers can inspect the finance record and
@@ -7710,7 +7750,11 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.RequestChanges",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export"
-                },
+                }
+                    // HR side: READ on the separations the MD signs (FR-HR-092) — see the remarks
+                    // on HrPermissions.RoleGrants — plus the hr.access module gate (W3).
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.ManagingDirector))
+                    .Concat(HrModuleAccessGrants).ToArray(),
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
                 {
@@ -7723,7 +7767,31 @@ namespace ErpSystem.Web.Services
                 },
                 // HR staff maintain occupational-health records but do not administer them:
                 // deleting a medical record stays with tenant administrators.
-                [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr),
+                //
+                // hr.access / admin.hr (W3): HR practitioners get the module gate and the
+                // Administration → HR reference-data screens (leave types, org structures) —
+                // maintaining their own reference data is HR work, while destructive/decisive
+                // acts stay with the HR.X.Admin permission tier. The legacy "HR User" spelling is
+                // seeded too: unlike the HR.* permissions, the module gates have no role-fallback
+                // handler standing in for the seed, and the seeder loop skips roles that do not
+                // exist, so listing it costs nothing on a migrated tenant.
+                [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
+                [Constants.Roles.LegacyHrUser] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).ToArray(),
+
+                // hr.access for the broad internal roles (W3). The /hr layout was previously
+                // ungated, and non-HR staff legitimately use surfaces under it (peer evaluations,
+                // team goals, acknowledgements, payroll screens), so the module gate is granted
+                // to every general internal role. Its purpose is excluding ExternalUser — the
+                // self-registering public of the candidate portal (area 26) — not rationing HR
+                // between internal staff; per-screen gates and the API keep doing that.
+                // "Admin" is the same bare literal HrPermissions.RoleGrants carries, kept for
+                // any environment that has such a role; the loop skips it where absent.
+                [Constants.Roles.Manager] = HrModuleAccessGrants,
+                [Constants.Roles.Employee] = HrModuleAccessGrants,
+                [Constants.Roles.ReadOnly] = HrModuleAccessGrants,
+                ["Admin"] = HrModuleAccessGrants.Concat(HrModuleAdminGrants).ToArray(),
 
                 // The two approval authorities, who hold READ on the HR records they decide:
                 // the Managing Director signs separations (FR-HR-092) and Internal Audit reviews
@@ -7735,9 +7803,13 @@ namespace ErpSystem.Web.Services
                 // fallback exists to stand in for the seed, so a role present in one and missing
                 // from the other is a drift — access that works until somebody trusts the database
                 // rows. Adding to RoleGrants alone is not enough.
-                [Constants.Roles.ManagingDirector] = HrPermissions.GrantsFor(Constants.Roles.ManagingDirector),
-                [Constants.Roles.TdcManagingDirector] = HrPermissions.GrantsFor(Constants.Roles.TdcManagingDirector),
+                // Constants.Roles.ManagingDirector ("Managing Director") is deliberately ABSENT
+                // here — its Finance + HR grants are merged into the single entry above, because
+                // a duplicate key in this initializer overwrites rather than throws.
+                [Constants.Roles.TdcManagingDirector] = HrPermissions.GrantsFor(Constants.Roles.TdcManagingDirector)
+                    .Concat(HrModuleAccessGrants).ToArray(),
                 [Constants.Roles.InternalAudit] = HrPermissions.GrantsFor(Constants.Roles.InternalAudit)
+                    .Concat(HrModuleAccessGrants).ToArray()
             };
 
             foreach (var (roleName, permissionNames) in rolePermissionMap)

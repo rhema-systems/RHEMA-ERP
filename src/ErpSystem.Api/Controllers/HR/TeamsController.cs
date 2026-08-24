@@ -31,7 +31,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/hr/teams")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class TeamsController : ControllerBase
 {
     private const string WriteRoles =

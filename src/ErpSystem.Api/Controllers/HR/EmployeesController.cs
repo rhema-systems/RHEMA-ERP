@@ -10,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/hr/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeesController : ControllerBase
 {
     private readonly IEmployeeService _service;
