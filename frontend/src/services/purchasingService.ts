@@ -89,6 +89,7 @@ export interface PurchaseRequisitionSummaryDto {
   priority: string;
   department?: string;
   totalAmount: number;
+  currency: string;
   itemCount: number;
   currentWorkflowStepName?: string;
   sourcePlanNumber?: string;
@@ -177,6 +178,17 @@ export interface PurchaseRequisitionLinkageOptionDto {
   category?: string;
   amount?: number;
   currency?: string;
+  budgetId?: string;
+  budgetCode?: string;
+  departmentId?: string;
+  departmentName?: string;
+  inventoryItemId?: string;
+  quantity?: number;
+  unitOfMeasure?: string;
+  unitPrice?: number;
+  requiredDate?: string;
+  specifications?: string;
+  preferredSupplierId?: string;
 }
 
 export interface PurchaseRequisitionNamedOptionDto {
@@ -485,6 +497,7 @@ export interface CreatePurchaseRequisitionDto {
   priority: string;
   department?: string;
   departmentId?: string;
+  currency?: string;
   costCenter?: string;
   justification?: string;
   notes?: string;

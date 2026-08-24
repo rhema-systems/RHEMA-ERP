@@ -28,12 +28,8 @@ export const validateProcurementAppExport = (
   value: RecordProcurementAppExport
 ) => {
   if (!value.procurementPlanId) return 'Select a published plan version.';
-  if (!value.exportFileName.trim()) return 'Export file name is required.';
-  if (!value.exportFormat.trim()) return 'Export format is required.';
-  if (!value.exportTemplateVersion.trim())
-    return 'Export template version is required.';
-  if (!/^[0-9a-f]{64}$/i.test(value.exportChecksumSha256.trim()))
-    return 'SHA-256 checksum must contain exactly 64 hexadecimal characters.';
+  if (!['CSV', 'JSON', 'XML'].includes(value.exportFormat.toUpperCase()))
+    return 'Select CSV, JSON or XML.';
   return undefined;
 };
 

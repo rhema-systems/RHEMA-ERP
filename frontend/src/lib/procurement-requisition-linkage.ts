@@ -1,8 +1,36 @@
 import type {
+  ProcurementCategoryClass,
   PurchaseRequisitionLinkageDto,
+  PurchaseRequisitionLinkageOptionDto,
   PurchaseRequisitionType,
   SavePurchaseRequisitionLinkageRequest,
 } from '@/services/purchasingService';
+
+const procurementCategories: ProcurementCategoryClass[] = [
+  'Goods',
+  'Works',
+  'TechnicalServices',
+  'ConsultancyServices',
+  'GeneralServices',
+];
+
+export function applyPlanItemToRequisitionLinkage(
+  linkage: SavePurchaseRequisitionLinkageRequest,
+  option?: PurchaseRequisitionLinkageOptionDto
+): SavePurchaseRequisitionLinkageRequest {
+  const normalizedCategory = option?.category?.replace(/\s+/g, '').toLowerCase();
+  const category = normalizedCategory
+    ? procurementCategories.find((value) => value.toLowerCase() === normalizedCategory)
+    : undefined;
+
+  return {
+    ...linkage,
+    sourcePlanItemId: option?.id,
+    budgetId: option?.budgetId,
+    procurementCategory: option ? category || linkage.procurementCategory : undefined,
+    costCenter: undefined,
+  };
+}
 
 export const EMPTY_REQUISITION_LINKAGE: SavePurchaseRequisitionLinkageRequest = {
   requisitionType: 'StockReplenishment',

@@ -1151,12 +1151,6 @@ export default function PurchaseRequisitionDetailPage() {
                   </div>
                 )}
 
-                {requisition.costCenter && (
-                  <div>
-                    <Label className="text-muted-foreground">Cost Center</Label>
-                    <p className="font-medium mt-1">{requisition.costCenter}</p>
-                  </div>
-                )}
               </div>
 
               {requisition.justification && (
@@ -1205,11 +1199,7 @@ export default function PurchaseRequisitionDetailPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Total Amount:</span>
                   <span className="text-2xl font-bold text-primary">
-                    $
-                    {requisition.totalAmount.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatMoney(requisition.totalAmount, requisition.currency)}
                   </span>
                 </div>
               </div>
@@ -1350,18 +1340,10 @@ export default function PurchaseRequisitionDetailPage() {
                         </TableCell>
                         <TableCell>{item.unitOfMeasure || '-'}</TableCell>
                         <TableCell className="text-right">
-                          $
-                          {item.estimatedUnitPrice.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(item.estimatedUnitPrice, requisition.currency)}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          $
-                          {item.lineTotal.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(item.lineTotal, requisition.currency)}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
@@ -1404,11 +1386,7 @@ export default function PurchaseRequisitionDetailPage() {
                       <div className="flex justify-between">
                         <span className="font-semibold">Total Amount:</span>
                         <span className="text-xl font-bold text-primary">
-                          $
-                          {requisition.totalAmount.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(requisition.totalAmount, requisition.currency)}
                         </span>
                       </div>
                     </div>
@@ -1466,12 +1444,6 @@ export default function PurchaseRequisitionDetailPage() {
                   <Label className="text-muted-foreground">Category</Label>
                   <p className="mt-1 font-medium">
                     {requisition.linkage.procurementCategory || 'Not selected'}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Cost centre</Label>
-                  <p className="mt-1 font-medium">
-                    {requisition.linkage.costCenter || 'Not linked'}
                   </p>
                 </div>
                 <div>

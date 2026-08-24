@@ -486,6 +486,7 @@ public class PurchaseRequisitionSummaryDto
     public string Priority { get; set; } = string.Empty;
     public string? Department { get; set; }
     public decimal TotalAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
     public string? SourcePlanNumber { get; set; }
     public string? SourcePlanItemDescription { get; set; }
@@ -555,6 +556,14 @@ public class CreatePurchaseRequisitionDto
     /// retained as the display snapshot for legacy reporting only.
     /// </summary>
     public Guid? DepartmentId { get; set; }
+
+    /// <summary>
+    /// Requested transaction currency for an unlinked requisition. When a
+    /// governed budget is selected, the budget currency remains authoritative.
+    /// </summary>
+    [StringLength(3, MinimumLength = 3)]
+    public string? Currency { get; set; }
+
     public string? CostCenter { get; set; }
     public string? Justification { get; set; }
     public string? Notes { get; set; }
@@ -642,6 +651,17 @@ public sealed class PurchaseRequisitionLinkageOptionDto
     public string? Category { get; set; }
     public decimal? Amount { get; set; }
     public string? Currency { get; set; }
+    public Guid? BudgetId { get; set; }
+    public string? BudgetCode { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public string? DepartmentName { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public decimal? Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal? UnitPrice { get; set; }
+    public DateTime? RequiredDate { get; set; }
+    public string? Specifications { get; set; }
+    public Guid? PreferredSupplierId { get; set; }
 }
 
 public sealed class PurchaseRequisitionNamedOptionDto

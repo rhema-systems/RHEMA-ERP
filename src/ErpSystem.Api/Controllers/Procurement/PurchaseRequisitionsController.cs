@@ -101,14 +101,17 @@ public class PurchaseRequisitionsController : ControllerBase
             var before = _linkageService.Map(requisition);
             var departmentName = await ResolveDepartmentNameAsync(
                 updateDto.DepartmentId,
+                updateDto.Linkage.SourcePlanItemId,
                 requisition.TenantId,
                 cancellationToken);
             await ApplyAuthoritativeInventoryPricingAsync(
                 updateDto.Items,
                 requisition.TenantId,
                 cancellationToken);
-            if (string.IsNullOrWhiteSpace(updateDto.Linkage.CostCenter))
-                updateDto.Linkage.CostCenter = updateDto.CostCenter;
+            requisition.Currency = await ResolveRequisitionCurrencyAsync(
+                updateDto.Currency,
+                requisition.TenantId,
+                cancellationToken);
             await _linkageService.PrepareAsync(requisition, updateDto.Linkage, CorrelationId, cancellationToken);
 
             requisition.RequiredDate = updateDto.RequiredDate;
@@ -550,6 +553,7 @@ public class PurchaseRequisitionsController : ControllerBase
             var tenantId = _tenantContext.GetCurrentTenantId();
             var departmentName = await ResolveDepartmentNameAsync(
                 createDto.DepartmentId,
+                createDto.Linkage.SourcePlanItemId,
                 tenantId,
                 cancellationToken);
             await ApplyAuthoritativeInventoryPricingAsync(
@@ -572,11 +576,10 @@ public class PurchaseRequisitionsController : ControllerBase
                 Justification = createDto.Justification,
                 Notes = createDto.Notes,
                 TotalAmount = totalAmount,
+                Currency = await ResolveRequisitionCurrencyAsync(createDto.Currency, tenantId, cancellationToken),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
-            if (string.IsNullOrWhiteSpace(createDto.Linkage.CostCenter))
-                createDto.Linkage.CostCenter = createDto.CostCenter;
             await _linkageService.PrepareAsync(requisition, createDto.Linkage, CorrelationId, cancellationToken);
 
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
@@ -1469,6 +1472,7 @@ public class PurchaseRequisitionsController : ControllerBase
         Priority = requisition.Priority,
         Department = requisition.Department,
         TotalAmount = requisition.TotalAmount,
+        Currency = requisition.Currency,
         ItemCount = requisition.Items?.Count ?? 0,
         SourcePlanNumber = requisition.SourcePlanNumber,
         SourcePlanItemDescription = requisition.SourcePlanItemDescription,
@@ -1507,6 +1511,7 @@ public class PurchaseRequisitionsController : ControllerBase
             ApprovedAt = requisition.ApprovedAt,
             RejectionReason = requisition.RejectionReason,
             TotalAmount = requisition.TotalAmount,
+            Currency = requisition.Currency,
             ItemCount = items.Count(),
             SourcePlanNumber = requisition.SourcePlanNumber,
             SourcePlanItemDescription = requisition.SourcePlanItemDescription,
@@ -1567,16 +1572,41 @@ public class PurchaseRequisitionsController : ControllerBase
         if (request.Items.Any(item => item.Quantity <= 0)) return "Every requisition item quantity must be greater than zero.";
         if (request.Items.Any(item => item.EstimatedUnitPrice < 0)) return "Estimated unit prices cannot be negative.";
         if (string.IsNullOrWhiteSpace(request.Priority)) return "Priority is required.";
-        if (!request.DepartmentId.HasValue || request.DepartmentId.Value == Guid.Empty)
+        if (!string.IsNullOrWhiteSpace(request.Currency) && request.Currency.Trim().Length != 3)
+            return "Currency must be a three-letter Finance currency code.";
+        if ((!request.DepartmentId.HasValue || request.DepartmentId.Value == Guid.Empty) &&
+            (!request.Linkage.SourcePlanItemId.HasValue || request.Linkage.SourcePlanItemId.Value == Guid.Empty))
             return "Select an active HR department.";
         return null;
     }
 
     private async Task<string> ResolveDepartmentNameAsync(
         Guid? departmentId,
+        Guid? sourcePlanItemId,
         Guid tenantId,
         CancellationToken cancellationToken)
     {
+        if (sourcePlanItemId.HasValue && sourcePlanItemId.Value != Guid.Empty)
+        {
+            var sourcePlanItem = await _unitOfWork.Repository<ProcurementPlanItem>()
+                .GetQueryable(item => item.Id == sourcePlanItemId.Value && item.TenantId == tenantId && !item.IsDeleted)
+                .Include(item => item.ProcurementPlan)
+                .ThenInclude(plan => plan.Department)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+            if (sourcePlanItem is null || sourcePlanItem.ProcurementPlan.IsDeleted ||
+                sourcePlanItem.ProcurementPlan.Department.IsDeleted || !sourcePlanItem.ProcurementPlan.Department.IsActive)
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_PLAN_DEPARTMENT_INVALID",
+                    "The selected plan item does not have an active HR department in the current tenant.");
+            if (departmentId.HasValue && departmentId.Value != Guid.Empty &&
+                departmentId.Value != sourcePlanItem.ProcurementPlan.DepartmentId)
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_PLAN_DEPARTMENT_MISMATCH",
+                    "The posted department does not match the selected procurement plan item.");
+            return sourcePlanItem.ProcurementPlan.Department.Name;
+        }
+
         if (!departmentId.HasValue || departmentId.Value == Guid.Empty)
             throw new ProcurementRequisitionLinkageValidationException(
                 "PR_DEPARTMENT_REQUIRED",
@@ -1589,6 +1619,44 @@ public class PurchaseRequisitionsController : ControllerBase
                 "The selected HR department is not available in the current tenant.");
 
         return department.Name;
+    }
+
+    private async Task<string> ResolveRequisitionCurrencyAsync(
+        string? requestedCurrency,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var currencies = _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.Currency>()
+            .GetQueryable(currency =>
+                currency.TenantId == tenantId &&
+                currency.IsActive &&
+                !currency.IsDeleted);
+
+        if (string.IsNullOrWhiteSpace(requestedCurrency))
+        {
+            var baseCurrency = await currencies
+                .AsNoTracking()
+                .Where(currency => currency.IsBaseCurrency)
+                .Select(currency => currency.CurrencyCode)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(baseCurrency))
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_BASE_CURRENCY_NOT_CONFIGURED",
+                    "Finance must configure an active tenant base currency before a purchase requisition can be created.");
+            return baseCurrency.Trim().ToUpperInvariant();
+        }
+
+        var normalized = requestedCurrency.Trim().ToUpperInvariant();
+        var activeCurrency = await currencies
+            .AsNoTracking()
+            .Where(currency => currency.CurrencyCode == normalized)
+            .Select(currency => currency.CurrencyCode)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(activeCurrency))
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_CURRENCY_NOT_ACTIVE",
+                $"Currency {normalized} is not active in Finance for this tenant.");
+        return activeCurrency.Trim().ToUpperInvariant();
     }
 
     /// <summary>

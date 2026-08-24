@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
@@ -39,7 +40,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         saved.SourcePlanNumber.Should().Be(references.Plan.PlanNumber);
         saved.BudgetId.Should().Be(references.Budget.Id);
         saved.ProcurementCategory.Should().Be(ProcurementCategoryClass.Goods);
-        saved.CostCenter.Should().Be("CC-010");
+        saved.CostCenter.Should().BeNull("a planned requisition derives its accounting ownership from the plan department");
         saved.ProjectCode.Should().Be(references.Project.ProjectCode);
         saved.RequisitionType.Should().Be(PurchaseRequisitionType.ProjectPurchase);
         saved.SpecificationTemplateCode.Should().Be(references.Template.TemplateCode);
@@ -55,6 +56,9 @@ public sealed class ProcurementRequisitionLinkageServiceTests
     {
         await using var fixture = new Fixture();
         var references = fixture.SeedReferences();
+        references.PlanItem.ProcurementBudgetId = null;
+        references.Plan.BudgetId = references.Budget.Id;
+        await fixture.Context.SaveChangesAsync();
         var requisition = fixture.NewRequisition();
 
         await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
@@ -185,7 +189,13 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         options.SpecificationTemplates.Should().ContainSingle(item => item.Id == references.Template.Id);
         options.SpecificationTemplates.Should().NotContain(item => item.Code == "DRAFT");
         options.ApprovedExceptionWorkflows.Should().ContainSingle(item => item.Id == references.ExceptionWorkflow.Id);
-        options.PlanItems.Should().ContainSingle(item => item.Id == references.PlanItem.Id);
+        var planItem = options.PlanItems.Should().ContainSingle(item => item.Id == references.PlanItem.Id).Subject;
+        planItem.BudgetId.Should().Be(references.Budget.Id);
+        planItem.BudgetCode.Should().Be(references.Budget.BudgetCode);
+        planItem.Currency.Should().Be(references.Budget.Currency,
+            "the approved budget currency is authoritative even when a plan item contains a stale default");
+        planItem.DepartmentId.Should().Be(references.Plan.DepartmentId);
+        planItem.DepartmentName.Should().Be("Information Technology");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -248,10 +258,14 @@ public sealed class ProcurementRequisitionLinkageServiceTests
 
         public SeededReferences SeedReferences()
         {
+            var department = new Department
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, Code = "IT", Name = "Information Technology", IsActive = true
+            };
             var plan = new ProcurementPlan
             {
                 Id = Guid.NewGuid(), TenantId = TenantId, PlanNumber = "APP-2026-01", Title = "Annual plan",
-                DepartmentId = Guid.NewGuid(), FiscalYear = 2026, PlanStartDate = DateTime.UtcNow.Date,
+                DepartmentId = department.Id, FiscalYear = 2026, PlanStartDate = DateTime.UtcNow.Date,
                 PlanEndDate = DateTime.UtcNow.Date.AddYears(1), Status = "Active"
             };
             var budget = new ProcurementBudget
@@ -264,7 +278,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
             {
                 Id = Guid.NewGuid(), TenantId = TenantId, ProcurementPlanId = plan.Id, ProcurementBudgetId = budget.Id,
                 ItemDescription = "Enterprise laptops", ItemCategory = "Goods", EstimatedQuantity = 10,
-                EstimatedUnitPrice = 5000, EstimatedTotalCost = 50000, Status = "Approved", Currency = "GHS"
+                EstimatedUnitPrice = 5000, EstimatedTotalCost = 50000, Status = "Approved", Currency = "USD"
             };
             var project = new Project
             {
@@ -303,7 +317,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
                 EntityTypeId = entityType.Id, EntityId = Guid.NewGuid(), InitiatedById = UserId,
                 Status = WorkflowInstanceStatus.Completed, CompletedDate = DateTime.UtcNow.AddHours(-1)
             };
-            Context.AddRange(plan, budget, planItem, project, template, policy, exceptionRule, entityType, definition, workflow);
+            Context.AddRange(department, plan, budget, planItem, project, template, policy, exceptionRule, entityType, definition, workflow);
             Context.SaveChanges();
             return new SeededReferences(plan, planItem, budget, project, template, exceptionRule, workflow);
         }

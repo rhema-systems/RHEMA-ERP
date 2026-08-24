@@ -32,18 +32,15 @@ describe('procurement APP submission presentation controls', () => {
     ).toBe(true);
   });
 
-  it('validates immutable export package metadata', () => {
+  it('validates the server-generated export format', () => {
     const value = {
       procurementPlanId: 'plan-1',
-      exportFileName: 'app.xlsx',
-      exportFormat: 'XLSX',
-      exportTemplateVersion: 'PPA-v1',
-      exportChecksumSha256: 'A'.repeat(64),
+      exportFormat: 'CSV',
     };
     expect(validateProcurementAppExport(value)).toBeUndefined();
     expect(
-      validateProcurementAppExport({ ...value, exportChecksumSha256: 'bad' })
-    ).toContain('64');
+      validateProcurementAppExport({ ...value, exportFormat: 'XLSX' })
+    ).toContain('CSV');
   });
 
   it('removes empty filters while retaining paging', () => {

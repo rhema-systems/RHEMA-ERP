@@ -12,14 +12,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Edit, FileText, Package, Calendar, Clock, CheckCircle, XCircle, AlertCircle, Send, Loader2, Plus, Trash2, Search, Users, History, GitBranch } from 'lucide-react';
+import { ArrowLeft, Edit, FileText, Package, Calendar, Clock, CheckCircle, XCircle, AlertCircle, Send, Loader2, Plus, Trash2, Search, Users, History, GitBranch, ClipboardPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type ProcurementBudgetDetailDto, type ProcurementPlanDetailDto, type ProcurementPlanDto, type CreateProcurementPlanItemDto, type InventoryItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { format } from 'date-fns';
-import { FileCheck, ShoppingCart } from 'lucide-react';
+import { FileCheck } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { ProcurementPlanItemDialogBody } from '@/app/procurement/planning/components/ProcurementPlanItemDialogBody';
@@ -105,6 +106,7 @@ export default function ProcurementPlanDetailPage() {
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [addingItem, setAddingItem] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const [itemIdToDelete, setItemIdToDelete] = useState<string | null>(null);
   const [newItemForm, setNewItemForm] = useState<CreateProcurementPlanItemDto>(createEmptyItemForm);
   const [pendingPlanItems, setPendingPlanItems] = useState<CreateProcurementPlanItemDto[]>([]);
 
@@ -128,42 +130,6 @@ export default function ProcurementPlanDetailPage() {
   const [amendmentTitle, setAmendmentTitle] = useState('');
   const [amendmentDescription, setAmendmentDescription] = useState('');
   const [amendmentLoading, setAmendmentLoading] = useState(false);
-
-  // Conversion dialog state
-  const [conversionDialogOpen, setConversionDialogOpen] = useState(false);
-  const [conversionType, setConversionType] = useState<'tender' | 'rfq' | 'purchaseOrder'>('tender');
-  const [selectedItemForConversion, setSelectedItemForConversion] = useState<ProcurementPlanItemDto | null>(null);
-  const [conversionLoading, setConversionLoading] = useState(false);
-  const [budgetValidation, setBudgetValidation] = useState<{
-    isValid: boolean;
-    hasBudget: boolean;
-    remainingAmount: number;
-    requestedAmount: number;
-    message?: string;
-    warnings: string[];
-    controlLevel?: string;
-  } | null>(null);
-  const [validatingBudget, setValidatingBudget] = useState(false);
-  const [tenderForm, setTenderForm] = useState({
-    purchaseRequisitionId: '',
-    tenderTitle: '',
-    tenderDescription: '',
-    tenderType: 'ITB',
-    submissionDeadline: '',
-    openingDate: '',
-    notes: '',
-    createSchedule: true,
-  });
-  const [poForm, setPoForm] = useState({
-    supplierId: '',
-    requiredDate: '',
-    paymentTerms: '',
-    shippingTerms: '',
-    deliveryAddress: '',
-    deliveryInstructions: '',
-    notes: '',
-    createSchedule: true,
-  });
 
   useEffect(() => {
     if (planId) {
@@ -468,16 +434,22 @@ export default function ProcurementPlanDetailPage() {
   };
 
   const handleDeleteItem = async (itemId: string) => {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+    setItemIdToDelete(itemId);
+  };
+
+  const confirmDeleteItem = async () => {
+    if (!itemIdToDelete) return false;
 
     try {
-      setDeletingItemId(itemId);
-      await procurementPlanService.removeItem(planId, itemId);
+      setDeletingItemId(itemIdToDelete);
+      await procurementPlanService.removeItem(planId, itemIdToDelete);
       toast.success('Item deleted successfully');
+      setItemIdToDelete(null);
       loadPlanDetails(); // Refresh plan data
     } catch (error) {
       console.error('Error deleting item:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to delete item');
+      return false;
     } finally {
       setDeletingItemId(null);
     }
@@ -628,138 +600,10 @@ export default function ProcurementPlanDetailPage() {
     }
   };
 
-  // Conversion handlers
-  const handleOpenConversionDialog = async (item: ProcurementPlanItemDto, type: 'tender' | 'rfq' | 'purchaseOrder') => {
-    setSelectedItemForConversion(item);
-    setConversionType(type);
-    setBudgetValidation(null);
-
-    // Validate budget before opening dialog
-    try {
-      setValidatingBudget(true);
-      const validation = await procurementPlanService.validateBudgetForItem(item.id);
-      setBudgetValidation(validation);
-    } catch (error) {
-      console.error('Error validating budget:', error);
-      // Continue without budget validation
-    } finally {
-      setValidatingBudget(false);
-    }
-
-    if (type === 'tender') {
-      setTenderForm({
-        purchaseRequisitionId: '',
-        tenderTitle: `Tender for ${item.itemDescription}`,
-        tenderDescription: item.specifications || '',
-        tenderType: 'ITB',
-        submissionDeadline: item.requiredDate ? format(new Date(item.requiredDate), 'yyyy-MM-dd') : '',
-        openingDate: '',
-        notes: '',
-        createSchedule: true,
-      });
-    } else if (type === 'rfq') {
-      setTenderForm({
-        purchaseRequisitionId: '',
-        tenderTitle: `RFQ for ${item.itemDescription}`,
-        tenderDescription: item.specifications || '',
-        tenderType: 'RFQ',
-        submissionDeadline: item.requiredDate ? format(new Date(item.requiredDate), 'yyyy-MM-dd') : '',
-        openingDate: '',
-        notes: '',
-        createSchedule: true,
-      });
-    } else {
-      setPoForm({
-        supplierId: item.preferredSupplierId || '',
-        requiredDate: item.requiredDate ? format(new Date(item.requiredDate), 'yyyy-MM-dd') : '',
-        paymentTerms: '',
-        shippingTerms: '',
-        deliveryAddress: '',
-        deliveryInstructions: '',
-        notes: '',
-        createSchedule: true,
-      });
-      loadSuppliers();
-    }
-    setConversionDialogOpen(true);
-  };
-
-  const handleConvertToTender = async () => {
-    if (!selectedItemForConversion) return;
-
-    // Check budget validation for strict control
-    if (budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict') {
-      toast.error(budgetValidation.message || 'Insufficient budget');
-      return;
-    }
-
-    try {
-      setConversionLoading(true);
-      const result = await procurementPlanService.convertItemToTender({
-        planItemId: selectedItemForConversion.id,
-        purchaseRequisitionId: tenderForm.purchaseRequisitionId,
-        tenderTitle: tenderForm.tenderTitle,
-        tenderDescription: tenderForm.tenderDescription || undefined,
-        tenderType: tenderForm.tenderType,
-        submissionDeadline: tenderForm.submissionDeadline || undefined,
-        openingDate: tenderForm.openingDate || undefined,
-        notes: tenderForm.notes || undefined,
-        createSchedule: tenderForm.createSchedule,
-      });
-      toast.success(result.message);
-      setConversionDialogOpen(false);
-      loadPlanDetails();
-    } catch (error) {
-      console.error('Error converting to tender:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to convert to tender');
-    } finally {
-      setConversionLoading(false);
-    }
-  };
-
-  const handleConvertToRfq = async () => {
-    if (!selectedItemForConversion) return;
-
-    // Check budget validation for strict control
-    if (budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict') {
-      toast.error(budgetValidation.message || 'Insufficient budget');
-      return;
-    }
-
-    try {
-      setConversionLoading(true);
-      const result = await procurementPlanService.convertItemToRfq({
-        planItemId: selectedItemForConversion.id,
-        purchaseRequisitionId: tenderForm.purchaseRequisitionId,
-        tenderTitle: tenderForm.tenderTitle,
-        tenderDescription: tenderForm.tenderDescription || undefined,
-        tenderType: 'RFQ',
-        submissionDeadline: tenderForm.submissionDeadline || undefined,
-        openingDate: tenderForm.openingDate || undefined,
-        notes: tenderForm.notes || undefined,
-        createSchedule: tenderForm.createSchedule,
-      });
-      toast.success(result.message);
-      setConversionDialogOpen(false);
-      loadPlanDetails();
-    } catch (error) {
-      console.error('Error converting to RFQ:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to convert to RFQ');
-    } finally {
-      setConversionLoading(false);
-    }
-  };
-
-  const handleConvertToPurchaseOrder = async () => {
-    if (!selectedItemForConversion) return;
-    toast.error(
-      'Direct plan-to-PO conversion is closed. Create and approve the requisition sourcing/award first, then select that governed source on the Purchase Order page.'
-    );
-  };
-
-  const canConvertItem = (item: ProcurementPlanItemDto) => {
-    return plan?.status === 'Active' &&
+  const canCreateRequisition = (item: ProcurementPlanItemDto) => {
+    return (plan?.status === 'Approved' || plan?.status === 'Active') &&
            (item.status === 'Approved' || item.status === 'Planned') &&
+           Boolean(item.procurementBudgetId || plan.budgetId) &&
            !item.tenderId &&
            !item.purchaseOrderId;
   };
@@ -1163,33 +1007,17 @@ export default function ProcurementPlanDetailPage() {
                                 )}
                               </Button>
                             )}
-                            {canConvertItem(item) && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleOpenConversionDialog(item, 'tender')}
-                                  title="Create Tender"
-                                >
-                                  <FileCheck className="h-4 w-4 text-purple-600" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleOpenConversionDialog(item, 'rfq')}
-                                  title="Create RFQ"
-                                >
-                                  <FileText className="h-4 w-4 text-blue-600" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleOpenConversionDialog(item, 'purchaseOrder')}
-                                  title="Create Purchase Order"
-                                >
-                                  <ShoppingCart className="h-4 w-4 text-green-600" />
-                                </Button>
-                              </>
+                            {canCreateRequisition(item) && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => router.push(`/procurement/purchase-requisitions/new?sourcePlanItemId=${item.id}`)}
+                                title="Create Purchase Requisition"
+                                aria-label={`Create purchase requisition for ${item.itemDescription}`}
+                              >
+                                <ClipboardPlus className="mr-2 h-4 w-4 text-blue-600" />
+                                Create PR
+                              </Button>
                             )}
                           </div>
                         </TableCell>
@@ -1958,295 +1786,17 @@ export default function ProcurementPlanDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Conversion Dialog */}
-      <Dialog open={conversionDialogOpen} onOpenChange={setConversionDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {conversionType === 'tender' ? 'Create Tender from Plan Item' :
-               conversionType === 'rfq' ? 'Create RFQ from Plan Item' :
-               'Create Purchase Order from Plan Item'}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedItemForConversion && (
-                <span>
-                  Converting: <strong>{selectedItemForConversion.itemDescription}</strong>
-                  {' '}({selectedItemForConversion.estimatedQuantity} {selectedItemForConversion.unitOfMeasure})
-                </span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
+      <ConfirmationDialog
+        open={itemIdToDelete !== null}
+        onOpenChange={(open) => { if (!open && !deletingItemId) setItemIdToDelete(null); }}
+        title="Delete procurement plan item?"
+        description="This is allowed only while the plan remains a draft. The item cannot be recovered after deletion."
+        confirmText="Delete item"
+        variant="destructive"
+        onConfirm={confirmDeleteItem}
+        isLoading={Boolean(deletingItemId)}
+      />
 
-          {/* Budget Validation Warning */}
-          {budgetValidation && (
-            <div className={`p-3 rounded-lg border ${
-              !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict'
-                ? 'bg-red-50 border-red-200'
-                : budgetValidation.warnings.length > 0
-                  ? 'bg-yellow-50 border-yellow-200'
-                  : 'bg-green-50 border-green-200'
-            }`}>
-              <div className="flex items-start gap-2">
-                {!budgetValidation.isValid && budgetValidation.controlLevel === 'Strict' ? (
-                  <XCircle className="h-5 w-5 text-red-500 mt-0.5" />
-                ) : budgetValidation.warnings.length > 0 ? (
-                  <AlertCircle className="h-5 w-5 text-yellow-500 mt-0.5" />
-                ) : (
-                  <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
-                )}
-                <div className="flex-1">
-                  <p className="text-sm font-medium">
-                    {budgetValidation.hasBudget ? 'Budget Status' : 'No Budget Allocated'}
-                  </p>
-                  <p className="text-sm text-gray-600">{budgetValidation.message}</p>
-                  {budgetValidation.warnings.map((warning, idx) => (
-                    <p key={idx} className="text-sm text-yellow-700 mt-1">⚠️ {warning}</p>
-                  ))}
-                  {budgetValidation.hasBudget && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Requested: {formatCurrency(budgetValidation.requestedAmount, plan?.currency)} |
-                      Remaining: {formatCurrency(budgetValidation.remainingAmount, plan?.currency)}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-          {validatingBudget && (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Validating budget...
-            </div>
-          )}
-
-          {(conversionType === 'tender' || conversionType === 'rfq') ? (
-            <div className="space-y-4">
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                Select the Approved purchase requisition released for this exact plan item. The API revalidates its immutable sourcing release before conversion.
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label htmlFor="purchaseRequisitionId">Released purchase requisition ID *</Label>
-                  <Input
-                    id="purchaseRequisitionId"
-                    value={tenderForm.purchaseRequisitionId}
-                    onChange={(e) => setTenderForm({ ...tenderForm, purchaseRequisitionId: e.target.value.trim() })}
-                    placeholder="Paste the Approved requisition ID from its detail page"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label htmlFor="tenderTitle">Tender Title *</Label>
-                  <Input
-                    id="tenderTitle"
-                    value={tenderForm.tenderTitle}
-                    onChange={(e) => setTenderForm({ ...tenderForm, tenderTitle: e.target.value })}
-                    placeholder="Enter tender title"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label htmlFor="tenderDescription">Description</Label>
-                  <Textarea
-                    id="tenderDescription"
-                    value={tenderForm.tenderDescription}
-                    onChange={(e) => setTenderForm({ ...tenderForm, tenderDescription: e.target.value })}
-                    placeholder="Enter tender description"
-                    rows={3}
-                  />
-                </div>
-                {conversionType === 'tender' && (
-                  <div>
-                    <Label htmlFor="tenderType">Tender Type</Label>
-                    <Select
-                      value={tenderForm.tenderType}
-                      onValueChange={(value) => setTenderForm({ ...tenderForm, tenderType: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ITB">Invitation to Bid (ITB)</SelectItem>
-                        <SelectItem value="RFP">Request for Proposal (RFP)</SelectItem>
-                        <SelectItem value="OpenTender">Open Tender</SelectItem>
-                        <SelectItem value="RestrictedTender">Restricted Tender</SelectItem>
-                        <SelectItem value="SingleSource">Single Source</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                {conversionType === 'rfq' && (
-                  <div>
-                    <Label>Type</Label>
-                    <div className="mt-1 p-2 bg-blue-50 rounded border border-blue-200 text-blue-700 text-sm">
-                      Request for Quotation (RFQ)
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor="submissionDeadline">Submission Deadline</Label>
-                  <Input
-                    id="submissionDeadline"
-                    type="date"
-                    value={tenderForm.submissionDeadline}
-                    onChange={(e) => setTenderForm({ ...tenderForm, submissionDeadline: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="openingDate">Opening Date</Label>
-                  <Input
-                    id="openingDate"
-                    type="date"
-                    value={tenderForm.openingDate}
-                    onChange={(e) => setTenderForm({ ...tenderForm, openingDate: e.target.value })}
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label htmlFor="tenderNotes">Notes</Label>
-                  <Textarea
-                    id="tenderNotes"
-                    value={tenderForm.notes}
-                    onChange={(e) => setTenderForm({ ...tenderForm, notes: e.target.value })}
-                    placeholder="Additional notes..."
-                    rows={2}
-                  />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label htmlFor="supplierId">Supplier *</Label>
-                  <Select
-                    value={poForm.supplierId}
-                    onValueChange={(value) => setPoForm({ ...poForm, supplierId: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select supplier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {loadingSuppliers ? (
-                        <div className="p-2 text-center text-gray-500">Loading suppliers...</div>
-                      ) : (
-                        suppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>
-                            {supplier.partnerName} ({supplier.partnerCode})
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="requiredDate">Required Date</Label>
-                  <Input
-                    id="requiredDate"
-                    type="date"
-                    value={poForm.requiredDate}
-                    onChange={(e) => setPoForm({ ...poForm, requiredDate: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="paymentTerms">Payment Terms</Label>
-                  <Input
-                    id="paymentTerms"
-                    value={poForm.paymentTerms}
-                    onChange={(e) => setPoForm({ ...poForm, paymentTerms: e.target.value })}
-                    placeholder="e.g., Net 30"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="shippingTerms">Shipping Terms</Label>
-                  <Input
-                    id="shippingTerms"
-                    value={poForm.shippingTerms}
-                    onChange={(e) => setPoForm({ ...poForm, shippingTerms: e.target.value })}
-                    placeholder="e.g., FOB Destination"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label htmlFor="deliveryAddress">Delivery Address</Label>
-                  <Input
-                    id="deliveryAddress"
-                    value={poForm.deliveryAddress}
-                    onChange={(e) => setPoForm({ ...poForm, deliveryAddress: e.target.value })}
-                    placeholder="Enter delivery address"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label htmlFor="deliveryInstructions">Delivery Instructions</Label>
-                  <Textarea
-                    id="deliveryInstructions"
-                    value={poForm.deliveryInstructions}
-                    onChange={(e) => setPoForm({ ...poForm, deliveryInstructions: e.target.value })}
-                    placeholder="Special delivery instructions..."
-                    rows={2}
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label htmlFor="poNotes">Notes</Label>
-                  <Textarea
-                    id="poNotes"
-                    value={poForm.notes}
-                    onChange={(e) => setPoForm({ ...poForm, notes: e.target.value })}
-                    placeholder="Additional notes..."
-                    rows={2}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConversionDialogOpen(false)}
-              disabled={conversionLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={
-                conversionType === 'tender' ? handleConvertToTender :
-                conversionType === 'rfq' ? handleConvertToRfq :
-                handleConvertToPurchaseOrder
-              }
-              disabled={
-                conversionLoading ||
-                ((conversionType === 'tender' || conversionType === 'rfq') && !tenderForm.purchaseRequisitionId) ||
-                (conversionType === 'purchaseOrder' && !poForm.supplierId) ||
-                Boolean(budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict')
-              }
-              className={
-                conversionType === 'tender' ? 'bg-purple-600 hover:bg-purple-700' :
-                conversionType === 'rfq' ? 'bg-blue-600 hover:bg-blue-700' :
-                'bg-green-600 hover:bg-green-700'
-              }
-            >
-              {conversionLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : conversionType === 'tender' ? (
-                <>
-                  <FileCheck className="h-4 w-4 mr-2" />
-                  Create Tender
-                </>
-              ) : conversionType === 'rfq' ? (
-                <>
-                  <FileText className="h-4 w-4 mr-2" />
-                  Create RFQ
-                </>
-              ) : (
-                <>
-                  <ShoppingCart className="h-4 w-4 mr-2" />
-                  Create Purchase Order
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

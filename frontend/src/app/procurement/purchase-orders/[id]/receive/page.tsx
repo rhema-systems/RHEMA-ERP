@@ -47,6 +47,7 @@ import { inventoryManagementService, WarehouseDto, WarehouseLocationDto } from '
 import { ReceiptSourceControlCard } from '@/components/procurement/ReceiptSourceControlCard';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 import { format } from 'date-fns';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
 
 interface ReceiptItemFormData extends ReceivePurchaseOrderItemDto {
   itemCode: string;
@@ -629,7 +630,7 @@ export default function ReceivePurchaseOrderPage() {
             <div>
               <Label className="text-muted-foreground">Total Amount</Label>
               <p className="font-medium mt-1">
-                ${order.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatProcurementMoney(order.totalAmount, order.currency)}
               </p>
             </div>
           </div>

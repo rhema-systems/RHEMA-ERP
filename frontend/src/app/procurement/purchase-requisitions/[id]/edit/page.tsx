@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,7 @@ import {
   PurchaseRequisitionDetailDto,
   UpdatePurchaseRequisitionDto,
   CreatePurchaseRequisitionItemDto,
+  PurchaseRequisitionLinkageOptionDto,
   PurchaseRequisitionLinkageOptionsDto,
   SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
@@ -60,6 +62,12 @@ import {
 } from '@/lib/procurement-requisition-linkage';
 import { inventoryManagementService, InventoryItemDto, ItemUnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
+import { procurementCurrencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import {
+  formatProcurementMoney,
+  getProcurementBaseCurrency,
+  normalizeProcurementCurrency,
+} from '@/lib/procurement-currency';
 import { format } from 'date-fns';
 
 interface PRItemFormData extends CreatePurchaseRequisitionItemDto {
@@ -92,6 +100,7 @@ export default function EditPurchaseRequisitionPage() {
   const [priority, setPriority] = useState('Normal');
   const [department, setDepartment] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [currency, setCurrency] = useState('');
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PRItemFormData[]>([]);
@@ -103,10 +112,12 @@ export default function EditPurchaseRequisitionPage() {
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
   const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
   // Item dialog
   const [showItemDialog, setShowItemDialog] = useState(false);
+  const [itemIndexToDelete, setItemIndexToDelete] = useState<number | null>(null);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
@@ -145,6 +156,7 @@ export default function EditPurchaseRequisitionPage() {
         setRequiredDate(pr.requiredDate ? pr.requiredDate.split('T')[0] : '');
         setPriority(pr.priority);
         setDepartment(pr.department || '');
+        setCurrency(pr.currency);
         setJustification(pr.justification || '');
         setNotes(pr.notes || '');
         setRowVersion(pr.rowVersion);
@@ -185,11 +197,12 @@ export default function EditPurchaseRequisitionPage() {
     const loadData = async () => {
       try {
         setLoadingData(true);
-        const [itemsData, suppliersData, linkageData, departmentsData] = await Promise.all([
+        const [itemsData, suppliersData, linkageData, departmentsData, currencyData] = await Promise.all([
           inventoryManagementService.getInventoryItems({ isActive: true }),
           businessPartnerService.getActivePartners(),
           purchasingService.getPurchaseRequisitionLinkageOptions(),
           commonService.getDepartments(),
+          procurementCurrencyService.getActive(),
         ]);
         
         setInventoryItems(itemsData || []);
@@ -198,6 +211,9 @@ export default function EditPurchaseRequisitionPage() {
         ));
         setLinkageOptions(linkageData);
         setDepartments((departmentsData || []).filter((value) => value.isActive));
+        const activeCurrencies = (currencyData || []).filter((value) => value.isActive);
+        setCurrencies(activeCurrencies);
+        setCurrency((current) => current || getProcurementBaseCurrency(activeCurrencies));
       } catch (error) {
         console.error('Error loading reference data:', error);
         toast.error('Failed to load reference data');
@@ -210,12 +226,36 @@ export default function EditPurchaseRequisitionPage() {
   }, []);
 
   useEffect(() => {
+    if (!linkage.sourcePlanItemId || !linkageOptions) return;
+    const sourcePlanItem = linkageOptions.planItems.find((option) => option.id === linkage.sourcePlanItemId);
+    if (sourcePlanItem?.departmentId) setDepartmentId(sourcePlanItem.departmentId);
+    if (sourcePlanItem?.currency) setCurrency(normalizeProcurementCurrency(sourcePlanItem.currency));
+  }, [linkage.sourcePlanItemId, linkageOptions]);
+
+  useEffect(() => {
     if (departmentId || !department || departments.length === 0) return;
     const match = departments.find((value) =>
       value.name.localeCompare(department, undefined, { sensitivity: 'accent' }) === 0 ||
       `${value.code} - ${value.name}`.localeCompare(department, undefined, { sensitivity: 'accent' }) === 0);
     if (match) setDepartmentId(match.id);
   }, [department, departmentId, departments]);
+
+  const applyPlanItemDepartment = (option?: PurchaseRequisitionLinkageOptionDto) => {
+    setDepartmentId(option?.departmentId || '');
+    setCurrency(normalizeProcurementCurrency(option?.currency, getProcurementBaseCurrency(currencies)));
+  };
+
+  const handleLinkageChange = (next: SavePurchaseRequisitionLinkageRequest) => {
+    setLinkage(next);
+    const planItem = linkageOptions?.planItems.find((option) => option.id === next.sourcePlanItemId);
+    const budget = linkageOptions?.budgets.find((option) => option.id === next.budgetId);
+    const inheritedCurrency = planItem?.currency || budget?.currency;
+    if (inheritedCurrency || (!next.sourcePlanItemId && !next.budgetId)) {
+      setCurrency(normalizeProcurementCurrency(inheritedCurrency, getProcurementBaseCurrency(currencies)));
+    }
+  };
+
+  const documentCurrency = normalizeProcurementCurrency(currency, getProcurementBaseCurrency(currencies));
 
   // Calculate totals
   const calculateLineTotal = (quantity: number, unitPrice: number) => {
@@ -343,11 +383,14 @@ export default function EditPurchaseRequisitionPage() {
 
   // Delete item
   const handleDeleteItem = (index: number) => {
-    if (confirm('Are you sure you want to remove this item?')) {
-      const updatedItems = items.filter((_, i) => i !== index);
-      setItems(updatedItems);
-      toast.success('Item removed');
-    }
+    setItemIndexToDelete(index);
+  };
+
+  const confirmDeleteItem = () => {
+    if (itemIndexToDelete === null) return;
+    setItems((current) => current.filter((_, index) => index !== itemIndexToDelete));
+    setItemIndexToDelete(null);
+    toast.success('Item removed');
   };
 
   // Save changes
@@ -384,7 +427,7 @@ export default function EditPurchaseRequisitionPage() {
         requiredDate: requiredDate || undefined,
         priority,
         departmentId,
-        costCenter: linkage.costCenter || undefined,
+        currency: documentCurrency,
         justification: justification || undefined,
         notes: notes || undefined,
         linkage: normalizeRequisitionLinkage(linkage),
@@ -522,7 +565,7 @@ export default function EditPurchaseRequisitionPage() {
             
             <div className="space-y-2">
               <Label htmlFor="departmentId">Department *</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId} disabled={loadingData}>
+              <Select value={departmentId} onValueChange={setDepartmentId} disabled={loadingData || Boolean(linkage.sourcePlanItemId)}>
                 <SelectTrigger id="departmentId">
                   <SelectValue placeholder={loadingData ? 'Loading departments...' : 'Select HR department'} />
                 </SelectTrigger>
@@ -534,6 +577,32 @@ export default function EditPurchaseRequisitionPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {linkage.sourcePlanItemId && (
+                <p className="text-xs text-muted-foreground">Inherited from the selected procurement plan.</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="currency">Transaction Currency *</Label>
+              <Select
+                value={documentCurrency}
+                onValueChange={setCurrency}
+                disabled={loadingData || Boolean(linkage.sourcePlanItemId || linkage.budgetId)}
+              >
+                <SelectTrigger id="currency">
+                  <SelectValue placeholder="Select currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencies.map((value) => (
+                    <SelectItem key={value.id} value={value.code}>
+                      {value.code} - {value.name}{value.isBaseCurrency ? ' (Base)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(linkage.sourcePlanItemId || linkage.budgetId) && (
+                <p className="text-xs text-muted-foreground">Inherited from the approved procurement budget.</p>
+              )}
             </div>
             
           </div>
@@ -566,9 +635,10 @@ export default function EditPurchaseRequisitionPage() {
 
       <PurchaseRequisitionLinkageFields
         value={linkage}
-        onChange={setLinkage}
+        onChange={handleLinkageChange}
         options={linkageOptions}
         loading={loadingData}
+        onPlanItemChange={applyPlanItemDepartment}
       />
 
       {/* Items Section */}
@@ -631,10 +701,10 @@ export default function EditPurchaseRequisitionPage() {
                         <TableCell className="text-right">{item.quantity}</TableCell>
                         <TableCell>{item.unitOfMeasure || '-'}</TableCell>
                         <TableCell className="text-right">
-                          ${item.estimatedUnitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(item.estimatedUnitPrice, documentCurrency)}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${calculateLineTotal(item.quantity, item.estimatedUnitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(calculateLineTotal(item.quantity, item.estimatedUnitPrice), documentCurrency)}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">{item.preferredSupplierName || '-'}</div>
@@ -680,7 +750,7 @@ export default function EditPurchaseRequisitionPage() {
                           Total Amount:
                         </span>
                         <span className="text-xl font-bold text-primary">
-                          ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(totalAmount, documentCurrency)}
                         </span>
                       </div>
                     </div>
@@ -765,7 +835,10 @@ export default function EditPurchaseRequisitionPage() {
                               <div className="text-sm text-muted-foreground">{item.description}</div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Stock: {item.currentStock} {item.unitOfMeasure} • 
-                                Managed cost: ${(item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0).toFixed(2)}
+                                Managed cost: {formatProcurementMoney(
+                                  item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0,
+                                  documentCurrency
+                                )}
                               </div>
                             </div>
                             {selectedInventoryItem?.id === item.id && (
@@ -951,6 +1024,16 @@ export default function EditPurchaseRequisitionPage() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmationDialog
+        open={itemIndexToDelete !== null}
+        onOpenChange={(open) => { if (!open) setItemIndexToDelete(null); }}
+        title="Remove requisition item?"
+        description="This removes the item from the draft requisition. It does not change the approved procurement plan."
+        confirmText="Remove item"
+        variant="destructive"
+        onConfirm={confirmDeleteItem}
+      />
     </div>
   );
 }

@@ -1,12 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_REQUISITION_LINKAGE,
+  applyPlanItemToRequisitionLinkage,
   normalizeRequisitionLinkage,
   toEditableRequisitionLinkage,
   validateExceptionLinkage,
 } from './procurement-requisition-linkage';
 
 describe('purchase requisition linkage helpers', () => {
+  it('inherits budget and category from the selected approved plan item without a cost centre', () => {
+    const result = applyPlanItemToRequisitionLinkage({
+      requisitionType: 'StockReplenishment',
+      budgetId: 'browser-budget',
+      costCenter: 'browser-cost-centre',
+    }, {
+      id: 'plan-item',
+      code: 'APP-2026-01',
+      name: 'Wireless Keyboard',
+      budgetId: 'approved-budget',
+      departmentId: 'it-department',
+      category: 'Goods',
+    });
+
+    expect(result).toEqual({
+      requisitionType: 'StockReplenishment',
+      sourcePlanItemId: 'plan-item',
+      budgetId: 'approved-budget',
+      procurementCategory: 'Goods',
+      costCenter: undefined,
+    });
+  });
+
   it('keeps every supported linkage field in the save contract', () => {
     const result = normalizeRequisitionLinkage({
       sourcePlanItemId: ' plan-item ',

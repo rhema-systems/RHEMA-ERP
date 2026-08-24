@@ -24,6 +24,7 @@ import { businessPartnerService, BusinessPartnerDto } from '@/services/businessP
 import { format } from 'date-fns';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
 
 const POStatuses = [
   { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800', icon: FileText },
@@ -435,7 +436,7 @@ export default function PurchaseOrdersPage() {
                               {po.requiredDate && ` • Required: ${format(new Date(po.requiredDate), 'MMM dd, yyyy')}`}
                             </p>
                             <p className="text-sm font-medium text-primary">
-                              Total: ${po.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Total: {formatProcurementMoney(po.totalAmount, po.currency)}
                             </p>
                           </div>
                         </div>
