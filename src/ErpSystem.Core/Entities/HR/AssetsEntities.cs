@@ -558,6 +558,44 @@ public class AssetMaintenance : TenantEntity
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    // ── the push into the Maintenance module — slice 9b, decision D10 ──────────────────────
+    //
+    // ⚠ Deliberately NOT foreign keys. These name rows in another module's transaction tables, and
+    // an FK from here would block that team's deletes and tie an HR migration to the shape of
+    // AssetAdmissions. The register link (CompanyAsset.MaintenanceAssetId) IS an FK, because that
+    // points at a master; these point at events. Same distinction the reminder dispatch log draws
+    // with its bare EntityId.
+
+    /// <summary>
+    /// The <c>AssetAdmission</c> raised in the Maintenance module when this asset was sent in.
+    /// </summary>
+    /// <remarks>
+    /// Null on a maintenance record HR kept to itself — a battery changed at the desk needs no
+    /// workshop. Set means the asset is physically somewhere else, which is the fact HR most needs
+    /// on this record and could not previously state at all.
+    /// </remarks>
+    public Guid? MaintenanceAdmissionId { get; set; }
+
+    /// <summary>
+    /// The admission's human-readable number, copied at the moment of sending.
+    /// </summary>
+    /// <remarks>
+    /// A copy, on purpose. It is what somebody quotes on the phone to the workshop, and it must
+    /// still read on an HR screen when the other module is unreachable or the row has been archived.
+    /// The id is the join; this is the reference.
+    /// </remarks>
+    [MaxLength(50)]
+    public string? MaintenanceAdmissionNumber { get; set; }
+
+    /// <summary>
+    /// The <c>AssetDischarge</c> that closed the admission, written when HR completes this record.
+    /// </summary>
+    /// <remarks>
+    /// Completing an HR maintenance record that carries an open admission discharges it, so the two
+    /// modules cannot disagree about whether the asset is back. Null while the asset is still out.
+    /// </remarks>
+    public Guid? MaintenanceDischargeId { get; set; }
+
     [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;
 

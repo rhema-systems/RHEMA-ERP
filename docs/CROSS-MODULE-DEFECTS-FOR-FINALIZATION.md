@@ -537,11 +537,18 @@ Measured against the reference database (`ErpSystemDB`), 2026-08-24:
 ```
 FixedAssets                                        4
 FixedAssets with MaintenanceAssetId IS NOT NULL     0
-MaintenanceAssets                                   1
+MaintenanceAssets                                   1   <- see below; not real data
 ```
 
 Zero of four. The link has never been used, which is consistent with there being no way to use it
 short of calling the API by hand.
+
+⚠ **The single `MaintenanceAsset` is HR's own litter, so the true figure is zero.** It is
+`A12V-VEH-1` / *"Toyota Hilux (area-12 harness)"*, in the only asset category on the database,
+*"Vehicles (area-12 harness)"* — both left behind by HR area-12 (staff travel) work. Recorded here
+so nobody reads that 1 as evidence that the Maintenance register holds anything. **These two rows
+are HR's to clear at finalization**, and they are named here rather than deleted mid-slice because
+they sit in another team's tables.
 
 ### What it blocks
 
@@ -610,15 +617,16 @@ Measured against the reference database, 2026-08-24:
 MaintenanceTypes             0
 PriorityLevels               0
 WorkOrderTypes               0
-MaintenanceAssetCategories   1
-MaintenanceAssets            1
+MaintenanceAssetCategories   1   <- "Vehicles (area-12 harness)", HR litter
+MaintenanceAssets            1   <- "Toyota Hilux (area-12 harness)", HR litter
 MaintenanceSchedules         0
 WorkOrders                   0
 AssetAdmissions              0
 ```
 
 All three lookups the resolvers search are **empty**, so every one of the four actions reaches its
-`throw` on this database. `GlobalExceptionHandlingMiddleware` discards `InvalidOperationException`
+`throw` on this database. The two rows that are not zero are **HR's own test litter** from area-12,
+not reference data — the Maintenance module's register is empty in every direction that matters. `GlobalExceptionHandlingMiddleware` discards `InvalidOperationException`
 messages, so the user does not even receive the sentence that would tell them what to configure —
 they get a generic failure.
 
@@ -652,6 +660,77 @@ they get a generic failure.
    strips. The sentences are good ones — they name exactly what to configure — and the user never
    sees them. Six HR areas have now needed a module-specific exception type for this reason; it is
    worth raising as a platform decision rather than a seventh workaround.
+
+---
+
+## 10. Maintenance — admission and discharge numbers collide within one second, and both are uniquely indexed
+
+**Severity: blocking, and it fails as a 500.** Found 2026-08-24 while building HR's push into the
+Maintenance module (area 16, slice 9b).
+
+### What is broken
+
+Two reference numbers are generated from a **second-resolution timestamp** and both columns carry a
+**unique index**:
+
+| entity | generator | index |
+|---|---|---|
+| `AssetAdmission.AdmissionNumber` | `$"ADM-{DateTime.UtcNow:yyyyMMddHHmmss}"` (`AssetAdmissionService.cs:121`) | `IX_AssetAdmissions_AdmissionNumber`, unique |
+| `AssetDischarge.DischargeNumber` | `$"DIS-{DateTime.UtcNow:yyyyMMddHHmmss}"` (`AssetDischargeService.cs:128`) | `IX_AssetDischarges_DischargeNumber`, unique |
+
+So **any two admissions, or any two discharges, created in the same wall-clock second collide** and
+the second one fails. Nothing serialises them, nothing retries, and there is no per-tenant or
+per-asset component in the key — two different tenants admitting two different assets in the same
+second is enough.
+
+The failure surfaces as an unhandled `DbUpdateException`, so the caller receives a bare **500** with
+`GlobalExceptionHandlingMiddleware`'s generic body. Nothing tells the user, or the calling module,
+that the problem is a duplicate reference number.
+
+### What was proven
+
+Reduced to four calls against `POST api/maintenance/asset-admissions` on the running API,
+2026-08-24, with two distinct maintenance assets so nothing else could be the cause:
+
+```
+#1  (t)          -> 201  ADM-20260824103724
+#2  (t, same s)  -> 500
+#3  (t+~0.3s)    -> 500        <- still inside the same second as #2
+#4  (t+1.2s)     -> 201  ADM-20260824103725
+```
+
+Deterministic, not a race: the only variable is whether the clock has ticked over a second.
+
+It also broke two consecutive runs of HR's slice-9b harness in two different places — the first on
+`AssetDischarges` (completing a maintenance record discharges the admission), the second on
+`AssetAdmissions` — which is what a timing-dependent collision looks like from the outside.
+
+### What it blocks
+
+1. **Any bulk or scripted use of admissions and discharges.** A "receive these five vehicles" action,
+   an import, a migration, or any automated test suite will fail on the second row. Only
+   hand-paced clicking is safe.
+2. **HR's push (area 16 slice 9b) at machine speed.** HR's own code is correct — its duplicate guard
+   refuses a second send for the *same* asset with a 409 before this module is reached — but two
+   *different* HR assets sent within one second hit this. HR is shipping no workaround: the harness
+   asserts the defect exists today and paces itself around it, so the assertion turns red the day
+   this is fixed.
+3. **Anything the Projects module eventually does here**, for the same reason.
+
+### What a fix needs
+
+1. Give both numbers a component that is unique within the second. The cheapest change that keeps
+   them human-readable is a short random or sequential suffix —
+   `$"ADM-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..4].ToUpper()}"` — which is
+   the shape HR's own `MNT-`, `AST-` and `SUR-` numbers already use in `AssetsServices.cs` for
+   exactly this reason. Both columns are `nvarchar(50)`, so there is room.
+2. Or drop the uniqueness to `(TenantId, Number)` **and** add the suffix. Tenant-scoping alone does
+   not fix it; the collision is within a tenant.
+3. Either way, catch the duplicate-key failure and answer **409 with a sentence**, rather than a 500
+   with a generic body. A reference-number clash is a state clash, not a server error.
+4. ⚠ Check the other generators in the module before assuming these two are the only ones. The same
+   `{PREFIX}-{yyyyMMddHHmmss}` pattern appears elsewhere; only these two were proven, because only
+   these two are on HR's path.
 
 ---
 

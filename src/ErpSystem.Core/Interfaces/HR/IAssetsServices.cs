@@ -62,6 +62,31 @@ public interface ICompanyAssetService
 
     /// <summary>AST-1 — assets that require regular maintenance and have never been scheduled.</summary>
     Task<IEnumerable<AssetMaintenanceDueDto>> GetUnscheduledMaintenanceAsync();
+
+    // ── the seam with the Maintenance module — slice 9b, decision D10 ──────────────────────
+
+    /// <summary>
+    /// The Maintenance module's assets HR could point at, with the ones it already claims marked.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <see cref="GetLinkableFixedAssetsAsync"/>, including the rule that matters: already-
+    /// linked rows are returned and flagged rather than filtered away.
+    /// </remarks>
+    Task<IEnumerable<MaintenanceAssetPickDto>> GetLinkableMaintenanceAssetsAsync(string? searchTerm = null);
+
+    /// <summary>
+    /// Names this asset's counterpart in the Maintenance register, so work can be sent there.
+    /// </summary>
+    /// <remarks>
+    /// HR does not <b>create</b> rows in that register. There is one asset category on this
+    /// database and it is a leftover test fixture, so an auto-registered laptop would be filed under
+    /// "Vehicles". The Projects module draws the same line in the same words — "link a maintenance
+    /// asset ... before creating maintenance follow-through" — and it is the right one.
+    /// </remarks>
+    Task<CompanyAssetDto> LinkMaintenanceAssetAsync(Guid assetId, Guid maintenanceAssetId);
+
+    /// <summary>Severs the link. Refused while the asset is at the workshop.</summary>
+    Task<CompanyAssetDto> UnlinkMaintenanceAssetAsync(Guid assetId);
     Task<CompanyAssetDto> CreateAsync(CreateCompanyAssetDto dto);
 
     /// <summary>
@@ -156,6 +181,23 @@ public interface IAssetMaintenanceService
     /// clauses had to be fixed to mean (defects D-aa, D-bb, D-cc).
     /// </remarks>
     Task CompleteMaintenanceAsync(Guid id, string? completionNotes = null);
+
+    // ── the push — slice 9b ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Sends an asset to the workshop: raises an <c>AssetAdmission</c> in the Maintenance module and
+    /// opens the HR maintenance record that tracks it. AST-1, decision D10.
+    /// </summary>
+    /// <remarks>
+    /// Goes through <c>AssetAdmission</c> rather than <c>WorkOrder</c> or <c>JobCard</c> because
+    /// those need <c>WorkOrderType</c>, <c>MaintenanceType</c> and <c>PriorityLevel</c> rows, and all
+    /// three tables are empty — which is why the Projects module's equivalent throws for every
+    /// tenant (cross-module defect 9). An admission needs no reference data at all.
+    /// </remarks>
+    Task<AssetMaintenanceDto> SendForMaintenanceAsync(Guid assetId, SendAssetForMaintenanceDto dto);
+
+    /// <summary>Every workshop admission raised for an asset, newest first.</summary>
+    Task<IEnumerable<AssetMaintenanceSummaryDto>> GetWorkshopHistoryAsync(Guid assetId);
 }
 
 #endregion

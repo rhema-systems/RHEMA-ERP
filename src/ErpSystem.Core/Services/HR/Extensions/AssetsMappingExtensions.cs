@@ -616,6 +616,9 @@ public static class AssetsMappingExtensions
             NextMaintenanceDate = entity.NextMaintenanceDate,
             Status = entity.Status,
             Notes = entity.Notes,
+            MaintenanceAdmissionId = entity.MaintenanceAdmissionId,
+            MaintenanceAdmissionNumber = entity.MaintenanceAdmissionNumber,
+            MaintenanceDischargeId = entity.MaintenanceDischargeId,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -638,7 +641,11 @@ public static class AssetsMappingExtensions
             Type = entity.Type,
             Status = entity.Status,
             Cost = entity.Cost,
-            NextMaintenanceDate = entity.NextMaintenanceDate
+            NextMaintenanceDate = entity.NextMaintenanceDate,
+            MaintenanceAdmissionNumber = entity.MaintenanceAdmissionNumber,
+            // Computed the same way the detail DTO computes it, from the same two columns, so the
+            // list and the by-id read cannot disagree about whether an asset is off site.
+            IsAtWorkshop = entity.MaintenanceAdmissionId.HasValue && !entity.MaintenanceDischargeId.HasValue
         };
     }
 

@@ -24,7 +24,18 @@ using ICurrencyService = ErpSystem.Core.Interfaces.Finance.ICurrencyService;
 using Employee = ErpSystem.Core.Entities.HR.Employee;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+
+// Slice 9b, decision D10 — the seam with the Maintenance module. ⚠ ALIASES, for the sharpest
+// version of this file's standing collision: `ErpSystem.Core.Entities.Maintenance` declares its own
+// `AssetType`, and this file is full of HR's. Importing that namespace would make `AssetType`
+// ambiguous throughout — build plan §3.3, collision 1. Four types wanted, four types named.
+using MaintenanceAsset = ErpSystem.Core.Entities.Maintenance.MaintenanceAsset;
+using IAssetAdmissionService = ErpSystem.Core.Interfaces.Maintenance.IAssetAdmissionService;
+using IAssetDischargeService = ErpSystem.Core.Interfaces.Maintenance.IAssetDischargeService;
+using CreateAssetAdmissionDto = ErpSystem.Core.DTOs.Maintenance.CreateAssetAdmissionDto;
+using CreateAssetDischargeDto = ErpSystem.Core.DTOs.Maintenance.CreateAssetDischargeDto;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -816,6 +827,119 @@ public class CompanyAssetService : ICompanyAssetService
             AlreadyLinked = linked.ContainsKey(f.Id),
             LinkedCompanyAssetId = linked.TryGetValue(f.Id, out var companyAssetId) ? companyAssetId : null
         }).OrderBy(f => f.AssetCode).ToList();
+    }
+
+    // ── the seam with the Maintenance module — slice 9b, decision D10 ──────────────────────
+
+    public async Task<IEnumerable<MaintenanceAssetPickDto>> GetLinkableMaintenanceAssetsAsync(
+        string? searchTerm = null)
+    {
+        var tenantId = GetTenantId();
+
+        var query = _unitOfWork.Repository<MaintenanceAsset>()
+            .GetQueryable(m => m.TenantId == tenantId && !m.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var term = searchTerm.Trim();
+            query = query.Where(m =>
+                m.AssetNumber.Contains(term)
+                || m.Name.Contains(term)
+                || (m.SerialNumber != null && m.SerialNumber.Contains(term)));
+        }
+
+        var rows = await query
+            .Select(m => new
+            {
+                m.Id, m.AssetNumber, m.Name, m.SerialNumber, m.Location, m.Status,
+                CategoryName = m.AssetCategory != null ? m.AssetCategory.Name : null,
+            })
+            .ToListAsync();
+
+        // One pass over the HR register to work out what is already spoken for — one query, not N.
+        // Same shape as the fixed-asset picker above.
+        var linked = (await _assetRepo.GetByTenantAsync(tenantId))
+            .Where(a => a.MaintenanceAssetId.HasValue)
+            .GroupBy(a => a.MaintenanceAssetId!.Value)
+            .ToDictionary(g => g.Key, g => g.First().Id);
+
+        return rows.Select(m => new MaintenanceAssetPickDto
+        {
+            Id = m.Id,
+            AssetNumber = m.AssetNumber,
+            Name = m.Name,
+            CategoryName = m.CategoryName,
+            SerialNumber = m.SerialNumber,
+            Location = m.Location,
+            StatusName = m.Status.ToString(),
+            AlreadyLinked = linked.ContainsKey(m.Id),
+            LinkedCompanyAssetId = linked.TryGetValue(m.Id, out var companyAssetId) ? companyAssetId : null,
+        }).OrderBy(m => m.AssetNumber).ToList();
+    }
+
+    public async Task<CompanyAssetDto> LinkMaintenanceAssetAsync(Guid assetId, Guid maintenanceAssetId)
+    {
+        var tenantId = GetTenantId();
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
+        var asset = await GetOwnedAssetAsync(assetId);
+
+        var target = await _unitOfWork.Repository<MaintenanceAsset>()
+            .FirstOrDefaultAsync(m => m.Id == maintenanceAssetId && m.TenantId == tenantId && !m.IsDeleted)
+            ?? throw AssetsWorkflowException.NotFound(
+                $"No asset was found with id {maintenanceAssetId} in the Maintenance module's register.");
+
+        // One HR entry per maintenance asset, enforced here rather than by a unique index — every
+        // delete in this area is a SOFT delete, so an index would hold the slot after an HR entry
+        // was removed and re-linking would fail with nothing on screen explaining why. Slice 2b made
+        // the same call for the Finance link; area 13 lost five faces to the index version.
+        var claimant = (await _assetRepo.GetByTenantAsync(tenantId))
+            .FirstOrDefault(a => a.MaintenanceAssetId == maintenanceAssetId && a.Id != assetId);
+        if (claimant is not null)
+            throw AssetsWorkflowException.Conflict(
+                $"Maintenance asset {target.AssetNumber} is already linked to {claimant.AssetNumber} "
+                + $"({claimant.AssetName}). Unlink it there first.");
+
+        asset.MaintenanceAssetId = maintenanceAssetId;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = userId.ToString();
+        await _assetRepo.UpdateAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+
+        var saved = await _assetRepo.GetWithDetailsAsync(assetId);
+        return saved!.ToDto();
+    }
+
+    public async Task<CompanyAssetDto> UnlinkMaintenanceAssetAsync(Guid assetId)
+    {
+        var tenantId = GetTenantId();
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
+        var asset = await GetOwnedAssetAsync(assetId);
+
+        // ⚠ Not while the thing is out. The admission on the HR maintenance record is reached
+        // through this link; severing it while an asset is at the workshop leaves a row naming an
+        // admission nobody can resolve, and an asset nobody can bring back.
+        var open = await _unitOfWork.Repository<AssetMaintenance>()
+            .GetQueryable(m => m.TenantId == tenantId && !m.IsDeleted
+                            && m.AssetId == assetId
+                            && m.MaintenanceAdmissionId != null
+                            && m.MaintenanceDischargeId == null)
+            .Select(m => m.MaintenanceAdmissionNumber)
+            .FirstOrDefaultAsync();
+        if (open is not null)
+            throw AssetsWorkflowException.Conflict(
+                $"Asset {asset.AssetNumber} is at the workshop on admission {open}. "
+                + "Complete the maintenance record before unlinking it.");
+
+        asset.MaintenanceAssetId = null;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = userId.ToString();
+        await _assetRepo.UpdateAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+
+        var saved = await _assetRepo.GetWithDetailsAsync(assetId);
+        return saved!.ToDto();
     }
 
     public async Task<CompanyAssetDto> CreateFromFixedAssetAsync(CreateAssetFromFixedAssetDto dto)
@@ -1718,16 +1842,27 @@ public class AssetMaintenanceService : IAssetMaintenanceService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
 
+    // Slice 9b / decision D10. HR reaches the Maintenance module through ITS OWN SERVICES, exactly
+    // as it reaches Finance through IFixedAssetService — so the boundary is visible in the
+    // dependency list and nothing here touches that module's tables. Both services take the actor
+    // from the token themselves, which is why no user id is passed across.
+    private readonly IAssetAdmissionService _admissionService;
+    private readonly IAssetDischargeService _dischargeService;
+
     public AssetMaintenanceService(
         IAssetMaintenanceRepository maintenanceRepo,
         ICompanyAssetRepository assetRepo,
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IAssetAdmissionService admissionService,
+        IAssetDischargeService dischargeService)
     {
         _maintenanceRepo = maintenanceRepo;
         _assetRepo = assetRepo;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _admissionService = admissionService;
+        _dischargeService = dischargeService;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -1892,6 +2027,122 @@ public class AssetMaintenanceService : IAssetMaintenanceService
     /// in the system answered "next: null" while the asset it belonged to carried a date. Two rows
     /// disagreeing about one schedule is how a maintenance history stops being evidence.</para>
     /// </remarks>
+    /// <summary>
+    /// Sends an asset to the workshop — <b>slice 9b, decision D10</b>, the other half of AST-1.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two rows in one act: an <c>AssetAdmission</c> in the Maintenance module, and the HR
+    /// maintenance record that tracks it. HR's record is the one an HR user reads; the admission is
+    /// what the workshop works from, and its number is what somebody quotes on the phone.</para>
+    ///
+    /// <para><b>Why an admission and not a work order.</b> <c>WorkOrder</c> requires
+    /// <c>WorkOrderTypeId</c>, <c>MaintenanceTypeId</c> and <c>PriorityLevelId</c>; <c>JobCard</c>
+    /// requires the last two; all three tables are empty, which is why the Projects module's
+    /// equivalent throws for every tenant (cross-module defect 9). An admission needs none of them.
+    /// The work-order path belongs on this same endpoint once those masters are seeded.</para>
+    ///
+    /// <para><b>HR does not register the asset over there.</b> The link must already exist. There is
+    /// one asset category on this database and it is a leftover test fixture, so an auto-registered
+    /// laptop would be filed under "Vehicles" — and inventing rows in another team's master data to
+    /// get past a validation is how a register stops being worth reading. The Projects module
+    /// refuses in the same words for the same reason.</para>
+    /// </remarks>
+    public async Task<AssetMaintenanceDto> SendForMaintenanceAsync(Guid assetId, SendAssetForMaintenanceDto dto)
+    {
+        var tenantId = GetTenantId();
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+
+        var asset = await GetOwnedAssetAsync(assetId);
+
+        if (asset.MaintenanceAssetId is not { } maintenanceAssetId)
+            throw AssetsWorkflowException.InvalidState(
+                $"Asset {asset.AssetNumber} is not linked to the Maintenance module's register, so "
+                + "there is nothing to raise the job against. Link it first.");
+
+        // You cannot send in something you no longer have. The same two statuses the reminder sweep
+        // treats as not serviceable, asked here as a refusal rather than a filter.
+        if (asset.Status is CompanyAssetStatus.Disposed or CompanyAssetStatus.LostStolen)
+            throw AssetsWorkflowException.InvalidState(
+                $"Asset {asset.AssetNumber} is {asset.Status} and cannot be sent for maintenance.");
+
+        // ⚠ One open admission at a time. The Maintenance module does NOT guard this — its
+        // CreateAdmissionAsync will admit the same asset twice without complaint — so a second send
+        // would put two live admissions on one machine and leave HR unable to say which one
+        // discharging it closes. Guarded on HR's side, because HR is the side that would be wrong.
+        var alreadyOut = await _unitOfWork.Repository<AssetMaintenance>()
+            .GetQueryable(m => m.TenantId == tenantId && !m.IsDeleted
+                            && m.AssetId == assetId
+                            && m.MaintenanceAdmissionId != null
+                            && m.MaintenanceDischargeId == null)
+            .Select(m => m.MaintenanceAdmissionNumber)
+            .FirstOrDefaultAsync();
+        if (alreadyOut is not null)
+            throw AssetsWorkflowException.Conflict(
+                $"Asset {asset.AssetNumber} is already at the workshop on admission {alreadyOut}.");
+
+        var admission = await _admissionService.CreateAdmissionAsync(new CreateAssetAdmissionDto
+        {
+            AssetId = maintenanceAssetId,
+            AdmissionType = string.IsNullOrWhiteSpace(dto.AdmissionType) ? "Scheduled" : dto.AdmissionType.Trim(),
+            // HR grades condition on its own scale and the other module takes a string on theirs.
+            // This is the one translation between them, and it is one-way.
+            AssetConditionOnAdmission = asset.Condition.ToString(),
+            AdmissionNotes = dto.Description,
+            ObservedProblems = dto.ObservedProblems,
+            AdmissionLocation = dto.AdmissionLocation,
+            EstimatedCompletionDate = dto.EstimatedCompletionDate,
+        });
+
+        var maintenanceNumber = $"MNT-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
+        var record = new AssetMaintenance
+        {
+            TenantId = tenantId,
+            MaintenanceNumber = maintenanceNumber,
+            AssetId = assetId,
+            MaintenanceDate = DateTime.UtcNow,
+            Type = dto.Type,
+            Description = dto.Description,
+            IsInternalMaintenance = false,
+            Cost = dto.Cost,
+            Status = MaintenanceStatus.InProgress,
+            MaintenanceAdmissionId = admission.Id,
+            MaintenanceAdmissionNumber = admission.AdmissionNumber,
+            CreatedBy = userId.ToString(),
+        };
+        await _maintenanceRepo.AddAsync(record);
+
+        // The asset is physically elsewhere and the register has to say so. Slice 9's
+        // RestoreFromMaintenance is what brings it back to Assigned or Available on completion —
+        // which is the reason that rule had to stop writing Available unconditionally before this
+        // endpoint could exist at all.
+        asset.Status = CompanyAssetStatus.InMaintenance;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = userId.ToString();
+        await _assetRepo.UpdateAsync(asset);
+
+        await _unitOfWork.SaveChangesAsync();
+
+        var created = await _maintenanceRepo.GetWithDetailsAsync(record.Id);
+        return created!.ToDto();
+    }
+
+    /// <summary>Every workshop admission raised for an asset, newest first. Slice 9b.</summary>
+    public async Task<IEnumerable<AssetMaintenanceSummaryDto>> GetWorkshopHistoryAsync(Guid assetId)
+    {
+        await GetOwnedAssetAsync(assetId);
+        var tenantId = GetTenantId();
+
+        var records = await _unitOfWork.Repository<AssetMaintenance>()
+            .GetQueryable(m => m.TenantId == tenantId && !m.IsDeleted
+                            && m.AssetId == assetId
+                            && m.MaintenanceAdmissionId != null)
+            .Include(m => m.Asset)
+            .OrderByDescending(m => m.MaintenanceDate)
+            .ToListAsync();
+
+        return records.ToSummaryDtoList();
+    }
+
     public async Task CompleteMaintenanceAsync(Guid id, string? completionNotes = null)
     {
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
@@ -1923,6 +2174,29 @@ public class AssetMaintenanceService : IAssetMaintenanceService
         await _assetRepo.UpdateAsync(asset);
 
         await _unitOfWork.SaveChangesAsync();
+
+        // ── slice 9b: bring it back from the workshop, in the same act ────────────────────
+        //
+        // ⚠ AFTER the save, and last. Discharging writes to another module and cannot be rolled
+        // back with HR's transaction, so it must not run before HR's own state is durable: a
+        // discharge against a completion that then failed would leave the Maintenance module saying
+        // the asset is back while HR still had it out. The other way round costs a re-run of the
+        // completion, which D-cc's guard makes safe to attempt.
+        if (entity.MaintenanceAdmissionId is { } admissionId && entity.MaintenanceDischargeId is null)
+        {
+            var discharge = await _dischargeService.CreateDischargeAsync(new CreateAssetDischargeDto
+            {
+                AdmissionId = admissionId,
+                AssetConditionOnDischarge = asset.Condition.ToString(),
+                WorkCompleted = entity.WorkPerformed,
+                DischargeNotes = completionNotes,
+                QualityCheckPassed = true,
+            });
+
+            entity.MaintenanceDischargeId = discharge.Id;
+            await _maintenanceRepo.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync();
+        }
     }
 }
 

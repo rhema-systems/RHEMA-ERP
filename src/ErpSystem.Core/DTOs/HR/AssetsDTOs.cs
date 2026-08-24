@@ -1006,6 +1006,17 @@ public class AssetMaintenanceDto : BaseDto
     public MaintenanceStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public string? Notes { get; set; }
+
+    /// <summary>Slice 9b — the workshop admission this record was sent out on, where there is one.</summary>
+    public Guid? MaintenanceAdmissionId { get; set; }
+    public string? MaintenanceAdmissionNumber { get; set; }
+    public Guid? MaintenanceDischargeId { get; set; }
+
+    /// <summary>
+    /// True while the asset is physically at the workshop — sent, and not yet discharged. The one
+    /// question a maintenance record could not answer before slice 9b.
+    /// </summary>
+    public bool IsAtWorkshop => MaintenanceAdmissionId.HasValue && !MaintenanceDischargeId.HasValue;
 }
 
 /// <summary>
@@ -1036,6 +1047,13 @@ public class AssetMaintenanceSummaryDto
     public string StatusName => Status.ToString();
     public decimal? Cost { get; set; }
     public DateTime? NextMaintenanceDate { get; set; }
+
+    /// <summary>
+    /// Slice 9b. On the summary as well as the detail, because "which of these is not in the
+    /// building" is a list question, and answering it a click at a time is how an asset stays lost.
+    /// </summary>
+    public string? MaintenanceAdmissionNumber { get; set; }
+    public bool IsAtWorkshop { get; set; }
 }
 
 /// <summary>
@@ -2189,6 +2207,73 @@ public class AssetReminderLogEntryDto
     public int DaysRemaining { get; set; }
     public int EscalationTier { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+#endregion
+
+#region Maintenance-module push DTOs — area 16 slice 9b, decision D10
+
+/// <summary>
+/// A row in the Maintenance module's asset register, offered to HR so an HR asset can name its
+/// counterpart there. Slice 9b.
+/// </summary>
+/// <remarks>
+/// Mirrors <see cref="FixedAssetPickDto"/> from slice 2b, including the part that matters:
+/// already-linked rows are <b>returned and flagged</b>, never filtered out. A picker that silently
+/// omits them leaves the user hunting for an asset that is on screen nowhere, with no way to learn
+/// that somebody else has already claimed it.
+/// </remarks>
+public class MaintenanceAssetPickDto
+{
+    public Guid Id { get; set; }
+    public string AssetNumber { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? CategoryName { get; set; }
+    public string? SerialNumber { get; set; }
+    public string? Location { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+
+    public bool AlreadyLinked { get; set; }
+    public Guid? LinkedCompanyAssetId { get; set; }
+}
+
+/// <summary>Sends an asset to the workshop — slice 9b. AST-1's other half.</summary>
+public class SendAssetForMaintenanceDto
+{
+    /// <summary>What is wrong with it. Required: an admission nobody can read is a lost asset.</summary>
+    [Required]
+    [MaxLength(1000)]
+    public string Description { get; set; } = string.Empty;
+
+    public AssetMaintenanceType Type { get; set; } = AssetMaintenanceType.Corrective;
+
+    /// <summary>"Scheduled", "Emergency" or "Breakdown" — the Maintenance module's own vocabulary.</summary>
+    /// <remarks>
+    /// Passed through rather than translated. The other module starts a downtime record for
+    /// Emergency and Breakdown and not for Scheduled, so mapping HR's words onto theirs would decide
+    /// something about their data that is not HR's to decide.
+    /// </remarks>
+    [MaxLength(20)]
+    public string AdmissionType { get; set; } = "Scheduled";
+
+    [MaxLength(2000)]
+    public string? ObservedProblems { get; set; }
+
+    [MaxLength(100)]
+    public string? AdmissionLocation { get; set; }
+
+    public DateTime? EstimatedCompletionDate { get; set; }
+
+    /// <summary>What HR expects it to cost, where HR has a figure.</summary>
+    [Range(0, double.MaxValue)]
+    public decimal? Cost { get; set; }
+}
+
+/// <summary>Links an HR asset to its counterpart in the Maintenance register — slice 9b.</summary>
+public class LinkMaintenanceAssetDto
+{
+    [Required]
+    public Guid MaintenanceAssetId { get; set; }
 }
 
 #endregion

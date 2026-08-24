@@ -39,8 +39,8 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–9 green twice — 1,043 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), and maintenance is now monitored rather than merely recorded |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice9.mjs`, `probe-slice6-ui.mjs` |
+| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–9b green twice — 1,134 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), and maintenance is now monitored rather than merely recorded |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice9b.mjs`, `probe-slice6-ui.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -568,7 +568,13 @@ issued to a person.
    That is the worked example. Finance's link is the same *shape* but has never carried a value,
    because no screen renders an input for it.
 
-**Two cross-module defects recorded rather than fixed** (`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`):
+**Slice 9b delivered it** (see §8): five routes, `AssetAdmission` as the door, and the work-order
+path deferred to whenever `WorkOrderType`/`MaintenanceType`/`PriorityLevel` acquire rows. Building it
+found **cross-module defect 10** — admission and discharge numbers are `{PREFIX}-{yyyyMMddHHmmss}`
+behind unique indexes, so two of either in one second collide with a 500. HR ships no workaround; the
+harness asserts the defect and paces around it.
+
+**Three cross-module defects recorded rather than fixed** (`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`):
 **#8** Finance's fixed-asset → Maintenance link is a field no screen can set; **#9** Projects'
 maintenance follow-through throws for every tenant because those three lookups are empty — four
 shipped actions whose buttons light up on the wrong condition and then fail, with the middleware
@@ -613,6 +619,7 @@ overdue returns; and the full screen set.
 | **7** | ✅ Damage and surcharge | `AssetSurcharge` + `AssetSurchargeRecovery` on the engine, the right of reply, the payroll projection (AST-3, **D-d**, D9) — and **D-z**, the incident route without which loss could not be recorded at all. Migration `AddAssetSurchargeAndIncident` |
 | **8** | ✅ Rental and the payroll seam | `IsRentable` + standard rate on the asset, seven rental columns on the assignment, the read-only projection, and **the rent closing at all three doors that close a custody** (AST-9, AST-10, D2). Migration `AddAssetRentalTerms` |
 | **9** | ✅ Maintenance monitoring | The schedule anchored on the work, three watchlist reads, the reminder engine, and the handle into the Maintenance module (AST-1; **D-aa, D-bb, D-cc, D-dd, D-ee, D-ff, D-gg, D-hh**; D10). Migration `AddAssetReminderEngine` |
+| **9b** | ✅ The push into Maintenance | D10 — the picker, link/unlink, `send-for-maintenance` on `AssetAdmission`, and completion discharging it. Migration `AddAssetMaintenanceAdmissionLink`. Found cross-module defect **10** |
 | **10** | Exit clearance | FR-HR-183 — clearance lines sourced from unreturned assignments, closing 9b D4 |
 | **11** | Reminders and reports | Insurance expiry, overdue returns, the asset register report |
 | **12+** | Screens, then the content audit | Admin + HR screens, then the endpoint-by-endpoint content audit that areas 11–23 proved is not optional |
@@ -1345,3 +1352,73 @@ once.
 
 **Screen.** None. Slice 9 is backend only; the maintenance watchlists and the reminder log are part
 of the HR register screens at slice 12.
+
+---
+
+### Slice 9b — sending an asset out for maintenance work. 2026-08-24, **91/91, run twice** (stamps 220005, 220006). Migration `AddAssetMaintenanceAdmissionLink`.
+
+Delivers **decision D10**, taken mid-slice-9 when the user asked what the Maintenance integration
+actually was. Slices 1–9 re-run green — **1,134 assertions** for the area.
+
+**Link first, then push.** HR does not create rows in the Maintenance register, and the reason is
+sitting in the database: there is exactly one `MaintenanceAssetCategory` and it is called
+*"Vehicles (area-12 harness)"* — HR's own leftover, from area 12 — so an auto-registered laptop
+would be filed under Vehicles. The Projects module draws the same line in the same words
+(*"link a maintenance asset to this project … before creating maintenance follow-through"*), and
+that module is the worked example this slice copies. Five routes: the picker, link, unlink, the
+push, and the workshop history.
+
+**An admission, not a work order, and the reason is measured.** `WorkOrder` needs
+`WorkOrderTypeId`, `MaintenanceTypeId` and `PriorityLevelId`; `JobCard` needs the last two; all
+three tables hold **0 rows**, which is why the Projects module's own four follow-through actions
+throw for every tenant (cross-module defect **9**). `AssetAdmission` needs none of them. The
+work-order path belongs on the same endpoint once TDC seeds those masters.
+
+**The assertion that makes this a push rather than a note.** Section 3 reads the admission back
+through the Maintenance module's *own* endpoint and checks it is against the linked machine, carries
+the number HR recorded, and is `Active`. HR having stored a string proves only that HR stored a
+string. Sections 6 and 7 do the same from the other end: completing HR's record must flip **that
+module's** admission to `Completed` and set its `DischargeId`, and a second completion must leave
+`by-admission` at exactly one discharge — a guard that returns 409 *after* writing a second discharge
+would be worse than no guard, because the damage would be invisible from HR's side.
+
+**One open admission at a time, guarded on HR's side.** `AssetAdmissionService.CreateAdmissionAsync`
+will admit the same asset twice without complaint. Two live admissions on one machine would leave HR
+unable to say which one discharging it closes, so HR refuses. HR is the side that would be wrong.
+
+**The discharge runs after HR's save, and last.** It writes to another module and cannot roll back
+with HR's transaction. A discharge against a completion that then failed would leave Maintenance
+saying the asset is back while HR still had it out; the other order costs a re-run of the completion,
+which D-cc's guard makes safe to attempt.
+
+**⚠ Cross-module defect 10, found by this slice failing twice.** `AssetAdmission.AdmissionNumber`
+and `AssetDischarge.DischargeNumber` are `{PREFIX}-{yyyyMMddHHmmss}` and **both columns carry unique
+indexes**, so any two admissions — or any two discharges — created in the same second collide and
+the second answers **500**. Reduced to four calls: #1 succeeded, #2 in the same second 500'd, #3 500'd,
+#4 a second later succeeded. Deterministic, not a race. HR ships **no workaround**: section 4 asserts
+the defect is real today (two *different* assets, so HR's own guard is not involved) and the harness
+`tick()`s around it everywhere else. That assertion turns red the day it is fixed — the slice-0
+convention applied to somebody else's module.
+
+**Two harness lessons, both about instruments that lied.**
+
+1. **An "allowed" failure that prints nothing reads as a success.** The cleanup's `drop()` helper
+   permitted 400/409 on the Maintenance-module rows and reported green while — it appeared —
+   leaving nine assets and three categories behind. Same shape as slice 3b's
+   `retireActiveDefinitions` swallowing 403s. It now prints every non-200 and permits nothing on
+   those rows, and a final read asserts this run left nothing of its own in that register.
+2. **…and then the count that raised the alarm was itself misread.** A raw `SELECT COUNT(*)` showed
+   thirteen rows; every one of them was `IsDeleted = 1`. **The neighbour soft-deletes too.** The
+   harness README has said that about HR's own tables since slice 0, and it took a wrong conclusion
+   about another team's to notice it generalises. The only live rows in that register are still the
+   two area-12 leftovers.
+
+**⚠ And a real consequence of slice 9's FK.** `FK_CompanyAssets_MaintenanceAssets_MaintenanceAssetId`
+is `NO ACTION`, and every HR delete is soft — so a *deleted* HR asset still holds its
+`MaintenanceAssetId` and the machine cannot be removed (SQL 547). Cleanup must **unlink before
+deleting**, and deleting the HR asset is not enough. This is trap 6 from the plan in a new place:
+closing one hole turned a dormant one into a trap.
+
+**Screen.** None. The picker and the "send for maintenance" action are part of the HR register
+screens at slice 12.
+

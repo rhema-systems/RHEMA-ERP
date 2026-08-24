@@ -364,6 +364,76 @@ public class AssetsController : ControllerBase
         return Ok(result);
     }
 
+    // ── the seam with the Maintenance module — slice 9b, decision D10 ──────────────────────
+
+    /// <summary>The Maintenance module's assets HR can point at, already-linked ones flagged.</summary>
+    /// <remarks>
+    /// Mirrors <c>fixed-assets/linkable</c> from slice 2b, including the part that matters: rows
+    /// another HR asset already claims are <b>returned and flagged</b>, not filtered out, so the
+    /// user can see why the one they want is unavailable instead of hunting for a row that is on
+    /// screen nowhere.
+    /// </remarks>
+    [HttpGet("maintenance-assets/linkable")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<MaintenanceAssetPickDto>>> GetLinkableMaintenanceAssets(
+        [FromQuery] string? searchTerm = null)
+    {
+        var result = await _companyAssetService.GetLinkableMaintenanceAssetsAsync(searchTerm);
+        return Ok(result);
+    }
+
+    /// <summary>Names this asset's counterpart in the Maintenance register.</summary>
+    /// <remarks>
+    /// Its own endpoint rather than a field on the asset PUT, because that PUT is <b>full-replace</b>
+    /// (D-j): a screen that let somebody attach a link through it would silently null every field it
+    /// did not resend. Linking is one fact and gets one door.
+    /// </remarks>
+    [HttpPost("{id:guid}/maintenance-link")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<CompanyAssetDto>> LinkMaintenanceAsset(
+        Guid id,
+        [FromBody] LinkMaintenanceAssetDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var result = await _companyAssetService.LinkMaintenanceAssetAsync(id, dto.MaintenanceAssetId);
+        return Ok(result);
+    }
+
+    /// <summary>Severs the link. Refused while the asset is at the workshop.</summary>
+    [HttpDelete("{id:guid}/maintenance-link")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<CompanyAssetDto>> UnlinkMaintenanceAsset(Guid id)
+    {
+        var result = await _companyAssetService.UnlinkMaintenanceAssetAsync(id);
+        return Ok(result);
+    }
+
+    /// <summary>Sends an asset to the workshop — AST-1's other half, decision D10.</summary>
+    /// <remarks>
+    /// Raises an <c>AssetAdmission</c> in the Maintenance module and opens the HR maintenance record
+    /// that tracks it, in one act. Refused if the asset is not linked, if it is already at the
+    /// workshop, or if it is disposed or lost — each in words.
+    /// </remarks>
+    [HttpPost("{id:guid}/send-for-maintenance")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetMaintenanceDto>> SendForMaintenance(
+        Guid id,
+        [FromBody] SendAssetForMaintenanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var result = await _maintenanceService.SendForMaintenanceAsync(id, dto);
+        return Ok(result);
+    }
+
+    /// <summary>Every workshop admission raised for an asset, newest first.</summary>
+    [HttpGet("{id:guid}/workshop-history")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetMaintenanceSummaryDto>>> GetWorkshopHistory(Guid id)
+    {
+        var result = await _maintenanceService.GetWorkshopHistoryAsync(id);
+        return Ok(result);
+    }
+
     /// <summary>AST-11 — the Finance fixed assets HR could register, already-linked ones flagged.</summary>
     [HttpGet("fixed-assets/linkable")]
     [Authorize(Roles = HrRoles)]
