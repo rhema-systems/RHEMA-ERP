@@ -56,6 +56,20 @@ public sealed class FinanceIntegrationContractFoundationTests
         contract.LimitationId.Should().Be("FIN-LIM-0028");
     }
 
+    [Fact]
+    public void ProcurementBudgetContractShouldExposeFinanceOwnedCommitmentProvider()
+    {
+        var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-015");
+
+        contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
+        contract.Version.Should().Be("1.0");
+        contract.ProducerOwner.Should().Be("Procurement");
+        contract.EntryPoint.Should().Be("IFinanceBudgetCommitmentService");
+        contract.SourceDocumentType.Should().Be("ProcurementRequisition");
+        contract.Notes.Should().Contain("GL-derived actuals");
+        contract.Notes.Should().Contain("without writing Finance tables");
+    }
+
     [Theory]
     [InlineData("FIN-INT-012", "Procurement and Inventory", "SupplierReturnDispatch")]
     [InlineData("FIN-INT-013", "Procurement", "SupplierReturnCommercialResolution")]
