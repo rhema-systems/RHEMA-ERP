@@ -98,7 +98,7 @@ public interface IProcurementBudgetService
 
     // Budget Revisions
     Task<ProcurementBudgetRevisionDto> CreateRevisionAsync(Guid budgetId, CreateProcurementBudgetRevisionDto dto);
-    Task<ProcurementBudgetRevisionDto> ApproveRevisionAsync(Guid revisionId);
+    Task<ProcurementBudgetRevisionDto> ApproveRevisionAsync(Guid revisionId, string? comments = null);
     Task<ProcurementBudgetRevisionDto> RejectRevisionAsync(Guid revisionId, string reason);
     Task<IEnumerable<ProcurementBudgetRevisionDto>> GetRevisionsAsync(Guid budgetId);
 

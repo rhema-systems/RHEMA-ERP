@@ -787,6 +787,61 @@ public sealed class ProcurementBudgetWorkflowStatusAdapter : IWorkflowStatusAdap
         => entity as ProcurementBudget ?? throw new InvalidOperationException("Expected ProcurementBudget entity.");
 }
 
+/// <summary>
+/// Keeps approved-budget amount revisions inside the shared workflow engine.
+/// The procurement service applies the approved amount to the parent budget
+/// only after this adapter reports a terminal Approved outcome.
+/// </summary>
+public sealed class ProcurementBudgetRevisionWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ProcurementBudgetRevision",
+        "Procurement Budget Revision",
+        "PROCUREMENT_BUDGET_REVISION"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => Apply(RequireRevision(entity), outcome, userId);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(RequireRevision(entity), outcome, userId);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+    {
+        var revision = RequireRevision(entity);
+        revision.Status = "Pending";
+        revision.ApprovedById = null;
+        revision.ApprovedDate = null;
+    }
+
+    private static void Apply(ProcurementBudgetRevision revision, WorkflowOutcome outcome, Guid? userId)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                revision.Status = "Approved";
+                revision.ApprovedById = userId;
+                revision.ApprovedDate = DateTime.UtcNow;
+                break;
+            case WorkflowOutcome.Rejected:
+                revision.Status = "Rejected";
+                revision.ApprovedById = null;
+                revision.ApprovedDate = null;
+                break;
+            default:
+                revision.Status = "Pending";
+                revision.ApprovedById = null;
+                revision.ApprovedDate = null;
+                break;
+        }
+    }
+
+    private static ProcurementBudgetRevision RequireRevision(object entity)
+        => entity as ProcurementBudgetRevision
+            ?? throw new InvalidOperationException("Expected ProcurementBudgetRevision entity.");
+}
+
 public sealed class PayrollRunWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, Package, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type ProcurementBudgetDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
+import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type ProcurementBudgetDto, type ProcurementBudgetDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
@@ -96,6 +96,8 @@ export default function EditProcurementPlanPage() {
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
   const [budgetOptions, setBudgetOptions] = useState<ProcurementBudgetDto[]>([]);
   const [loadingBudgets, setLoadingBudgets] = useState(false);
+  const [linkedBudget, setLinkedBudget] = useState<ProcurementBudgetDetailDto | null>(null);
+  const [loadingBudgetAllocations, setLoadingBudgetAllocations] = useState(false);
   const [formData, setFormData] = useState<UpdateProcurementPlanDto>({
     title: '',
     description: '',
@@ -135,6 +137,7 @@ export default function EditProcurementPlanPage() {
   const [loadingMarketAnalyses, setLoadingMarketAnalyses] = useState(false);
   const [unitsOfMeasure, setUnitsOfMeasure] = useState<UnitOfMeasureDto[]>([]);
   const [loadingUnitsOfMeasure, setLoadingUnitsOfMeasure] = useState(false);
+  const requestedEditItemOpened = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -212,6 +215,34 @@ export default function EditProcurementPlanPage() {
     void loadBudgets();
     return () => { active = false; };
   }, [formData.departmentId, formData.fiscalYear]);
+
+  useEffect(() => {
+    if (!formData.budgetId) {
+      setLinkedBudget(null);
+      return;
+    }
+
+    const budgetId = formData.budgetId;
+    let active = true;
+    const loadLinkedBudget = async () => {
+      try {
+        setLoadingBudgetAllocations(true);
+        const value = await procurementBudgetService.getBudgetById(budgetId);
+        if (active) setLinkedBudget(value);
+      } catch (error) {
+        console.error('Error loading linked budget allocations:', error);
+        if (active) {
+          setLinkedBudget(null);
+          toast.error('The linked budget allocations could not be loaded');
+        }
+      } finally {
+        if (active) setLoadingBudgetAllocations(false);
+      }
+    };
+
+    void loadLinkedBudget();
+    return () => { active = false; };
+  }, [formData.budgetId]);
 
   const handleInputChange = (field: keyof UpdateProcurementPlanDto, value: string | number) => {
     setFormData((prev) => ({
@@ -373,6 +404,26 @@ export default function EditProcurementPlanPage() {
     });
   };
 
+  const openEditItemRef = useRef(handleOpenEditItemDialog);
+  openEditItemRef.current = handleOpenEditItemDialog;
+
+  useEffect(() => {
+    if (requestedEditItemOpened.current || !plan?.items?.length) return;
+
+    const requestedItemId = new URLSearchParams(window.location.search).get('itemId');
+    if (!requestedItemId) return;
+
+    const requestedItem = plan.items.find(item => item.id === requestedItemId);
+    if (!requestedItem) {
+      requestedEditItemOpened.current = true;
+      toast.error('The selected plan item could not be found');
+      return;
+    }
+
+    requestedEditItemOpened.current = true;
+    openEditItemRef.current(requestedItem);
+  }, [plan]);
+
   const handleAddSupplierToItem = (supplier: BusinessPartnerDto) => {
     // Check if supplier is already added
     if (selectedItemSuppliers.some(s => s.supplierId === supplier.id)) {
@@ -484,6 +535,32 @@ export default function EditProcurementPlanPage() {
     if (!item.unitOfMeasure?.trim()) return 'Unit of measure is required';
     if (Number(item.estimatedQuantity) <= 0) return 'Quantity must be greater than 0';
     if (Number(item.estimatedUnitPrice) < 0) return 'Unit cost cannot be negative';
+    const itemBudgetAmount = item.approvedBudgetAmount ?? getItemEstimatedTotal(item);
+    if (itemBudgetAmount < 0) return 'Item budget amount cannot be negative';
+
+    if (linkedBudget?.allocations.length) {
+      const allocation = linkedBudget.allocations.find(value => value.id === item.procurementBudgetAllocationId);
+      if (!allocation) return 'Select a budget allocation from the linked approved budget';
+
+      const savedExposure = (plan?.items || [])
+        .filter(value => value.id !== editingItem?.id && value.procurementBudgetAllocationId === allocation.id)
+        .reduce((total, value) => total + (value.approvedBudgetAmount ?? value.estimatedTotalCost), 0);
+      const queuedExposure = pendingPlanItems
+        .filter(value => value.procurementBudgetAllocationId === allocation.id)
+        .reduce((total, value) => total + (value.approvedBudgetAmount ?? getItemEstimatedTotal(value)), 0);
+      if (savedExposure + queuedExposure + itemBudgetAmount > allocation.remainingAmount) {
+        return `${allocation.categoryName} has insufficient remaining allocation for this item`;
+      }
+    }
+
+    const savedPlanExposure = (plan?.items || [])
+      .filter(value => value.id !== editingItem?.id)
+      .reduce((total, value) => total + (value.approvedBudgetAmount ?? value.estimatedTotalCost), 0);
+    const queuedPlanExposure = pendingPlanItems
+      .reduce((total, value) => total + (value.approvedBudgetAmount ?? getItemEstimatedTotal(value)), 0);
+    if (plan && savedPlanExposure + queuedPlanExposure + itemBudgetAmount > plan.totalEstimatedBudget) {
+      return 'The item would exceed the procurement plan total budget';
+    }
     return null;
   };
 
@@ -553,7 +630,7 @@ export default function EditProcurementPlanPage() {
       setPlan(updatedPlan);
     } catch (error) {
       console.error('Error adding items:', error);
-      toast.error('Failed to save plan items');
+      toast.error(error instanceof Error ? error.message : 'Failed to save plan items');
     } finally {
       setAddingItem(false);
     }
@@ -587,7 +664,7 @@ export default function EditProcurementPlanPage() {
       setPlan(updatedPlan);
     } catch (error) {
       console.error('Error saving item:', error);
-      toast.error(editingItem ? 'Failed to update item' : 'Failed to add item');
+      toast.error(error instanceof Error ? error.message : editingItem ? 'Failed to update item' : 'Failed to add item');
     } finally {
       setSavingItem(false);
     }
@@ -605,7 +682,7 @@ export default function EditProcurementPlanPage() {
       setPlan(updatedPlan);
     } catch (error) {
       console.error('Error deleting item:', error);
-      toast.error('Failed to delete item');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete item');
     } finally {
       setDeletingItemId(null);
     }
@@ -945,7 +1022,7 @@ export default function EditProcurementPlanPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item Description</TableHead>
-                      <TableHead>Budget Line</TableHead>
+                      <TableHead>Budget Allocation</TableHead>
                       <TableHead>Quantity</TableHead>
                       <TableHead>Unit Cost</TableHead>
                       <TableHead>Total</TableHead>
@@ -959,9 +1036,9 @@ export default function EditProcurementPlanPage() {
                         <TableCell className="font-medium">{item.itemDescription}</TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            <div>{item.budgetLineCode || '-'}</div>
-                            {item.budgetCategoryName && (
-                              <div className="text-xs text-gray-500">{item.budgetCategoryName}</div>
+                            <div>{item.budgetCategoryName || '-'}</div>
+                            {item.budgetLineCode && (
+                              <div className="text-xs text-gray-500">Legacy line: {item.budgetLineCode}</div>
                             )}
                           </div>
                         </TableCell>
@@ -1045,6 +1122,9 @@ export default function EditProcurementPlanPage() {
             marketAnalyses={marketAnalyses}
             loadingMarketAnalyses={loadingMarketAnalyses}
             onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            budgetCode={linkedBudget?.budgetCode}
+            budgetAllocations={linkedBudget?.allocations || []}
+            loadingBudgetAllocations={loadingBudgetAllocations}
             suppliers={suppliers}
             supplierSearchTerm={supplierSearchTerm}
             onSupplierSearchTermChange={setSupplierSearchTerm}
@@ -1554,6 +1634,9 @@ export default function EditProcurementPlanPage() {
             marketAnalyses={marketAnalyses}
             loadingMarketAnalyses={loadingMarketAnalyses}
             onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            budgetCode={linkedBudget?.budgetCode}
+            budgetAllocations={linkedBudget?.allocations || []}
+            loadingBudgetAllocations={loadingBudgetAllocations}
             suppliers={suppliers}
             supplierSearchTerm={supplierSearchTerm}
             onSupplierSearchTermChange={setSupplierSearchTerm}

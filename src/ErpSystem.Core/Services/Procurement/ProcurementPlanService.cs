@@ -1035,7 +1035,9 @@ public class ProcurementPlanService : IProcurementPlanService
         if (plan.Status != "Draft")
             throw new InvalidOperationException("Items can only be added to draft plans");
 
+        var budgetControl = await ValidatePlanItemBudgetAsync(plan, dto);
         var item = CreatePlanItem(planId, dto, plan.Currency, plan.BudgetId);
+        ApplyPlanItemBudgetControl(item, plan, budgetControl);
         await _itemRepository.AddAsync(item);
         await _unitOfWork.SaveChangesAsync();
 
@@ -1077,13 +1079,14 @@ public class ProcurementPlanService : IProcurementPlanService
         if (plan == null)
             throw new KeyNotFoundException($"Procurement plan with ID {item.ProcurementPlanId} not found");
 
+        if (plan.Status != "Draft")
+            throw new InvalidOperationException("Items can only be edited while the procurement plan is in Draft status");
+
+        var budgetControl = await ValidatePlanItemBudgetAsync(plan, dto, item.Id);
+
         item.InventoryItemId = dto.InventoryItemId;
-        item.ProcurementBudgetId = dto.ProcurementBudgetId;
-        item.ProcurementBudgetAllocationId = dto.ProcurementBudgetAllocationId;
         item.MarketAnalysisId = dto.MarketAnalysisId;
         item.BudgetLineCode = dto.BudgetLineCode;
-        item.BudgetCategoryName = dto.BudgetCategoryName;
-        item.ApprovedBudgetAmount = dto.ApprovedBudgetAmount;
         item.BudgetNotes = dto.BudgetNotes;
         item.ItemDescription = dto.ItemDescription;
         item.Specifications = dto.Specifications;
@@ -1105,6 +1108,7 @@ public class ProcurementPlanService : IProcurementPlanService
         item.ProcurementMethod = dto.ProcurementMethod;
         item.Notes = dto.Notes;
         item.UpdatedAt = DateTime.UtcNow;
+        ApplyPlanItemBudgetControl(item, plan, budgetControl);
 
         await _itemRepository.UpdateAsync(item);
 
@@ -1237,6 +1241,94 @@ public class ProcurementPlanService : IProcurementPlanService
             TenantId = _currentUserProvider.TenantId
         };
     }
+
+    private async Task<PlanItemBudgetControl> ValidatePlanItemBudgetAsync(
+        ProcurementPlan plan,
+        CreateProcurementPlanItemDto dto,
+        Guid? excludeItemId = null)
+    {
+        var estimatedTotal = dto.EstimatedQuantity * dto.EstimatedUnitPrice;
+        var itemBudgetAmount = dto.ApprovedBudgetAmount ?? estimatedTotal;
+        if (itemBudgetAmount < 0)
+            throw new InvalidOperationException("The item budget amount cannot be negative.");
+
+        var existingPlanItems = (await _itemRepository.GetByPlanIdAsync(plan.Id))
+            .Where(item => !excludeItemId.HasValue || item.Id != excludeItemId.Value)
+            .ToList();
+        var proposedPlanExposure = existingPlanItems.Sum(item => item.ApprovedBudgetAmount ?? item.EstimatedTotalCost)
+            + itemBudgetAmount;
+        if (proposedPlanExposure > plan.TotalEstimatedBudget)
+        {
+            throw new InvalidOperationException(
+                $"The item would increase planned item exposure to {proposedPlanExposure:N2} {plan.Currency}, " +
+                $"which exceeds the plan total budget of {plan.TotalEstimatedBudget:N2} {plan.Currency}.");
+        }
+
+        if (!plan.BudgetId.HasValue)
+        {
+            if (dto.ProcurementBudgetAllocationId.HasValue)
+                throw new InvalidOperationException("Link an approved procurement budget before selecting a budget allocation.");
+
+            return new PlanItemBudgetControl(null, itemBudgetAmount);
+        }
+
+        if (dto.ProcurementBudgetId.HasValue && dto.ProcurementBudgetId != plan.BudgetId)
+            throw new InvalidOperationException("The plan item budget must match the approved budget linked to the plan.");
+
+        var budget = await _budgetRepository.GetWithAllocationsAsync(plan.BudgetId.Value)
+            ?? throw new KeyNotFoundException("The approved budget linked to this plan was not found in the current tenant.");
+        if (budget.TenantId != _currentUserProvider.TenantId || budget.IsDeleted)
+            throw new KeyNotFoundException("The approved budget linked to this plan was not found in the current tenant.");
+        if (!string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The budget linked to this plan is no longer approved or active.");
+
+        var allocations = budget.Allocations.Where(allocation => !allocation.IsDeleted).ToList();
+        if (allocations.Count == 0)
+        {
+            if (dto.ProcurementBudgetAllocationId.HasValue)
+                throw new InvalidOperationException("The selected budget allocation is not part of the approved budget linked to this plan.");
+
+            return new PlanItemBudgetControl(null, itemBudgetAmount);
+        }
+
+        if (!dto.ProcurementBudgetAllocationId.HasValue)
+            throw new InvalidOperationException("Select a budget allocation from the approved budget linked to this plan.");
+
+        var selectedAllocation = allocations.FirstOrDefault(
+            allocation => allocation.Id == dto.ProcurementBudgetAllocationId.Value);
+        if (selectedAllocation == null || selectedAllocation.TenantId != _currentUserProvider.TenantId)
+            throw new InvalidOperationException("The selected budget allocation is not part of the approved budget linked to this plan.");
+
+        var existingAllocationExposure = await _itemRepository.GetPlannedBudgetExposureByAllocationAsync(
+            selectedAllocation.Id,
+            excludeItemId);
+        var allocationAvailable = selectedAllocation.AllocatedAmount - selectedAllocation.UtilizedAmount;
+        if (existingAllocationExposure + itemBudgetAmount > allocationAvailable)
+        {
+            throw new InvalidOperationException(
+                $"The {selectedAllocation.CategoryName} allocation has only " +
+                $"{Math.Max(0, allocationAvailable - existingAllocationExposure):N2} {budget.Currency} " +
+                "available for procurement planning.");
+        }
+
+        return new PlanItemBudgetControl(selectedAllocation, itemBudgetAmount);
+    }
+
+    private static void ApplyPlanItemBudgetControl(
+        ProcurementPlanItem item,
+        ProcurementPlan plan,
+        PlanItemBudgetControl control)
+    {
+        item.ProcurementBudgetId = plan.BudgetId;
+        item.ProcurementBudgetAllocationId = control.Allocation?.Id;
+        item.BudgetCategoryName = control.Allocation?.CategoryName;
+        item.ApprovedBudgetAmount = control.ItemBudgetAmount;
+    }
+
+    private sealed record PlanItemBudgetControl(
+        ProcurementBudgetAllocation? Allocation,
+        decimal ItemBudgetAmount);
 
     private static ProcurementPlanDto MapToDto(ProcurementPlan plan)
     {

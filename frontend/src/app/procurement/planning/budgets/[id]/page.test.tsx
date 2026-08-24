@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ProcurementBudgetDetailPage from './page';
@@ -13,6 +13,9 @@ const budgetServiceMock = vi.hoisted(() => ({
   getBudgetById: vi.fn(),
   submitBudget: vi.fn(),
   approveBudget: vi.fn(),
+  createRevision: vi.fn(),
+  approveRevision: vi.fn(),
+  rejectRevision: vi.fn(),
 }));
 
 const workflowMock = vi.hoisted(() => ({
@@ -29,7 +32,7 @@ vi.mock('@/services/procurementPlanningService', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn() },
 }));
 
 vi.mock('@/components/workflow', () => ({
@@ -115,6 +118,51 @@ describe('Procurement budget workflow details', () => {
     expect(budgetServiceMock.approveBudget).toHaveBeenNthCalledWith(2, 'budget-1', {
       isApproved: false,
       comments: 'Return for correction',
+    });
+  });
+
+  it('creates a governed amount revision from an approved budget', async () => {
+    budgetServiceMock.getBudgetById.mockResolvedValue({
+      ...submittedBudget,
+      status: 'Approved',
+      committedAmount: 10_000,
+      allocations: [{
+        id: 'allocation-1',
+        procurementBudgetId: 'budget-1',
+        categoryName: 'Goods',
+        allocatedAmount: 40_000,
+        utilizedAmount: 0,
+        remainingAmount: 40_000,
+        utilizationPercent: 0,
+      }],
+    });
+    budgetServiceMock.createRevision.mockResolvedValue({
+      id: 'revision-1',
+      procurementBudgetId: 'budget-1',
+      revisionNumber: 1,
+      revisionType: 'Increase',
+      previousAmount: 100_000,
+      newAmount: 125_000,
+      changeAmount: 25_000,
+      reason: 'Additional approved scope',
+      status: 'Pending',
+      createdAt: '2026-08-24T10:00:00Z',
+    });
+
+    render(<ProcurementBudgetDetailPage />);
+    await screen.findByText('PB-2026-0002');
+
+    fireEvent.click(screen.getByRole('button', { name: /revise budget/i }));
+    fireEvent.change(screen.getByLabelText(/new approved amount/i), { target: { value: '125000' } });
+    fireEvent.change(screen.getByLabelText(/^reason$/i), { target: { value: 'Additional approved scope' } });
+    fireEvent.click(screen.getByRole('button', { name: /submit revision/i }));
+
+    await waitFor(() => {
+      expect(budgetServiceMock.createRevision).toHaveBeenCalledWith('budget-1', {
+        revisionType: 'Increase',
+        newAmount: 125_000,
+        reason: 'Additional approved scope',
+      });
     });
   });
 });

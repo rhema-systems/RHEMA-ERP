@@ -311,6 +311,8 @@ public class ProcurementBudgetsController : ControllerBase
             var allocation = await _budgetService.AddAllocationAsync(budgetId, dto);
             return Ok(allocation);
         }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding allocation to budget {BudgetId}", budgetId);
@@ -327,6 +329,7 @@ public class ProcurementBudgetsController : ControllerBase
             return Ok(allocation);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating allocation {AllocationId}", allocationId);
@@ -343,6 +346,7 @@ public class ProcurementBudgetsController : ControllerBase
             return NoContent();
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting allocation {AllocationId}", allocationId);
@@ -358,7 +362,30 @@ public class ProcurementBudgetsController : ControllerBase
             var revision = await _budgetService.CreateRevisionAsync(budgetId, dto);
             return Ok(revision);
         }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(BudgetProblem(
+                StatusCodes.Status404NotFound,
+                "PROCUREMENT_BUDGET_NOT_FOUND",
+                "Procurement budget not found",
+                ex.Message));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, BudgetProblem(
+                StatusCodes.Status403Forbidden,
+                "PROCUREMENT_BUDGET_REVISION_FORBIDDEN",
+                "Procurement budget revision forbidden",
+                ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(BudgetProblem(
+                StatusCodes.Status409Conflict,
+                "PROCUREMENT_BUDGET_REVISION_CONFLICT",
+                "Procurement budget revision conflict",
+                ex.Message));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating revision for budget {BudgetId}", budgetId);
@@ -367,14 +394,18 @@ public class ProcurementBudgetsController : ControllerBase
     }
 
     [HttpPost("revisions/{revisionId}/approve")]
-    public async Task<ActionResult<ProcurementBudgetRevisionDto>> ApproveRevision(Guid revisionId)
+    public async Task<ActionResult<ProcurementBudgetRevisionDto>> ApproveRevision(
+        Guid revisionId,
+        [FromBody] ApproveProcurementBudgetDto? dto)
     {
         try
         {
-            var revision = await _budgetService.ApproveRevisionAsync(revisionId);
+            var revision = await _budgetService.ApproveRevisionAsync(revisionId, dto?.Comments);
             return Ok(revision);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error approving revision {RevisionId}", revisionId);
@@ -383,14 +414,18 @@ public class ProcurementBudgetsController : ControllerBase
     }
 
     [HttpPost("revisions/{revisionId}/reject")]
-    public async Task<ActionResult<ProcurementBudgetRevisionDto>> RejectRevision(Guid revisionId, [FromBody] string reason)
+    public async Task<ActionResult<ProcurementBudgetRevisionDto>> RejectRevision(
+        Guid revisionId,
+        [FromBody] ApproveProcurementBudgetDto? dto)
     {
         try
         {
-            var revision = await _budgetService.RejectRevisionAsync(revisionId, reason);
+            var revision = await _budgetService.RejectRevisionAsync(revisionId, dto?.Comments ?? string.Empty);
             return Ok(revision);
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error rejecting revision {RevisionId}", revisionId);

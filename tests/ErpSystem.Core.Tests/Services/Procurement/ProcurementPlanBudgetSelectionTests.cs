@@ -86,6 +86,109 @@ public sealed class ProcurementPlanBudgetSelectionTests
         _plans.Verify(value => value.UpdateAsync(It.IsAny<ProcurementPlan>()), Times.Never);
     }
 
+    [Fact]
+    public async Task AddItemUsesControlledAllocationFromLinkedBudget()
+    {
+        var plan = DraftPlan();
+        plan.TotalEstimatedBudget = 20_000m;
+        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        var allocation = new ProcurementBudgetAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            ProcurementBudgetId = budget.Id,
+            CategoryName = "IT Equipment",
+            AllocatedAmount = 15_000m,
+            UtilizedAmount = 1_000m
+        };
+        budget.Allocations.Add(allocation);
+        plan.BudgetId = budget.Id;
+        plan.Currency = budget.Currency;
+
+        ProcurementPlanItem? addedItem = null;
+        _plans.Setup(value => value.GetByIdAsync(plan.Id)).ReturnsAsync(plan);
+        _budgets.Setup(value => value.GetWithAllocationsAsync(budget.Id)).ReturnsAsync(budget);
+        _items.Setup(value => value.GetByPlanIdAsync(plan.Id)).ReturnsAsync(Array.Empty<ProcurementPlanItem>());
+        _items.Setup(value => value.GetPlannedBudgetExposureByAllocationAsync(allocation.Id, null)).ReturnsAsync(2_000m);
+        _items.Setup(value => value.AddAsync(It.IsAny<ProcurementPlanItem>()))
+            .Callback<ProcurementPlanItem>(value => addedItem = value)
+            .ReturnsAsync((ProcurementPlanItem value) => value);
+        _unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        await CreateService().AddItemAsync(plan.Id, new CreateProcurementPlanItemDto
+        {
+            ProcurementBudgetId = budget.Id,
+            ProcurementBudgetAllocationId = allocation.Id,
+            BudgetCategoryName = "untrusted free text",
+            ItemDescription = "Wireless Keyboard",
+            EstimatedQuantity = 10,
+            EstimatedUnitPrice = 490,
+            UnitOfMeasure = "EA"
+        });
+
+        addedItem.Should().NotBeNull();
+        addedItem!.ProcurementBudgetId.Should().Be(budget.Id);
+        addedItem.ProcurementBudgetAllocationId.Should().Be(allocation.Id);
+        addedItem.BudgetCategoryName.Should().Be("IT Equipment");
+        addedItem.ApprovedBudgetAmount.Should().Be(4_900m);
+    }
+
+    [Fact]
+    public async Task AddItemRejectsAllocationOutsideLinkedBudget()
+    {
+        var plan = DraftPlan();
+        plan.TotalEstimatedBudget = 20_000m;
+        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        budget.Allocations.Add(new ProcurementBudgetAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            ProcurementBudgetId = budget.Id,
+            CategoryName = "IT Equipment",
+            AllocatedAmount = 15_000m
+        });
+        plan.BudgetId = budget.Id;
+
+        _plans.Setup(value => value.GetByIdAsync(plan.Id)).ReturnsAsync(plan);
+        _budgets.Setup(value => value.GetWithAllocationsAsync(budget.Id)).ReturnsAsync(budget);
+        _items.Setup(value => value.GetByPlanIdAsync(plan.Id)).ReturnsAsync(Array.Empty<ProcurementPlanItem>());
+
+        var action = () => CreateService().AddItemAsync(plan.Id, new CreateProcurementPlanItemDto
+        {
+            ProcurementBudgetId = budget.Id,
+            ProcurementBudgetAllocationId = Guid.NewGuid(),
+            ItemDescription = "Wireless Keyboard",
+            EstimatedQuantity = 10,
+            EstimatedUnitPrice = 490,
+            UnitOfMeasure = "EA"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not part of the approved budget linked to this plan*");
+        _items.Verify(value => value.AddAsync(It.IsAny<ProcurementPlanItem>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddItemRejectsExposureAbovePlanTotalBudget()
+    {
+        var plan = DraftPlan();
+        plan.TotalEstimatedBudget = 600m;
+        _plans.Setup(value => value.GetByIdAsync(plan.Id)).ReturnsAsync(plan);
+        _items.Setup(value => value.GetByPlanIdAsync(plan.Id)).ReturnsAsync(Array.Empty<ProcurementPlanItem>());
+
+        var action = () => CreateService().AddItemAsync(plan.Id, new CreateProcurementPlanItemDto
+        {
+            ItemDescription = "Wireless Keyboard",
+            EstimatedQuantity = 10,
+            EstimatedUnitPrice = 490,
+            UnitOfMeasure = "EA"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*exceeds the plan total budget*");
+        _items.Verify(value => value.AddAsync(It.IsAny<ProcurementPlanItem>()), Times.Never);
+    }
+
     private ProcurementPlanService CreateService()
     {
         var currentUser = new Mock<ICurrentUserProvider>();

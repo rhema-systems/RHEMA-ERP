@@ -41,6 +41,7 @@ public interface IProcurementPlanItemRepository : IGenericRepository<Procurement
     Task<IEnumerable<ProcurementPlanItem>> GetByMonthAsync(Guid planId, int month);
     Task<IEnumerable<ProcurementPlanItem>> GetByPriorityAsync(Guid planId, string priority);
     Task<decimal> GetTotalEstimatedCostAsync(Guid planId);
+    Task<decimal> GetPlannedBudgetExposureByAllocationAsync(Guid allocationId, Guid? excludeItemId = null);
 }
 
 /// <summary>

@@ -206,6 +206,20 @@ public class ProcurementPlanItemRepository : GenericRepository<ProcurementPlanIt
             .ToListAsync();
     }
 
+    public async Task<decimal> GetPlannedBudgetExposureByAllocationAsync(Guid allocationId, Guid? excludeItemId = null)
+    {
+        return await _dbSet
+            .Where(item =>
+                item.ProcurementBudgetAllocationId == allocationId &&
+                (!excludeItemId.HasValue || item.Id != excludeItemId.Value) &&
+                !item.IsDeleted &&
+                !item.ProcurementPlan.IsDeleted &&
+                item.ProcurementPlan.Status != "Rejected" &&
+                item.ProcurementPlan.Status != "Cancelled" &&
+                item.ProcurementPlan.Status != "Completed")
+            .SumAsync(item => item.ApprovedBudgetAmount ?? item.EstimatedTotalCost);
+    }
+
     public async Task<IEnumerable<ProcurementPlanItem>> GetCriticalItemsAsync(Guid planId)
     {
         return await _dbSet

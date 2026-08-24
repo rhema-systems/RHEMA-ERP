@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Edit, FileText, Package, Calendar, Clock, CheckCircle, XCircle, AlertCircle, Send, Loader2, Plus, Trash2, Search, Users, History, GitBranch } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementPlanService, commonService, marketAnalysisService, type ProcurementPlanDetailDto, type ProcurementPlanDto, type CreateProcurementPlanItemDto, type InventoryItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
+import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type ProcurementBudgetDetailDto, type ProcurementPlanDetailDto, type ProcurementPlanDto, type CreateProcurementPlanItemDto, type InventoryItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { format } from 'date-fns';
@@ -94,6 +94,8 @@ export default function ProcurementPlanDetailPage() {
 
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [linkedBudget, setLinkedBudget] = useState<ProcurementBudgetDetailDto | null>(null);
+  const [loadingBudgetAllocations, setLoadingBudgetAllocations] = useState(false);
 
   // Add Item Dialog State
   const [addItemDialogOpen, setAddItemDialogOpen] = useState(false);
@@ -175,6 +177,20 @@ export default function ProcurementPlanDetailPage() {
       setLoading(true);
       const data = await procurementPlanService.getPlanById(planId);
       setPlan(data);
+      if (data.budgetId) {
+        try {
+          setLoadingBudgetAllocations(true);
+          setLinkedBudget(await procurementBudgetService.getBudgetById(data.budgetId));
+        } catch (budgetError) {
+          console.error('Error loading linked budget allocations:', budgetError);
+          setLinkedBudget(null);
+          toast.error('The linked budget allocations could not be loaded');
+        } finally {
+          setLoadingBudgetAllocations(false);
+        }
+      } else {
+        setLinkedBudget(null);
+      }
     } catch (error) {
       console.error('Error loading plan details:', error);
       toast.error('Failed to load procurement plan details');
@@ -352,6 +368,31 @@ export default function ProcurementPlanDetailPage() {
     if (!item.unitOfMeasure?.trim()) return 'Unit of measure is required';
     if (Number(item.estimatedQuantity) <= 0) return 'Quantity must be greater than 0';
     if (Number(item.estimatedUnitPrice) < 0) return 'Unit cost cannot be negative';
+    const itemBudgetAmount = item.approvedBudgetAmount ?? getItemEstimatedTotal(item);
+    if (itemBudgetAmount < 0) return 'Item budget amount cannot be negative';
+
+    if (linkedBudget?.allocations.length) {
+      const allocation = linkedBudget.allocations.find(value => value.id === item.procurementBudgetAllocationId);
+      if (!allocation) return 'Select a budget allocation from the linked approved budget';
+
+      const savedExposure = (plan?.items || [])
+        .filter(value => value.procurementBudgetAllocationId === allocation.id)
+        .reduce((total, value) => total + (value.approvedBudgetAmount ?? value.estimatedTotalCost), 0);
+      const queuedExposure = pendingPlanItems
+        .filter(value => value.procurementBudgetAllocationId === allocation.id)
+        .reduce((total, value) => total + (value.approvedBudgetAmount ?? getItemEstimatedTotal(value)), 0);
+      if (savedExposure + queuedExposure + itemBudgetAmount > allocation.remainingAmount) {
+        return `${allocation.categoryName} has insufficient remaining allocation for this item`;
+      }
+    }
+
+    const savedPlanExposure = (plan?.items || [])
+      .reduce((total, value) => total + (value.approvedBudgetAmount ?? value.estimatedTotalCost), 0);
+    const queuedPlanExposure = pendingPlanItems
+      .reduce((total, value) => total + (value.approvedBudgetAmount ?? getItemEstimatedTotal(value)), 0);
+    if (plan && savedPlanExposure + queuedPlanExposure + itemBudgetAmount > plan.totalEstimatedBudget) {
+      return 'The item would exceed the procurement plan total budget';
+    }
     return null;
   };
 
@@ -420,7 +461,7 @@ export default function ProcurementPlanDetailPage() {
       loadPlanDetails(); // Refresh plan data
     } catch (error) {
       console.error('Error adding items:', error);
-      toast.error('Failed to save plan items');
+      toast.error(error instanceof Error ? error.message : 'Failed to save plan items');
     } finally {
       setAddingItem(false);
     }
@@ -436,7 +477,7 @@ export default function ProcurementPlanDetailPage() {
       loadPlanDetails(); // Refresh plan data
     } catch (error) {
       console.error('Error deleting item:', error);
-      toast.error('Failed to delete item');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete item');
     } finally {
       setDeletingItemId(null);
     }
@@ -1055,7 +1096,7 @@ export default function ProcurementPlanDetailPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item Description</TableHead>
-                      <TableHead>Budget Line</TableHead>
+                      <TableHead>Budget Allocation</TableHead>
                       <TableHead>Quantity</TableHead>
                       <TableHead>Unit Cost</TableHead>
                       <TableHead>Total</TableHead>
@@ -1085,9 +1126,9 @@ export default function ProcurementPlanDetailPage() {
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            <div>{item.budgetLineCode || '-'}</div>
-                            {item.budgetCategoryName && (
-                              <div className="text-xs text-gray-500">{item.budgetCategoryName}</div>
+                            <div>{item.budgetCategoryName || '-'}</div>
+                            {item.budgetLineCode && (
+                              <div className="text-xs text-gray-500">Legacy line: {item.budgetLineCode}</div>
                             )}
                           </div>
                         </TableCell>
@@ -1099,6 +1140,16 @@ export default function ProcurementPlanDetailPage() {
                         <TableCell>{formatDate(item.requiredDate)}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
+                            {plan.status === 'Draft' && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => router.push(`/procurement/planning/plans/${planId}/edit?itemId=${item.id}`)}
+                                title="Edit item"
+                              >
+                                <Edit className="h-4 w-4 text-blue-500" />
+                              </Button>
+                            )}
                             {plan.status === 'Draft' && (
                               <Button
                                 variant="ghost"
@@ -1295,6 +1346,9 @@ export default function ProcurementPlanDetailPage() {
             marketAnalyses={marketAnalyses}
             loadingMarketAnalyses={loadingMarketAnalyses}
             onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            budgetCode={linkedBudget?.budgetCode}
+            budgetAllocations={linkedBudget?.allocations || []}
+            loadingBudgetAllocations={loadingBudgetAllocations}
             suppliers={suppliers}
             supplierSearchTerm={supplierSearchTerm}
             onSupplierSearchTermChange={setSupplierSearchTerm}
