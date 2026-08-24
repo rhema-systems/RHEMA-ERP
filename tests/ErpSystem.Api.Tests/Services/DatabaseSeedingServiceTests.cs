@@ -34,6 +34,22 @@ public class DatabaseSeedingServiceTests
     }
 
     [Fact]
+    public void FinanceRoleSeeder_ShouldGrantChiefAccountantControlledReportExportPermission()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var chiefAccountantStart = source.IndexOf("[\"Chief Accountant\"] = new[]", StringComparison.Ordinal);
+        var managingDirectorStart = source.IndexOf("[\"Managing Director\"] = new[]", chiefAccountantStart, StringComparison.Ordinal);
+
+        chiefAccountantStart.Should().BeGreaterThan(-1);
+        managingDirectorStart.Should().BeGreaterThan(chiefAccountantStart);
+        source[chiefAccountantStart..managingDirectorStart]
+            .Should().Contain("\"Finance.Reports.Export\"",
+                "Chief Accountants must be able to distribute the controlled reports they review");
+    }
+
+    [Fact]
     public void FinanceRoleSeeder_ShouldKeepDemoAuditorReadOnly()
     {
         var root = FindRepositoryRoot();

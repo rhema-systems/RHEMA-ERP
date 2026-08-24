@@ -9,6 +9,7 @@ namespace ErpSystem.Core.DTOs.AR;
 public class AgingReportDto
 {
     public DateTime AsOfDate { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
     public bool UsesSettlementReadModel { get; set; }
     public List<CustomerAgingDto> Customers { get; set; } = new();
     public AgingSummaryDto Summary { get; set; } = new();
@@ -46,6 +47,7 @@ public class AgingSummaryDto
 public class DetailedAgingReportDto
 {
     public DateTime AsOfDate { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
     public bool UsesSettlementReadModel { get; set; }
     public List<CustomerDetailedAgingDto> Customers { get; set; } = new();
     public AgingSummaryDto Summary { get; set; } = new();
@@ -73,6 +75,13 @@ public class InvoiceAgingDto
     public decimal CreditedAmount { get; set; }
     public decimal WithheldAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public string DocumentCurrencyCode { get; set; } = "GHS";
+    public decimal DocumentTotalAmount { get; set; }
+    public decimal DocumentPaidAmount { get; set; }
+    public decimal DocumentCreditedAmount { get; set; }
+    public decimal DocumentWithheldAmount { get; set; }
+    public decimal DocumentBalanceAmount { get; set; }
     public Guid? SourcePostingEventId { get; set; }
     public Guid? SourceJournalEntryId { get; set; }
     public string? SettlementStatus { get; set; }
@@ -118,6 +127,7 @@ public class CustomerDetailedLedgerReportDto
     public decimal TotalDebits { get; set; }
     public decimal TotalCredits { get; set; }
     public decimal TotalClosingBalance { get; set; }
+    public List<DetailedLedgerCurrencyTotalDto> CurrencyTotals { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
     public List<CustomerDetailedLedgerAccountDto> Customers { get; set; } = new();
 }

@@ -8620,7 +8620,10 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
-                    "Finance.Reports.Run"
+                    "Finance.Reports.Run",
+                    // Chief Accountants own period-end review and controlled financial-report
+                    // distribution. Export remains separately permission-gated at the API/UI.
+                    "Finance.Reports.Export"
                 },
                 ["Managing Director"] = new[]
                 {

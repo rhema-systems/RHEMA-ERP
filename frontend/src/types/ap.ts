@@ -902,6 +902,13 @@ export interface SupplierDetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals: Array<{
+        currencyCode: string;
+        openingBalance: number;
+        totalDebits: number;
+        totalCredits: number;
+        closingBalance: number;
+    }>;
     warnings: string[];
     suppliers: SupplierDetailedLedgerAccount[];
 }

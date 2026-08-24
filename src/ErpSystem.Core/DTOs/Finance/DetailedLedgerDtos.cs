@@ -3,6 +3,15 @@ using System.Collections.Generic;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
+    public class DetailedLedgerCurrencyTotalDto
+    {
+        public string CurrencyCode { get; set; } = "GHS";
+        public decimal OpeningBalance { get; set; }
+        public decimal TotalDebits { get; set; }
+        public decimal TotalCredits { get; set; }
+        public decimal ClosingBalance { get; set; }
+    }
+
     public class DetailedLedgerRequestDto
     {
         public DateTime StartDate { get; set; } = DateTime.UtcNow.Date;
