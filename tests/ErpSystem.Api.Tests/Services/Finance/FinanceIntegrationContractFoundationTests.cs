@@ -32,6 +32,18 @@ public sealed class FinanceIntegrationContractFoundationTests
     }
 
     [Fact]
+    public void PostingContractShouldExposeOptionalStructuredDimensionsAsAdditiveVersion()
+    {
+        var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-001");
+
+        contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
+        contract.Version.Should().Be("1.1");
+        contract.Notes.Should().Contain("Structured dimensions are optional");
+        typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.Dimensions)).Should().NotBeNull();
+        typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.FinanceDimensionSetId)).Should().NotBeNull();
+    }
+
+    [Fact]
     public void DisposalContractShouldExposeExistingFinanceOwnedOrchestration()
     {
         var contract = FinanceIntegrationContractCatalog.GetRequired("fin-int-006");

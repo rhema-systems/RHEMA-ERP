@@ -83,9 +83,38 @@ public sealed class FinancePostingLineDto
     public DateTime? ExchangeRateDate { get; set; }
     public string? SourceReferenceNumber { get; set; }
     public int? LineNumber { get; set; }
+
+    /// <summary>
+    /// Structured operational classifications supplied by a posting producer. Producers submit
+    /// canonical codes or entity lineage; Finance resolves and owns the resulting dimension set.
+    /// The collection is optional during the dimension-adapter certification period.
+    /// </summary>
+    public IReadOnlyList<FinancePostingDimensionValueDto> Dimensions { get; set; }
+        = Array.Empty<FinancePostingDimensionValueDto>();
+
+    /// <summary>
+    /// Finance-internal historical set identity used only when reversing an already-posted journal.
+    /// Ordinary producers must submit <see cref="Dimensions"/> and cannot select a stored set ID.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
     public string? SegmentString { get; set; }
     public string? Notes { get; set; }
     public string? TransactionTag { get; set; }
+}
+
+public sealed class FinancePostingDimensionValueDto
+{
+    [System.ComponentModel.DataAnnotations.MaxLength(30)]
+    public string DimensionCode { get; set; } = string.Empty;
+
+    [System.ComponentModel.DataAnnotations.MaxLength(50)]
+    public string? ValueCode { get; set; }
+
+    [System.ComponentModel.DataAnnotations.MaxLength(100)]
+    public string? SourceEntityType { get; set; }
+
+    public Guid? SourceEntityId { get; set; }
 }
 
 public sealed class FinancePostingResultDto

@@ -30,6 +30,12 @@ public class AccountTransaction : BusinessEntity
     public Guid JournalEntryId { get; set; }
 
     /// <summary>
+    /// Immutable transaction-level financial classifications. Null preserves compatibility for
+    /// legacy posting producers until their Finance adapters are dimension-certified.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
+    /// <summary>
     /// Transaction date (posting date to GL).
     /// Must fall within an open fiscal period.
     /// </summary>
@@ -262,6 +268,9 @@ public class AccountTransaction : BusinessEntity
     /// </summary>
     [MaxLength(200)]
     public string? SegmentString { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSetId))]
+    public FinanceDimensionSet? FinanceDimensionSet { get; set; }
 
     // ========================================================================
     // REVALUATION TRACKING (Section 3.2.5 - IAS 21 Currency Revaluation)

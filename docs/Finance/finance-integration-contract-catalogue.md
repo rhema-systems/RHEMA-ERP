@@ -13,7 +13,7 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 
 | ID | Contract | Producer → Finance owner | Status | Version | Entry point / proposed boundary | Requirement or limitation |
 |---|---|---|---|---|---|---|
-| FIN-INT-001 | Approved source transaction → GL | Calling module → Finance GL | Available | 1.0 | `IFinancePostingEngine.PostAsync` | Common control foundation |
+| FIN-INT-001 | Approved source transaction → GL | Calling module → Finance GL | Available | 1.1 | `IFinancePostingEngine.PostAsync` | Optional structured transaction dimensions are additive; mandatory enforcement requires adapter certification |
 | FIN-INT-002 | Accepted procurement stock receipt → inventory and GRV accrual | Procurement/Inventory → Finance GL | Available | 1.0 | `IInventoryReceiptFinancePostingService.PostAcceptedReceiptAsync` | Procurement/Finance reconciliation |
 | FIN-INT-003 | Inventory adjustment → GL | Inventory → Finance GL | Available | 1.0 | `IInventoryAdjustmentFinancePostingService.PostAsync` | Inventory adjustment accounting |
 | FIN-INT-004 | Inventory landed-cost valuation → GL | Inventory → Finance GL | Available | 1.0 | `IInventoryLandedCostFinancePostingService.PostLandedCostAsync` | Inventory valuation accounting |
@@ -36,6 +36,7 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 4. The adapter saves the returned posting and journal references on the source document. A retry returns the original outcome rather than creating a second accounting event.
 5. A customer or supplier balance is never represented by GL lines alone; the applicable AR/AP source and settlement records must exist.
 6. Breaking request or outcome changes require a new major contract version and coordinated consumer migration. Additive evidence can use a minor version.
+7. Producers provide operational dimension facts through `FinancePostingLineDto.Dimensions`; Finance resolves and owns the immutable set. Producers must not select stored dimension-set IDs or write dimension tables.
 
 ## Agreed post-acceptance Return-to-Vendor boundary
 

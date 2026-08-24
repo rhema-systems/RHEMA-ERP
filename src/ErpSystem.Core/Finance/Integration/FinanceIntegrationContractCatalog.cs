@@ -56,11 +56,11 @@ public static class FinanceIntegrationContractCatalog
             "Calling module",
             "Finance / General Ledger",
             FinanceIntegrationContractStatus.Available,
-            "1.0",
+            "1.1",
             "IFinancePostingEngine.PostAsync(FinancePostingRequestDto)",
             "Defined by the calling adapter",
             null,
-            "Use only after the producer has completed its own approval; Finance owns period, balance, currency, idempotency and audit validation."),
+            "Use only after the producer has completed its own approval; Finance owns period, balance, currency, idempotency, dimension-set resolution and audit validation. Structured dimensions are optional until the producer is certified."),
         new(
             "FIN-INT-002",
             "Accepted procurement stock receipt to inventory and GRV accrual",
