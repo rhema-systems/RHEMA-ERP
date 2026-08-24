@@ -550,6 +550,10 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelRequestAttachment> StaffTravelRequestAttachments { get; set; } = null!;
     public DbSet<StaffTravelReminderRun> StaffTravelReminderRuns { get; set; } = null!;
     public DbSet<StaffTravelReminderDispatchLog> StaffTravelReminderDispatchLogs { get; set; } = null!;
+
+    // ---- Asset reminder engine (area 16 slice 9, AST-1) ----
+    public DbSet<AssetReminderRun> AssetReminderRuns { get; set; } = null!;
+    public DbSet<AssetReminderDispatchLog> AssetReminderDispatchLogs { get; set; } = null!;
     public DbSet<StaffTravelItinerary> StaffTravelItineraries { get; set; } = null!;
     public DbSet<StaffTravelItineraryLeg> StaffTravelItineraryLegs { get; set; } = null!;
     public DbSet<StaffTravelItineraryActivity> StaffTravelItineraryActivities { get; set; } = null!;
@@ -4197,6 +4201,15 @@ private void ConfigureHREntities(ModelBuilder builder)
             // can read IsDeleted and can explain itself. (Area 13 lost five faces to this exact
             // trap.)
             entity.HasIndex(x => x.FixedAssetId);
+
+            // Slice 9 — the link into the Maintenance module's register, deciding which engine owns
+            // this asset's servicing. Same shape as the Finance link above, paired explicitly with
+            // WithMany() for the same reason, and non-unique for the same soft-delete reason.
+            entity.HasOne(x => x.MaintenanceAsset)
+                .WithMany()
+                .HasForeignKey(x => x.MaintenanceAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.MaintenanceAssetId);
 
             entity.HasOne(x => x.CurrentAssignedTo)
                 .WithMany()
@@ -9142,6 +9155,22 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => new { x.TenantId, x.CreatedAt });
             e.HasIndex(x => x.RunId);
             e.HasIndex(x => x.ProbationPeriodId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Asset reminder engine (area 16 slice 9) ----
+        builder.Entity<AssetReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<AssetReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.HasIndex(x => new { x.TenantId, x.AssetId });
 
             e.HasOne(x => x.Run)
                 .WithMany(x => x.DispatchLogs)

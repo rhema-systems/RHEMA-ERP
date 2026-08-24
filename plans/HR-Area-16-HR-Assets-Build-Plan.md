@@ -35,12 +35,12 @@ decision — record the change where it happened.
 | **Branch** | `hrdev` |
 | **FRD requirements** | **FR-HR-183 (M)** — exit clearance across "outstanding loans, salary advances, **company property, office equipment**, duty-post keys, documents and payroll recoveries". That is the only FRD line that touches this area. |
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
-| **Backend today** | **12 entities**, **106 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7 + 3 in slice 8) plus **16 employee-portal routes** |
+| **Backend today** | **14 entities**, **108 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7 + 3 in slice 8 + 2 in slice 9) plus **16 employee-portal routes** and **4 on `AssetRemindersController`** |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions **D1–D9** settled. **Slices 0–8 green twice — 887 assertions.** Assets can be charged for and rented out, and both money surfaces stop at the payroll boundary: HR declares, payroll deducts |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice8.mjs`, `probe-slice6-ui.mjs` |
+| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–9 green twice — 1,043 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), and maintenance is now monitored rather than merely recorded |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice9.mjs`, `probe-slice6-ui.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -173,10 +173,12 @@ be reached, for the reason D-k gives.
   W3 sweep's shape, landing inside this area.
 - **D-g — no insurance expiry.** `CompanyAsset` has `IsInsured`, `InsurancePolicyNumber`,
   `InsuredValue` — and no expiry date. **AST-4.**
-- **D-h — nothing acts on the maintenance schedule.** `NextMaintenanceDate` /
-  `MaintenanceIntervalDays` / `RequiresRegularMaintenance` exist and
-  `GetDueForMaintenanceAsync(daysAhead)` reads them, but nothing writes `NextMaintenanceDate` from
-  the interval on completion, and there is no reminder sweep. **AST-1.**
+- **D-h — ⚠ WRONG AS WRITTEN; see slice 9.** Recorded here as "nothing writes
+  `NextMaintenanceDate` from the interval on completion". It did, and always had — the slice-0
+  assertion failed because it measured the interval *after* a full-replace PUT had nulled it (D-j),
+  and the harness bug was misread as a second product defect. **This is the only entry in §3.4 that
+  was not confirmed by execution, and it is the only one that was wrong.** What was actually broken
+  is D-aa … D-hh, closed in slice 9. **AST-1.**
 - **D-i — no "Additional Remarks" field of any name.** `AdditionalDescription` does not exist
   anywhere in the asset model (the only hits in the repo are on a payroll component). **AST-7 needs
   a decision, see D6.** Slice 0 also confirmed **D-i(b)**: `CreateCompanyAssetDto` has no `UnitId`
@@ -524,6 +526,56 @@ manual line remains possible for property HR never registered.
 
 ---
 
+### D10 — the seam with the Maintenance module (AST-1). ✅ **DECIDED 2026-08-24.**
+
+**The question, as the user put it:** "can HR push an asset for maintenance works in the maintenance
+module?"
+
+**Measured before answering.** No link of any kind existed between HR and Maintenance. `CompanyAsset`
+and `AssetMaintenance` had zero FKs to that module; `MaintenanceAsset` has a bare `Guid? EmployeeId`
+("asset custodian/responsible employee") and nothing pointing back. The only bridge anywhere was
+`FixedAsset.MaintenanceAssetId` — Finance → Maintenance, **0 of 4 rows carrying one**.
+
+**What a `MaintenanceAsset` is.** That module's register of *physical objects*, and its only subject:
+24 entities carry a navigation to it — `WorkOrder`, `JobCard`, `MaintenanceSchedule`,
+`AssetInspection`, `AssetDowntime`, `AssetAdmission`, `AssetDischarge`, `MaintenanceAssetMovement`,
+and nine Fleet entities that call it `VehicleAsset`. Its fields (`OperatingHours`, `Mileage`,
+`LicensePlate`, `VIN`, `IsFleetAsset`, `Capacity`, `PowerRating`, `FloorArea`, `Criticality`,
+`ParentAssetId`) describe **plant, vehicles and buildings** — things that are serviced, not things
+issued to a person.
+
+**The decision, in three parts.**
+
+1. **`CompanyAsset.MaintenanceAssetId` is a handle, not an abdication.** Everything in that module is
+   addressed by `MaintenanceAsset.Id`, so without the column HR cannot name the thing it wants worked
+   on. **A linked asset is still scheduled and still chased by HR.** The opposite rule was written
+   first and reversed the same day: standing HR down on link would mean sending a laptop out for a
+   one-off repair silently switched off its servicing reminders — the precise opposite of what a push
+   is for. Four assertions in harness §14 exist to stop that idea returning.
+
+2. **The push is slice 9b, and it goes through `AssetAdmission`.** `AssetAdmission` is "asset
+   admitted to the workshop": it needs `AssetId`, `AdmissionDate`, `AdmittedById` and two
+   classification strings, and its `JobCardId` and `WorkOrderId` are both optional. `AssetDischarge`
+   closes it. The richer `WorkOrder` path is added to the same endpoint **when the reference data
+   exists** — `WorkOrder` requires `WorkOrderTypeId`, `MaintenanceTypeId` and `PriorityLevelId`, and
+   all three tables hold **0 rows**. HR seeding another module's masters is not an acceptable
+   workaround (the payroll rule).
+
+3. **Copy Projects, not Finance.** `ProjectService.MaintenanceFollowThrough` (432 lines) already
+   raises job cards and work orders in that module from project variations and defect-liability
+   cases, and `ProjectAssetLink` already carries `MaintenanceAssetId` beside a `CompanyAssetId` — so
+   Projects can already link a project to an **HR** asset, a third bridge HR knew nothing about.
+   That is the worked example. Finance's link is the same *shape* but has never carried a value,
+   because no screen renders an input for it.
+
+**Two cross-module defects recorded rather than fixed** (`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`):
+**#8** Finance's fixed-asset → Maintenance link is a field no screen can set; **#9** Projects'
+maintenance follow-through throws for every tenant because those three lookups are empty — four
+shipped actions whose buttons light up on the wrong condition and then fail, with the middleware
+stripping the sentence that would have said what to configure.
+
+---
+
 ## 6. Scope
 
 **In scope:** the ten existing sub-surfaces hardened and proven; the thirteen change-document
@@ -560,7 +612,7 @@ overdue returns; and the full screen set.
 | **6** | ✅ The employee's own surface | `/hr/assets/me` + 13 `EmployeePortalController` routes: my assets, acknowledge, print the terms, request, request on behalf (AST-6, AST-6b, AST-8, D4). **D-w, D-x, D-y** |
 | **7** | ✅ Damage and surcharge | `AssetSurcharge` + `AssetSurchargeRecovery` on the engine, the right of reply, the payroll projection (AST-3, **D-d**, D9) — and **D-z**, the incident route without which loss could not be recorded at all. Migration `AddAssetSurchargeAndIncident` |
 | **8** | ✅ Rental and the payroll seam | `IsRentable` + standard rate on the asset, seven rental columns on the assignment, the read-only projection, and **the rent closing at all three doors that close a custody** (AST-9, AST-10, D2). Migration `AddAssetRentalTerms` |
-| **9** | Maintenance monitoring | Schedule written from the interval, due/overdue reads, the reminder sweep (AST-1, D-h) |
+| **9** | ✅ Maintenance monitoring | The schedule anchored on the work, three watchlist reads, the reminder engine, and the handle into the Maintenance module (AST-1; **D-aa, D-bb, D-cc, D-dd, D-ee, D-ff, D-gg, D-hh**; D10). Migration `AddAssetReminderEngine` |
 | **10** | Exit clearance | FR-HR-183 — clearance lines sourced from unreturned assignments, closing 9b D4 |
 | **11** | Reminders and reports | Insurance expiry, overdue returns, the asset register report |
 | **12+** | Screens, then the content audit | Admin + HR screens, then the endpoint-by-endpoint content audit that areas 11–23 proved is not optional |
@@ -1211,3 +1263,85 @@ already in the README, both walked into anyway. Fixed and annotated at the call 
 row is where somebody finds out they are paying for a company flat, and a deduction discovered on a
 payslip instead of here is the version of this feature nobody wants. `tsc` (19 pre-existing errors,
 all in `inventory`) and `eslint` clean.
+
+---
+
+### Slice 9 — maintenance monitoring, and what D-h actually was. 2026-08-24, **156/156, run twice** (stamps 210003, 210004). Migration `AddAssetReminderEngine`.
+
+Delivers **AST-1**. Slices 1–8 re-run green — **1,043 assertions** for the area.
+
+**D-h was a hypothesis, and it was wrong.** Slice 0 recorded it as "nothing writes
+`NextMaintenanceDate` from the interval on completion". `CompleteMaintenanceAsync` did exactly that,
+and had since the port. The slice-0 assertion failed because it measured the interval *after* a
+full-replace PUT had nulled it — the harness bug that found **D-j** in the first place, misread as a
+second product defect. The lesson is worth keeping beside slice 3's unreachable refusal: **a defect
+written down from reading the source is a hypothesis until something executes it.** Every other
+defect in §3.4 was confirmed by execution; this one was not, and it is the one that was wrong.
+
+What was actually broken is larger, and none of it was in the plan:
+
+- **D-aa — completion set the asset `Available` unconditionally.** An asset out on assignment that
+  went for repair came back reported as free *while still in an employee's hands*: the register
+  contradicted its own `IsCurrentlyAssigned` on the same row, the employee's own portal showed the
+  laptop they were holding as available, and `assets/status/Available` listed it. It was not issued
+  to a second person only because slice 4's `RequireAssignable` asks `IsCurrentlyAssigned` **before**
+  status — the order that D-p forced for an unrelated reason. A guard that holds by accident is one
+  refactor from not holding. In the other direction, completing a maintenance record against a
+  `Disposed` asset **resurrected it**. The rule is now stated the narrow way round: completion
+  reverses *only* what maintenance did, so a non-`InMaintenance` status is somebody else's fact and
+  is left alone.
+- **D-bb — the schedule was anchored on the clock, not on the work.** `UtcNow + interval`, so
+  servicing done a fortnight ago and written up today produced a next date a fortnight late — and
+  because each completion re-anchors from the last, the drift never came back. It also ignored
+  `RequiresRegularMaintenance` (generating dates that the reads, which do filter on the flag, would
+  never show), ignored a next date the record stated for itself, and never wrote the record's own
+  `NextMaintenanceDate` — declared on the entity, both read DTOs and both write DTOs, and set by
+  nothing, so every completed maintenance row in the system said "next: null" beside an asset that
+  carried a date.
+- **D-cc — a completion could be taken twice**, re-advancing the schedule each time, and a
+  **cancelled** record could be completed, silently un-cancelling it and resting the asset's schedule
+  on work somebody had called off.
+- **D-dd / D-ee** — `maintenance/asset/{id}` had no `.Include(am => am.Asset)`, so every row's
+  `assetName` was blank while the by-id read filled it; and `AssetMaintenanceSummaryDto` carried a
+  name with no `AssetId` or `AssetNumber`, so nothing could open the asset behind a row. Seventh and
+  eighth occurrences of "a mapping and its `.Include` are one change".
+- **D-ff / D-gg / D-hh** — `due-maintenance` answered with `CompanyAssetSummaryDto`, which carries
+  **no maintenance date of any kind**: the one monitoring read the module had could say *that* assets
+  needed attention and never *when*, *how late*, or *in what order*. And `daysAhead=-5` and a
+  backwards `from`/`to` window both answered **200 with an empty list** — the same answer as an
+  estate in good order.
+
+**Three reads, because they are three jobs.** Due is a plan, overdue is an exception list, and
+unscheduled is a data-quality list. The third is the one that did not exist and could not have:
+every maintenance query in the module filters `NextMaintenanceDate != null`, so an asset flagged as
+needing regular servicing that nobody had ever scheduled appeared on **no list anywhere** and could
+never become due. `DaysRemaining` is signed on purpose — an absolute number plus a flag lets a
+caller sort an exception list and put the worst row at the bottom.
+
+**The sweep, with the shape all six HR engines share.** `AssetReminderRun` + a dispatch log with a
+unique `(TenantId, DedupeKey)` index, a daily host and a run-now endpoint over one scoped service, an
+`asOf` preview that claims nothing. Three rungs: due soon, overdue on the 0/1/2/3 ladder, and
+unscheduled. The unscheduled key carries the **month** rather than a due date, because there is no
+due date to carry: keyed on the asset alone it would fire once in the register's lifetime and never
+again; keyed on the day it would arrive every morning until somebody muted the engine.
+
+**⚠ The harness's own three failures were all the same shape, and it is this area's recurring one.**
+The sweep has two horizons the watchlist reads do not — a 30-day due horizon and a **90-day backlog
+floor** — and the probe kept aiming at records outside them: `pump` is 170 days past due, and
+`preview?asOf=today+3650` puts every fixture 3,600 days in the past. Both read as "the engine is not
+chasing it", and both were the engine being right. Fourth, fifth and sixth time this area has met *a
+rule measured on a record another rule already refuses*. The backlog floor is now asserted directly
+rather than tripped over, with the reason: area 9's first live run queued 275 reminders of which 242
+were history.
+
+**Decision D10 — the seam with the Maintenance module**, taken with the user mid-slice after they
+asked what the integration actually was. See §5.
+
+**What did not change.** `AssetSource` gained no `MaintenanceModule` member. It was drafted and
+removed: `Source` records provenance and is read by `IsFinanceOwned`, an asset can be
+Finance-sourced *and* Maintenance-serviced at once, and nothing would ever have written the new
+member — the D-z shape (an enum member with no writer anywhere) which this area has already found
+once.
+
+**Screen.** None. Slice 9 is backend only; the maintenance watchlists and the reminder log are part
+of the HR register screens at slice 12.

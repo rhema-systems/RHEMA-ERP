@@ -206,6 +206,95 @@ internal static class AssetIntegrity
 
         assignment.RentalEffectiveTo = on;
     }
+
+    /// <summary>
+    /// Puts an asset back into service after maintenance — <b>defect D-aa</b>, area 16 slice 9.
+    /// </summary>
+    /// <remarks>
+    /// <para>Completion used to write <c>Status = Available</c> unconditionally, which is wrong in
+    /// both directions. An asset out on assignment that went for repair came back <b>Available
+    /// while still in an employee's hands</b>: the register then contradicted its own
+    /// <c>IsCurrentlyAssigned</c> on the same row, the employee's portal showed the laptop they are
+    /// holding as free, and <c>assets/status/Available</c> listed it. Only the order of the three
+    /// questions in <see cref="RequireAssignable"/> stopped it being issued to a second person as
+    /// well — the guard that answers first is <c>IsCurrentlyAssigned</c>, not status, so the
+    /// double-issue this would otherwise have caused was averted by accident rather than on
+    /// purpose. And in the other direction, a completed maintenance record against a
+    /// <c>Disposed</c>, <c>Lost</c> or <c>Damaged</c> asset <b>resurrected it to Available</b>.</para>
+    ///
+    /// <para>So the rule is stated the narrow way round: completion reverses <i>only</i> what
+    /// maintenance did. If the asset is not <c>InMaintenance</c>, its status is somebody else's
+    /// fact and is left alone. If it is, it returns to <c>Assigned</c> when somebody holds it and
+    /// <c>Available</c> when nobody does.</para>
+    /// </remarks>
+    internal static void RestoreFromMaintenance(CompanyAsset asset)
+    {
+        if (asset.Status != CompanyAssetStatus.InMaintenance) return;
+
+        asset.Status = asset.IsCurrentlyAssigned
+            ? CompanyAssetStatus.Assigned
+            : CompanyAssetStatus.Available;
+    }
+
+    /// <summary>
+    /// Advances the maintenance schedule from completed work — <b>defect D-bb</b>, AST-1.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The schedule is anchored on the work, not on the clock.</b> It used to be
+    /// <c>DateTime.UtcNow.AddDays(interval)</c>, so servicing done a fortnight ago and written up
+    /// today produced a next date a fortnight late — for ever, since each completion re-anchors from
+    /// the last one. Anchoring on <c>MaintenanceDate</c> makes the schedule a property of the
+    /// servicing history rather than of when somebody got round to the paperwork.</para>
+    ///
+    /// <para><b>A computed date in the past is left in the past.</b> Work done 200 days ago on a
+    /// 90-day interval is 110 days overdue, and the honest schedule says so. Clamping it forward to
+    /// "90 days from now" would silently forgive every backlogged asset at the moment its history
+    /// was finally entered, which is exactly when the backlog most needs to be visible.</para>
+    ///
+    /// <para><b>An explicitly stated next date wins.</b> Both maintenance DTOs carry
+    /// <c>NextMaintenanceDate</c> and nothing had ever read it on completion. A technician who
+    /// writes "back in six weeks" knows something the interval does not — the interval is the
+    /// default, not the authority.</para>
+    ///
+    /// <para><b>An asset that does not require regular maintenance gets no schedule.</b> The old
+    /// code asked only whether an interval was set, so a stale interval on an asset whose flag had
+    /// since been cleared kept generating dates that <c>GetDueForMaintenanceAsync</c> — which does
+    /// filter on the flag — would never show. A date nothing reads is a date that cannot be
+    /// trusted when something finally does.</para>
+    /// </remarks>
+    internal static DateOnly? NextMaintenanceDateFor(
+        CompanyAsset asset, AssetMaintenance record)
+    {
+        if (record.NextMaintenanceDate is { } stated)
+            return DateOnly.FromDateTime(stated);
+
+        if (!asset.RequiresRegularMaintenance) return null;
+        if (asset.MaintenanceIntervalDays is not { } interval || interval <= 0) return null;
+
+        return DateOnly.FromDateTime(record.MaintenanceDate).AddDays(interval);
+    }
+
+    /// <summary>
+    /// Refuses a completion that has already happened, or that cannot — <b>defect D-cc</b>.
+    /// </summary>
+    /// <remarks>
+    /// Completing a record twice re-ran every consequence: the asset was pushed back into service
+    /// again and the schedule re-advanced from the same maintenance date, so a second click on a
+    /// slow-responding button moved the whole servicing calendar. Completing a <c>Cancelled</c>
+    /// record was worse — it silently un-cancelled it, and the asset's schedule then rested on work
+    /// somebody had explicitly called off.
+    /// </remarks>
+    internal static void RequireCompletable(AssetMaintenance record)
+    {
+        if (record.Status == MaintenanceStatus.Completed)
+            throw AssetsWorkflowException.Conflict(
+                $"Maintenance {record.MaintenanceNumber} is already completed.");
+
+        if (record.Status == MaintenanceStatus.Cancelled)
+            throw AssetsWorkflowException.InvalidState(
+                $"Maintenance {record.MaintenanceNumber} was cancelled and cannot be completed. "
+                + "Raise a new maintenance record for work that was actually carried out.");
+    }
 }
 
 #region Asset Type Services
@@ -606,11 +695,48 @@ public class CompanyAssetService : ICompanyAssetService
         return assets.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<CompanyAssetSummaryDto>> GetDueForMaintenanceAsync(int daysAhead = 30)
+    public async Task<IEnumerable<AssetMaintenanceDueDto>> GetDueForMaintenanceAsync(
+        int daysAhead = 30, DateOnly? asOf = null)
     {
         var tenantId = GetTenantId();
-        var assets = await _assetRepo.GetDueForMaintenanceAsync(tenantId, daysAhead);
-        return assets.ToSummaryDtoList();
+
+        // D-gg. A negative horizon pushed the cut-off into the past, so the read answered 200 with
+        // an empty list — indistinguishable from an estate with nothing due, which is the one
+        // answer a maintenance screen must never receive by accident. The upper bound is a sanity
+        // clamp: past ten years every scheduled asset is "due" and the list stops meaning anything.
+        if (daysAhead < 0)
+            throw AssetsWorkflowException.Invalid(
+                "daysAhead cannot be negative. Use the overdue read for maintenance that has already slipped.");
+        if (daysAhead > 3650)
+            throw AssetsWorkflowException.Invalid("daysAhead cannot exceed 3650 (ten years).");
+
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var assets = await _assetRepo.GetDueForMaintenanceAsync(tenantId, at.AddDays(daysAhead));
+        return assets.ToMaintenanceDueDtoList(at);
+    }
+
+    public async Task<IEnumerable<AssetMaintenanceDueDto>> GetOverdueMaintenanceAsync(DateOnly? asOf = null)
+    {
+        var tenantId = GetTenantId();
+        var at = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Strictly before today: an asset due today is due, not late.
+        var assets = await _assetRepo.GetDueForMaintenanceAsync(tenantId, at.AddDays(-1));
+
+        // Most overdue first. The due read is ordered by date ascending, which for overdue rows is
+        // the same order — stated here anyway, because the one thing an exception list cannot do is
+        // put the worst row at the bottom.
+        return assets.ToMaintenanceDueDtoList(at)
+            .OrderBy(a => a.DaysRemaining)
+            .ToList();
+    }
+
+    public async Task<IEnumerable<AssetMaintenanceDueDto>> GetUnscheduledMaintenanceAsync()
+    {
+        var tenantId = GetTenantId();
+        var at = DateOnly.FromDateTime(DateTime.UtcNow);
+        var assets = await _assetRepo.GetUnscheduledMaintenanceAsync(tenantId);
+        return assets.ToMaintenanceDueDtoList(at);
     }
 
     public async Task<CompanyAssetDto> CreateAsync(CreateCompanyAssetDto dto)
@@ -1682,9 +1808,21 @@ public class AssetMaintenanceService : IAssetMaintenanceService
         return maintenances.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>Maintenance records falling in a date window, whatever their status.</summary>
+    /// <remarks>
+    /// D-hh: <c>from</c> after <c>to</c> used to answer <b>200 with an empty list</b> — the same
+    /// answer as a quiet fortnight. A window that runs backwards is a caller mistake, and slice 8
+    /// settled how this area answers those: refuse in words rather than let a wrong question look
+    /// like a reassuring answer.
+    /// </remarks>
     public async Task<IEnumerable<AssetMaintenanceSummaryDto>> GetScheduledMaintenanceAsync(DateTime from, DateTime to)
     {
         var tenantId = GetTenantId();
+
+        if (from > to)
+            throw AssetsWorkflowException.Invalid(
+                $"The maintenance window runs backwards: from {from:yyyy-MM-dd} is after to {to:yyyy-MM-dd}.");
+
         var maintenances = await _maintenanceRepo.GetScheduledMaintenanceAsync(tenantId, from, to);
         return maintenances.ToSummaryDtoList();
     }
@@ -1737,27 +1875,49 @@ public class AssetMaintenanceService : IAssetMaintenanceService
         await _unitOfWork.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Records the work as done, returns the asset to service, and advances the schedule.
+    /// </summary>
+    /// <remarks>
+    /// <para>Area 16 slice 9 rewrote all three of those clauses; every rule they now obey lives in
+    /// <see cref="AssetIntegrity"/> with the defect it closes. In outline: a completion can only
+    /// happen once and not on a cancelled record (D-cc); the asset comes back to the status it
+    /// actually has rather than always to <c>Available</c> (D-aa); and the next date is computed
+    /// from the <b>work's own date</b> plus the interval, deferring to a date the record states for
+    /// itself, and is written to the record as well as to the asset (D-bb).</para>
+    ///
+    /// <para><b>The record's own <c>NextMaintenanceDate</c> is written back even when it was
+    /// computed.</b> It is declared on the entity, on both read DTOs and on both write DTOs, and
+    /// before this slice nothing ever set it on completion — so every completed maintenance record
+    /// in the system answered "next: null" while the asset it belonged to carried a date. Two rows
+    /// disagreeing about one schedule is how a maintenance history stops being evidence.</para>
+    /// </remarks>
     public async Task CompleteMaintenanceAsync(Guid id, string? completionNotes = null)
     {
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
         
         var entity = await GetOwnedMaintenanceAsync(id);
+        AssetIntegrity.RequireCompletable(entity);
+
+        var asset = await GetOwnedAssetAsync(entity.AssetId);
+        var next = AssetIntegrity.NextMaintenanceDateFor(asset, entity);
 
         entity.Status = MaintenanceStatus.Completed;
         entity.Notes = completionNotes ?? entity.Notes;
+        entity.NextMaintenanceDate = next?.ToDateTime(TimeOnly.MinValue);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 
         await _maintenanceRepo.UpdateAsync(entity);
 
-        // Update asset status and maintenance dates
-        var asset = await GetOwnedAssetAsync(entity.AssetId);
-        asset.Status = CompanyAssetStatus.Available;
+        AssetIntegrity.RestoreFromMaintenance(asset);
         asset.LastMaintenanceDate = DateOnly.FromDateTime(entity.MaintenanceDate);
-        if (asset.MaintenanceIntervalDays.HasValue)
-        {
-            asset.NextMaintenanceDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(asset.MaintenanceIntervalDays.Value));
-        }
+
+        // Null is assignment, not omission: an asset that no longer requires regular maintenance has
+        // its stale date CLEARED here, so it stops appearing on a watchlist that filters on the flag
+        // it no longer sets.
+        asset.NextMaintenanceDate = next;
+
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = userId.ToString();
         await _assetRepo.UpdateAsync(asset);

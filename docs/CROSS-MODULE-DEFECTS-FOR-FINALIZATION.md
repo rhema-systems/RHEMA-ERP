@@ -1,4 +1,4 @@
-# Cross-Module Defects Found During HR Work — For Finalization
+﻿# Cross-Module Defects Found During HR Work — For Finalization
 
 **Opened 2026-08-17.**
 
@@ -496,6 +496,162 @@ enabled, *no* module's documents are listed in the designer at all.
    token list from documentation into an authoring aid.
 3. Consider refusing to save a template whose `Module` matches a catalog but whose `EventKey` matches
    no event in it. A template bound to nothing should not look saved.
+
+---
+
+## 8. Finance — the fixed-asset → Maintenance link is a field no screen can set
+
+**Severity: feature never usable.** Found 2026-08-24 while deciding HR's own link into the
+Maintenance register (area 16, slice 9).
+
+### What is broken
+
+`FixedAsset.MaintenanceAssetId` (`Entities/Finance/FixedAssets/FixedAsset.cs:117`) is a nullable FK
+plus navigation, commented *"Link to the physical asset/equipment record in Operations module
+(One-to-One relationship)"*. The service layer handles it correctly and completely:
+
+| site | what it does |
+|---|---|
+| `FixedAssetService.cs:125` | copies it from the create DTO onto the entity |
+| `FixedAssetService.cs:222` | copies it from the update DTO onto the entity |
+| `FixedAssetService.cs:336` | returns it on the read DTO |
+| `FixedAssetDtos.cs:112, 168, 191` | declared on the read, create and update DTOs |
+| `frontend/src/types/fixed-assets.ts:83, 131` | typed on the frontend, both shapes |
+
+And the **UI never renders an input for it**. In
+`frontend/src/app/finance/fixed-assets/register/new/page.tsx` the field appears exactly twice —
+initialised as `maintenanceAssetId: ''` in the form state (line 35) and forwarded as
+`formData.maintenanceAssetId || undefined` in the submit (line 68). There is no control, no picker,
+no lookup of `api/maintenance/assets` anywhere on the page. The edit page
+(`register/[id]/edit/page.tsx:62, 97`) is the same: it *loads* the existing value into state and
+sends it back, so it round-trips a value that nothing can ever put there in the first place.
+
+Because the state is initialised to the empty string and `'' || undefined` is `undefined`, every
+create posts `undefined` and every edit posts back whatever was already stored — which is always
+null.
+
+### What was proven
+
+Measured against the reference database (`ErpSystemDB`), 2026-08-24:
+
+```
+FixedAssets                                        4
+FixedAssets with MaintenanceAssetId IS NOT NULL     0
+MaintenanceAssets                                   1
+```
+
+Zero of four. The link has never been used, which is consistent with there being no way to use it
+short of calling the API by hand.
+
+### What it blocks
+
+1. **The integration the comment promises does not exist.** Nothing anywhere reads
+   `FixedAsset.MaintenanceAssetId` except the DTO round-trip that wrote it — no join, no report, no
+   screen showing a capitalised asset's service history, no screen showing a serviced asset's book
+   value.
+2. **It is being copied as a precedent.** HR area 16 slice 9 added `CompanyAsset.MaintenanceAssetId`
+   on the strength of this field being "the house convention" for reaching the Maintenance register.
+   The shape is right; the claim that it is established practice was not — it is one declaration
+   that has never carried a value. Anyone citing it should know that.
+
+### What a fix needs
+
+1. An asset picker on the fixed-asset create and edit forms, sourced from `GET api/maintenance/assets`
+   — the same control the Projects module already has in its Access tab
+   (`ProjectAccessTab.tsx:112-124`), which is a working example to copy rather than design.
+2. Decide whether the relationship is genuinely one-to-one as the comment says. Nothing enforces it:
+   there is no unique index on `FixedAssets.MaintenanceAssetId`, so two fixed assets can name one
+   maintenance asset today.
+3. If the link is not wanted, remove the column and the three DTO fields rather than leaving a
+   documented integration that has never run.
+
+---
+
+## 9. Projects — maintenance follow-through throws for every tenant, because its reference data is empty
+
+**Severity: blocking, shipped feature.** Found 2026-08-24 while researching how modules push work
+into the Maintenance module (area 16, slice 9b design).
+
+### What is broken
+
+`ProjectService.MaintenanceFollowThrough.cs` (432 lines) implements four user-facing actions that
+raise work inside the Maintenance module from a project:
+
+- `CreateJobCardFromCustomerVariationAsync`
+- `CreateWorkOrderFromCustomerVariationAsync`
+- `CreateJobCardFromDefectLiabilityCaseAsync`
+- `CreateWorkOrderFromDefectLiabilityCaseAsync`
+
+Each one resolves the Maintenance reference data it needs before calling
+`_jobCardService.CreateJobCardAsync` / `_workOrderService.CreateWorkOrderAsync`. The resolvers
+**select an existing row and throw when there is none** — they never create a default:
+
+```csharp
+// ResolveProjectMaintenanceTypeForActionAsync  (:244-268)
+?? throw new InvalidOperationException("No active maintenance types are configured for this tenant.");
+
+// ResolveProjectPriorityLevelForActionAsync    (:271-292)
+?? throw new InvalidOperationException("No active maintenance priority levels are configured for this tenant.");
+
+// ResolveProjectWorkOrderTypeForActionAsync    (:295-312)
+?? throw new InvalidOperationException("No active work order types are configured for this tenant.");
+```
+
+`WorkOrder` requires all four FKs — `AssetId`, `WorkOrderTypeId`, `MaintenanceTypeId`,
+`PriorityLevelId` (`MaintenanceEntities.cs:659-668`) — so none of these paths can degrade
+gracefully. `JobCard` needs `AssetId`, `MaintenanceTypeId` and `PriorityLevelId` (`:973-980`), so the
+job-card paths are blocked by two of the three empty lookups and the work-order paths by all three.
+
+### What was proven
+
+Measured against the reference database, 2026-08-24:
+
+```
+MaintenanceTypes             0
+PriorityLevels               0
+WorkOrderTypes               0
+MaintenanceAssetCategories   1
+MaintenanceAssets            1
+MaintenanceSchedules         0
+WorkOrders                   0
+AssetAdmissions              0
+```
+
+All three lookups the resolvers search are **empty**, so every one of the four actions reaches its
+`throw` on this database. `GlobalExceptionHandlingMiddleware` discards `InvalidOperationException`
+messages, so the user does not even receive the sentence that would tell them what to configure —
+they get a generic failure.
+
+### What it blocks
+
+1. **Four shipped actions with buttons in front of them.** `ProjectCustomerVariationsTab.tsx:101`
+   and `ProjectDefectsTab.tsx:109` gate the controls on
+   `project.assetLinks.some(item => Boolean(item.maintenanceAssetId))` — i.e. on a *project asset
+   link*, not on the reference data. Link a maintenance asset to a project and the buttons light up;
+   pressing them fails.
+2. **Every other module that wants to raise maintenance work.** HR area 16 slice 9b intends to push
+   an asset for repair. Following this module's pattern — the correct instinct, since it is the only
+   worked example in the codebase — inherits the same block. HR seeding another module's master data
+   is not an acceptable workaround, so slice 9b is being built on `AssetAdmission` instead, which
+   requires no reference data at all.
+3. **The Maintenance module's own PM engine.** `MaintenanceTriggerEvaluationBackgroundService` sweeps
+   every 30 minutes over `MaintenanceSchedule`; with 0 schedules and 0 maintenance types it has never
+   had a row to evaluate.
+
+### What a fix needs
+
+1. **Seed the three lookups per tenant.** `MaintenanceType`, `PriorityLevel` and `WorkOrderType` are
+   classification masters, not customer data — a system seed of the obvious set (Preventive /
+   Corrective / Inspection; Low / Medium / High / Critical; Standard / Emergency) makes every one of
+   these paths work immediately. Note that the resolvers already search by name for `"Corrective"`,
+   `"Medium"`, `"High"` and `"Standard"`, so those exact names are what the code expects to find.
+2. **Gate the UI on what actually blocks it.** The buttons should be disabled when the reference data
+   is missing, not only when an asset link is absent, or the user is offered an action that cannot
+   succeed.
+3. **Let the refusal speak.** These are `InvalidOperationException`s, which the global middleware
+   strips. The sentences are good ones — they name exactly what to configure — and the user never
+   sees them. Six HR areas have now needed a module-specific exception type for this reason; it is
+   worth raising as a platform decision rather than a seventh workaround.
 
 ---
 

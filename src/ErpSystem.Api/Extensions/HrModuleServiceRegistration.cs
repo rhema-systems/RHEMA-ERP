@@ -653,6 +653,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ISeparationReminderService, SeparationReminderService>();
         services.AddScoped<IProbationReminderService, ProbationReminderService>();
         services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
+        // Asset reminder engine (area 16 slice 9, AST-1): maintenance due, overdue, and
+        // never scheduled. Slice 11 adds insurance expiry and overdue returns to this one
+        // rather than starting a seventh.
+        services.AddScoped<IAssetReminderService, AssetReminderService>();
         // Travel's read-only window onto Finance's currency and exchange-rate masters —
         // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
         services.AddScoped<StaffTravelCurrencyBridge>();

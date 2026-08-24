@@ -1891,6 +1891,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
 
+            // Asset reminder engine (area 16 slice 9): daily sweep — maintenance due within
+            // the horizon, maintenance already overdue on the escalation ladder, and assets
+            // that require regular servicing with no next date at all. Sweep logic is scoped
+            // (IAssetReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.AssetReminderBackgroundService>();
+
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,
                 ErpSystem.Api.Services.TransactionalEmailQueue>();

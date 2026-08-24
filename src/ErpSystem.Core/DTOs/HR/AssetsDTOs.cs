@@ -166,6 +166,18 @@ public class CompanyAssetDto : BaseDto
     /// fields rather than offering an edit the API will refuse.
     /// </summary>
     public bool IsFinanceOwned => Source == AssetSource.FixedAssetsModule && FixedAssetId.HasValue;
+
+    /// <summary>
+    /// This asset's counterpart in the Maintenance module's register, where it has one. Slice 9.
+    /// </summary>
+    public Guid? MaintenanceAssetId { get; set; }
+
+    /// <summary>
+    /// True where this asset is known to the Maintenance module, so a screen can offer "send for
+    /// maintenance" rather than a dead button. It says nothing about who schedules the servicing:
+    /// HR watches its own assets whether or not they are linked.
+    /// </summary>
+    public bool IsKnownToMaintenance => MaintenanceAssetId.HasValue;
     
     // Identification
     public string? Manufacturer { get; set; }
@@ -384,6 +396,12 @@ public class CreateCompanyAssetDto : CreateDtoBase
     // Assignment
     public bool IsAssignable { get; set; }
 
+    /// <summary>
+    /// Slice 9 — this asset's counterpart in the Maintenance module's register, so work can be sent
+    /// there. HR keeps its own maintenance schedule either way.
+    /// </summary>
+    public Guid? MaintenanceAssetId { get; set; }
+
     // Maintenance
     public bool RequiresRegularMaintenance { get; set; }
 
@@ -500,6 +518,12 @@ public class UpdateCompanyAssetDto : UpdateDtoBase
 
     // Assignment
     public bool IsAssignable { get; set; }
+
+    /// <summary>
+    /// Slice 9 — this asset's counterpart in the Maintenance module's register, so work can be sent
+    /// there. HR keeps its own maintenance schedule either way.
+    /// </summary>
+    public Guid? MaintenanceAssetId { get; set; }
 
     // Maintenance
     public bool RequiresRegularMaintenance { get; set; }
@@ -991,6 +1015,19 @@ public class AssetMaintenanceSummaryDto
 {
     public Guid Id { get; set; }
     public string MaintenanceNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Which asset this row is about — <b>defect D-ee</b>, area 16 slice 9.
+    /// </summary>
+    /// <remarks>
+    /// The summary carried a name and no identity, so nothing reading a maintenance list could open
+    /// the asset behind a row, and two assets sharing a name were indistinguishable. This is the
+    /// same shape as D-y on the assignment summary: a list DTO that names a thing it cannot point
+    /// at. The name alone also made the list read disagree with the by-id read, which carries both.
+    /// </remarks>
+    public Guid AssetId { get; set; }
+
+    public string AssetNumber { get; set; } = string.Empty;
     public string AssetName { get; set; } = string.Empty;
     public DateTime MaintenanceDate { get; set; }
     public AssetMaintenanceType Type { get; set; }
@@ -2025,3 +2062,133 @@ public class AssetRentalPayrollLineDto
 
 #endregion
 
+#region Maintenance monitoring DTOs — area 16 slice 9, AST-1
+
+/// <summary>
+/// An asset whose maintenance is due, overdue, or has never been scheduled at all.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this type exists — defect D-ff.</b> The one monitoring read this module had,
+/// <c>GET api/Assets/due-maintenance</c>, answered with <see cref="CompanyAssetSummaryDto"/>, which
+/// carries <b>no maintenance date of any kind</b>. It could therefore say <i>that</i> a set of
+/// assets needed attention and never <i>when</i>, <i>how late</i>, or <i>in what order</i> — which
+/// is the entire content of AST-1's "there must be a way to monitor it". A list of thirty assets
+/// with no dates is not a schedule; it is a hint that somebody should go and look.</para>
+///
+/// <para><b><see cref="DaysRemaining"/> is signed on purpose.</b> Negative is overdue. Collapsing it
+/// to an absolute number plus a flag would let a caller sort a list and put the most urgent row at
+/// the bottom, which is the failure mode a monitoring screen cannot survive.</para>
+///
+/// <para><see cref="LastMaintenanceDate"/> and <see cref="MaintenanceIntervalDays"/> travel with the
+/// row because the first question anyone asks about an overdue asset is whether the schedule is
+/// real — a 30-day interval on something last serviced two years ago is a data problem, not a
+/// maintenance problem, and the two need telling apart from the list.</para>
+/// </remarks>
+public class AssetMaintenanceDueDto
+{
+    public Guid Id { get; set; }
+    public string AssetNumber { get; set; } = string.Empty;
+    public string AssetTag { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetTypeName { get; set; } = string.Empty;
+
+    public CompanyAssetStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    public HRAssetCondition Condition { get; set; }
+    public string ConditionName => Condition.ToString();
+
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
+    public Guid? UnitId { get; set; }
+    public string? UnitName { get; set; }
+
+    /// <summary>
+    /// Who is holding it, when somebody is. Maintenance on an issued asset has to be arranged with
+    /// the holder, so a schedule that cannot name them sends the planner back to the register.
+    /// </summary>
+    public bool IsCurrentlyAssigned { get; set; }
+    public Guid? CurrentAssignedToId { get; set; }
+    public string? CurrentAssignedToName { get; set; }
+
+    public bool RequiresRegularMaintenance { get; set; }
+    public int? MaintenanceIntervalDays { get; set; }
+    public DateOnly? LastMaintenanceDate { get; set; }
+
+    /// <summary>Null only on the unscheduled read — see <see cref="IsScheduled"/>.</summary>
+    public DateOnly? NextMaintenanceDate { get; set; }
+
+    /// <summary>False when the asset requires maintenance and no next date has ever been set.</summary>
+    public bool IsScheduled { get; set; }
+
+    /// <summary>Signed: negative means overdue by that many days. Zero on the unscheduled read.</summary>
+    public int DaysRemaining { get; set; }
+
+    public bool IsOverdue { get; set; }
+
+    /// <summary>The date the read was taken as at, echoed back so a stale screen is detectable.</summary>
+    public DateOnly AsOf { get; set; }
+}
+
+#endregion
+
+#region Asset reminder engine DTOs — area 16 slice 9
+
+public class AssetReminderRunResultDto
+{
+    public Guid RunId { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+
+    /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
+    public int AlreadySent { get; set; }
+}
+
+/// <summary>
+/// One thing a sweep would fire. Carries a reference and a date and nothing sensitive — see the
+/// remarks on <c>AssetReminderDispatchLog</c>.
+/// </summary>
+public class AssetReminderPreviewItemDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public Guid AssetId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public string DedupeKey { get; set; } = string.Empty;
+
+    /// <summary>True when a previous sweep already claimed this key, so a real run would skip it.</summary>
+    public bool AlreadySent { get; set; }
+}
+
+public class AssetReminderRunDto
+{
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public Guid? TriggeredByUserId { get; set; }
+    public int RemindersQueued { get; set; }
+}
+
+public class AssetReminderLogEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public Guid AssetId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+#endregion

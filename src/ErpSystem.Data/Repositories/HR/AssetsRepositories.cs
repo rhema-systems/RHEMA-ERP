@@ -186,9 +186,14 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, int daysAhead = 30)
+    /// <summary>
+    /// Assets whose next maintenance falls on or before <paramref name="onOrBefore"/>. Area 16
+    /// slice 9 gave this an explicit horizon date instead of computing one from the clock, so the
+    /// service can offer an <c>asOf</c> seam and the reminder sweep and the read agree by
+    /// construction rather than by coincidence.
+    /// </summary>
+    public async Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, DateOnly onOrBefore)
     {
-        var futureDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(daysAhead));
         return await _context.Set<CompanyAsset>()
             .Include(ca => ca.AssetType)
             .Include(ca => ca.Location)
@@ -197,8 +202,34 @@ public class CompanyAssetRepository : GenericRepository<CompanyAsset>, ICompanyA
             .Where(ca => ca.TenantId == tenantId 
                 && ca.RequiresRegularMaintenance 
                 && ca.NextMaintenanceDate != null 
-                && ca.NextMaintenanceDate <= futureDate
+                && ca.NextMaintenanceDate <= onOrBefore
                 && !ca.IsDeleted)
+            .OrderBy(ca => ca.NextMaintenanceDate)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Assets that require regular maintenance and have <b>no next date at all</b> — area 16 slice 9.
+    /// </summary>
+    /// <remarks>
+    /// These are invisible to every other maintenance read, because all of them filter on
+    /// <c>NextMaintenanceDate != null</c>. An asset flagged as needing regular servicing that has
+    /// never been scheduled is precisely the one a monitoring feature must not lose, and before this
+    /// slice it was the one row shape guaranteed never to appear anywhere.
+    /// </remarks>
+    public async Task<IEnumerable<CompanyAsset>> GetUnscheduledMaintenanceAsync(Guid tenantId)
+    {
+        return await _context.Set<CompanyAsset>()
+            .Include(ca => ca.AssetType)
+            .Include(ca => ca.Location)
+            .Include(ca => ca.Unit)
+            .Include(ca => ca.CurrentAssignedTo)
+            .Where(ca => ca.TenantId == tenantId
+                && ca.RequiresRegularMaintenance
+                && ca.NextMaintenanceDate == null
+                && ca.Status != CompanyAssetStatus.Disposed
+                && !ca.IsDeleted)
+            .OrderBy(ca => ca.AssetNumber)
             .ToListAsync();
     }
 
@@ -433,6 +464,11 @@ public class AssetMaintenanceRepository : GenericRepository<AssetMaintenance>, I
     public async Task<IEnumerable<AssetMaintenance>> GetByAssetIdAsync(Guid assetId)
     {
         return await _context.Set<AssetMaintenance>()
+            // ⚠ D-dd, area 16 slice 9. Without this Include every row of this list answered with a
+            // blank asset name while the by-id read filled it — the seventh time in this area that a
+            // mapping and the Include that feeds it were changed apart. The assertion that catches
+            // it either way round is "the list read and the by-id read agree".
+            .Include(am => am.Asset)
             .Include(am => am.PerformedBy)
             .Where(am => am.AssetId == assetId && !am.IsDeleted)
             .OrderByDescending(am => am.MaintenanceDate)

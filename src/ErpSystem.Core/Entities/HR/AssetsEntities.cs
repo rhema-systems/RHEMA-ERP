@@ -8,6 +8,12 @@ using ErpSystem.Core.Enums;
 // puts a silent trap one edit away from firing, and this exact collision has already bitten twice.
 using FixedAsset = ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset;
 
+// ⚠ An ALIAS again, and the reason is sharper here than above: the Maintenance namespace
+// declares its OWN `AssetType`, and so does this file. A plain
+// `using ErpSystem.Core.Entities.Maintenance` would put two `AssetType`s in scope in the one
+// file that defines HR's — build plan §3.3, collision 1.
+using MaintenanceAsset = ErpSystem.Core.Entities.Maintenance.MaintenanceAsset;
+
 namespace ErpSystem.Core.Entities.HR.Assets;
 
 /// <summary>
@@ -108,6 +114,40 @@ public class CompanyAsset : TenantEntity
     /// drifts.</para>
     /// </remarks>
     public Guid? FixedAssetId { get; set; }
+
+    /// <summary>
+    /// This asset's counterpart in the Maintenance module's register — the handle HR sends work
+    /// out on. Slice 9.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>It is a handle, not an abdication.</b> Everything in the Maintenance module targets
+    /// an asset by <c>MaintenanceAsset.Id</c> — an admission to the workshop, a job card, a work
+    /// order — so without this column there is no way for HR to name the thing it wants worked on.
+    /// Slice 9b uses it to push: HR sends an asset in for repair and gets a reference back.</para>
+    ///
+    /// <para><b>HR keeps its own schedule regardless.</b> A linked asset still appears on HR's
+    /// maintenance watchlists and is still chased by HR's reminder sweep. The opposite rule was
+    /// written first and reversed on the same day it was written: standing HR down on link would
+    /// mean that sending a laptop out for a one-off repair silently switched off its servicing
+    /// reminders, which is the precise opposite of what a push is for. The Maintenance module
+    /// schedules the plant <i>it</i> owns; HR schedules what HR issues to people, and an asset can
+    /// be both known to that module and watched by this one.</para>
+    ///
+    /// <para><b>The live precedent is Projects, not Finance.</b> <c>ProjectAssetLink</c> carries this
+    /// same column beside a <c>CompanyAssetId</c> and a <c>JobCardId</c>, has a real picker behind it
+    /// (the project Access tab), and <c>ProjectService.MaintenanceFollowThrough</c> raises job cards
+    /// and work orders on it — 432 lines of exactly the push slice 9b needs, worth copying rather
+    /// than reinventing. Finance's <c>FixedAsset.MaintenanceAssetId</c> is the same shape but has
+    /// never carried a value on any row, because no screen renders an input for it (cross-module
+    /// defect 8) — so cite it for the shape and not as evidence that the integration works.</para>
+    ///
+    /// <para>⚠ Projects' pushes cannot execute on this database: its resolvers throw when
+    /// <c>MaintenanceType</c>, <c>PriorityLevel</c> or <c>WorkOrderType</c> has no rows, and all
+    /// three are empty (cross-module defect 9). That is why slice 9b pushes via
+    /// <c>AssetAdmission</c>, which needs none of them, and adds the work-order path only once those
+    /// masters are seeded.</para>
+    /// </remarks>
+    public Guid? MaintenanceAssetId { get; set; }
 
     // Identification
     [MaxLength(100)]
@@ -241,6 +281,9 @@ public class CompanyAsset : TenantEntity
 
     [ForeignKey(nameof(FixedAssetId))]
     public virtual FixedAsset? FixedAsset { get; set; }
+
+    [ForeignKey(nameof(MaintenanceAssetId))]
+    public virtual MaintenanceAsset? MaintenanceAsset { get; set; }
 
     public virtual ICollection<AssetAssignment> AssignmentHistory { get; set; } = new List<AssetAssignment>();
 

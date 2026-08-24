@@ -46,7 +46,11 @@ public interface ICompanyAssetRepository : IGenericRepository<CompanyAsset>
     Task<IEnumerable<CompanyAsset>> GetByLocationAsync(Guid locationId);
     Task<IEnumerable<CompanyAsset>> GetByEmployeeAsync(Guid employeeId);
     Task<IEnumerable<CompanyAsset>> GetAvailableForAssignmentAsync(Guid tenantId);
-    Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, int daysAhead = 30);
+    /// <summary>Assets whose next maintenance falls on or before the supplied date. Area 16 slice 9.</summary>
+    Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, DateOnly onOrBefore);
+
+    /// <summary>Assets that require regular maintenance and have no next date at all. Area 16 slice 9.</summary>
+    Task<IEnumerable<CompanyAsset>> GetUnscheduledMaintenanceAsync(Guid tenantId);
     Task<IEnumerable<CompanyAsset>> GetWarrantyExpiringAsync(Guid tenantId, int daysAhead = 30);
 }
 

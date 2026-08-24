@@ -40,7 +40,28 @@ public interface ICompanyAssetService
     Task<IEnumerable<CompanyAssetSummaryDto>> GetByAssetTypeAsync(Guid assetTypeId);
     Task<IEnumerable<CompanyAssetSummaryDto>> GetAvailableForAssignmentAsync();
     Task<IEnumerable<CompanyAssetSummaryDto>> GetByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<CompanyAssetSummaryDto>> GetDueForMaintenanceAsync(int daysAhead = 30);
+    /// <summary>
+    /// AST-1 — the maintenance watchlist, in three readings of the same question.
+    /// </summary>
+    /// <remarks>
+    /// <para>Split into three because they are three different jobs. <b>Due</b> is a plan: what to
+    /// book in the next <paramref name="daysAhead"/> days. <b>Overdue</b> is an exception list:
+    /// what has already slipped, worst first, and it must not be diluted by thirty rows that are
+    /// merely approaching. <b>Unscheduled</b> is a data-quality list: assets that say they need
+    /// regular servicing and have never been given a date — the rows every other read filters
+    /// away, and the ones a monitoring feature most needs to surface.</para>
+    ///
+    /// <para><paramref name="asOf"/> exists for the same reason it does on the reminder preview:
+    /// the schedule is written by the server from the interval, so without it a test can only ever
+    /// assert what happens to be true today. It reads only.</para>
+    /// </remarks>
+    Task<IEnumerable<AssetMaintenanceDueDto>> GetDueForMaintenanceAsync(int daysAhead = 30, DateOnly? asOf = null);
+
+    /// <summary>AST-1 — assets whose maintenance date has already passed, most overdue first.</summary>
+    Task<IEnumerable<AssetMaintenanceDueDto>> GetOverdueMaintenanceAsync(DateOnly? asOf = null);
+
+    /// <summary>AST-1 — assets that require regular maintenance and have never been scheduled.</summary>
+    Task<IEnumerable<AssetMaintenanceDueDto>> GetUnscheduledMaintenanceAsync();
     Task<CompanyAssetDto> CreateAsync(CreateCompanyAssetDto dto);
 
     /// <summary>
@@ -127,6 +148,13 @@ public interface IAssetMaintenanceService
     Task<AssetMaintenanceDto> CreateAsync(CreateAssetMaintenanceDto dto);
     Task<AssetMaintenanceDto> UpdateAsync(Guid id, UpdateAssetMaintenanceDto dto);
     Task DeleteAsync(Guid id);
+    /// <summary>
+    /// Records the work as done, returns the asset to service, and advances the schedule — AST-1.
+    /// </summary>
+    /// <remarks>
+    /// See <c>AssetMaintenanceService.CompleteMaintenanceAsync</c> for what each of those three
+    /// clauses had to be fixed to mean (defects D-aa, D-bb, D-cc).
+    /// </remarks>
     Task CompleteMaintenanceAsync(Guid id, string? completionNotes = null);
 }
 

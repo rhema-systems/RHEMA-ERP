@@ -193,6 +193,7 @@ public static class AssetsMappingExtensions
             AdditionalRemarks = entity.AdditionalRemarks,
             Source = entity.Source,
             FixedAssetId = entity.FixedAssetId,
+            MaintenanceAssetId = entity.MaintenanceAssetId,
             UnitId = entity.UnitId,
             UnitName = entity.Unit?.Name,
             InsuranceExpiryDate = entity.InsuranceExpiryDate,
@@ -281,6 +282,7 @@ public static class AssetsMappingExtensions
             AdditionalRemarks = entity.AdditionalRemarks,
             Source = entity.Source,
             FixedAssetId = entity.FixedAssetId,
+            MaintenanceAssetId = entity.MaintenanceAssetId,
             UnitId = entity.UnitId,
             UnitName = entity.Unit?.Name,
             InsuranceExpiryDate = entity.InsuranceExpiryDate,
@@ -328,6 +330,7 @@ public static class AssetsMappingExtensions
             LocationId = dto.LocationId,
             LocationDetails = dto.LocationDetails,
             IsAssignable = dto.IsAssignable,
+            MaintenanceAssetId = dto.MaintenanceAssetId,
             RequiresRegularMaintenance = dto.RequiresRegularMaintenance,
             MaintenanceIntervalDays = dto.MaintenanceIntervalDays,
             IsInsured = dto.IsInsured,
@@ -369,6 +372,7 @@ public static class AssetsMappingExtensions
         entity.LocationId = dto.LocationId;
         entity.LocationDetails = dto.LocationDetails;
         entity.IsAssignable = dto.IsAssignable;
+        entity.MaintenanceAssetId = dto.MaintenanceAssetId;
         entity.RequiresRegularMaintenance = dto.RequiresRegularMaintenance;
         entity.MaintenanceIntervalDays = dto.MaintenanceIntervalDays;
         entity.LastMaintenanceDate = dto.LastMaintenanceDate;
@@ -625,6 +629,10 @@ public static class AssetsMappingExtensions
         {
             Id = entity.Id,
             MaintenanceNumber = entity.MaintenanceNumber,
+            // D-ee. Kept next to the name so a future edit cannot take one and leave the other —
+            // the by-id read carries all three and the two reads are asserted to agree.
+            AssetId = entity.AssetId,
+            AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
             AssetName = entity.Asset?.AssetName ?? string.Empty,
             MaintenanceDate = entity.MaintenanceDate,
             Type = entity.Type,
@@ -675,6 +683,55 @@ public static class AssetsMappingExtensions
         entity.Notes = dto.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
+    }
+
+    /// <summary>
+    /// Projects an asset onto the maintenance watchlist row — area 16 slice 9, AST-1, D-ff.
+    /// </summary>
+    /// <remarks>
+    /// One projection for all three reads on purpose. Due, overdue and unscheduled differ only in
+    /// which assets they select; if each computed its own <c>daysRemaining</c> the three lists could
+    /// disagree about the same asset on the same day, and a schedule that contradicts itself is
+    /// worse than no schedule.
+    /// </remarks>
+    public static AssetMaintenanceDueDto ToMaintenanceDueDto(this CompanyAsset entity, DateOnly asOf)
+    {
+        var next = entity.NextMaintenanceDate;
+        var days = next.HasValue ? next.Value.DayNumber - asOf.DayNumber : 0;
+
+        return new AssetMaintenanceDueDto
+        {
+            Id = entity.Id,
+            AssetNumber = entity.AssetNumber,
+            AssetTag = entity.AssetTag,
+            AssetName = entity.AssetName,
+            AssetTypeName = entity.AssetType?.Name ?? string.Empty,
+            Status = entity.Status,
+            Condition = entity.Condition,
+            LocationId = entity.LocationId,
+            LocationName = entity.Location?.Name,
+            UnitId = entity.UnitId,
+            UnitName = entity.Unit?.Name,
+            IsCurrentlyAssigned = entity.IsCurrentlyAssigned,
+            CurrentAssignedToId = entity.CurrentAssignedToId,
+            CurrentAssignedToName = entity.CurrentAssignedTo != null
+                ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}"
+                : null,
+            RequiresRegularMaintenance = entity.RequiresRegularMaintenance,
+            MaintenanceIntervalDays = entity.MaintenanceIntervalDays,
+            LastMaintenanceDate = entity.LastMaintenanceDate,
+            NextMaintenanceDate = next,
+            IsScheduled = next.HasValue,
+            DaysRemaining = days,
+            IsOverdue = next.HasValue && days < 0,
+            AsOf = asOf,
+        };
+    }
+
+    public static List<AssetMaintenanceDueDto> ToMaintenanceDueDtoList(
+        this IEnumerable<CompanyAsset> entities, DateOnly asOf)
+    {
+        return entities.Select(e => e.ToMaintenanceDueDto(asOf)).ToList();
     }
 
     public static List<AssetMaintenanceSummaryDto> ToSummaryDtoList(this IEnumerable<AssetMaintenance> entities)

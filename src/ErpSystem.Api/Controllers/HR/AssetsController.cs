@@ -313,12 +313,54 @@ public class AssetsController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Assets due for maintenance.</summary>
+    /// <summary>AST-1 — assets whose maintenance falls due within the horizon.</summary>
+    /// <remarks>
+    /// <para>Answers <see cref="AssetMaintenanceDueDto"/>, not the register summary. Until slice 9
+    /// this route returned <c>CompanyAssetSummaryDto</c>, which carries no maintenance date of any
+    /// kind — so the only monitoring read the module had could say that assets needed attention and
+    /// never when, how late, or in what order (D-ff).</para>
+    ///
+    /// <para><c>asOf</c> reads only and claims nothing. It exists because the schedule is written by
+    /// the server from the interval, so without it a test can assert only what happens to be true
+    /// today — the same seam the reminder preview offers, for the same reason.</para>
+    /// </remarks>
     [HttpGet("due-maintenance")]
     [Authorize(Roles = HrRoles)]
-    public async Task<ActionResult<IEnumerable<CompanyAssetSummaryDto>>> GetDueForMaintenance([FromQuery] int daysAhead = 30)
+    public async Task<ActionResult<IEnumerable<AssetMaintenanceDueDto>>> GetDueForMaintenance(
+        [FromQuery] int daysAhead = 30,
+        [FromQuery] DateOnly? asOf = null)
     {
-        var result = await _companyAssetService.GetDueForMaintenanceAsync(daysAhead);
+        var result = await _companyAssetService.GetDueForMaintenanceAsync(daysAhead, asOf);
+        return Ok(result);
+    }
+
+    /// <summary>AST-1 — assets whose maintenance date has already passed, most overdue first.</summary>
+    /// <remarks>
+    /// Its own read rather than a filter on the one above, because it answers a different question.
+    /// "What should I book this month" and "what have we let slip" are different jobs for different
+    /// people, and eleven overdue rows inside a list of two hundred due ones are lost rows.
+    /// </remarks>
+    [HttpGet("overdue-maintenance")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetMaintenanceDueDto>>> GetOverdueMaintenance(
+        [FromQuery] DateOnly? asOf = null)
+    {
+        var result = await _companyAssetService.GetOverdueMaintenanceAsync(asOf);
+        return Ok(result);
+    }
+
+    /// <summary>AST-1 — assets that require regular maintenance and have never been scheduled.</summary>
+    /// <remarks>
+    /// The rows every other maintenance read filters away: each of them requires
+    /// <c>NextMaintenanceDate != null</c>, so an asset flagged as needing regular servicing that
+    /// nobody has ever given a date appeared on no list anywhere. That is the one asset shape a
+    /// monitoring feature must not lose, since nothing about it will ever become due.
+    /// </remarks>
+    [HttpGet("unscheduled-maintenance")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetMaintenanceDueDto>>> GetUnscheduledMaintenance()
+    {
+        var result = await _companyAssetService.GetUnscheduledMaintenanceAsync();
         return Ok(result);
     }
 
