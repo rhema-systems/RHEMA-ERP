@@ -11,6 +11,7 @@ The maintained integration artifacts are:
 - [Finance Integration Consumer-Test Template](Finance/finance-integration-consumer-test-template.md) — reusable request-capture assertions and CI expectations.
 - [FIN-INT-006 Fixed Asset Disposal Reference Contract](Finance/fixed-asset-disposal-ar-tax-cash-contract.md) — first complete orchestration example.
 - [FIN-INT-015 Procurement Budget Commitment Contract](Finance/procurement-finance-budget-commitment-contract.md) — Finance-owned availability/reservation boundary for Procurement consumers.
+- [Finance Coding Dimensions Architecture](Finance/finance-coding-dimensions-architecture.md) — structural-account versus transaction-dimension ownership, posting, reporting and budget rollout.
 
 ## Quick Integration Overview
 
@@ -44,6 +45,11 @@ Every posting-capable integration should build a `FinancePostingRequestDto` with
 - `FunctionalCurrencyCode`
 - deterministic `IdempotencyKey`
 - balanced `FinancePostingLineDto` lines
+
+`FinancePostingLineDto.Dimensions` is an additive Finance 1.1 input. During adapter certification it
+is optional. A producer supplies dimension codes plus a configured value code or canonical source-
+entity lineage; it must not select a stored Finance dimension-set ID. Finance resolves the immutable
+set. Required dimension rules become posting errors only after the producer adapter is certified.
 
 Source metadata is not optional. Audit trail, duplicate-posting protection, reversal planning, report drill-through, settlement diagnostics, and migration sign-off all depend on stable source metadata.
 

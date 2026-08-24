@@ -6,11 +6,14 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -513,6 +516,194 @@ public sealed class FinancePostingEngineTests
         (await db.JournalEntries.CountAsync()).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Category", "FinanceDimensions")]
+    public async Task PostAsync_ShouldResolveAndReuseCanonicalDimensionSet_WithoutChangingLegacyLines()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var expense = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var payable = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        SeedDimensionValue(db, tenantId, "DEPARTMENT", "Department", "EST", "Estate", 1);
+        SeedDimensionValue(db, tenantId, "FUND", "Fund", "CAPEX", "Capital", 2);
+        await db.SaveChangesAsync();
+
+        var firstRequest = CreateRequest(tenantId, expense.Id, payable.Id);
+        firstRequest.Lines[0].Dimensions = new[]
+        {
+            new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "EST" },
+            new FinancePostingDimensionValueDto { DimensionCode = "FUND", ValueCode = "CAPEX" }
+        };
+        var service = CreateService(db, tenantId);
+        var first = await service.PostAsync(firstRequest);
+
+        var secondRequest = CreateRequest(tenantId, expense.Id, payable.Id);
+        secondRequest.Lines[0].Dimensions = new[]
+        {
+            new FinancePostingDimensionValueDto { DimensionCode = "fund", ValueCode = "capex" },
+            new FinancePostingDimensionValueDto { DimensionCode = "department", ValueCode = "est" }
+        };
+        var second = await service.PostAsync(secondRequest);
+
+        var sets = await db.FinanceDimensionSets.Include(x => x.Items).ToListAsync();
+        sets.Should().ContainSingle();
+        sets[0].Items.Should().HaveCount(2);
+        sets[0].DisplayValue.Should().Be("DEPARTMENT=EST · FUND=CAPEX");
+
+        var firstLines = await db.AccountTransactions.Where(x => x.JournalEntryId == first.JournalEntryId)
+            .OrderBy(x => x.LineNumber).ToListAsync();
+        var secondLines = await db.AccountTransactions.Where(x => x.JournalEntryId == second.JournalEntryId)
+            .OrderBy(x => x.LineNumber).ToListAsync();
+        firstLines[0].FinanceDimensionSetId.Should().Be(sets[0].Id);
+        secondLines[0].FinanceDimensionSetId.Should().Be(sets[0].Id);
+        firstLines[1].FinanceDimensionSetId.Should().BeNull("legacy and control lines remain compatible while adapters are certified");
+        secondLines[1].FinanceDimensionSetId.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "FinanceDimensions")]
+    public async Task PostAsync_ShouldRejectDimensionValueFromAnotherTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTHER");
+        SeedOpenPeriod(db, tenantId);
+        var expense = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var payable = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        SeedDimensionValue(db, otherTenantId, "DEPARTMENT", "Department", "EST", "Estate", 1);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, expense.Id, payable.Id);
+        request.Lines[0].Dimensions = new[]
+        {
+            new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "EST" }
+        };
+
+        var act = () => CreateService(db, tenantId).PostAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("One or more Finance dimensions were not found or are inactive for this tenant.");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinanceDimensionSets.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "FinanceDimensions")]
+    public async Task PostAsync_ShouldRejectArbitraryStoredDimensionSetOnOrdinaryPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var expense = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var payable = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        SeedDimensionValue(db, tenantId, "DEPARTMENT", "Department", "EST", "Estate", 1);
+        await db.SaveChangesAsync();
+
+        var original = CreateRequest(tenantId, expense.Id, payable.Id);
+        original.Lines[0].Dimensions = new[]
+        {
+            new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "EST" }
+        };
+        await CreateService(db, tenantId).PostAsync(original);
+        var storedSetId = await db.FinanceDimensionSets.Select(x => x.Id).SingleAsync();
+
+        var forged = CreateRequest(tenantId, expense.Id, payable.Id);
+        forged.Lines[0].FinanceDimensionSetId = storedSetId;
+        var act = () => CreateService(db, tenantId).PostAsync(forged);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Stored Finance dimension-set IDs may only be reused from an exact Finance journal line.");
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "FinanceDimensions")]
+    public async Task Reversal_ShouldPreserveExactHistoricalDimensionSet_AfterValueDeactivation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var department = SeedDimensionValue(db, tenantId, "DEPARTMENT", "Department", "SALES", "Sales", 1);
+        await db.SaveChangesAsync();
+
+        var request = CreateRequest(tenantId, cash.Id, revenue.Id);
+        foreach (var line in request.Lines)
+        {
+            line.Dimensions = new[]
+            {
+                new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "SALES" }
+            };
+        }
+        var service = CreateService(db, tenantId);
+        var original = await service.PostAsync(request);
+        var originalSetId = await db.FinanceDimensionSets.Select(x => x.Id).SingleAsync();
+
+        department.IsActive = false;
+        department.Name = "Renamed after posting";
+        await db.SaveChangesAsync();
+
+        var plan = await service.GetReversalPlanAsync(original.PostingEventId, "Correct classification", new DateTime(2026, 7, 5));
+        plan.ReversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
+        var reversal = await service.PostAsync(new FinancePostingRequestDto
+        {
+            SourceModule = "TEST",
+            SourceDocumentType = "TestDocumentReversal",
+            SourceDocumentId = request.SourceDocumentId,
+            SourceDocumentTenantId = tenantId,
+            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+            ReversalReason = plan.Reason,
+            ReversalType = "Manual",
+            PostingAction = plan.PostingAction,
+            SourceDocumentReference = "REV-SRC-001",
+            Description = "Exact dimension reversal",
+            PostingDate = plan.ReversalDate,
+            JournalType = "Reversing",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS",
+            Lines = plan.ReversalLines
+        });
+
+        var reversalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == reversal.JournalEntryId).ToListAsync();
+        reversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
+        (await db.FinanceDimensionSets.CountAsync()).Should().Be(1);
+        (await db.FinanceDimensionSetItems.SingleAsync()).DimensionValueNameSnapshot.Should().Be("Sales");
+    }
+
+    [Fact]
+    [Trait("Category", "FinanceDimensions")]
+    public void Migration_ShouldAddDimensionFoundationAndNullablePostedLineLinkage()
+    {
+        var migration = new TestFinanceDimensionsMigration();
+        var operations = migration.BuildUpOperations();
+
+        operations.OfType<CreateTableOperation>().Select(x => x.Name).Should().BeEquivalentTo(new[]
+        {
+            "FinanceDimensionDefinitions",
+            "FinanceDimensionValues",
+            "FinanceDimensionSets",
+            "FinanceDimensionSetItems",
+            "FinanceDimensionAccountRules"
+        });
+        operations.OfType<AddColumnOperation>().Should().ContainSingle(x =>
+            x.Table == "AccountTransactions" && x.Name == "FinanceDimensionSetId" && x.IsNullable);
+        operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(x =>
+            x.Table == "AccountTransactions"
+            && x.PrincipalTable == "FinanceDimensionSets"
+            && x.OnDelete == ReferentialAction.Restrict);
+
+        var down = migration.BuildDownOperations();
+        down.OfType<DropColumnOperation>().Should().ContainSingle(x =>
+            x.Table == "AccountTransactions" && x.Name == "FinanceDimensionSetId");
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -521,6 +712,23 @@ public sealed class FinancePostingEngineTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private sealed class TestFinanceDimensionsMigration : AddFinanceTransactionDimensions
+    {
+        public IReadOnlyList<MigrationOperation> BuildUpOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
+
+        public IReadOnlyList<MigrationOperation> BuildDownOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Down(builder);
+            return builder.Operations;
+        }
     }
 
     private static FinancePostingEngine CreateService(
@@ -639,6 +847,41 @@ public sealed class FinancePostingEngineTests
         };
         db.ModuleDefinitions.Add(module);
         return module;
+    }
+
+    private static FinanceDimensionValue SeedDimensionValue(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string dimensionCode,
+        string dimensionName,
+        string valueCode,
+        string valueName,
+        int displayOrder)
+    {
+        var definition = new FinanceDimensionDefinition
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = dimensionCode,
+            Name = dimensionName,
+            Classification = "Analytical",
+            ValueSourceType = "Lookup",
+            IsActive = true,
+            DisplayOrder = displayOrder
+        };
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = valueCode,
+            Name = valueName,
+            EffectiveDate = new DateTime(2026, 1, 1),
+            IsActive = true
+        };
+        db.FinanceDimensionDefinitions.Add(definition);
+        db.FinanceDimensionValues.Add(value);
+        return value;
     }
 
     private static ExchangeRate SeedExchangeRate(

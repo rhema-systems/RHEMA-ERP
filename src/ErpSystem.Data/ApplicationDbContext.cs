@@ -102,6 +102,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
       public DbSet<FinancePeriodReopenRequest> FinancePeriodReopenRequests { get; set; }
     public DbSet<AccountSegmentStructure> AccountSegmentStructures { get; set; }
     public DbSet<SegmentLookupValue> SegmentLookupValues { get; set; }
+    public DbSet<FinanceDimensionDefinition> FinanceDimensionDefinitions { get; set; }
+    public DbSet<FinanceDimensionValue> FinanceDimensionValues { get; set; }
+    public DbSet<FinanceDimensionSet> FinanceDimensionSets { get; set; }
+    public DbSet<FinanceDimensionSetItem> FinanceDimensionSetItems { get; set; }
+    public DbSet<FinanceDimensionAccountRule> FinanceDimensionAccountRules { get; set; }
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
@@ -2949,6 +2954,64 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FinanceDimensionDefinition>(entity =>
+        {
+            entity.ToTable("FinanceDimensionDefinitions");
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+            entity.HasCheckConstraint("CK_FinanceDimensionDefinitions_Classification",
+                "[Classification] IN ('Analytical','Balancing','Derived')");
+            entity.HasCheckConstraint("CK_FinanceDimensionDefinitions_ValueSourceType",
+                "[ValueSourceType] IN ('Lookup','EntityBacked')");
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionValue>(entity =>
+        {
+            entity.ToTable("FinanceDimensionValues");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionDefinitionId, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionDefinitionId, e.SourceEntityType, e.SourceEntityId })
+                .IsUnique().HasFilter("[SourceEntityId] IS NOT NULL");
+            entity.HasOne(e => e.FinanceDimensionDefinition).WithMany(e => e.Values)
+                .HasForeignKey(e => e.FinanceDimensionDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ParentValue).WithMany(e => e.ChildValues)
+                .HasForeignKey(e => e.ParentValueId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionSet>(entity =>
+        {
+            entity.ToTable("FinanceDimensionSets");
+            entity.HasIndex(e => new { e.TenantId, e.CombinationHash }).IsUnique();
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionSetItem>(entity =>
+        {
+            entity.ToTable("FinanceDimensionSetItems");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionSetId, e.FinanceDimensionDefinitionId }).IsUnique();
+            entity.HasOne(e => e.FinanceDimensionSet).WithMany(e => e.Items)
+                .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionDefinition).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionValue).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionValueId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceDimensionAccountRule>(entity =>
+        {
+            entity.ToTable("FinanceDimensionAccountRules");
+            entity.HasIndex(e => new { e.TenantId, e.AccountId, e.FinanceDimensionDefinitionId }).IsUnique();
+            entity.HasCheckConstraint("CK_FinanceDimensionAccountRules_RuleType",
+                "[RuleType] IN ('Required','Optional','Prohibited','Fixed')");
+            entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionDefinition).WithMany(e => e.AccountRules)
+                .HasForeignKey(e => e.FinanceDimensionDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.DefaultDimensionValue).WithMany()
+                .HasForeignKey(e => e.DefaultDimensionValueId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<AccountTransaction>(entity =>
         {
             entity.ToTable("AccountTransactions");
@@ -2968,6 +3031,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 e.AccountId
             });
             entity.HasIndex(e => e.ExchangeRateId);
+            entity.HasIndex(e => new { e.TenantId, e.FinanceDimensionSetId, e.TransactionDate, e.AccountId });
             entity.HasIndex(e => new { e.TenantId, e.TransactionCurrency, e.ExchangeRateId });
             entity.HasIndex(e => new { e.TenantId, e.SourceDocumentId, e.SourceDocumentLineId });
             entity.HasOne(e => e.Account)
@@ -2977,6 +3041,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.ExchangeRateRecord)
                 .WithMany()
                 .HasForeignKey(e => e.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionSet)
+                .WithMany(e => e.AccountTransactions)
+                .HasForeignKey(e => e.FinanceDimensionSetId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany(j => j.Transactions)

@@ -844,6 +844,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ExchangeRateDate = t.ExchangeRateDate,
                         SourceReferenceNumber = t.SourceReferenceNumber,
                         LineNumber = t.LineNumber,
+                        FinanceDimensionSetId = t.FinanceDimensionSetId,
                         SegmentString = t.SegmentString,
                         Notes = t.Notes,
                         TransactionTag = t.TransactionTag
@@ -892,6 +893,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ExchangeRateDate = t.ExchangeRateDate,
                         SourceReferenceNumber = t.SourceReferenceNumber,
                         LineNumber = t.LineNumber,
+                        FinanceDimensionSetId = t.FinanceDimensionSetId,
                         SegmentString = t.SegmentString,
                         Notes = reason,
                         TransactionTag = "Reversal"
