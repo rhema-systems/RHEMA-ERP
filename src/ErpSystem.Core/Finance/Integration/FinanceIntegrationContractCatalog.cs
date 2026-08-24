@@ -198,7 +198,18 @@ public static class FinanceIntegrationContractCatalog
             "SupplierReturnFinanceAdapter.ConsumeCommercialResolutionAsync (fail-closed)",
             "SupplierReturnCommercialResolution v0.1",
             null,
-            "Procurement owns the supplier credit, refund, replacement or warranty-resolution evidence; Inventory remains authoritative for quantity and cost layers; Finance owns AP application, GRV clearing, tax, cash/refund and GL effects. Producers must not write Finance tables directly. Keep Planned until the callable Finance consumer and producer consumer-contract tests pass.")
+            "Procurement owns the supplier credit, refund, replacement or warranty-resolution evidence; Inventory remains authoritative for quantity and cost layers; Finance owns AP application, GRV clearing, tax, cash/refund and GL effects. Producers must not write Finance tables directly. Keep Planned until the callable Finance consumer and producer consumer-contract tests pass."),
+        new(
+            "FIN-INT-015",
+            "Approved Procurement demand to Finance budget commitment",
+            "Procurement",
+            "Finance / Budget",
+            FinanceIntegrationContractStatus.Available,
+            "1.0",
+            "IFinanceBudgetCommitmentService",
+            "ProcurementRequisition",
+            null,
+            "Finance provides canonical adopted-budget selection, availability, reservations, idempotency and GL-derived actuals. Procurement owns its workflow and must add the consumer adapter without writing Finance tables or reserving again at purchase-order issue.")
     ];
 
     public static FinanceIntegrationContractDefinition GetRequired(string id)

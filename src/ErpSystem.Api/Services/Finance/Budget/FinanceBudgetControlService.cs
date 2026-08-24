@@ -99,6 +99,16 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                         CurrencyCode = evaluation.CurrencyCode,
                         SourceDocumentType = ManualJournalSource,
                         SourceDocumentId = journalEntryId,
+                        SourceVersion = evaluation.EvaluationHash,
+                        BudgetDate = evaluation.EntryDate.Date,
+                        SourceLineIdsJson = System.Text.Json.JsonSerializer.Serialize(new[]
+                        {
+                            $"{line.AccountId:N}:{line.FiscalPeriodId:N}"
+                        }),
+                        TransactionCurrencyCode = evaluation.CurrencyCode,
+                        TransactionAmount = line.RequestedAmount,
+                        ExchangeRate = 1m,
+                        ReservationVersion = 1,
                         ReservedAmount = line.RequestedAmount,
                         BudgetAmountSnapshot = line.BudgetAmount,
                         PostedActualSnapshot = line.PostedActualAmount,

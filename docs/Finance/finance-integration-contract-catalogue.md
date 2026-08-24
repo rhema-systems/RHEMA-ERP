@@ -26,6 +26,7 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 | FIN-INT-011 | SH Fund, PF, ESB and fuel allocation | Owner not defined → Finance | Requirements clarification | 0.0 | Not yet designable | SRS-INT-004 |
 | FIN-INT-012 | Post-acceptance supplier return dispatch and valuation handoff | Procurement/Inventory → Finance AP/GRV/GL | Planned | 0.1 | `SupplierReturnFinanceAdapter.ConsumeDispatchAsync` (fail-closed) | Finance envelope validation is implemented; authoritative producer evidence and posting orchestration remain pending |
 | FIN-INT-013 | Supplier return commercial resolution → AP, tax and settlement | Procurement → Finance AP/Tax/Cash | Planned | 0.1 | `SupplierReturnFinanceAdapter.ConsumeCommercialResolutionAsync` (fail-closed) | Finance envelope validation is implemented; producer lifecycle, durable correlation and AP/tax settlement remain pending |
+| FIN-INT-015 | Approved Procurement demand → Finance budget commitment | Procurement → Finance Budget | Available | 1.0 | `IFinanceBudgetCommitmentService` | Finance provider is callable and tested; the Procurement lifecycle adapter remains Procurement-owned and pending |
 
 ## Contract-wide rules
 
@@ -82,5 +83,49 @@ The proposed request must carry at least:
 Finance owns AP application, GRV or return-clearing settlement, input-tax correction, refund/cash treatment and GL posting. A balanced control-account journal without AP aging/application and tax evidence is not a complete FIN-INT-013 outcome.
 
 Both entries remain **Planned**. Agreement on ownership is necessary but is not implementation evidence. Each may become **Available** only after a callable Finance consumer exists and the Procurement/Inventory producer consumer-contract tests, retry/idempotency tests, failure-state tests and Finance subledger/reconciliation tests pass.
+
+## FIN-INT-015 — Procurement commitment to Finance budget control
+
+Finance is the sole owner of adopted budget cells, functional-currency availability,
+reservations and GL-derived actuals. Procurement owns requisitions, purchase orders,
+receipts, cancellations, returns, approvals and their segregation-of-duties rules.
+Procurement must call `IFinanceBudgetCommitmentService`; it must not write Finance budget,
+reservation, operation or journal tables.
+
+The available Finance provider supports:
+
+- listing eligible adopted expense-budget cells for a date and optional account/segment;
+- retrieving `approved - posted actual - active reservations` for an exact budget entry;
+- evaluating and reserving one or more producer lines, aggregated by Finance budget entry;
+- changing an active reservation to an absolute target amount with optimistic version evidence;
+- releasing an active reservation with a reason;
+- reducing or consuming a commitment only after the Finance adapter validates authoritative
+  source lineage and the exact posted source type/ID/action, event and journal exist.
+
+Every mutation requires a stable source document ID/type/reference/version, stable source-line
+IDs, a budget date, an idempotency key and a correlation ID. Tenant and actor identity are
+derived from the authenticated Finance context and are not accepted as producer authority.
+Foreign-currency amounts require the exact approved Finance exchange-rate record; Finance
+stores transaction and functional values as evidence.
+
+The initial Procurement consumer must implement this lifecycle without double counting:
+
+1. Draft requisition: availability check only.
+2. Approved requisition: reserve once.
+3. Amended requisition: set the absolute desired reservation; do not apply a blind delta.
+4. Rejected/cancelled requisition: release the remaining reservation.
+5. Purchase order: inherit the requisition commitment; do not reserve it again.
+6. Accepted receipt: after its Finance posting succeeds, reduce the remaining commitment by
+   the receipted portion. The posted expense/inventory/GRNI journal is the actual evidence.
+7. Supplier invoice: post through AP and clear GRNI as applicable; do not create a second
+   budget actual or reservation.
+8. Cancellation, return or reversal: post governed compensating Finance evidence and adjust
+   or release only the remaining commitment implied by the authoritative source lifecycle.
+
+`ApplyPostingOutcomeAsync` never writes an actual amount. Actuals are derived exclusively from
+posted `AccountTransaction` rows on the exact budget account and fiscal period. This prevents
+receipt and supplier-invoice stages from counting the same expenditure twice.
+
+See the detailed [Procurement budget commitment contract](procurement-finance-budget-commitment-contract.md).
 
 Use the [adapter checklist](finance-integration-adapter-checklist.md) before implementation and the [consumer-test template](finance-integration-consumer-test-template.md) before requesting review. FIN-INT-006 is documented as the first full [reference contract](fixed-asset-disposal-ar-tax-cash-contract.md).

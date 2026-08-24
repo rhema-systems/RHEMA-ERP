@@ -177,6 +177,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<BudgetRevision> BudgetRevisions { get; set; }
     public DbSet<BudgetRevisionLine> BudgetRevisionLines { get; set; }
     public DbSet<FinanceBudgetReservation> FinanceBudgetReservations { get; set; }
+    public DbSet<FinanceBudgetReservationOperation> FinanceBudgetReservationOperations { get; set; }
     public DbSet<FinanceBudgetOverrideRequest> FinanceBudgetOverrideRequests { get; set; }
     public DbSet<BankAccount> BankAccounts { get; set; }
     public DbSet<LiquidityAccount> LiquidityAccounts { get; set; }
@@ -7666,12 +7667,40 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<FinanceBudgetReservation>(entity =>
         {
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_FinanceBudgetReservations_TransactionCurrencyCode",
+                    "LEN([TransactionCurrencyCode]) = 3");
+                table.HasCheckConstraint(
+                    "CK_FinanceBudgetReservations_TransactionAmount",
+                    "[TransactionAmount] >= 0");
+                table.HasCheckConstraint(
+                    "CK_FinanceBudgetReservations_ExchangeRate",
+                    "[ExchangeRate] > 0");
+                table.HasCheckConstraint(
+                    "CK_FinanceBudgetReservations_ReservationVersion",
+                    "[ReservationVersion] >= 1");
+            });
             entity.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(x => new { x.TenantId, x.BudgetEntryId, x.Status });
             entity.HasIndex(x => new { x.TenantId, x.SourceDocumentType, x.SourceDocumentId, x.BudgetEntryId })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0 AND [Status] = 'Reserved'");
             entity.HasIndex(x => x.PostingEventId);
+        });
+
+        builder.Entity<FinanceBudgetReservationOperation>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(x => new { x.TenantId, x.FinanceBudgetReservationId, x.OccurredAt });
+            entity.HasIndex(x => x.PostingEventId);
+            entity.HasOne(x => x.FinanceBudgetReservation)
+                .WithMany()
+                .HasForeignKey(x => x.FinanceBudgetReservationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<FinanceBudgetOverrideRequest>(entity =>

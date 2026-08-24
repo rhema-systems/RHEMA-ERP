@@ -23,6 +23,42 @@ public sealed class FinanceBudgetReservation : TenantEntity
     public string SourceDocumentType { get; set; } = string.Empty;
     public Guid SourceDocumentId { get; set; }
 
+    /// <summary>
+    /// Human-readable producer reference retained as evidence. Finance never uses this
+    /// value as authority; the stable source ID and validated budget cell remain canonical.
+    /// </summary>
+    [MaxLength(100)]
+    public string? SourceDocumentReference { get; set; }
+
+    /// <summary>
+    /// Producer-owned version or immutable evidence hash used to detect a changed document.
+    /// </summary>
+    [MaxLength(64)]
+    public string? SourceVersion { get; set; }
+
+    public DateTime BudgetDate { get; set; }
+
+    /// <summary>
+    /// Stable producer line IDs included in this budget-cell reservation. Several source
+    /// lines may aggregate into one Finance budget cell, so the evidence is stored as JSON.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? SourceLineIdsJson { get; set; }
+
+    [Required, MaxLength(3)]
+    public string TransactionCurrencyCode { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TransactionAmount { get; set; }
+
+    public Guid? ExchangeRateId { get; set; }
+
+    /// <summary>Transaction-currency to functional-currency multiplier.</summary>
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal ExchangeRate { get; set; } = 1m;
+
+    public int ReservationVersion { get; set; } = 1;
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal ReservedAmount { get; set; }
     [Column(TypeName = "decimal(18,2)")]
@@ -52,6 +88,49 @@ public sealed class FinanceBudgetReservation : TenantEntity
 
     [Timestamp]
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+}
+
+/// <summary>
+/// Immutable idempotency and audit evidence for every generic Finance budget-reservation
+/// state transition. Producer modules never write this table directly.
+/// </summary>
+public sealed class FinanceBudgetReservationOperation : TenantEntity
+{
+    public Guid? FinanceBudgetReservationId { get; set; }
+
+    [MaxLength(2000)]
+    public string? ReservationIdsJson { get; set; }
+
+    [Required, MaxLength(30)]
+    public string OperationType { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    [Required, MaxLength(64)]
+    public string PayloadHash { get; set; } = string.Empty;
+
+    [Required, MaxLength(20)]
+    public string PriorStatus { get; set; } = string.Empty;
+
+    [Required, MaxLength(20)]
+    public string ResultStatus { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PriorReservedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ResultReservedAmount { get; set; }
+
+    [Required, MaxLength(100)]
+    public string CorrelationId { get; set; } = string.Empty;
+
+    public Guid ActorUserId { get; set; }
+    public DateTime OccurredAt { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
+
+    public FinanceBudgetReservation? FinanceBudgetReservation { get; set; }
 }
 
 /// <summary>
