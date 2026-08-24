@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.Assets;
+﻿using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -128,6 +128,9 @@ public interface IAssetRequisitionRepository : IGenericRepository<AssetRequisiti
     Task<AssetRequisition?> GetWithDetailsAsync(Guid id);
     Task<AssetRequisition?> GetByRequisitionNumberAsync(Guid tenantId, string requisitionNumber);
     Task<IEnumerable<AssetRequisition>> GetByRequestedByIdAsync(Guid employeeId);
+
+    /// <summary>Raised BY the employee or FOR them — the portal's list, AST-6b.</summary>
+    Task<IEnumerable<AssetRequisition>> GetForEmployeeAsync(Guid employeeId);
     Task<IEnumerable<AssetRequisition>> GetByStatusAsync(Guid tenantId, AssetRequisitionStatus status);
     Task<IEnumerable<AssetRequisition>> GetPendingApprovalsAsync(Guid tenantId);
 }

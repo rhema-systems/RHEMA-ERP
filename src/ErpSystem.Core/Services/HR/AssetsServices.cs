@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Assets;
@@ -1860,6 +1860,25 @@ public class AssetRequisitionService : IAssetRequisitionService
 
         var tenantId = GetTenantId();
         var requisitions = await _requisitionRepo.GetByRequestedByIdAsync(employeeId);
+        return requisitions.Where(r => r.TenantId == tenantId).ToSummaryDtoList();
+    }
+
+    /// <summary>
+    /// The employee's own requisitions — raised by them, or raised for them. AST-6, AST-6b.
+    /// </summary>
+    /// <remarks>
+    /// <para>Not the same question as <c>GetByRequestedByIdAsync</c>, and the difference is the
+    /// point of the portal. Filtering on the requester alone means an employee cannot see the
+    /// request their manager raised to get them a laptop — the record exists precisely for them and
+    /// names them, and they are the last to know. Both actor columns, one list, one gate.</para>
+    /// </remarks>
+    public async Task<IEnumerable<AssetRequisitionSummaryDto>> GetForEmployeeAsync(Guid employeeId)
+    {
+        AssetActor.EnsureSelfOrHr(_currentUserService, employeeId,
+            "list the asset requisitions an employee is a party to");
+
+        var tenantId = GetTenantId();
+        var requisitions = await _requisitionRepo.GetForEmployeeAsync(employeeId);
         return requisitions.Where(r => r.TenantId == tenantId).ToSummaryDtoList();
     }
 

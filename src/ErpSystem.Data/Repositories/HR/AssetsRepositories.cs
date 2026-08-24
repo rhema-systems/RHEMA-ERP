@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.Assets;
+﻿using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -270,7 +270,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     public async Task<IEnumerable<AssetAssignment>> GetByTenantAsync(Guid tenantId)
     {
         return await _context.Set<AssetAssignment>()
-            .Include(aa => aa.Asset)
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
             .Where(aa => aa.TenantId == tenantId && !aa.IsDeleted)
             .OrderByDescending(aa => aa.AssignmentDate)
@@ -280,7 +280,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     public async Task<IEnumerable<AssetAssignment>> GetByRequisitionIdAsync(Guid requisitionId)
     {
         return await _context.Set<AssetAssignment>()
-            .Include(aa => aa.Asset)
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
             .Where(aa => aa.RequisitionId == requisitionId && !aa.IsDeleted)
             .OrderBy(aa => aa.AssignmentDate)
@@ -311,6 +311,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     public async Task<IEnumerable<AssetAssignment>> GetByAssetIdAsync(Guid assetId)
     {
         return await _context.Set<AssetAssignment>()
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
             .Where(aa => aa.AssetId == assetId && !aa.IsDeleted)
             .OrderByDescending(aa => aa.AssignmentDate)
@@ -321,6 +322,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     {
         return await _context.Set<AssetAssignment>()
             .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
+            .Include(aa => aa.Employee)
             .Where(aa => aa.EmployeeId == employeeId && !aa.IsDeleted)
             .OrderByDescending(aa => aa.AssignmentDate)
             .ToListAsync();
@@ -328,8 +330,20 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
 
     public async Task<AssetAssignment?> GetActiveAssignmentForAssetAsync(Guid assetId)
     {
+        // ⚠ This is the ONE list-style query whose result is mapped by `ToDto`, not `ToSummaryDto`,
+        // so it must load everything the full DTO reads. With `Employee` alone, `assets/assignments/
+        // asset/{id}/current` answered 200 with a blank asset name and number, no requisition or
+        // transfer number, and no approver, returned-to or terms-document actor — the same record
+        // the by-id read renders in full. It carries the same graph as `GetWithDetailsAsync` for
+        // exactly that reason.
         return await _context.Set<AssetAssignment>()
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
+            .Include(aa => aa.Requisition)
+            .Include(aa => aa.Transfer)
+            .Include(aa => aa.ApprovedBy)
+            .Include(aa => aa.ReturnedTo)
+            .Include(aa => aa.TermsDocumentSentBy)
             .FirstOrDefaultAsync(aa => aa.AssetId == assetId && aa.Status == AssignmentStatus.Active && !aa.IsDeleted);
     }
 
@@ -337,6 +351,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     {
         return await _context.Set<AssetAssignment>()
             .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
+            .Include(aa => aa.Employee)
             .Where(aa => aa.EmployeeId == employeeId && aa.Status == AssignmentStatus.Active && !aa.IsDeleted)
             .ToListAsync();
     }
@@ -345,7 +360,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return await _context.Set<AssetAssignment>()
-            .Include(aa => aa.Asset)
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
             .Where(aa => aa.TenantId == tenantId 
                 && aa.Status == AssignmentStatus.Active 
@@ -358,7 +373,7 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
     public async Task<IEnumerable<AssetAssignment>> GetByStatusAsync(Guid tenantId, AssignmentStatus status)
     {
         return await _context.Set<AssetAssignment>()
-            .Include(aa => aa.Asset)
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
             .Include(aa => aa.Employee)
             .Where(aa => aa.TenantId == tenantId && aa.Status == status && !aa.IsDeleted)
             .ToListAsync();
@@ -525,6 +540,27 @@ public class AssetRequisitionRepository : GenericRepository<AssetRequisition>, I
             .Include(ar => ar.RequestedBy)
             .Include(ar => ar.BeneficiaryEmployee)
             .Where(ar => ar.RequestedById == employeeId && !ar.IsDeleted)
+            .OrderByDescending(ar => ar.RequestDate)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Every requisition an employee is a party to — raised BY them or FOR them (AST-6b).
+    /// </summary>
+    /// <remarks>
+    /// <c>GetByRequestedByIdAsync</c> matches <c>RequestedById</c> alone, which is correct for the
+    /// question it asks and wrong for the portal's. Once a manager or HR may raise a request on
+    /// somebody's behalf, "my requests" filtered on the requester hides from an employee the very
+    /// requisitions that exist to give them something. Both actor columns, one list.
+    /// </remarks>
+    public async Task<IEnumerable<AssetRequisition>> GetForEmployeeAsync(Guid employeeId)
+    {
+        return await _context.Set<AssetRequisition>()
+            .Include(ar => ar.AssetType)
+            .Include(ar => ar.RequestedBy)
+            .Include(ar => ar.BeneficiaryEmployee)
+            .Where(ar => (ar.RequestedById == employeeId || ar.BeneficiaryEmployeeId == employeeId)
+                && !ar.IsDeleted)
             .OrderByDescending(ar => ar.RequestDate)
             .ToListAsync();
     }

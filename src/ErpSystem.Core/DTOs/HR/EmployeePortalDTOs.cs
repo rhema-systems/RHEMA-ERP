@@ -1,4 +1,4 @@
-namespace ErpSystem.Core.DTOs.HR;
+﻿namespace ErpSystem.Core.DTOs.HR;
 
 // ============================================================================
 // EMPLOYEE PORTAL DTOs
@@ -54,4 +54,41 @@ public sealed class EmployeePortalNotificationDto
     public Guid? MovementId { get; set; }
     public string? MovementNumber { get; set; }
     public string? ActionUrl { get; set; }
+}
+
+// ============================================================================
+// STAFF / COMPANY ASSETS — area 16 slice 6 (AST-6, AST-8)
+// ============================================================================
+
+/// <summary>
+/// What the employee holds and what they have asked for, in the four numbers the portal landing
+/// needs before it decides what to shout about.
+/// </summary>
+/// <remarks>
+/// Deliberately a separate payload from <c>EmployeePortalDashboardDto</c> rather than more fields
+/// on it: that one is the movements dashboard, and widening it would make every asset read a cost
+/// paid by a screen that does not want it. Both are cheap; neither is coupled to the other.
+/// </remarks>
+public sealed class EmployeePortalAssetSummaryDto
+{
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>Assets currently in this employee's hands.</summary>
+    public int HeldCount { get; set; }
+
+    /// <summary>Held assets they have not yet signed for — AST-8, the portal's one nag.</summary>
+    public int AwaitingAcknowledgementCount { get; set; }
+
+    /// <summary>Held assets already past the date they were due back.</summary>
+    public int OverdueReturnCount { get; set; }
+
+    /// <summary>Requisitions they are a party to that have not yet been settled either way.</summary>
+    public int OpenRequisitionCount { get; set; }
+
+    /// <summary>Requisitions still in draft — raised and then never sent for approval.</summary>
+    public int DraftRequisitionCount { get; set; }
+
+    public IEnumerable<AssetAssignmentSummaryDto> Held { get; set; } = [];
+    public IEnumerable<AssetAssignmentSummaryDto> AwaitingAcknowledgement { get; set; } = [];
+    public IEnumerable<AssetRequisitionSummaryDto> OpenRequisitions { get; set; } = [];
 }

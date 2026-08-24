@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -137,6 +137,11 @@ public interface IAssetRequisitionService
     Task<IEnumerable<AssetRequisitionSummaryDto>> GetAllAsync();
     Task<PagedResult<AssetRequisitionSummaryDto>> GetPagedAsync(int page, int pageSize, string? searchTerm = null, AssetRequisitionStatus? status = null);
     Task<IEnumerable<AssetRequisitionSummaryDto>> GetByRequestedByIdAsync(Guid employeeId);
+
+    /// <summary>
+    /// Every requisition the employee is a party to — raised by them or for them (AST-6b).
+    /// </summary>
+    Task<IEnumerable<AssetRequisitionSummaryDto>> GetForEmployeeAsync(Guid employeeId);
     Task<IEnumerable<AssetRequisitionSummaryDto>> GetPendingApprovalsAsync();
     Task<AssetRequisitionDto> CreateAsync(CreateAssetRequisitionDto dto);
     Task<AssetRequisitionDto> UpdateAsync(Guid id, UpdateAssetRequisitionDto dto);

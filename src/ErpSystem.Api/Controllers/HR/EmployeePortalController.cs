@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -8,10 +8,15 @@ using Microsoft.AspNetCore.Mvc;
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Employee self-service portal for workforce mobility data.
+/// Employee self-service portal: workforce mobility, and the employee's own company assets.
 /// ALL endpoints are automatically scoped to the authenticated user's employee record.
 /// The frontend never passes an employee ID — the server derives it from the JWT claim.
 /// </summary>
+/// <remarks>
+/// The asset routes (area 16 slice 6) delegate to the same services <c>api/Assets</c> calls, so the
+/// authorization rules are enforced once and in one place. This controller adds no rule of its own;
+/// it removes the need for the client to know its own employee id.
+/// </remarks>
 [ApiController]
 [Route("api/employee-portal")]
 [Authorize]
@@ -19,16 +24,25 @@ public class EmployeePortalController : ControllerBase
 {
     private readonly IStaffMovementService         _movementService;
     private readonly IStaffActingAppointmentService _actingService;
+    private readonly IAssetAssignmentService       _assignmentService;
+    private readonly IAssetRequisitionService      _requisitionService;
+    private readonly IAssetTermsLetterService      _termsLetterService;
     private readonly ICurrentUserService           _currentUser;
 
     public EmployeePortalController(
         IStaffMovementService          movementService,
         IStaffActingAppointmentService actingService,
+        IAssetAssignmentService        assignmentService,
+        IAssetRequisitionService       requisitionService,
+        IAssetTermsLetterService       termsLetterService,
         ICurrentUserService            currentUser)
     {
-        _movementService = movementService;
-        _actingService   = actingService;
-        _currentUser     = currentUser;
+        _movementService    = movementService;
+        _actingService      = actingService;
+        _assignmentService  = assignmentService;
+        _requisitionService = requisitionService;
+        _termsLetterService = termsLetterService;
+        _currentUser        = currentUser;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -318,6 +332,183 @@ public class EmployeePortalController : ControllerBase
 
         return Ok(notifications.OrderByDescending(n => n.IsActionRequired).ThenByDescending(n => n.CreatedAt));
     }
+
+    // =========================================================================
+    // STAFF / COMPANY ASSETS - area 16 slice 6 (AST-6, AST-6b, AST-8)
+    // =========================================================================
+    //
+    // Every route below is a delegation, not a second implementation. The rules about who may read,
+    // sign for, edit or withdraw an asset record live in AssetsServices' AssetActor and fire here
+    // exactly as they fire on api/Assets - so the portal cannot become a wider door than the
+    // register, and a rule tightened in one place cannot be left loose in the other.
+    //
+    // What these routes add is the ABSENCE of an employee id. api/Assets/assignments/employee/{id}
+    // is correct and gated, but a screen that must know its own employee id can pass someone
+    // else's, and that is how several of this module's authorization holes started. Here the token
+    // supplies it and the client has nothing to get wrong.
+
+    /// <summary>What the employee currently holds - the portal's main list.</summary>
+    [HttpGet("assets")]
+    public async Task<IActionResult> GetMyAssets()
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        return Ok(await _assignmentService.GetActiveAssignmentsForEmployeeAsync(empId));
+    }
+
+    /// <summary>Everything the employee has ever held, returned assets included.</summary>
+    [HttpGet("assets/history")]
+    public async Task<IActionResult> GetMyAssetHistory()
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        return Ok(await _assignmentService.GetByEmployeeIdAsync(empId));
+    }
+
+    /// <summary>The counters the portal landing needs, and the three short lists behind them.</summary>
+    [HttpGet("assets/summary")]
+    public async Task<IActionResult> GetMyAssetSummary()
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+
+        var held         = (await _assignmentService.GetActiveAssignmentsForEmployeeAsync(empId)).ToList();
+        var requisitions = (await _requisitionService.GetForEmployeeAsync(empId)).ToList();
+
+        var today    = DateOnly.FromDateTime(DateTime.UtcNow);
+        var unsigned = held.Where(a => !a.EmployeeAcknowledged).ToList();
+
+        var openStatuses = new[]
+        {
+            AssetRequisitionStatus.Draft,
+            AssetRequisitionStatus.Submitted,
+            AssetRequisitionStatus.UnderReview,
+            AssetRequisitionStatus.Approved
+        };
+        var open = requisitions.Where(r => openStatuses.Contains(r.Status)).ToList();
+
+        return Ok(new EmployeePortalAssetSummaryDto
+        {
+            EmployeeId                   = empId,
+            HeldCount                    = held.Count,
+            AwaitingAcknowledgementCount = unsigned.Count,
+            // An assignment is late when the date it was due back has passed, whatever its status
+            // still says - the status only turns Overdue if something sweeps it, and nothing does
+            // yet (that arrives with the slice 11 reminder sweep).
+            OverdueReturnCount           = held.Count(a => a.ExpectedReturnDate is { } due && due < today),
+            OpenRequisitionCount         = open.Count,
+            DraftRequisitionCount        = requisitions.Count(r => r.Status == AssetRequisitionStatus.Draft),
+            Held                         = held,
+            AwaitingAcknowledgement      = unsigned,
+            OpenRequisitions             = open
+        });
+    }
+
+    /// <summary>One of the employee's own assignments, in full.</summary>
+    [HttpGet("assets/{id:guid}")]
+    public async Task<IActionResult> GetMyAsset(Guid id)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+
+        var assignment = await _assignmentService.GetByIdAsync(id);
+        return assignment is null ? NotFound() : Ok(assignment);
+    }
+
+    /// <summary>
+    /// The employee signs for what they were given - AST-8.
+    /// </summary>
+    /// <remarks>
+    /// The service refuses this for anybody but the assignment's subject, <b>HR included</b>. That
+    /// is deliberate and it is why this route exists at all: acknowledgement is the employee's own
+    /// testimony, and the portal is where they give it.
+    /// </remarks>
+    [HttpPost("assets/{id:guid}/acknowledge")]
+    public async Task<IActionResult> AcknowledgeMyAsset(Guid id)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+
+        await _assignmentService.AcknowledgeAssignmentAsync(new AcknowledgeAssignmentDto { AssignmentId = id });
+        return Ok(new { message = "Receipt acknowledged" });
+    }
+
+    /// <summary>The responsibility-and-terms document for one of the employee's own assignments - AST-5.</summary>
+    [HttpGet("assets/{id:guid}/terms-document")]
+    public async Task<IActionResult> GetMyAssetTermsDocument(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+        return Ok(await _termsLetterService.GenerateAsync(id, ct));
+    }
+
+    // -- Requisitions ---------------------------------------------------------
+
+    /// <summary>Every requisition the employee is a party to - raised by them, or raised for them.</summary>
+    [HttpGet("asset-requisitions")]
+    public async Task<IActionResult> GetMyAssetRequisitions()
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        return Ok(await _requisitionService.GetForEmployeeAsync(empId));
+    }
+
+    /// <summary>One requisition the employee raised or is the beneficiary of.</summary>
+    [HttpGet("asset-requisitions/{id:guid}")]
+    public async Task<IActionResult> GetMyAssetRequisition(Guid id)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+
+        var requisition = await _requisitionService.GetByIdAsync(id);
+        return requisition is null ? NotFound() : Ok(requisition);
+    }
+
+    /// <summary>
+    /// Request an asset - AST-6, and AST-6b where <c>beneficiaryEmployeeId</c> names somebody else.
+    /// </summary>
+    /// <remarks>
+    /// The requester is the token's employee and the payload has no say in it. Naming a beneficiary
+    /// is refused unless the caller is that employee's recorded line manager, or holds the HR role.
+    /// What comes back is a <b>draft</b>; nothing reaches an approver until it is submitted.
+    /// </remarks>
+    [HttpPost("asset-requisitions")]
+    public async Task<IActionResult> CreateMyAssetRequisition([FromBody] CreateAssetRequisitionDto dto)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+
+        var created = await _requisitionService.CreateAsync(dto);
+        return CreatedAtAction(nameof(GetMyAssetRequisition), new { id = created.Id }, created);
+    }
+
+    /// <summary>Edit a requisition the employee raised, while it is still a draft.</summary>
+    [HttpPut("asset-requisitions/{id:guid}")]
+    public async Task<IActionResult> UpdateMyAssetRequisition(Guid id, [FromBody] UpdateAssetRequisitionDto dto)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+        return Ok(await _requisitionService.UpdateAsync(id, dto));
+    }
+
+    /// <summary>Send the draft for approval - the workflow engine decides who sees it.</summary>
+    [HttpPost("asset-requisitions/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitMyAssetRequisition(Guid id)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+        return Ok(await _requisitionService.SubmitAsync(id));
+    }
+
+    /// <summary>Pull a submitted requisition back to draft.</summary>
+    [HttpPost("asset-requisitions/{id:guid}/recall")]
+    public async Task<IActionResult> RecallMyAssetRequisition(
+        Guid id,
+        [FromBody] EmployeePortalRecallDto? dto = null)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+        return Ok(await _requisitionService.RecallAsync(id, dto?.Reason));
+    }
+
+    /// <summary>Withdraw a requisition entirely.</summary>
+    [HttpDelete("asset-requisitions/{id:guid}")]
+    public async Task<IActionResult> DeleteMyAssetRequisition(Guid id)
+    {
+        if (_currentUser.EmployeeId is not Guid) return NoEmployee();
+
+        await _requisitionService.DeleteAsync(id);
+        return Ok(new { message = "Asset requisition withdrawn" });
+    }
+
 }
 
 // ── Input DTO ─────────────────────────────────────────────────────────────────
@@ -327,4 +518,10 @@ public sealed class EmployeePortalRespondDto
 {
     public bool    Accepted { get; set; }
     public string? Comments { get; set; }
+}
+
+/// <summary>Why a submitted requisition is being pulled back - optional.</summary>
+public sealed class EmployeePortalRecallDto
+{
+    public string? Reason { get; set; }
 }

@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 
@@ -496,7 +496,11 @@ public static class AssetsMappingExtensions
         {
             Id = entity.Id,
             AssignmentNumber = entity.AssignmentNumber,
+            AssetId = entity.AssetId,
             AssetName = entity.Asset?.AssetName ?? string.Empty,
+            AssetNumber = entity.Asset?.AssetNumber ?? string.Empty,
+            AssetTypeName = entity.Asset?.AssetType?.Name ?? string.Empty,
+            EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee != null 
                 ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
                 : string.Empty,
@@ -504,7 +508,9 @@ public static class AssetsMappingExtensions
             ExpectedReturnDate = entity.ExpectedReturnDate,
             Type = entity.Type,
             Status = entity.Status,
-            ReturnDate = entity.ReturnDate
+            ReturnDate = entity.ReturnDate,
+            EmployeeAcknowledged = entity.EmployeeAcknowledged,
+            AcknowledgementDate = entity.AcknowledgementDate
         };
     }
 
@@ -783,9 +789,19 @@ public static class AssetsMappingExtensions
         {
             Id = entity.Id,
             RequisitionNumber = entity.RequisitionNumber,
+            RequestedById = entity.RequestedById,
             RequestedByName = entity.RequestedBy != null 
                 ? $"{entity.RequestedBy.FirstName} {entity.RequestedBy.LastName}" 
                 : string.Empty,
+            // AST-6b. The field, the doc comment and the .Include on every query that feeds this
+            // mapping all existed; the assignment did not, so every requisition LIST answered with
+            // a blank beneficiary while the by-id read resolved it in full. The rule that catches
+            // this shape - and this is now its sixth appearance in the area - is that a by-id read
+            // and its list read must be asserted to agree.
+            BeneficiaryEmployeeId = entity.BeneficiaryEmployeeId,
+            BeneficiaryEmployeeName = entity.BeneficiaryEmployee != null
+                ? $"{entity.BeneficiaryEmployee.FirstName} {entity.BeneficiaryEmployee.LastName}"
+                : null,
             RequestDate = entity.RequestDate,
             AssetTypeName = entity.AssetType?.Name ?? string.Empty,
             Quantity = entity.Quantity,

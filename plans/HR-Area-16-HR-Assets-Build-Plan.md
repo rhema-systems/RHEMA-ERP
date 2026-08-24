@@ -35,12 +35,12 @@ decision — record the change where it happened.
 | **Branch** | `hrdev` |
 | **FRD requirements** | **FR-HR-183 (M)** — exit clearance across "outstanding loans, salary advances, **company property, office equipment**, duty-post keys, documents and payroll recoveries". That is the only FRD line that touches this area. |
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
-| **Backend today** | 10 entities, **84 endpoints** on one controller (82 ported + 2 added in slice 2b), 1,634 lines of service, 1,193 lines of DTOs, 939 lines of mapping, 584 lines of repositories |
+| **Backend today** | 10 entities, **84 endpoints** on `AssetsController` (82 ported + 2 added in slice 2b) plus **13 employee-portal routes** added in slice 6, 1,634 lines of service, 1,193 lines of DTOs, 939 lines of mapping, 584 lines of repositories |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
-| **Frontend today** | **none** — no `asset*.service.ts`, no screen under `/hr` or `/administration/hr` |
+| **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–5 green twice — 529 assertions.** The register and the asset now agree with each other: an asset cannot be in two people's hands, a return cannot contradict itself, and a completed transfer moves the custody record rather than a pointer |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice5.mjs` |
+| **Status** | 🔨 In progress. Decisions D1–D8 settled. **Slices 0–6 green twice — 647 assertions.** The register and the asset agree with each other, and the employee can now see what is in their hands, sign for it, print what they signed and ask for more — through routes that take no employee id |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice6.mjs`, `probe-slice6-ui.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -403,9 +403,16 @@ There is no separate employee portal application. The established convention is 
 inside the main app (e.g. `/hr/movements/mine`) backed by `api/employee-portal` — and area 25
 (employee self-service consolidation) is still deferred.
 
-*Recommendation taken.* **Built the established way**: `/hr/assets/me` (my assets · acknowledge receipt
-· request an asset · request on behalf) plus asset routes added to the existing
-`EmployeePortalController`. Area 25 consolidates later; nothing is thrown away.
+*Recommendation taken.* **Built the established way, and delivered in slice 6**: `/hr/assets/me`
+(my assets · acknowledge receipt · print the terms · request an asset · request on behalf) plus
+thirteen asset routes on the existing `EmployeePortalController`. Area 25 consolidates later;
+nothing is thrown away.
+
+⚠ **Every portal route is a delegation, not a second implementation.** They call the same services
+`api/Assets` calls, so the rules live in `AssetActor` and fire identically on both doors. What the
+portal adds is the *absence* of an employee id — `assignments/employee/{id}` is correctly gated, but
+a client that must know its own employee id in order to ask a question can pass somebody else's, and
+that is how several of this module's authorization holes started.
 
 *Rejected alternative:* the `external-portal` app — that is for candidates, suppliers and
 consultants, i.e. external users, and would need staff auth added to it.
@@ -503,7 +510,7 @@ overdue returns; and the full screen set.
 | **3b** | ✅ Both approvals on the workflow engine | D3 — the four-step recipe on `HrAssetRequisition` and `HrAssetTransfer`, Draft → submit → decide → recall; **D-l** pulled forward so transfers exist at all; D-q, D-r, D-s, D-t |
 | **4** | ✅ Assignment integrity | The availability guard (AST-2, **D-a**), the return consistency check (**D-c**), the transfer-completion gap, and two holes that made an asset unusable: a deleted assignment that never released it, and a return that could be taken twice. Migration `AddAssetAssignmentTransferLink` |
 | **5** | ✅ Responsibility and terms | The document rendered from an **HR-editable template** + the per-tenant `CompanyProfile`, printable and emailable, recorded on the assignment (AST-5, AST-5b). Migration `AddAssetAssignmentTermsDocumentSend` |
-| **6** | The employee's own surface | `/hr/assets/me` + `EmployeePortalController` routes: my assets, acknowledge, request, request on behalf (AST-6, AST-8) |
+| **6** | ✅ The employee's own surface | `/hr/assets/me` + 13 `EmployeePortalController` routes: my assets, acknowledge, print the terms, request, request on behalf (AST-6, AST-6b, AST-8, D4). **D-w, D-x, D-y** |
 | **7** | Damage and surcharge | The surcharge record, its approval, its recovery route (AST-3, D-d) |
 | **8** | Rental and the payroll seam | `IsRentable`, the assignment's rental terms, the read-only projection (AST-9, AST-10) |
 | **9** | Maintenance monitoring | Schedule written from the interval, due/overdue reads, the reminder sweep (AST-1, D-h) |
@@ -966,3 +973,80 @@ replacements were not asserted; two matched nothing, the script reported success
 left half-migrated. The harness README has warned about exactly this since slice 2b. Every patch
 script in this area asserts its match count — including the one that then found the earlier pass had
 already applied part of the change.
+
+### Slice 6 — the employee's own surface. 2026-08-24, **118/118, run twice** (stamps 180001, 180002). No migration.
+
+Delivers **AST-6**, **AST-6b**, **AST-8** and decision **D4**. Slices 1, 2, 2b, 3, 3b, 4 and 5 re-run
+at 45/45, 85/85, 94/94, 49/49, 135/135, 73/73 and 48/48 — **647 assertions** for the area.
+
+**Nothing about the rules changed, and that is the design.** Slice 1 bound acknowledgement to the
+assignment's subject, slice 3 gave the requisition a beneficiary, slice 3b put its approval on the
+engine. What did not exist was a door an employee could walk through. So `api/employee-portal` gains
+thirteen asset routes, **every one of them a delegation** to the service `api/Assets` already calls.
+The gate stays in one place and cannot be left loose on one side. The assertion that proves it:
+**HR cannot acknowledge through the portal either** — the role that can do almost everything else to
+an assignment is refused this one, on both doors, because it is the employee's own testimony.
+
+**What the portal actually adds is the absence of an employee id.** That is the whole authorization
+argument for it, and it is worth stating plainly: a client that has to know its own employee id in
+order to ask a question is a client that can pass somebody else's.
+
+**Three defects, all on the reads the portal depends on — and all found by looking, not by failing.**
+
+- **D-w.** `AssetRequisitionSummaryDto.BeneficiaryEmployeeName` was declared, carried an AST-6b doc
+  comment, and was `.Include`d by *every* query that feeds the mapping — and the mapping never
+  assigned it. So every requisition **list** in the module showed a blank beneficiary while the
+  by-id read resolved it in full. This is the **sixth** appearance of "a mapping and a read are one
+  change" in this area, and the first where the *read* was right and the mapping was the missing
+  half. The rule that catches it either way round is unchanged: assert that a by-id read and its
+  list read agree. The summary also gained `RequestedById`, without which `IsOnBehalf` could not be
+  computed at all.
+
+- **D-x.** `GetByEmployeeIdAsync` and `GetActiveAssignmentsForEmployeeAsync` never loaded the
+  employee, and `GetByAssetIdAsync` never loaded the asset — so `employeeName` and `assetName` came
+  back empty on exactly the lists whose job is to name them. Worse:
+  `GetActiveAssignmentForAssetAsync` is **the one list-shaped query mapped by the full `ToDto`**, and
+  with `Employee` alone `assignments/asset/{id}/current` answered 200 with no asset name, no asset
+  number, no requisition or transfer number and no approver, returned-to or terms-document actor —
+  the same record the by-id read renders complete. It now carries the same graph as
+  `GetWithDetailsAsync`, for that reason.
+
+- **D-y.** The assignment summary could answer neither of the two questions the employee's own list
+  exists to answer — *which asset is this* and *have I signed for it*. It gained `AssetId`,
+  `AssetNumber`, `AssetTypeName`, `EmployeeId`, `EmployeeAcknowledged` and `AcknowledgementDate`;
+  without them the screen would have had to fetch every row again in full to render either.
+
+**One new read, and it is the point of AST-6b.** `GetForEmployeeAsync` matches **both** actor
+columns. "My requisitions" filtered on `RequestedById` alone — which is what it meant until this
+slice — means the employee a manager raised a laptop request *for* is the only person who cannot see
+it. The record exists to give them something, it names them, and they were the last to know. The
+harness asserts the beneficiary's own list contains it; under the old read that list is empty.
+
+**The summary is a separate payload from the movements dashboard, deliberately.** Widening
+`EmployeePortalDashboardDto` would make every asset read a cost paid by a screen that does not want
+it. Its `overdueReturnCount` compares `ExpectedReturnDate` against today rather than trusting
+`Status`, because nothing sweeps an assignment to `Overdue` yet — that arrives with slice 11.
+
+**The UI-payload probe caught a 404 before any TypeScript was written.** `probe-slice6-ui.mjs` exists
+because the request form needs two reads that are *not* on the portal: the asset-type picker and
+"who reports to me". The first guess at the latter — `api/employees/manager/me/direct-reports` —
+answered **404**; the route is `api/hr/Employees/…`. It also caught that the type catalogue is empty
+between harness runs, so the probe now creates a type before measuring: *an endpoint that returns
+nothing tells you nothing about its shape*. The types in `frontend/src/types/hr/assets.ts` are
+written from `slice6-payloads.json` and `slice6-ui-payloads.json`, not from route names.
+
+**Two things the measured payload settled that a guess would have got wrong.**
+`HRAssetRequisitionPriority` runs **Urgent = 1 … Low = 4**, the opposite of reading order, so a form
+offering "1, 2, 3, 4" as increasing urgency would file every emergency as an afterthought — the
+frontend picks from a named constant. And the requests table shows rows raised *by* the caller
+alongside rows raised *for* them, so "can I edit, send, withdraw or pull this back" is a real
+question: those belong to the requester alone, and the caller's own employee id comes from the
+summary payload rather than from a lookup the page would otherwise need.
+
+**Screen.** `/hr/assets/me` — four counters, three tabs (in your hands · previously held · requests),
+acknowledge in place, the responsibility document opened in its own window (a self-contained letter
+injected into a screen's DOM is how a print stylesheet ends up printing the navigation), and the
+request dialog whose on-behalf picker only renders when the caller actually has reports. One sidebar
+entry, "My Assets"; the HR register joins it as children at slice 12. Verified by `tsc` (19
+pre-existing errors, all in `inventory`, none in these files) and `eslint` (clean) — there is still
+no browser-automation tool.

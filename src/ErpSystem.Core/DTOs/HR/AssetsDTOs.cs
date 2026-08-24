@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
@@ -746,7 +746,21 @@ public class AssetAssignmentSummaryDto
 {
     public Guid Id { get; set; }
     public string AssignmentNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The asset itself, not only its name — slice 6.
+    /// </summary>
+    /// <remarks>
+    /// A list that names an asset without identifying it forces every screen showing it to fetch
+    /// each row again to be able to link anywhere, and the employee's own list is exactly that
+    /// screen. The number is here for the same reason the name is: it is what a person reads off
+    /// the label stuck to the thing in their hands.
+    /// </remarks>
+    public Guid AssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public string AssetTypeName { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public DateOnly AssignmentDate { get; set; }
     public DateOnly? ExpectedReturnDate { get; set; }
@@ -755,6 +769,14 @@ public class AssetAssignmentSummaryDto
     public AssignmentStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateTime? ReturnDate { get; set; }
+
+    /// <summary>Whether the holder has signed for it, and when — AST-8.</summary>
+    /// <remarks>
+    /// On the summary because the whole point of the employee's list is to show what still needs
+    /// acknowledging; deriving that would mean reading every row in full to find the few that do.
+    /// </remarks>
+    public bool EmployeeAcknowledged { get; set; }
+    public DateTime? AcknowledgementDate { get; set; }
 }
 
 /// <summary>
@@ -1157,10 +1179,21 @@ public class AssetRequisitionSummaryDto
 {
     public Guid Id { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
+    public Guid RequestedById { get; set; }
     public string RequestedByName { get; set; } = string.Empty;
 
     /// <summary>AST-6b — so a list can show who it is for, not only who asked.</summary>
+    public Guid? BeneficiaryEmployeeId { get; set; }
     public string? BeneficiaryEmployeeName { get; set; }
+
+    /// <summary>
+    /// The employee the asset will be issued to: the beneficiary where one is named, the requester
+    /// otherwise — the same rule the full DTO and fulfilment both apply, stated once.
+    /// </summary>
+    public string ForEmployeeName => BeneficiaryEmployeeName ?? RequestedByName;
+
+    /// <summary>True where somebody raised this on another employee's behalf.</summary>
+    public bool IsOnBehalf => BeneficiaryEmployeeId.HasValue && BeneficiaryEmployeeId != RequestedById;
     public DateTime RequestDate { get; set; }
     public string AssetTypeName { get; set; } = string.Empty;
     public int Quantity { get; set; }

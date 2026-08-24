@@ -616,6 +616,17 @@ export const navigationItems: NavItem[] = [
         icon: HandCoins,
       },
       {
+        // Area 16. Company property in a named employee's hands: the register, the requisition that
+        // asks for one, and the responsibility document they sign for it.
+        //
+        // Only the employee's own screen exists so far (slice 6) — the HR register and its
+        // approval queues arrive with slice 12, and join this entry as children then. A parent
+        // pointing at the register before the register exists would be a link to a 404.
+        title: 'My Assets',
+        href: '/hr/assets/me',
+        icon: Package,
+      },
+      {
         // Area 8. One record covers promotion, transfer, demotion, secondment, acting appointment,
         // lateral move and redesignation — they share an approval route, a checklist and a set of
         // documents, and differ only in their subtype detail.
