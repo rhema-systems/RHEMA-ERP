@@ -43,6 +43,69 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
     [Trait("Category", "FixedAssets")]
+    public async Task FixedAssetRegisterUsesRequestedBookValuesAndExcludesMasterOnlyAssets()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var masterOnly = BuildAsset(
+            tenantId,
+            "TEN-MASTER-ONLY",
+            "Master without accounting-book lineage",
+            fixture.Category,
+            1_710_000m,
+            204_333.33m,
+            1_505_666.67m);
+        var localOnly = BuildAsset(
+            tenantId,
+            "TEN-LOCAL-ONLY",
+            "Asset carried only in the local statutory book",
+            fixture.Category,
+            500_000m,
+            50_000m,
+            450_000m);
+        var localBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "LOCAL_STATUTORY",
+            Name = "Local Statutory",
+            IsActive = true,
+            AllowsPosting = true,
+            SortOrder = 2,
+            CreatedAt = DateTime.UtcNow
+        };
+        var localBookValue = BuildBookValue(
+            tenantId,
+            localBook,
+            localOnly,
+            500_000m,
+            50_000m,
+            450_000m,
+            "FixedAsset",
+            localOnly.Id,
+            null);
+        localBookValue.BookClassification = "LOCAL_STATUTORY";
+        db.FixedAssets.AddRange(masterOnly, localOnly);
+        db.AccountingBooks.Add(localBook);
+        db.FixedAssetBookValues.Add(localBookValue);
+        await db.SaveChangesAsync();
+        var service = CreateReportsService(db, tenantId);
+
+        var report = await service.GetAssetRegisterAsync(DefaultQuery());
+
+        report.Items.Should().HaveCount(2);
+        report.Items.Should().NotContain(item => item.AssetCode == masterOnly.AssetCode);
+        report.Items.Should().NotContain(item => item.AssetCode == localOnly.AssetCode);
+        report.Items.Should().OnlyContain(item => item.BookValueId.HasValue && item.BookClassification == "IFRS");
+        report.TotalCost.Should().Be(2_000m);
+        report.TotalAccumulatedDepreciation.Should().Be(100m);
+        report.TotalNetBookValue.Should().Be(1_300m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
     public async Task CrossTenantAssetCategoryAndAccountFiltersAreRejected()
     {
         var tenantId = Guid.NewGuid();
