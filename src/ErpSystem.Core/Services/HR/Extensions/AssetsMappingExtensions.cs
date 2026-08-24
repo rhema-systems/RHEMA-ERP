@@ -196,6 +196,9 @@ public static class AssetsMappingExtensions
             UnitId = entity.UnitId,
             UnitName = entity.Unit?.Name,
             InsuranceExpiryDate = entity.InsuranceExpiryDate,
+            IsRentable = entity.IsRentable,
+            StandardRentalAmount = entity.StandardRentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -223,6 +226,7 @@ public static class AssetsMappingExtensions
                 ? $"{entity.CurrentAssignedTo.FirstName} {entity.CurrentAssignedTo.LastName}" 
                 : null,
             CurrentValue = entity.PurchaseCost,
+            IsRentable = entity.IsRentable,
             Source = entity.Source
         };
     }
@@ -280,6 +284,9 @@ public static class AssetsMappingExtensions
             UnitId = entity.UnitId,
             UnitName = entity.Unit?.Name,
             InsuranceExpiryDate = entity.InsuranceExpiryDate,
+            IsRentable = entity.IsRentable,
+            StandardRentalAmount = entity.StandardRentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -327,6 +334,9 @@ public static class AssetsMappingExtensions
             InsurancePolicyNumber = dto.InsurancePolicyNumber,
             InsuredValue = dto.InsuredValue,
             InsuranceExpiryDate = dto.InsuranceExpiryDate,
+            IsRentable = dto.IsRentable,
+            StandardRentalAmount = dto.StandardRentalAmount,
+            RentalCurrencyCode = dto.RentalCurrencyCode,
             AdditionalRemarks = dto.AdditionalRemarks,
             UnitId = dto.UnitId,
             CreatedBy = userId.ToString()
@@ -367,6 +377,9 @@ public static class AssetsMappingExtensions
         entity.InsurancePolicyNumber = dto.InsurancePolicyNumber;
         entity.InsuredValue = dto.InsuredValue;
         entity.InsuranceExpiryDate = dto.InsuranceExpiryDate;
+        entity.IsRentable = dto.IsRentable;
+        entity.StandardRentalAmount = dto.StandardRentalAmount;
+        entity.RentalCurrencyCode = dto.RentalCurrencyCode;
         entity.AdditionalRemarks = dto.AdditionalRemarks;
         entity.UnitId = dto.UnitId;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -484,6 +497,13 @@ public static class AssetsMappingExtensions
             EmployeeLiable = entity.EmployeeLiable,
             RepairCost = entity.RepairCost,
             ReplacementCost = entity.ReplacementCost,
+            RentalAmount = entity.RentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
+            RentalFrequency = entity.RentalFrequency,
+            RentalEffectiveFrom = entity.RentalEffectiveFrom,
+            RentalEffectiveTo = entity.RentalEffectiveTo,
+            IsBenefitInKind = entity.IsBenefitInKind,
+            BenefitInKindValue = entity.BenefitInKindValue,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -511,7 +531,11 @@ public static class AssetsMappingExtensions
             Status = entity.Status,
             ReturnDate = entity.ReturnDate,
             EmployeeAcknowledged = entity.EmployeeAcknowledged,
-            AcknowledgementDate = entity.AcknowledgementDate
+            AcknowledgementDate = entity.AcknowledgementDate,
+            RentalAmount = entity.RentalAmount,
+            RentalCurrencyCode = entity.RentalCurrencyCode,
+            RentalFrequencyName = entity.RentalFrequency?.ToString(),
+            IsBenefitInKind = entity.IsBenefitInKind
         };
     }
 

@@ -370,6 +370,24 @@ public class AssetAssignmentRepository : GenericRepository<AssetAssignment>, IAs
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<AssetAssignment>> GetRentalArrangementsAsync(
+        Guid tenantId, DateOnly periodStart, DateOnly periodEnd)
+    {
+        return await _context.Set<AssetAssignment>()
+            .Include(aa => aa.Asset).ThenInclude(a => a.AssetType)
+            .Include(aa => aa.Employee)
+            .Where(aa => aa.TenantId == tenantId
+                && !aa.IsDeleted
+                && aa.RentalFrequency != null
+                // The window overlaps the period. A null start means "from the beginning" and a
+                // null end means "still running", so each side is open unless it says otherwise.
+                && (aa.RentalEffectiveFrom == null || aa.RentalEffectiveFrom <= periodEnd)
+                && (aa.RentalEffectiveTo == null || aa.RentalEffectiveTo >= periodStart))
+            .OrderBy(aa => aa.EmployeeId)
+            .ThenBy(aa => aa.RentalEffectiveFrom)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<AssetAssignment>> GetByStatusAsync(Guid tenantId, AssignmentStatus status)
     {
         return await _context.Set<AssetAssignment>()

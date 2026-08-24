@@ -171,13 +171,19 @@ plainly rather than filing under "HR costs".
 | 16.3 | Recovery declared to payroll | `AssetSurcharge.RecoveryMethod` / `InstalmentCount` / `RecoveryStartDate`, read through `GET Assets/surcharges/payroll-deductions` | HR **declares**; payroll deducts. The projection exists and nothing consumes it yet — wiring it into a payroll run is the sweep's, not HR's, and payroll is another dev's module. |
 | 16.4 | Surcharge waived | `AssetSurcharge.WaiverReason` | Forgiving a balance is a write-off. No GL treatment, no approval-limit rule beyond the workflow definition. |
 | 16.5 | Outstanding balance deducted at exit | `AssetSurcharge` → `SeparationClearanceItem.OutstandingAmount` (slice 10) | The link is HR-internal; the settlement that pays it out is unavoidably an accounting event. |
-| 16.6 | Rental / benefit-in-kind deduction | AST-9 / AST-10, **slice 8** | ⏳ not yet built. Decision D2: HR declares rental terms and exposes a read-only projection, never writes payroll. |
+| 16.6 | Rental charged to an employee | `AssetAssignment.RentalAmount` + `RentalCurrencyCode` + `RentalFrequency` + the effective window, read through `GET Assets/payroll/rental-deductions` | ✅ **built, slice 8.** A second employee deduction with no accounting counterpart. HR declares; payroll deducts. The projection deliberately does **not** prorate — it carries the full periodic rate, the window and an `IsPartialPeriod` flag, because HR does not know payroll's period boundaries. |
+| 16.6b | Benefit in kind on a subsidised asset | `AssetAssignment.IsBenefitInKind` + `BenefitInKindValue` | ✅ **built, slice 8.** The taxable value of a subsidy — the asset's standard rate less what the employee pays. HR computes the *value*; **assessing tax on it is payroll's** and nothing in HR does it. The sweep should confirm nobody else is already valuing the same benefit. |
 | 16.7 | Asset sourced from Finance's fixed-asset register | `CompanyAsset.FixedAssetId` + `AssetSource` | Custody is HR's; depreciation, valuation and disposal accounting stay Finance's (decision D1). The sweep should confirm that a surcharge for a *destroyed* fixed asset does not double-count against Finance's own write-off. |
 
 ⚠ **The one question this area raises that no other does:** a surcharge is money owed *by* an
 employee, so the sweep must decide whether it is an employee receivable, a payroll deduction, or
 both in sequence — and TDC's answer to the payroll-vs-direct-payment question below now has a
 second surface depending on it.
+
+⚠ **Two projections, one boundary.** Slices 7 and 8 each expose a read-only line payroll pulls
+(`surcharges/payroll-deductions`, `payroll/rental-deductions`). Neither writes a deduction, and the
+sweep should decide whether payroll consumes two HR endpoints or one — but *not* by having HR write
+into payroll, which is the alternative D2 explicitly rejected.
 
 ⚠ **What slice 7 deliberately did NOT build**, so the sweep does not have to unpick it: no
 instalment schedule, no deduction run, no payment status machine of its own. HR records the amount,

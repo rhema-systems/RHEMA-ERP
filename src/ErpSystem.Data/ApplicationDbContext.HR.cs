@@ -4143,6 +4143,10 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.DisposalMethod).HasConversion<int>();
             entity.Property(x => x.PurchaseCost).HasColumnType("decimal(18,2)");
             entity.Property(x => x.InsuredValue).HasColumnType("decimal(18,2)");
+            // AST-9. Indexed because "what do we let to staff" is a register question in its own
+            // right, and slice 8's projection filters on it before anything else.
+            entity.Property(x => x.StandardRentalAmount).HasColumnType("decimal(18,2)");
+            entity.HasIndex(x => x.IsRentable);
 
             // AST-11. The default matters: every asset that existed before this column did was
             // created in HR, so HrCreated is the truthful description of it rather than a
@@ -4266,6 +4270,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.Status).HasConversion<int>();
             entity.Property(x => x.RepairCost).HasColumnType("decimal(18,2)");
             entity.Property(x => x.ReplacementCost).HasColumnType("decimal(18,2)");
+            // Slice 8 — AST-10. Declared to payroll, deducted by payroll.
+            entity.Property(x => x.RentalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.BenefitInKindValue).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.RentalFrequency).HasConversion<int>();
+            entity.HasIndex(x => x.RentalEffectiveFrom);
 
             entity.HasOne(x => x.Asset)
                 .WithMany(x => x.AssignmentHistory)

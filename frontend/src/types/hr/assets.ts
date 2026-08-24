@@ -76,6 +76,19 @@ export interface AssetAssignmentSummary {
   returnDate: string | null;
   employeeAcknowledged: boolean;
   acknowledgementDate: string | null;
+
+  /**
+   * What the holder is charged for this, per period — AST-10.
+   *
+   * ⚠ `rentalAmount: 0` is not the same as `null`. Zero means the asset is provided free — a
+   * stated arrangement, and usually a taxable one — while null means no terms have been set. A
+   * screen that treats them alike loses the difference between "free accommodation" and "nobody
+   * has set this up yet".
+   */
+  rentalAmount: number | null;
+  rentalCurrencyCode: string | null;
+  rentalFrequencyName: string | null;
+  isBenefitInKind: boolean;
 }
 
 /** The full assignment record — what one row opens into. */

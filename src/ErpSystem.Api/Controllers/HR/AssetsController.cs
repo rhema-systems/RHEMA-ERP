@@ -1274,4 +1274,89 @@ public class AssetsController : ControllerBase
         => Ok(await _surchargeService.CancelAsync(id, dto));
 
     #endregion
+
+    #region Rental and the payroll seam — AST-9, AST-10, decision D2 (slice 8)
+
+    /// <summary>
+    /// Declare what an employee is charged for holding a rentable asset — AST-10.
+    /// </summary>
+    /// <remarks>
+    /// Refused unless the asset is marked rentable. Nothing here deducts anything: payroll pulls
+    /// the projection below and runs its own deduction (decision D2).
+    /// </remarks>
+    [HttpPut("assignments/{id:guid}/rental-terms")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetAssignmentDto>> SetAssignmentRentalTerms(
+        Guid id,
+        [FromBody] SetAssetRentalTermsDto dto)
+        => Ok(await _assignmentService.SetRentalTermsAsync(id, dto));
+
+    /// <summary>Remove rental terms declared in error — not the way to end a tenancy that ran.</summary>
+    [HttpDelete("assignments/{id:guid}/rental-terms")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<AssetAssignmentDto>> ClearAssignmentRentalTerms(Guid id)
+        => Ok(await _assignmentService.ClearRentalTermsAsync(id));
+
+    /// <summary>
+    /// The read-only rental projection payroll pulls — AST-10, decision D2.
+    /// </summary>
+    /// <remarks>
+    /// <para>Give either a <c>period</c> of <c>YYYY-MM</c>, or an explicit <c>from</c> and
+    /// <c>to</c>. Defaults to the current calendar month.</para>
+    ///
+    /// <para>⚠ The figures are <b>not prorated</b>. Each line carries the full periodic rate and
+    /// the window it applies to; how much of it falls in a given pay run is payroll's calculation,
+    /// made with payroll's calendar. HR computing a part-month here would be guessing at another
+    /// module's period boundaries in the one place a mistake reaches somebody's take-home pay.</para>
+    /// </remarks>
+    [HttpGet("payroll/rental-deductions")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<ActionResult<IEnumerable<AssetRentalPayrollLineDto>>> GetRentalPayrollLines(
+        [FromQuery] string? period = null,
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null)
+    {
+        DateOnly start, end;
+
+        if (!string.IsNullOrWhiteSpace(period))
+        {
+            // ⚠ Parsed rather than trusted. `period=2026-13` and `period=banana` both used to be a
+            // silent fall-through to "this month" in surfaces like this one, which answers 200 with
+            // the wrong month's money in it — the worst possible failure for a payroll input.
+            if (!DateTime.TryParseExact(period.Trim(), "yyyy-MM",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var parsed))
+            {
+                return Problem(
+                    detail: $"'{period}' is not a period. Use YYYY-MM, or give explicit from and to dates.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid Period");
+            }
+
+            start = new DateOnly(parsed.Year, parsed.Month, 1);
+            end = start.AddMonths(1).AddDays(-1);
+        }
+        else if (from is { } f && to is { } t)
+        {
+            start = f;
+            end = t;
+        }
+        else if (from is null && to is null)
+        {
+            var now = DateTime.UtcNow;
+            start = new DateOnly(now.Year, now.Month, 1);
+            end = start.AddMonths(1).AddDays(-1);
+        }
+        else
+        {
+            return Problem(
+                detail: "Give both from and to, or neither.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Incomplete Period");
+        }
+
+        return Ok(await _assignmentService.GetRentalPayrollLinesAsync(start, end));
+    }
+
+    #endregion
 }

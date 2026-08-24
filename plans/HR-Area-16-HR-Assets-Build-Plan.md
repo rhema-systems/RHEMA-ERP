@@ -35,12 +35,12 @@ decision — record the change where it happened.
 | **Branch** | `hrdev` |
 | **FRD requirements** | **FR-HR-183 (M)** — exit clearance across "outstanding loans, salary advances, **company property, office equipment**, duty-post keys, documents and payroll recoveries". That is the only FRD line that touches this area. |
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
-| **Backend today** | **12 entities**, **103 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7) plus **16 employee-portal routes** (13 in slice 6, 3 in slice 7) |
+| **Backend today** | **12 entities**, **106 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7 + 3 in slice 8) plus **16 employee-portal routes** |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions **D1–D9** settled. **Slices 0–7 green twice — 799 assertions.** An asset can now be reported lost, and an employee charged for it — but only after being asked, and only for an amount they were shown |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice7.mjs`, `probe-slice6-ui.mjs` |
+| **Status** | 🔨 In progress. Decisions **D1–D9** settled. **Slices 0–8 green twice — 887 assertions.** Assets can be charged for and rented out, and both money surfaces stop at the payroll boundary: HR declares, payroll deducts |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice8.mjs`, `probe-slice6-ui.mjs` |
 | **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
 
 ---
@@ -333,8 +333,8 @@ an ID below so slices can cite it. Nothing is inferred that the document does no
 | **AST-6b** | A **manager or another person may request on behalf** of an employee | ❌ absent — `AssetRequisition` has only `RequestedById` |
 | **AST-7** | Rename **"Additional Description" → "Additional Remarks"** | No such field exists (D-i, decision D6) |
 | **AST-8** | On the portal, the employee **acknowledges receipt** of the asset | Endpoint exists but any caller can acknowledge for anyone (D-b); no screen |
-| **AST-9** | **Rentable** company assets (e.g. staff housing): a flag distinguishing a rental property/asset, with financial implications; Finance **deducts at source** | ❌ absent entirely |
-| **AST-10** | Assigning a rentable asset feeds **payroll** for benefit-in-kind, tax assessment or deduction, carrying the **deductible rental amount** | ❌ absent entirely |
+| **AST-9** | **Rentable** company assets (e.g. staff housing): a flag distinguishing a rental property/asset, with financial implications; Finance **deducts at source** | ✅ **slice 8** — `IsRentable` + a standard rate on the asset, on all four reads |
+| **AST-10** | Assigning a rentable asset feeds **payroll** for benefit-in-kind, tax assessment or deduction, carrying the **deductible rental amount** | ✅ **slice 8** — rental terms on the assignment and a read-only projection payroll pulls |
 | **AST-11** | **Integrate with and read from the Fixed Assets module** so effort is not duplicated; when HR picks an asset from that module, a **flag/detail marks it as sourced there**, distinct from assets HR creates itself | ❌ absent — no link of any kind between `CompanyAsset` and `FixedAsset` |
 
 Plus, from the FRD:
@@ -386,6 +386,18 @@ deduction row and never posts to the GL; both are registered in the Finance back
 
 *Rejected alternative:* HR writing directly into a payroll deduction table — it would be the first
 time HR writes into payroll, and would need that module's owner to agree.
+
+✅ **DELIVERED IN SLICE 8**, with one refinement worth recording. D2 specified "a benefit-in-kind
+**flag**", and a flag alone turned out not to be enough: the taxable value of subsidised
+accommodation is the **market rate less what the employee pays**, and the flag cannot carry that
+number. `BenefitInKindValue` was added beside it, defaulting to exactly that computation. Both
+halves are facts HR holds — the going rate and what is charged; *assessing tax* on the difference
+stays payroll's, and nothing in this module does it.
+
+Two things the slice deliberately did **not** build, so the sweep does not have to unpick them:
+the projection does **not prorate** (a mid-period tenancy is reported with its full periodic rate,
+its window, and an `isPartialPeriod` flag — HR does not know payroll's period boundaries, rounding
+or net-pay floor), and there is no deduction row, no schedule and no payment-status machine.
 
 ### D3 — approval routing for requisitions and transfers. ✅ **DECIDED 2026-08-23.**
 
@@ -547,7 +559,7 @@ overdue returns; and the full screen set.
 | **5** | ✅ Responsibility and terms | The document rendered from an **HR-editable template** + the per-tenant `CompanyProfile`, printable and emailable, recorded on the assignment (AST-5, AST-5b). Migration `AddAssetAssignmentTermsDocumentSend` |
 | **6** | ✅ The employee's own surface | `/hr/assets/me` + 13 `EmployeePortalController` routes: my assets, acknowledge, print the terms, request, request on behalf (AST-6, AST-6b, AST-8, D4). **D-w, D-x, D-y** |
 | **7** | ✅ Damage and surcharge | `AssetSurcharge` + `AssetSurchargeRecovery` on the engine, the right of reply, the payroll projection (AST-3, **D-d**, D9) — and **D-z**, the incident route without which loss could not be recorded at all. Migration `AddAssetSurchargeAndIncident` |
-| **8** | Rental and the payroll seam | `IsRentable`, the assignment's rental terms, the read-only projection (AST-9, AST-10) |
+| **8** | ✅ Rental and the payroll seam | `IsRentable` + standard rate on the asset, seven rental columns on the assignment, the read-only projection, and **the rent closing at all three doors that close a custody** (AST-9, AST-10, D2). Migration `AddAssetRentalTerms` |
 | **9** | Maintenance monitoring | Schedule written from the interval, due/overdue reads, the reminder sweep (AST-1, D-h) |
 | **10** | Exit clearance | FR-HR-183 — clearance lines sourced from unreturned assignments, closing 9b D4 |
 | **11** | Reminders and reports | Insurance expiry, overdue returns, the asset register report |
@@ -1143,3 +1155,59 @@ copy is blunt on purpose: *disputing does not cancel the charge; your account go
 with it, and they may reduce the amount — they cannot increase it.* A button that reads like a veto
 and behaves like a comment is worse than no button. `tsc` (19 pre-existing errors, all in
 `inventory`, none in these files) and `eslint` clean.
+
+### Slice 8 — rentable assets and the payroll seam. 2026-08-24, **88/88, run twice** (stamps 200002, 200003). Migration `AddAssetRentalTerms`.
+
+Delivers **AST-9** and **AST-10** under decision **D2**. Slices 1–7 re-run green — **887
+assertions** for the area.
+
+**The split between the two tables is the design.** `IsRentable` and `StandardRentalAmount` belong
+to the *asset*: the flat is worth what it is worth whoever lives in it, and the flag is what lets
+the register answer "what property do we let to staff" without inferring it from whatever happens to
+carry a rent. What one employee actually pays belongs to the *assignment*, because it is a term of
+their tenancy — and the gap between the two is exactly what makes an arrangement a taxable benefit.
+
+**The defect this slice was most likely to ship, and the assertion that stops it.** Three acts end a
+custody in this module — a return, a loss-or-damage report, and a completed transfer — and a rental
+window that outlives any one of them means payroll goes on deducting rent for a house the employee
+moved out of. Nobody notices until a payslip is wrong and somebody has been overcharged for months.
+`AssetIntegrity.CloseRentalWindow` sits beside slice 4's two rules and **all three doors call it**;
+section 6 asserts each one separately. Two of three would have been *worse* than none, because the
+hole would have been invisible. The recipient of a transfer inherits the asset and **not** the rent
+— what the next holder pays is a new decision, the same reasoning that stops them inheriting the
+previous holder's acknowledgement (D-b).
+
+**Where the module stops, stated as two assertions rather than a comment.**
+
+- **The projection does not prorate.** A tenancy that starts mid-month is reported with its full
+  periodic rate, its window, and `IsPartialPeriod` flagging that there is something to prorate. HR
+  does not know payroll's period boundaries, its rounding or its net-pay floor; computing a
+  part-month here would be guessing at another module's calendar in the one place a mistake reaches
+  somebody's take-home pay.
+- **A bad period is refused in words.** `period=banana` and `period=2026-13` both answer **400**
+  rather than falling through to "this month". A payroll input that answers 200 with the wrong
+  month's money in it is the worst failure this surface can have, and a silent default is exactly
+  how it happens.
+
+**Zero is not null, and the distinction is load-bearing.** A rent of zero means the asset is provided
+free — a stated arrangement, and usually a taxable one. Null means nobody has said. Collapsing them
+would lose the difference between "free accommodation" and "not set up yet", which is the difference
+between a correct payslip and a missing benefit. The rent-free line still reaches payroll, with
+`IsDeductible` false and a taxable value set.
+
+**Clearing terms is not ending a tenancy**, and the service refuses to confuse them. Terms that have
+not started can be cleared; a rent that has been running is ended with a date, because payroll may
+already have deducted against it and a window that vanishes cannot be reconciled with a payslip.
+
+**One refinement to D2 as written** — recorded in §5. It asked for "a benefit-in-kind flag"; a flag
+cannot carry the value of a subsidy, so `BenefitInKindValue` was added beside it, defaulting to the
+asset's standard rate less what the employee pays.
+
+**Harness.** One failure on the first run and it was the probe's: the asset `PUT` needs `id` in the
+body as well as the route, and `UpdateCompanyAssetDto` is a full-replace payload (D-j) — both traps
+already in the README, both walked into anyway. Fixed and annotated at the call site.
+
+**Screen.** The rent shows on the employee's own asset row rather than a click away, because that
+row is where somebody finds out they are paying for a company flat, and a deduction discovered on a
+payslip instead of here is the version of this feature nobody wants. `tsc` (19 pre-existing errors,
+all in `inventory`) and `eslint` clean.

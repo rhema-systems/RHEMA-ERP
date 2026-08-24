@@ -180,6 +180,30 @@ public class CompanyAsset : TenantEntity
 
     public DateOnly? NextMaintenanceDate { get; set; }
 
+    // Rental — AST-9, decision D2
+    /// <summary>
+    /// Whether this asset is one an employee can be <b>charged for holding</b> — staff housing, a
+    /// company vehicle used privately, a serviced flat.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="IsAssignable"/>, which asks whether it can be issued at all. Every
+    /// rentable asset is assignable; almost no assignable asset is rentable. The flag exists so
+    /// that rental terms cannot be attached to a stapler, and so the register can answer "what
+    /// property do we let to staff" without inferring it from whatever happens to carry a rent.
+    /// </remarks>
+    public bool IsRentable { get; set; }
+
+    /// <summary>The going rate for this asset, per period. A <b>default</b> the assignment copies.</summary>
+    /// <remarks>
+    /// Kept on the asset because it is a property of the thing, not of who holds it: the flat is
+    /// worth what it is worth whoever lives in it. The assignment may charge less — a subsidy — and
+    /// the difference between the two is what makes the arrangement a taxable benefit.
+    /// </remarks>
+    public decimal? StandardRentalAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
+
     // Insurance
     public bool IsInsured { get; set; }
 
@@ -363,6 +387,55 @@ public class AssetAssignment : TenantEntity
     public bool ReturnedInGoodCondition { get; set; }
 
     public Guid? ReturnedToId { get; set; }
+
+    // Rental — AST-10, decision D2
+    /// <summary>
+    /// What this employee is charged for holding the asset, per <see cref="RentalFrequency"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null where no rent is charged. Zero is different from null and is allowed on purpose:
+    /// zero means <i>provided free</i>, which is a stated arrangement — and usually a taxable one —
+    /// whereas null means nobody has said. A screen that treated them alike would lose the
+    /// difference between "free accommodation" and "we have not set this up yet".</para>
+    ///
+    /// <para>⚠ Nothing deducts this. It is declared here and read by payroll through
+    /// <c>GET Assets/payroll/rental-deductions</c>. Decision D2.</para>
+    /// </remarks>
+    public decimal? RentalAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
+
+    public RentalDeductionFrequency? RentalFrequency { get; set; }
+
+    /// <summary>When the rent starts running. Defaults to the assignment date when terms are set.</summary>
+    public DateOnly? RentalEffectiveFrom { get; set; }
+
+    /// <summary>
+    /// When it stops. Null means open-ended, and <b>closing the custody closes this</b>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Set automatically by every act that ends a custody — a return, a loss or damage report,
+    /// and a completed transfer. Without that, payroll would keep deducting rent for a house the
+    /// employee moved out of, which is the kind of defect nobody notices until a payslip is wrong.
+    /// Three doors close a custody in this module and all three close the rent.
+    /// </remarks>
+    public DateOnly? RentalEffectiveTo { get; set; }
+
+    /// <summary>Whether the arrangement is taxable as a benefit in kind — AST-10.</summary>
+    public bool IsBenefitInKind { get; set; }
+
+    /// <summary>
+    /// The taxable value of the benefit per period, where it is not simply the rent charged.
+    /// </summary>
+    /// <remarks>
+    /// <para>Decision D2 said "a benefit-in-kind flag", and a flag alone turned out not to be
+    /// enough: the taxable value of subsidised accommodation is the <b>market rate less what the
+    /// employee pays</b>, and the flag cannot carry that number. Left null it is computed from the
+    /// asset's <c>StandardRentalAmount</c> minus <see cref="RentalAmount"/>, which is a fact HR
+    /// holds; assessing tax on it stays payroll's.</para>
+    /// </remarks>
+    public decimal? BenefitInKindValue { get; set; }
 
     // Damages/Loss
     public bool DamageReported { get; set; }

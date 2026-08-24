@@ -91,6 +91,17 @@ public interface IAssetAssignmentRepository : IGenericRepository<AssetAssignment
     Task<IEnumerable<AssetAssignment>> GetActiveAssignmentsForEmployeeAsync(Guid employeeId);
     Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(Guid tenantId);
     Task<IEnumerable<AssetAssignment>> GetByStatusAsync(Guid tenantId, AssignmentStatus status);
+
+    /// <summary>
+    /// Rental arrangements whose effective window overlaps a period — AST-10, slice 8.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NOT filtered to active assignments. A tenancy that ran for half the month and
+    /// ended when the employee handed the keys back is owed for that half; filtering on the custody
+    /// would silently drop the last period of every arrangement the module has ever carried.
+    /// </remarks>
+    Task<IEnumerable<AssetAssignment>> GetRentalArrangementsAsync(
+        Guid tenantId, DateOnly periodStart, DateOnly periodEnd);
 }
 
 #endregion

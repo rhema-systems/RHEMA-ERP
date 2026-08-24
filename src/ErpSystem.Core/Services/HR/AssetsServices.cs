@@ -14,6 +14,9 @@ using ErpSystem.Core.Interfaces;
 // of it. Aliasing the one type we actually want keeps the collision from ever arising.
 using IFixedAssetService = ErpSystem.Core.Interfaces.Finance.IFixedAssetService;
 
+// Slice 8. Same reason as the alias above: one type, named once.
+using ICurrencyService = ErpSystem.Core.Interfaces.Finance.ICurrencyService;
+
 // Slice 4 names `Employee` as a return type for the first time in this file. An ALIAS again, not
 // `using ErpSystem.Core.Entities.HR` — that namespace carries a hundred-odd HR entities and pulling
 // all of them in beside `Entities.HR.Assets` is how this file's `AssetType` and `AssetTransfer`
@@ -179,6 +182,29 @@ internal static class AssetIntegrity
             throw AssetsWorkflowException.Invalid(
                 $"An asset returned in {dto.ConditionAtReturn} condition cannot also be recorded as "
                 + "returned in good condition.");
+    }
+
+    /// <summary>
+    /// Stops the rent when the custody ends — area 16, slice 8, AST-10.
+    /// </summary>
+    /// <remarks>
+    /// <para>Lives here, beside the other two integrity rules, for the reason the class exists:
+    /// <b>three doors close a custody</b> — a return, a loss or damage report, and a completed
+    /// transfer — and a rental that ends at only two of them is worse than one that ends at none,
+    /// because the hole is invisible. Payroll reads the effective window; leave it open and it goes
+    /// on deducting rent for a house the employee moved out of, which nobody notices until a payslip
+    /// is wrong and somebody has been overcharged for months.</para>
+    ///
+    /// <para>The existing end date wins when it is earlier: a tenancy already agreed to finish on a
+    /// stated day is not extended by the custody outlasting it.</para>
+    /// </remarks>
+    internal static void CloseRentalWindow(AssetAssignment assignment, DateOnly on)
+    {
+        if (assignment.RentalFrequency is null) return;
+
+        if (assignment.RentalEffectiveTo is { } existing && existing <= on) return;
+
+        assignment.RentalEffectiveTo = on;
     }
 }
 
@@ -953,6 +979,7 @@ public class AssetAssignmentService : IAssetAssignmentService
     private readonly IAssetAssignmentRepository _assignmentRepo;
     private readonly ICompanyAssetRepository _assetRepo;
     private readonly IEmployeeRepository _employeeRepo;
+    private readonly ICurrencyService _currencies;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
 
@@ -960,12 +987,14 @@ public class AssetAssignmentService : IAssetAssignmentService
         IAssetAssignmentRepository assignmentRepo,
         ICompanyAssetRepository assetRepo,
         IEmployeeRepository employeeRepo,
+        ICurrencyService currencies,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService)
     {
         _assignmentRepo = assignmentRepo;
         _assetRepo = assetRepo;
         _employeeRepo = employeeRepo;
+        _currencies = currencies;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
     }
@@ -1235,6 +1264,195 @@ public class AssetAssignmentService : IAssetAssignmentService
         await _unitOfWork.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Declares what an employee is charged for holding a rentable asset — AST-9, AST-10, D2.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The asset must be marked rentable.</b> Rent attached to something the register does
+    /// not let is a figure that reaches payroll with nothing behind it, and AST-9 asks for the flag
+    /// precisely so that "what do we let to staff" has an answer that is not "whatever happens to
+    /// carry a rent".</para>
+    ///
+    /// <para><b>Zero is a real amount.</b> It means provided free — a stated arrangement, and
+    /// usually a taxable one. Null means nobody has said. Defaulting one to the other would lose
+    /// the difference between "free accommodation" and "not set up yet", which is the difference
+    /// between a correct payslip and a missing benefit.</para>
+    ///
+    /// <para>Nothing here deducts anything. Decision D2.</para>
+    /// </remarks>
+    public async Task<AssetAssignmentDto> SetRentalTermsAsync(Guid id, SetAssetRentalTermsDto dto)
+    {
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+        var entity = await GetOwnedAssignmentAsync(id);
+        var asset = await GetOwnedAssetAsync(entity.AssetId);
+
+        if (!asset.IsRentable)
+            throw AssetsWorkflowException.InvalidState(
+                $"Asset {asset.AssetNumber} is not marked as rentable, so nobody can be charged for "
+                + "holding it. Mark it rentable on the asset first.");
+
+        if (entity.Status != AssignmentStatus.Active)
+            throw AssetsWorkflowException.InvalidState(
+                $"Only an active assignment can carry rental terms; this one is {entity.Status}.");
+
+        var from = dto.RentalEffectiveFrom ?? entity.AssignmentDate;
+        if (dto.RentalEffectiveTo is { } to && to < from)
+            throw AssetsWorkflowException.Invalid(
+                $"The rent cannot end ({to:yyyy-MM-dd}) before it starts ({from:yyyy-MM-dd}).");
+
+        var amount = dto.RentalAmount ?? asset.StandardRentalAmount
+            ?? throw AssetsWorkflowException.Invalid(
+                $"No rent is stated and asset {asset.AssetNumber} carries no standard rate to fall "
+                + "back on. State the amount, or set a standard rate on the asset.");
+
+        var currency = await ResolveRentalCurrencyAsync(dto.RentalCurrencyCode ?? asset.RentalCurrencyCode);
+
+        // The value of a subsidy is the going rate less what the employee actually pays — a fact
+        // this module holds. Assessing tax on it is payroll's, and stays there.
+        decimal? benefitValue = dto.BenefitInKindValue;
+        if (dto.IsBenefitInKind && benefitValue is null && asset.StandardRentalAmount is { } standard)
+            benefitValue = Math.Max(0m, standard - amount);
+
+        if (!dto.IsBenefitInKind && dto.BenefitInKindValue is > 0)
+            throw AssetsWorkflowException.Invalid(
+                "A taxable value cannot be recorded on an arrangement that is not a benefit in kind. "
+                + "Either mark it as one, or leave the value out.");
+
+        entity.RentalAmount = amount;
+        entity.RentalCurrencyCode = currency;
+        entity.RentalFrequency = dto.RentalFrequency;
+        entity.RentalEffectiveFrom = from;
+        entity.RentalEffectiveTo = dto.RentalEffectiveTo;
+        entity.IsBenefitInKind = dto.IsBenefitInKind;
+        entity.BenefitInKindValue = benefitValue;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
+        await _assignmentRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        return (await _assignmentRepo.GetWithDetailsAsync(id))!.ToDto();
+    }
+
+    /// <summary>
+    /// Removes rental terms declared in error — distinct from ending a tenancy.
+    /// </summary>
+    /// <remarks>
+    /// Clearing is for terms that should never have been recorded. A tenancy that genuinely ran and
+    /// has finished is closed with an effective-to date instead, because payroll has already
+    /// deducted against it and a window that vanishes cannot be reconciled with a payslip.
+    /// </remarks>
+    public async Task<AssetAssignmentDto> ClearRentalTermsAsync(Guid id)
+    {
+        var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
+        var entity = await GetOwnedAssignmentAsync(id);
+
+        if (entity.RentalFrequency is null)
+            throw AssetsWorkflowException.InvalidState("This assignment carries no rental terms.");
+
+        var todayOnly = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (entity.RentalEffectiveFrom is { } started && started <= todayOnly)
+            throw AssetsWorkflowException.Conflict(
+                $"This rent has been running since {started:yyyy-MM-dd} and payroll may already have "
+                + "deducted against it. End it with a date instead of clearing it.");
+
+        entity.RentalAmount = null;
+        entity.RentalCurrencyCode = null;
+        entity.RentalFrequency = null;
+        entity.RentalEffectiveFrom = null;
+        entity.RentalEffectiveTo = null;
+        entity.IsBenefitInKind = false;
+        entity.BenefitInKindValue = null;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
+        await _assignmentRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        return (await _assignmentRepo.GetWithDetailsAsync(id))!.ToDto();
+    }
+
+    /// <summary>
+    /// The read-only projection payroll pulls — AST-10, decision D2's whole point.
+    /// </summary>
+    /// <remarks>
+    /// <para>One line per employee-asset arrangement whose window overlaps the period asked for.
+    /// The assignment need not still be active: a tenancy that ran for the first half of the month
+    /// and ended when the employee handed the keys back is <b>owed for that half</b>, and a
+    /// projection that only reported live custodies would silently drop the last period of every
+    /// arrangement it has ever carried.</para>
+    ///
+    /// <para>⚠ <b>Nothing here is prorated.</b> The line carries the full periodic rate and the
+    /// window it applies to, with <c>IsPartialPeriod</c> flagging that there is something to
+    /// prorate. HR does not know payroll's period boundaries, its rounding or its net-pay floor;
+    /// computing a part-month here would be guessing at another module's calendar and being quietly
+    /// wrong in the one place a mistake reaches somebody's take-home pay.</para>
+    /// </remarks>
+    public async Task<IEnumerable<AssetRentalPayrollLineDto>> GetRentalPayrollLinesAsync(
+        DateOnly periodStart, DateOnly periodEnd)
+    {
+        if (periodEnd < periodStart)
+            throw AssetsWorkflowException.Invalid(
+                $"The period ends ({periodEnd:yyyy-MM-dd}) before it starts ({periodStart:yyyy-MM-dd}).");
+
+        var tenantId = GetTenantId();
+        var rows = await _assignmentRepo.GetRentalArrangementsAsync(tenantId, periodStart, periodEnd);
+
+        return rows.Select(a =>
+        {
+            var from = a.RentalEffectiveFrom;
+            var to = a.RentalEffectiveTo;
+            return new AssetRentalPayrollLineDto
+            {
+                AssignmentId = a.Id,
+                AssignmentNumber = a.AssignmentNumber,
+                EmployeeId = a.EmployeeId,
+                EmployeeName = a.Employee is null ? string.Empty : $"{a.Employee.FirstName} {a.Employee.LastName}",
+                EmployeeNumber = a.Employee?.EmployeeNumber ?? string.Empty,
+                AssetId = a.AssetId,
+                AssetName = a.Asset?.AssetName ?? string.Empty,
+                AssetNumber = a.Asset?.AssetNumber ?? string.Empty,
+                AssetTypeName = a.Asset?.AssetType?.Name ?? string.Empty,
+                RentalAmount = a.RentalAmount ?? 0m,
+                CurrencyCode = a.RentalCurrencyCode ?? string.Empty,
+                Frequency = a.RentalFrequency!.Value,
+                IsBenefitInKind = a.IsBenefitInKind,
+                BenefitInKindValue = a.BenefitInKindValue,
+                EffectiveFrom = from,
+                EffectiveTo = to,
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd,
+                IsPartialPeriod = (from is { } f && f > periodStart) || (to is { } t && t < periodEnd)
+            };
+        }).ToList();
+    }
+
+    /// <summary>The currency the rent is stated in — asked for, the asset's, or Finance's base.</summary>
+    /// <remarks>
+    /// Validated against Finance's canonical list, the same read-side integration slice 7 uses for
+    /// a surcharge. A rent in a currency that does not exist reaches payroll as an unconvertible
+    /// number.
+    /// </remarks>
+    private async Task<string> ResolveRentalCurrencyAsync(string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            var code = requested.Trim().ToUpperInvariant();
+            if (await _currencies.GetByCodeAsync(code) is null)
+                throw AssetsWorkflowException.Invalid(
+                    $"'{code}' is not a currency Finance holds. Add it in Finance, or use one that exists.");
+            return code;
+        }
+
+        var baseCurrency = await _currencies.GetBaseCurrencyAsync();
+        if (baseCurrency is null)
+            throw AssetsWorkflowException.Invalid(
+                "No base currency is configured in Finance, so a rent has no currency to be stated in. "
+                + "Set one, or state the currency on the terms.");
+
+        return baseCurrency.CurrencyCode;
+    }
+
     public async Task ReturnAssetAsync(ReturnAssetDto dto)
     {
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
@@ -1256,6 +1474,8 @@ public class AssetAssignmentService : IAssetAssignmentService
 
         entity.Status = AssignmentStatus.Returned;
         entity.ReturnDate = DateTime.UtcNow;
+        // AST-10. Handing the asset back ends the rent on it — door one of three.
+        AssetIntegrity.CloseRentalWindow(entity, DateOnly.FromDateTime(DateTime.UtcNow));
         entity.ConditionAtReturn = dto.ConditionAtReturn;
         entity.ReturnNotes = dto.ReturnNotes;
         entity.ReturnedInGoodCondition = dto.ReturnedInGoodCondition;
@@ -1327,6 +1547,9 @@ public class AssetAssignmentService : IAssetAssignmentService
         entity.Status = dto.Outcome == AssetIncidentOutcome.Lost
             ? AssignmentStatus.Lost
             : AssignmentStatus.Damaged;
+
+        // AST-10, door two of three. An employee is not charged rent for a house that burned down.
+        AssetIntegrity.CloseRentalWindow(entity, dto.OccurredOn ?? DateOnly.FromDateTime(DateTime.UtcNow));
 
         // ⚠ Deliberately NOT stamped with a return date. The asset did not come back, and writing
         // one would make every "was it returned" query — including the exit clearance in slice 10 —
@@ -2922,6 +3145,10 @@ public class AssetTransferService : IAssetTransferService
         {
             outgoing.Status = AssignmentStatus.Transferred;
             outgoing.ReturnDate = DateTime.UtcNow;
+            // AST-10, door three of three. Custody passing to somebody else ends the first
+            // employee's rent as surely as handing it back does — and the incoming assignment
+            // starts with no rental terms, because what the next holder pays is a new decision.
+            AssetIntegrity.CloseRentalWindow(outgoing, DateOnly.FromDateTime(DateTime.UtcNow));
             outgoing.ConditionAtReturn = asset.Condition;
             outgoing.ReturnedInGoodCondition = true;
             outgoing.ReturnedToId = transfer.ToEmployeeId ?? transfer.InitiatedById;

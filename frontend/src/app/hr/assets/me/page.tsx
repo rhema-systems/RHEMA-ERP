@@ -320,6 +320,22 @@ export default function MyAssetsPage() {
         <div className="text-xs text-muted-foreground">
           {a.assetNumber} · {a.assetTypeName}
         </div>
+        {/*
+          AST-10. Shown on the row rather than a click away, because this is where somebody finds
+          out they are paying rent for a company flat — and a deduction discovered on a payslip
+          instead of here is the version of this feature nobody wants. `!= null` on purpose: a rent
+          of zero is a real arrangement and says "provided free", which is worth stating.
+        */}
+        {a.rentalAmount != null && (
+          <div className="text-xs font-medium text-amber-700 dark:text-amber-500">
+            {a.rentalAmount > 0
+              ? `${a.rentalCurrencyCode} ${a.rentalAmount.toLocaleString()} ${(
+                  a.rentalFrequencyName ?? ''
+                ).toLowerCase()}`
+              : 'Provided free'}
+            {a.isBenefitInKind && ' · taxable benefit'}
+          </div>
+        )}
       </TableCell>
       <TableCell>{fmtDate(a.assignmentDate)}</TableCell>
       <TableCell>{fmtDate(a.expectedReturnDate)}</TableCell>

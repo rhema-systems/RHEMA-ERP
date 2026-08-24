@@ -505,3 +505,30 @@ public enum AssetSurchargeRecoveryMethod
     [Description("Deduct at Exit")]
     ExitSettlement = 3
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AREA 16 SLICE 8 — rentable assets and the payroll seam (AST-9, AST-10, decision D2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// How often the rent on a company asset falls due.
+/// </summary>
+/// <remarks>
+/// ⚠ A <b>declaration to payroll</b>, not a schedule this module runs. HR states what is charged
+/// and how often; payroll owns the pay periods, the proration and the net-pay floor. Nothing here
+/// generates a deduction row — decision D2 and the payroll ownership boundary.
+/// </remarks>
+public enum RentalDeductionFrequency
+{
+    [Description("Monthly")]
+    Monthly = 1,
+
+    [Description("Fortnightly")]
+    Fortnightly = 2,
+
+    [Description("Weekly")]
+    Weekly = 3,
+
+    [Description("Annually")]
+    Annually = 4
+}

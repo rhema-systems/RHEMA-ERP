@@ -213,6 +213,11 @@ public class CompanyAssetDto : BaseDto
     public bool IsCurrentlyAssigned { get; set; }
     public Guid? CurrentAssignedToId { get; set; }
     public string? CurrentAssignedToName { get; set; }
+
+    /// <summary>AST-9 — whether an employee can be charged for holding this.</summary>
+    public bool IsRentable { get; set; }
+    public decimal? StandardRentalAmount { get; set; }
+    public string? RentalCurrencyCode { get; set; }
     
     // Maintenance
     public bool RequiresRegularMaintenance { get; set; }
@@ -264,6 +269,9 @@ public class CompanyAssetSummaryDto
     public bool IsCurrentlyAssigned { get; set; }
     public string? CurrentAssignedToName { get; set; }
     public decimal? CurrentValue { get; set; }
+
+    /// <summary>AST-9 — so the register can answer "what do we let to staff" from a list.</summary>
+    public bool IsRentable { get; set; }
 
     /// <summary>AST-11 — so a register list shows at a glance where each row came from.</summary>
     public AssetSource Source { get; set; } = AssetSource.HrCreated;
@@ -394,6 +402,18 @@ public class CreateCompanyAssetDto : CreateDtoBase
     /// <summary>AST-4 — when the cover lapses.</summary>
     public DateOnly? InsuranceExpiryDate { get; set; }
 
+    // Rental — AST-9. ⚠ A field on the payload AND in the mapping AND read back: this area has
+    // produced a permanently-null column six times by getting one of the three, so all three or
+    // none. D-i(b) is the same shape one slice earlier.
+    /// <summary>Whether an employee can be charged for holding this — staff housing, a car.</summary>
+    public bool IsRentable { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? StandardRentalAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
+
     public List<CreateAssetAttributeValueDto>? AttributeValues { get; set; }
 }
 
@@ -501,6 +521,18 @@ public class UpdateCompanyAssetDto : UpdateDtoBase
 
     /// <summary>AST-4 — when the cover lapses.</summary>
     public DateOnly? InsuranceExpiryDate { get; set; }
+
+    // Rental — AST-9. ⚠ A field on the payload AND in the mapping AND read back: this area has
+    // produced a permanently-null column six times by getting one of the three, so all three or
+    // none. D-i(b) is the same shape one slice earlier.
+    /// <summary>Whether an employee can be charged for holding this — staff housing, a car.</summary>
+    public bool IsRentable { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? StandardRentalAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
 
     // Disposal
     public DateOnly? DisposalDate { get; set; }
@@ -737,6 +769,31 @@ public class AssetAssignmentDto : BaseDto
     public bool EmployeeLiable { get; set; }
     public decimal? RepairCost { get; set; }
     public decimal? ReplacementCost { get; set; }
+
+    // Rental — AST-10, decision D2
+    public decimal? RentalAmount { get; set; }
+    public string? RentalCurrencyCode { get; set; }
+    public RentalDeductionFrequency? RentalFrequency { get; set; }
+    public string? RentalFrequencyName => RentalFrequency?.ToString();
+    public DateOnly? RentalEffectiveFrom { get; set; }
+    public DateOnly? RentalEffectiveTo { get; set; }
+    public bool IsBenefitInKind { get; set; }
+    public decimal? BenefitInKindValue { get; set; }
+
+    /// <summary>True where rental terms have been declared at all.</summary>
+    public bool HasRentalTerms => RentalFrequency.HasValue;
+
+    /// <summary>
+    /// The rent is stated, the period has started, and nothing has closed it.
+    /// </summary>
+    /// <remarks>
+    /// Answers the question the payroll projection asks, so a screen and the projection cannot
+    /// disagree about whether an arrangement is running.
+    /// </remarks>
+    public bool IsRentalRunning =>
+        HasRentalTerms
+        && (RentalEffectiveFrom is null || RentalEffectiveFrom <= DateOnly.FromDateTime(DateTime.UtcNow))
+        && (RentalEffectiveTo is null || RentalEffectiveTo >= DateOnly.FromDateTime(DateTime.UtcNow));
 }
 
 /// <summary>
@@ -777,6 +834,19 @@ public class AssetAssignmentSummaryDto
     /// </remarks>
     public bool EmployeeAcknowledged { get; set; }
     public DateTime? AcknowledgementDate { get; set; }
+
+    /// <summary>
+    /// What the holder is charged for this, per period — AST-10.
+    /// </summary>
+    /// <remarks>
+    /// On the summary because the employee's own list is where somebody finds out they are paying
+    /// rent for a company flat, and making them open every row to discover it is how a deduction
+    /// becomes a surprise on a payslip. Columns on the assignment itself, so no read pays for them.
+    /// </remarks>
+    public decimal? RentalAmount { get; set; }
+    public string? RentalCurrencyCode { get; set; }
+    public string? RentalFrequencyName { get; set; }
+    public bool IsBenefitInKind { get; set; }
 }
 
 /// <summary>
@@ -1844,6 +1914,113 @@ public class AssetSurchargePayrollLineDto
     public decimal? InstalmentAmount { get; set; }
     public DateOnly? RecoveryStartDate { get; set; }
     public DateTime? ApprovalDate { get; set; }
+}
+
+#endregion
+
+#region Rental and the payroll seam — area 16 slice 8 (AST-9, AST-10, decision D2)
+
+/// <summary>
+/// Declares what an employee is charged for holding a rentable asset — AST-10.
+/// </summary>
+/// <remarks>
+/// ⚠ A <b>declaration</b>. Nothing here deducts anything: payroll reads
+/// <c>GET Assets/payroll/rental-deductions</c> and runs its own deduction. HR does not know
+/// payroll's periods, its proration or its net-pay floor, and inventing them here is exactly the
+/// parallel mechanism the ownership boundary exists to prevent (decision D2).
+/// </remarks>
+public class SetAssetRentalTermsDto
+{
+    /// <summary>
+    /// What the employee pays per period. <b>Zero is not null.</b>
+    /// </summary>
+    /// <remarks>
+    /// Zero means the asset is provided free — a stated arrangement, and usually a taxable one.
+    /// Null means nobody has said. Leave it out to take the asset's standard rate.
+    /// </remarks>
+    [Range(0, double.MaxValue)]
+    public decimal? RentalAmount { get; set; }
+
+    /// <summary>Defaults to the asset's rental currency, then to Finance's base currency.</summary>
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
+
+    [Required]
+    public RentalDeductionFrequency RentalFrequency { get; set; }
+
+    /// <summary>Defaults to the assignment date — rent runs from when they got the keys.</summary>
+    public DateOnly? RentalEffectiveFrom { get; set; }
+
+    /// <summary>Open-ended when omitted. Closing the custody closes it either way.</summary>
+    public DateOnly? RentalEffectiveTo { get; set; }
+
+    public bool IsBenefitInKind { get; set; }
+
+    /// <summary>
+    /// The taxable value per period, where it is not simply the rent charged.
+    /// </summary>
+    /// <remarks>
+    /// Left null on a benefit-in-kind arrangement it is computed as the asset's standard rate less
+    /// what the employee pays — the value of the subsidy, which is a fact HR holds. Assessing tax
+    /// on it is payroll's.
+    /// </remarks>
+    [Range(0, double.MaxValue)]
+    public decimal? BenefitInKindValue { get; set; }
+}
+
+/// <summary>
+/// One employee, one rentable asset, one period — the read-only line payroll pulls.
+/// </summary>
+/// <remarks>
+/// <para><b>HR declares; payroll deducts.</b> This carries no payroll period id, no deduction code
+/// and no net-pay arithmetic, because those belong to a module this one integrates with read-only.
+/// What it does carry is everything payroll needs to build its own row and everything an auditor
+/// needs to see where the figure came from: the asset, the custody, the rate, the currency, the
+/// window, and whether the arrangement is a charge, a taxable benefit, or both.</para>
+///
+/// <para>⚠ <c>AmountForPeriod</c> is <b>not</b> prorated. A tenancy that starts mid-month is
+/// reported with its window and its full periodic rate; how much of it falls in a given pay run is
+/// payroll's calculation, made with payroll's calendar. Prorating here would be HR guessing at
+/// somebody else's period boundaries and being quietly wrong.</para>
+/// </remarks>
+public class AssetRentalPayrollLineDto
+{
+    public Guid AssignmentId { get; set; }
+    public string AssignmentNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public string AssetTypeName { get; set; } = string.Empty;
+
+    /// <summary>What the employee pays per period. Zero where the asset is provided free.</summary>
+    public decimal RentalAmount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public RentalDeductionFrequency Frequency { get; set; }
+    public string FrequencyName => Frequency.ToString();
+
+    /// <summary>Whether there is anything to deduct at all.</summary>
+    public bool IsDeductible => RentalAmount > 0;
+
+    public bool IsBenefitInKind { get; set; }
+
+    /// <summary>The taxable value per period, where the arrangement is a benefit.</summary>
+    public decimal? BenefitInKindValue { get; set; }
+
+    public DateOnly? EffectiveFrom { get; set; }
+    public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>The period this line was requested for, echoed back.</summary>
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+
+    /// <summary>
+    /// True where the arrangement covers only part of the requested period — it started or ended
+    /// inside it. Payroll prorates; this only flags that there is something to prorate.
+    /// </summary>
+    public bool IsPartialPeriod { get; set; }
 }
 
 #endregion

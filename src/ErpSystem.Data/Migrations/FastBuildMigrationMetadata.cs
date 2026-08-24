@@ -211,3 +211,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260823223410_AddAssetAssignmentTransferLink")] partial class AddAssetAssignmentTransferLink { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824010739_AddAssetAssignmentTermsDocumentSend")] partial class AddAssetAssignmentTermsDocumentSend { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824025224_AddAssetSurchargeAndIncident")] partial class AddAssetSurchargeAndIncident { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824081736_AddAssetRentalTerms")] partial class AddAssetRentalTerms { }

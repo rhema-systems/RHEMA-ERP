@@ -99,6 +99,18 @@ public interface IAssetAssignmentService
     /// returned.
     /// </remarks>
     Task ReportIncidentAsync(ReportAssetIncidentDto dto);
+
+    /// <summary>Declares what an employee is charged for holding a rentable asset — AST-9/AST-10.</summary>
+    Task<AssetAssignmentDto> SetRentalTermsAsync(Guid id, SetAssetRentalTermsDto dto);
+
+    /// <summary>Removes terms declared in error. A tenancy that ran is ended with a date instead.</summary>
+    Task<AssetAssignmentDto> ClearRentalTermsAsync(Guid id);
+
+    /// <summary>
+    /// The read-only projection payroll pulls — decision D2. HR declares; payroll deducts.
+    /// </summary>
+    Task<IEnumerable<AssetRentalPayrollLineDto>> GetRentalPayrollLinesAsync(
+        DateOnly periodStart, DateOnly periodEnd);
 }
 
 #endregion
