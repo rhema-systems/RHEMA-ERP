@@ -55,6 +55,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { AssetAttributesPanel } from '@/components/hr/assets/AssetAttributesPanel';
 import { AssetFilesPanel } from '@/components/hr/assets/AssetFilesPanel';
+import { MaintenanceRecordDialog } from '@/components/hr/assets/MaintenanceRecordDialog';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -141,6 +142,7 @@ export default function AssetDetailPage() {
     cost: '',
   });
 
+  const [viewingJob, setViewingJob] = useState<string | null>(null);
   const [completing, setCompleting] = useState<{ id: string; number: string } | null>(null);
   const [completionNotes, setCompletionNotes] = useState('');
 
@@ -545,7 +547,17 @@ export default function AssetDetailPage() {
                   <TableBody>
                     {asset.recentMaintenance.map((m) => (
                       <TableRow key={m.id}>
-                        <TableCell>{m.maintenanceNumber}</TableCell>
+                        <TableCell>
+                          {/* The row shows the SUMMARY; what was actually done to the asset lives
+                              only on the by-id read, and until now no screen loaded it. */}
+                          <button
+                            type="button"
+                            className="text-left hover:underline"
+                            onClick={() => setViewingJob(m.id)}
+                          >
+                            {m.maintenanceNumber}
+                          </button>
+                        </TableCell>
                         <TableCell>{fmtDate(m.maintenanceDate)}</TableCell>
                         <TableCell>{m.typeName}</TableCell>
                         <TableCell><StatusBadge status={m.statusName} /></TableCell>
@@ -746,6 +758,12 @@ export default function AssetDetailPage() {
 
       {/* ── Link to the Maintenance register ────────────────────────────────── */}
       {/* ── Dispose ───────────────────────────────────────── */}
+      <MaintenanceRecordDialog
+        maintenanceId={viewingJob}
+        onClose={() => setViewingJob(null)}
+        onDeleted={invalidate}
+      />
+
       <Dialog open={disposing} onOpenChange={setDisposing}>
         <DialogContent>
           <DialogHeader>

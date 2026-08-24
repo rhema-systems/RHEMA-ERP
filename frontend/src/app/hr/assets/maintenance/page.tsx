@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { MaintenanceRecordDialog } from '@/components/hr/assets/MaintenanceRecordDialog';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
 import type { AssetMaintenanceDueItem } from '@/types/hr/assets';
 
@@ -109,6 +110,7 @@ function WatchlistTable({
  */
 export default function AssetMaintenancePage() {
   const [daysAhead, setDaysAhead] = useState(30);
+  const [viewingJob, setViewingJob] = useState<string | null>(null);
 
   const { data: due = [], isLoading: loadingDue } = useQuery({
     queryKey: ['hr', 'assets', 'maintenance', 'due', daysAhead],
@@ -257,7 +259,15 @@ export default function AssetMaintenancePage() {
                   <TableBody>
                     {(log?.items ?? []).map((m) => (
                       <TableRow key={m.id}>
-                        <TableCell>{m.maintenanceNumber}</TableCell>
+                        <TableCell>
+                          <button
+                            type="button"
+                            className="text-left hover:underline"
+                            onClick={() => setViewingJob(m.id)}
+                          >
+                            {m.maintenanceNumber}
+                          </button>
+                        </TableCell>
                         <TableCell>
                           <Link href={`/hr/assets/register/${m.assetId}`} className="hover:underline">
                             {m.assetName}
@@ -282,6 +292,11 @@ export default function AssetMaintenancePage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <MaintenanceRecordDialog
+        maintenanceId={viewingJob}
+        onClose={() => setViewingJob(null)}
+      />
     </div>
   );
 }
