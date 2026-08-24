@@ -65,6 +65,19 @@ public static class ControlledFileUploadCategories
     public const string HrRecruitmentAttachments = "hr-recruitment-attachments";
 
     /// <summary>
+    /// Paperwork filed against a company asset — the purchase invoice, the warranty certificate,
+    /// the user manual, and photographs of its condition when issued or taken back (area 16).
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than part of the HR pile because most of it is not personal data at
+    /// all — an invoice for a laptop is a procurement record — while a photograph of damage taken
+    /// at a return is evidence in a charge against a named employee. Keeping them together under
+    /// one asset-scoped category lets retention follow the ASSET, which is how anybody looking for
+    /// them would ask. The <c>hr-</c> prefix keeps the store private either way.
+    /// </remarks>
+    public const string HrAssetDocuments = "hr-asset-documents";
+
+    /// <summary>
     /// Evidence behind a pre-employment check on a conditional offer — police clearance
     /// certificates, medical reports, academic transcripts, written references.
     ///
@@ -120,6 +133,11 @@ public static class ControlledFileUploadCategories
                 // certificate. No tenant policy should be able to let one of those in unscanned.
                 HrSeparationDocuments,
                 HrRecruitmentAttachments,
+                // ⚠ Scan-mandatory although an asset invoice is mundane. The same category carries
+                // damage photographs taken at a return, which are evidence in a money claim against
+                // an employee, and a tenant policy should not be able to let one of those in
+                // unscanned just because most of its neighbours are receipts.
+                HrAssetDocuments,
                 HrPreEmploymentDocuments,
                 HrSheControlledDocuments
             ],

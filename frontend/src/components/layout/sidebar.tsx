@@ -633,6 +633,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Requisitions', href: '/hr/assets/requisitions', icon: ClipboardList },
           { title: 'Transfers', href: '/hr/assets/transfers', icon: ArrowRightLeft },
           { title: 'Surcharges', href: '/hr/assets/surcharges', icon: Receipt },
+          // The payroll desk's view of both money surfaces. Its own entry because it is somebody
+          // else's worklist entirely: HR declares here, payroll deducts elsewhere.
+          { title: 'Payroll Deductions', href: '/hr/assets/payroll', icon: Coins },
           // The three watchlist groups get their own entries rather than living behind the
           // register: each is somebody's worklist, and a list you have to go looking for is a list
           // nobody works.

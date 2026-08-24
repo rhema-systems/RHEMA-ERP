@@ -6,6 +6,7 @@ import {
   ArrowRightLeft,
   BellRing,
   Boxes,
+  Banknote,
   ClipboardList,
   FileText,
   Package,
@@ -126,6 +127,12 @@ export default function AssetsHubPage() {
             description: 'What is coming back this fortnight, and what is already late.',
             href: '/hr/assets/returns',
             icon: AlertTriangle,
+          },
+          {
+            title: 'Payroll deductions',
+            description: 'What HR has declared for asset rental and surcharge recovery.',
+            href: '/hr/assets/payroll',
+            icon: Banknote,
           },
           {
             title: 'Register report',

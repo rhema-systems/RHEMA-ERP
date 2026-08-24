@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Boxes, Loader2, Plus, Search } from 'lucide-react';
+import { Boxes, Landmark, Loader2, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -82,11 +82,21 @@ export default function AssetRegisterPage() {
         description="Every asset the organisation holds, and who has it."
         backHref="/hr/assets"
         actions={
-          <Button asChild>
-            <Link href="/hr/assets/register/new">
-              <Plus className="mr-2 h-4 w-4" /> Register an asset
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Two ways in, because there are two kinds of asset. Something HR bought outright is
+                registered here; something Finance capitalised is taken across from their register,
+                and its money stays theirs (decision D1). */}
+            <Button variant="outline" asChild>
+              <Link href="/hr/assets/register/from-fixed-asset">
+                <Landmark className="mr-2 h-4 w-4" /> From fixed assets
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/hr/assets/register/new">
+                <Plus className="mr-2 h-4 w-4" /> Register an asset
+              </Link>
+            </Button>
+          </div>
         }
       />
 

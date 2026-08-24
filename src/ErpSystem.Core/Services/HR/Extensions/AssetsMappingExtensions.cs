@@ -813,20 +813,51 @@ public static class AssetsMappingExtensions
             AssetId = entity.AssetId,
             FileName = entity.FileName,
             FilePath = entity.FilePath,
+            Caption = entity.Caption,
             UploadDate = entity.UploadDate,
-            UploadedBy = entity.CreatedBy
+            UploadedBy = entity.CreatedBy,
+            UploadedById = entity.UploadedById,
+            FileSizeBytes = entity.FileSizeBytes,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId
         };
     }
 
-    public static AssetImage ToEntity(this CreateAssetImageDto dto, Guid tenantId, Guid assetId, Guid userId)
+    /// <summary>
+    /// Builds an image row from a file that has ALREADY been through the controlled upload gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The file name and the stored location come from <paramref name="storedFileName"/> and
+    /// <paramref name="filePath"/> — the gate's, not the caller's. That is the whole difference
+    /// between this and what it replaced.
+    /// </remarks>
+    public static AssetImage ToUploadedEntity(
+        this CreateAssetImageDto dto,
+        Guid tenantId,
+        Guid assetId,
+        Guid userId,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AssetImage
         {
             TenantId = tenantId,
             AssetId = assetId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = storedFileName,
+            FilePath = filePath,
+            Caption = dto.Caption,
             UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             CreatedBy = userId.ToString()
         };
     }
@@ -851,6 +882,11 @@ public static class AssetsMappingExtensions
             FilePath = entity.FilePath,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            UploadedById = entity.UploadedById,
+            FileSizeBytes = entity.FileSizeBytes,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -858,16 +894,33 @@ public static class AssetsMappingExtensions
         };
     }
 
-    public static AssetAttachment ToEntity(this CreateAssetAttachmentDto dto, Guid tenantId, Guid assetId, Guid userId)
+    /// <summary>Builds an attachment row from a file already through the controlled upload gate.</summary>
+    public static AssetAttachment ToUploadedEntity(
+        this CreateAssetAttachmentDto dto,
+        Guid tenantId,
+        Guid assetId,
+        Guid userId,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AssetAttachment
         {
             TenantId = tenantId,
             AssetId = assetId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = storedFileName,
+            FilePath = filePath,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             CreatedBy = userId.ToString()
         };
     }

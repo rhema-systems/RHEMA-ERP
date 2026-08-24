@@ -37,9 +37,9 @@ decision — record the change where it happened.
 | **Primary requirement source** | `Staff Assets Changes.pdf` (supplied by the user 2026-08-23) — extracted in section 4 |
 | **Backend today** | **14 entities**, **108 endpoints** on `AssetsController` (82 ported + 2 in slice 2b + 19 in slice 7 + 3 in slice 8 + 2 in slice 9) plus **16 employee-portal routes** and **4 on `AssetRemindersController`** |
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
-| **Frontend today** | **the employee's own screen plus the full HR register** — 19 routes: `/hr/assets` (hub), the register (list/new/detail/edit), assignments, requisitions, transfers, surcharges, the three maintenance watchlists, the three insurance ones, the two return lists, the register report (the print screen), the reminder console, `/hr/assets/me`, and the asset-type catalogue at `/administration/hr/asset-types`. `asset-register.service.ts` + `asset-portal.service.ts` + `types/hr/assets.ts` |
+| **Frontend today** | **the employee's own screen plus the full HR register** — 23 routes: `/hr/assets` (hub), the register (list/new/detail/edit), assignments, requisitions, transfers, surcharges, the three maintenance watchlists, the three insurance ones, the two return lists, the register report (the print screen), the reminder console, the payroll projections, the three slice-12b forms (raise a transfer, register from a fixed asset, raise a request), `/hr/assets/me`, and the asset-type catalogue at `/administration/hr/asset-types`. `asset-register.service.ts` + `asset-portal.service.ts` + `types/hr/assets.ts` |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | ✅ **COMPLETE 2026-08-24.** Decisions **D1–D10** settled. **Slices 0–12 green twice — 2,076 assertions** (1,363 across slices 0–11, 59 on the UI probe, 654 on the content audit). Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance and insurance are both monitored rather than merely recorded, an exit can no longer close over property the leaver still holds, and the register can be counted on one page. **Only the screens and the content audit are done: 19 screens, and 77 GET route templates asserted by id, run twice** |
+| **Status** | ✅ **COMPLETE 2026-08-24 (slices 0–12b).** Decisions **D1–D10** settled. **Slices 0–12 green twice — 2,076 assertions** (1,363 across slices 0–11, 59 on the UI probe, 654 on the content audit). Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance and insurance are both monitored rather than merely recorded, an exit can no longer close over property the leaver still holds, and the register can be counted on one page. **Only the screens and the content audit are done: 23 screens, and 79 GET route templates asserted by id, run twice**. Slice 12b closed the eleven write-side gaps a post-slice-12 check found and put asset documents behind the **controlled upload gate** — the endpoints it replaced stored no file at all |
 | **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice11.mjs`, `probe-slice6-ui.mjs`, **`probe-slice12-ui.mjs`**, **`audit-content.mjs`**, `cleanup-s12-litter.mjs` |
 | **Blocks / unblocks** | ✅ **Unblocked area 9b D4 in slice 10** — asset return is now an enforced clearance gate, and the clearance form is drawn from the register rather than remembered |
 
@@ -647,6 +647,7 @@ overdue returns; and the full screen set.
 | **10** | ✅ Exit clearance | FR-HR-183 — the form drawn from the register, the gate that refuses to clear an asset still out, the money onto the settlement, and `refresh-assets` for the notice period. **D-ii**, and the payroll double-recovery closed. Migration `AddClearanceAssetSourcing` |
 | **11** | ✅ Reminders and reports | Insurance expiry (three reads), overdue **and** due-soon returns, five new sweep rungs, and the register report. **D-jj**, **D-kk**, and `AssignmentStatus.Overdue` left deliberately unwritten. No migration |
 | **12** | ✅ Screens, then the content audit | The 19 HR register screens (the report with a real print layout), the UI-payload probe that preceded them, and the endpoint-by-endpoint content audit — **77 GET route templates asserted by id**. Found **D-ll**, and four payload fictions of the harness's own. No migration |
+| **12b** | ✅ The write-side gaps, and the upload gate | The eleven capabilities with no UI — raising a transfer, registering from a fixed asset, completing a service, recording a recovery, sending to the workshop, the rental payroll projection, custom attribute values, disposal, HR raising a requisition on behalf, emailing the terms document, and the renames and deletes — plus asset documents and photographs behind the **controlled upload gate**. Migration `AddAssetDocumentControlledUpload` |
 
 Slice numbering is indicative; it will move as slice 0 reports.
 
@@ -1742,3 +1743,117 @@ Not this area's, and not a harness fault: read the API log before blaming a slow
 to return rows. The Maintenance register's only live row is **HR's own litter from area 12**, ours to
 clear at finalization — so the day it is cleared these assertions go red. That is the intent: an
 audit that skipped them would report full coverage over a route that had never executed.
+
+---
+
+### Slice 12b — the write-side gaps, and the upload gate. 2026-08-24. Audit **663/663, run twice**. One defect: **D-mm**. Migration `AddAssetDocumentControlledUpload`.
+
+Closes the eleven gaps the post-slice-12 check found, and puts asset documents and photographs
+behind the **controlled upload gate**. The audit grew from 654 to 663 assertions and from 77 route
+templates to **79** — the two new download routes.
+
+**The gap this slice really closed is not one of the eleven.** It is that *slice 12 reported done
+while a meaningful part of the write surface had no UI at all*, and nothing in the process would
+have said so. The content audit asserts every GET by id; a capability with no screen still has a
+perfectly working endpoint, so 654/654 was true and "the screens are finished" was not. **Coverage
+of the API is not coverage of the product.** The check that found it is two greps — every service
+method matched against the screens, every non-GET route template matched against the service — and
+it belongs at the end of every area's UI work.
+
+**The upload gate, and what it replaced.**
+
+`POST {assetId}/attachments` and `POST {assetId}/images` took `fileName` and `filePath` as **JSON**.
+The caller named a path, the server wrote the string down, and **no file was stored or scanned
+anywhere**: an "attachment" was a string somebody typed, and the list rendered it beautifully. Both
+routes are multipart now and run `HrAttachmentUpload.ExecuteAsync` — scan, central-DMS registration,
+row write, and a rollback of the stored document if that write fails — with two new authorized
+download endpoints on `HrDocumentDownload.ServeAsync`.
+
+- **New category `hr-asset-documents`, in `SystemCleanScanRequired`.** ⚠ Scan-mandatory although an
+  asset invoice is mundane: the same category carries photographs of damage taken at a return, which
+  are evidence in a money claim against a named employee, and no tenant policy should be able to let
+  one of those in unscanned.
+- **`UploadedById` is nullable, deliberately.** A row written before the gate genuinely does not
+  know who filed it, and inventing `Guid.Empty` is the mistake four performance call sites made
+  before `HrAttachmentUpload` existed — every one died on a foreign-key violation the first time it
+  ran.
+- **`IsStored` is computed, and the screens use it.** Rows from the old JSON path have no file
+  behind them, so the panel says "No file stored" rather than offering a download that answers 404.
+- ⚠ **`filePath` is not a URL and no screen may render it as a link.** The files live outside the
+  web root and the download endpoints need the bearer token, which an `<a href>` cannot attach.
+  Everything goes through `hrDocumentService`, which fetches a blob and revokes the object URL.
+- ⚠ **The migration's two tables disagree about pluralisation** — `AssetImages` plural,
+  `AssetAttachment` singular — so every statement names its own table rather than deriving one from
+  the other. Pre-existing, and exactly the shape §3.3 warns about.
+
+**Four assertions are what make this provable rather than merely compiled**, and they are the ones a
+green audit would otherwise have hidden: that `isStored` is true, that the row knows which
+**employee** filed it, that the download streams back **exactly the bytes uploaded**, and that
+`content-disposition` names the file. Without them the audit passes against precisely the state this
+slice replaced — a well-formed row describing a file that never existed. ⚠ The fixture carries a
+genuinely valid PDF and a real 1×1 PNG, because the gate sniffs content: a text file renamed `.pdf`
+is refused, and that refusal reads as "the endpoint is broken" rather than "my fixture is a lie".
+
+⚠ **`audit-content.mjs` now needs `clamd-stub.mjs` running** (`dev-harness/hr-performance/`). With
+no scanner reachable the gate refuses with **422** and the failures look exactly like defects in the
+attachment code. Recorded in the harness README.
+
+**D-mm — the defect this slice created and its own regression caught.**
+
+The first version of both upload endpoints ran the gate immediately and let the service's
+"no asset was found" refusal come out of the persist callback, on the stated theory that
+`HrAttachmentUpload` would then roll the stored document back. **It does not reach that far.** DMS
+registration requires a non-empty source-record id and throws inside `UploadAsync` — *before* the
+persist try — so against a nonexistent asset the bytes were written to disk, nothing rolled them
+back, and the caller met a generic 400 with the service's words discarded. An orphaned file for an
+asset that never existed.
+
+The controller now resolves the asset before a single byte is stored, which is what every other HR
+upload site already did (`CheckInsController`). The service keeps its own check as the guard against
+the race, and the rollback does cover *that* path. Verified after the fix: **404 with the message
+intact, and nothing written**.
+
+⚠ **The comment asserting the opposite was in the source, confident and wrong.** Third instance in
+this area of the rule that *a defect — or a safety property — written down from reading the source is
+a hypothesis*. It would have shipped as fact if slice 2's not-found probe had not sent a real file at
+a nil id.
+
+⚠ **Two harness probes were measuring the wrong thing** once the routes became multipart, and both
+had to be fixed before either could report on the product. Slices 1 and 2 posted JSON, and
+`ConsumesAttribute` is an **IActionConstraint**, not a filter: an unmatched content type means the
+action is never *selected*, so routing answers **415 before authorization runs at all**. Slice 1 read
+that as an authorization leak; it is not one — sent multipart, a plain Employee gets 403. This is the
+harness's own rule from the other side: *a refusal is only evidence about the gate when nothing else
+could have produced it*, and a 415 is a different refusal. **When a route changes its content type,
+every probe that ever pointed at it is measuring something new.**
+
+**Verification after D-mm.** Slice 1 **45/45**, slice 2 **85/85** (two more than before — the two
+upload probes now assert the status *and* the message), audit **663/663 twice**. Slices 2b–11 were
+re-run before the fix at **1,235/1,235** and are untouched by it. Confirmed directly: a multipart
+upload against a nonexistent asset answers **404 with the message intact and writes nothing**.
+
+**The other ten gaps.**
+
+| Gap | Screen |
+|---|---|
+| A transfer could not be raised at all | `/hr/assets/transfers/new` — asks only for the **destination**, because where the asset comes *from* is read from the register; one field per transfer type, `DepartmentToDepartment` absent since nothing records a department |
+| `POST from-fixed-asset` had no service method | `/hr/assets/register/from-fixed-asset` — slice 2b's picker finally reachable; already-claimed rows greyed out, never hidden |
+| A scheduled service could not be completed | An action on every scheduled/in-progress row of the service log — it is what re-dates the asset and clears the overdue watchlist |
+| A recovery could not be recorded | A dialog on the surcharge detail, pre-filled with the instalment amount. Without it the plan is only intent: `amountRecovered` never moves and the charge sits outstanding for ever |
+| Work could not be sent to the workshop | A dialog on the asset detail, offered only once linked — with `description`, not `reason` |
+| The rental payroll projection had no screen | `/hr/assets/payroll` — both money surfaces, with **benefits in kind in a separate table** so nobody totals a column that mixes declared-for-tax with deducted-from-pay |
+| Custom attribute values could not be set | `AssetAttributesPanel` — joins the TYPE's declared attributes onto the asset's values, so one added later still appears, empty and fillable. Listing only stored values hid exactly the rows needing attention |
+| No disposal | A dialog on the asset detail |
+| HR could not raise a requisition for anyone | `/hr/assets/requisitions/new`. The portal's beneficiary picker renders only for somebody with direct reports — correct there, but it left an HR officer who manages nobody unable to use a permission the API has always granted |
+| No email of the terms document; no rename; no deletes | All present |
+
+**Two bugs written and caught in the same slice, both worth the note.** The requisition form's
+"save as a draft" and "raise and send" buttons first shared a `useState` flag — and a setter does not
+apply before the click handler finishes, so "save as a draft" would have sent the request anyway.
+Threading it through `mutate()` is the version that cannot drift. The type-rename mutation had the
+same shape and five `!` assertions to go with it; passing the edited type as a mutation variable
+removed both problems at once.
+
+⚠ **Anchoring a patch on a box-drawing rule failed three times, once silently.** These files use a
+variable number of `─` characters and counting them by hand is not a thing that works. Anchor on
+ASCII.

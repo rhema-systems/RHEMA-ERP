@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRightLeft, Inbox, Loader2, Search } from 'lucide-react';
+import { ArrowRightLeft, Inbox, Loader2, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -113,6 +113,13 @@ export default function AssetTransfersPage() {
         title="Asset transfers"
         description="Assets moving between people, locations and units."
         backHref="/hr/assets"
+        actions={
+          <Button asChild>
+            <Link href="/hr/assets/transfers/new">
+              <Plus className="mr-2 h-4 w-4" /> Raise a transfer
+            </Link>
+          </Button>
+        }
       />
 
       <div className="flex flex-wrap gap-2">

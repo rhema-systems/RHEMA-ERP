@@ -1203,26 +1203,49 @@ public class AssetImageDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AssetId { get; set; }
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ⚠ <b>Not a URL, and not something a browser can fetch.</b> The file lives outside the web
+    /// root; <c>GET api/Assets/images/{id}/download</c> is the only way to it. Kept on the DTO so a
+    /// pre-gate row can still be traced, never so a screen can link to it.
+    /// </summary>
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>What the photograph is of — slice 12b.</summary>
+    public string? Caption { get; set; }
+
     public DateTime UploadDate { get; set; }
+
+    /// <summary>The USER who filed it, as a string id. Unlike <see cref="UploadedById"/>.</summary>
     public string? UploadedBy { get; set; }
+
+    /// <summary>The EMPLOYEE who filed it — slice 12b. Null on a row written before the gate.</summary>
+    public Guid? UploadedById { get; set; }
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>True once the file is really stored and scanned, rather than merely named.</summary>
+    public bool IsStored => DocumentRecordId.HasValue || FileUploadRecordId.HasValue;
+
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
 }
 
 /// <summary>
-/// DTO for creating an asset image record
+/// Fields accompanying an asset photograph upload — area 16 slice 12b.
 /// </summary>
-public class CreateAssetImageDto : CreateDtoBase
+/// <remarks>
+/// ⚠ <b>This used to carry <c>FileName</c> and <c>FilePath</c> and be posted as JSON.</b> The
+/// caller named a path, the server wrote it down, and no file was ever stored or scanned: the
+/// "image" was a string. The route is multipart now and goes through the controlled upload gate,
+/// so the file name and the stored location both come from the file itself and neither is the
+/// caller's to assert.
+/// </remarks>
+public class CreateAssetImageDto
 {
-    [Required]
-    public Guid AssetId { get; set; }
-
-    [Required]
-    [MaxLength(250)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
+    [MaxLength(1000)]
+    public string? Caption { get; set; }
 }
 
 #endregion
@@ -1237,27 +1260,38 @@ public class AssetAttachmentDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AssetId { get; set; }
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ⚠ <b>Not a URL.</b> See the note on <see cref="AssetImageDto.FilePath"/> —
+    /// <c>GET api/Assets/attachments/{id}/download</c> is the only way to the bytes.
+    /// </summary>
     public string FilePath { get; set; } = string.Empty;
+
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
+
+    /// <summary>The EMPLOYEE who filed it — slice 12b. Null on a row written before the gate.</summary>
+    public Guid? UploadedById { get; set; }
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>True once the file is really stored and scanned, rather than merely named.</summary>
+    public bool IsStored => DocumentRecordId.HasValue || FileUploadRecordId.HasValue;
+
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
 }
 
 /// <summary>
 /// DTO for creating an asset attachment
 /// </summary>
-public class CreateAssetAttachmentDto : CreateDtoBase
+/// <remarks>
+/// ⚠ Multipart, not JSON — see <see cref="CreateAssetImageDto"/> for why the file name and path
+/// are no longer the caller's to supply.
+/// </remarks>
+public class CreateAssetAttachmentDto
 {
-    [Required]
-    public Guid AssetId { get; set; }
-
-    [Required]
-    [MaxLength(250)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(300)]
-    public string FilePath { get; set; } = string.Empty;
-
     [MaxLength(1000)]
     public string? Description { get; set; }
 }

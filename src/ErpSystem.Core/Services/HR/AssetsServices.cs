@@ -2481,14 +2481,30 @@ public class AssetImageService : IAssetImageService
         return images.Where(i => i.TenantId == tenantId).ToDtoList();
     }
 
-    public async Task<AssetImageDto> CreateAsync(Guid assetId, CreateAssetImageDto dto)
+    public async Task<AssetImageDto> CreateUploadedAsync(
+        Guid assetId,
+        CreateAssetImageDto dto,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         var tenantId = GetTenantId();
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
 
+        // ⚠ A SECOND check, not the only one. The controller resolves the asset before the file
+        // is stored, because the rollback does not reach as far as this comment once claimed: DMS
+        // registration throws inside `UploadAsync`, before the persist try, so a bad asset id left
+        // the bytes on disk with nothing to clean them up. This stays as the guard against the
+        // race between that check and this write, and the rollback does cover this path.
         await EnsureOwnedAssetAsync(assetId);
 
-        var entity = dto.ToEntity(tenantId, assetId, userId);
+        var entity = dto.ToUploadedEntity(
+            tenantId, assetId, userId, uploadedById, storedFileName, filePath, fileSizeBytes,
+            fileUploadRecordId, documentRecordId, documentVersionId);
         await _imageRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return entity.ToDto();
@@ -2564,14 +2580,30 @@ public class AssetAttachmentService : IAssetAttachmentService
         return attachments.Where(a => a.TenantId == tenantId).ToDtoList();
     }
 
-    public async Task<AssetAttachmentDto> CreateAsync(Guid assetId, CreateAssetAttachmentDto dto)
+    public async Task<AssetAttachmentDto> CreateUploadedAsync(
+        Guid assetId,
+        CreateAssetAttachmentDto dto,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         var tenantId = GetTenantId();
         var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("User ID not found"));
 
+        // ⚠ A SECOND check, not the only one. The controller resolves the asset before the file
+        // is stored, because the rollback does not reach as far as this comment once claimed: DMS
+        // registration throws inside `UploadAsync`, before the persist try, so a bad asset id left
+        // the bytes on disk with nothing to clean them up. This stays as the guard against the
+        // race between that check and this write, and the rollback does cover this path.
         await EnsureOwnedAssetAsync(assetId);
-        
-        var entity = dto.ToEntity(tenantId, assetId, userId);
+
+        var entity = dto.ToUploadedEntity(
+            tenantId, assetId, userId, uploadedById, storedFileName, filePath, fileSizeBytes,
+            fileUploadRecordId, documentRecordId, documentVersionId);
         await _attachmentRepo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return entity.ToDto();

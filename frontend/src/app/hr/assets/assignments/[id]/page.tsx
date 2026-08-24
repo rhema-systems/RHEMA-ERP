@@ -2,15 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Banknote,
   FileSignature,
   Loader2,
+  Mail,
   Printer,
   Receipt,
+  Trash2,
   Undo2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -77,6 +79,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  */
 export default function AssetAssignmentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -112,6 +115,9 @@ export default function AssetAssignmentDetailPage() {
     benefitInKindValue: '',
     rentalNotes: '',
   });
+
+  const [emailing, setEmailing] = useState(false);
+  const [recipientEmail, setRecipientEmail] = useState('');
 
   const [charging, setCharging] = useState(false);
   const [chargeForm, setChargeForm] = useState({ reason: '1', description: '', assessedAmount: '' });
@@ -154,6 +160,36 @@ export default function AssetAssignmentDetailPage() {
     },
     onError: (e: Error) =>
       toast({ title: 'Could not open the document', description: e.message, variant: 'destructive' }),
+  });
+
+  /**
+   * AST-5b's second half: serving the responsibility document by email.
+   *
+   * ⚠ Leave the address blank to send it to the holder's own recorded address — passing one
+   * is for the case where it must go somewhere else (a site office, a supervisor). The send is
+   * recorded on the assignment either way, which is what makes "was it ever served?" answerable.
+   */
+  const emailTerms = useMutation({
+    mutationFn: () => assetRegisterService.emailTermsDocument(id, recipientEmail || undefined),
+    onSuccess: () => {
+      invalidate();
+      setEmailing(false);
+      setRecipientEmail('');
+      toast({ title: 'Responsibility document sent' });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not send it', description: e.message, variant: 'destructive' }),
+  });
+
+  const removeAssignment = useMutation({
+    mutationFn: () => assetRegisterService.deleteAssignment(id),
+    onSuccess: () => {
+      invalidate();
+      toast({ title: 'Assignment deleted', description: 'The asset has been released.' });
+      router.push('/hr/assets/assignments');
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not delete it', description: e.message, variant: 'destructive' }),
   });
 
   const doReturn = useMutation({
@@ -254,6 +290,9 @@ export default function AssetAssignmentDetailPage() {
                 : <Printer className="mr-2 h-4 w-4" />}
               Responsibility document
             </Button>
+            <Button variant="outline" onClick={() => setEmailing(true)}>
+              <Mail className="mr-2 h-4 w-4" /> Email it
+            </Button>
             {isOpen && (
               <>
                 <Button onClick={() => setReturning(true)}>
@@ -264,6 +303,13 @@ export default function AssetAssignmentDetailPage() {
                 </Button>
               </>
             )}
+            {/* ⚠ Deleting a custody RELEASES the asset — it is how a mistaken issue is
+                undone, not how a return is recorded. Before slice 4 it stranded the asset instead,
+                which was survivable only because anything could be assigned over it. */}
+            <Button variant="ghost" onClick={() => removeAssignment.mutate()}
+              disabled={removeAssignment.isPending}>
+              <Trash2 className="mr-2 h-4 w-4" /> Delete
+            </Button>
           </div>
         }
       />
@@ -455,6 +501,40 @@ export default function AssetAssignmentDetailPage() {
       )}
 
       {/* ── Take it back ────────────────────────────────────────────────────── */}
+      <Dialog open={emailing} onOpenChange={setEmailing}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Email the responsibility document</DialogTitle>
+            <DialogDescription>
+              It goes to {a.employeeName}&rsquo;s recorded address unless you name another one. The
+              send is recorded on this assignment either way.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Send to</Label>
+            <Input
+              type="email"
+              placeholder={`${a.employeeName}'s own address`}
+              value={recipientEmail}
+              onChange={(e) => setRecipientEmail(e.target.value)}
+            />
+          </div>
+          {a.termsDocumentSentAt && (
+            <p className="text-sm text-muted-foreground">
+              Already sent on {fmtDate(a.termsDocumentSentAt)} to{' '}
+              {a.termsDocumentSentTo ?? 'the holder'}. Sending again replaces that record.
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailing(false)}>Cancel</Button>
+            <Button onClick={() => emailTerms.mutate()} disabled={emailTerms.isPending}>
+              {emailTerms.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Send it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={returning} onOpenChange={setReturning}>
         <DialogContent className="max-w-lg">
           <DialogHeader>

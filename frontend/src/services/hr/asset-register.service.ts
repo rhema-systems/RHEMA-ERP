@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   AssetActionAck,
@@ -39,13 +40,17 @@ import type {
   CreateAssetTransferRequest,
   CreateAssetTypeAttributeRequest,
   CreateAssetTypeRequest,
+  CreateAssetFromFixedAssetRequest,
+  CreateAssetRequisitionFromRegisterRequest,
   CreateCompanyAssetRequest,
   DisposeAssetRequest,
   FixedAssetPick,
   MaintenanceAssetPick,
+  RecordSurchargeRecoveryRequest,
   ReportAssetIncidentRequest,
   ReturnAssetRequest,
   SendAssetForMaintenanceRequest,
+  SetAssetAttributeValueRequest,
   SetAssetRentalTermsRequest,
   UpdateCompanyAssetRequest,
 } from '@/types/hr/assets';
@@ -124,8 +129,74 @@ class AssetRegisterService {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
   }
 
+  /**
+   * Registers an HR asset from a Finance fixed asset — AST-11, decision D1.
+   *
+   * The resulting asset reads `source: 'FixedAssetsModule'` and its purchase figures are Finance's:
+   * HR records who is holding the thing, Finance records what it is worth.
+   */
+  createFromFixedAsset(data: CreateAssetFromFixedAssetRequest): Promise<CompanyAsset> {
+    return apiService.post<CompanyAsset>(`${this.baseUrl}/from-fixed-asset`, data);
+  }
+
+  /** ⚠ `assetId` must be in the body as well as the route — see `DisposeAssetRequest`. */
   disposeAsset(id: string, data: DisposeAssetRequest): Promise<CompanyAsset> {
     return apiService.post<CompanyAsset>(`${this.baseUrl}/${id}/dispose`, data);
+  }
+
+  // ── Custom attribute values ────────────────────────────────────────────────
+
+  addAttributeValue(assetId: string, data: SetAssetAttributeValueRequest): Promise<AssetAttributeValue> {
+    return apiService.post<AssetAttributeValue>(`${this.baseUrl}/${assetId}/attribute-values`, data);
+  }
+
+  /** ⚠ Needs `id` in the body as well as the route, like the register PUT. */
+  updateAttributeValue(
+    id: string,
+    data: SetAssetAttributeValueRequest & { id: string },
+  ): Promise<AssetAttributeValue> {
+    return apiService.put<AssetAttributeValue>(`${this.baseUrl}/attribute-values/${id}`, data);
+  }
+
+  deleteAttributeValue(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/attribute-values/${id}`);
+  }
+
+  // ── Files: the controlled upload gate ──────────────────────────────────────
+  //
+  // ⚠ Both uploads are MULTIPART and go through the gate — scanning, central-DMS registration, and
+  // a rollback if the row write fails. They replaced JSON endpoints that took a caller-supplied
+  // `filePath` and stored nothing at all, so an "attachment" was a string somebody typed.
+  //
+  // ⚠ `filePath` on the read DTOs is a stored location, NEVER a URL. The files live outside the
+  // web root and the download endpoints below are the only way to the bytes.
+
+  uploadAttachment(assetId: string, file: File, description?: string): Promise<AssetAttachment> {
+    return hrDocumentService.upload<AssetAttachment>(
+      `${this.baseUrl}/${assetId}/attachments`, file, { description });
+  }
+
+  uploadImage(assetId: string, file: File, caption?: string): Promise<AssetImage> {
+    return hrDocumentService.upload<AssetImage>(
+      `${this.baseUrl}/${assetId}/images`, file, { caption });
+  }
+
+  /** Streams the document to the browser as a download, bearer token attached. */
+  downloadAttachment(id: string, fileName: string): Promise<void> {
+    return hrDocumentService.download(`${this.baseUrl}/attachments/${id}/download`, fileName);
+  }
+
+  /** Opens a photograph inline in a new tab. */
+  openImage(id: string): Promise<void> {
+    return hrDocumentService.openInNewTab(`${this.baseUrl}/images/${id}/download`);
+  }
+
+  deleteAttachment(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/attachments/${id}`);
+  }
+
+  deleteImage(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/images/${id}`);
   }
 
   getAttributeValues(assetId: string): Promise<AssetAttributeValue[]> {
@@ -419,6 +490,30 @@ class AssetRegisterService {
     return apiService.get<AssetRequisitionSummary[]>(`${this.baseUrl}/requisitions/pending-approvals`);
   }
 
+  /**
+   * Raises a requisition from the register — AST-6b's HR half.
+   *
+   * ⚠ The portal's request form offers a beneficiary picker only to somebody with direct reports,
+   * which leaves an HR officer who manages nobody unable to raise a request for anyone. The API
+   * has always allowed "line manager **or** HR"; this is the route that lets HR use it.
+   */
+  createRequisition(data: CreateAssetRequisitionFromRegisterRequest): Promise<AssetRequisition> {
+    return apiService.post<AssetRequisition>(`${this.baseUrl}/requisitions`, data);
+  }
+
+  /** A requisition is born a Draft; nothing is decided until it is submitted. */
+  submitRequisition(id: string): Promise<AssetRequisition> {
+    return apiService.post<AssetRequisition>(`${this.baseUrl}/requisitions/${id}/submit`, {});
+  }
+
+  recallRequisition(id: string, reason: string): Promise<AssetRequisition> {
+    return apiService.post<AssetRequisition>(`${this.baseUrl}/requisitions/${id}/recall`, { reason });
+  }
+
+  deleteRequisition(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/requisitions/${id}`);
+  }
+
   approveRequisition(id: string, approvalComments?: string): Promise<AssetRequisition> {
     return apiService.post<AssetRequisition>(`${this.baseUrl}/requisitions/${id}/approve`,
       { approvalComments: approvalComments ?? null });
@@ -561,6 +656,17 @@ class AssetRegisterService {
     recoveryStartDate?: string | null;
   }): Promise<AssetSurcharge> {
     return apiService.put<AssetSurcharge>(`${this.baseUrl}/surcharges/${id}/recovery-plan`, data);
+  }
+
+  /**
+   * Records that money actually came back.
+   *
+   * ⚠ Without this the recovery plan is only a statement of intent: `amountRecovered` never moves,
+   * the charge never reaches `Recovered`, and it sits on the outstanding list for ever. Payroll
+   * makes the deduction; HR records that it happened.
+   */
+  recordSurchargeRecovery(id: string, data: RecordSurchargeRecoveryRequest): Promise<AssetSurcharge> {
+    return apiService.post<AssetSurcharge>(`${this.baseUrl}/surcharges/${id}/recoveries`, data);
   }
 
   waiveSurcharge(id: string, waiverReason: string): Promise<AssetSurcharge> {

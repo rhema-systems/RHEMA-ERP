@@ -768,11 +768,72 @@ export type CreateCompanyAssetRequest = Omit<
   attributeValues?: Array<{ assetTypeAttributeId: string; value: string }>;
 };
 
+/**
+ * ⚠ `assetId` goes in the BODY as well as the route — `DisposeAssetDto` marks it `[Required]`, so
+ * omitting it is a ModelState 400 rather than anything the route can supply. The same shape as the
+ * register PUT's `id`, and the same trap.
+ */
 export interface DisposeAssetRequest {
+  assetId: string;
   disposalDate: string;
   /** The NUMBER — see `DISPOSAL_METHODS`. */
   disposalMethod: number;
   disposalNotes?: string | null;
+}
+
+/**
+ * Registering an HR asset from a Finance fixed asset — AST-11, decision D1.
+ *
+ * ⚠ `assetTypeId` is asked for rather than derived. Finance's categories are accounting classes and
+ * do not map onto the things HR issues to people: "Office Equipment" is a depreciation class, not a
+ * laptop. The purchase figures come across from Finance and stay Finance's — the resulting asset
+ * reads `source: 'FixedAssetsModule'` and HR refuses to edit them.
+ */
+export interface CreateAssetFromFixedAssetRequest {
+  fixedAssetId: string;
+  assetTypeId: string;
+  assetTag?: string;
+  /** The NUMBER — see `ASSET_CONDITIONS`. */
+  condition: number;
+  locationId?: string | null;
+  unitId?: string | null;
+  isAssignable: boolean;
+  additionalRemarks?: string | null;
+}
+
+/** ⚠ `assetId` and `assetTypeAttributeId` are both required in the body on the UPDATE too. */
+export interface SetAssetAttributeValueRequest {
+  assetId: string;
+  assetTypeAttributeId: string;
+  value: string;
+}
+
+/** Recording that money actually came back — the other half of a recovery plan. */
+export interface RecordSurchargeRecoveryRequest {
+  amount: number;
+  /** DateOnly — `YYYY-MM-DD`. */
+  recoveredOn: string;
+  /** The NUMBER — 1 = PayrollDeduction, 2 = DirectPayment, 3 = ExitSettlement. */
+  method: number;
+  reference?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Raising a requisition from the register, on somebody's behalf — AST-6b.
+ *
+ * ⚠ `requiredByDate` is a full `DateTime` here, not the DateOnly the asset's own dates use.
+ */
+export interface CreateAssetRequisitionFromRegisterRequest {
+  assetTypeId: string;
+  /** Omit for yourself. Naming somebody else needs the HR role, or being their line manager. */
+  beneficiaryEmployeeId?: string | null;
+  description: string;
+  quantity: number;
+  /** The NUMBER — see `ASSET_REQUISITION_PRIORITIES`, and read the warning on it. */
+  priority: number;
+  justification: string;
+  requiredByDate?: string | null;
 }
 
 // ── Types and their custom attributes ──────────────────────────────────────────
@@ -840,9 +901,24 @@ export interface AssetAttachment {
   tenantId: string;
   assetId: string;
   fileName: string;
+  /** NOT a URL — see the note above. Use `downloadAttachment`. */
   filePath: string;
   description: string | null;
   uploadDate: string;
+  /** The EMPLOYEE who filed it. Null on a row written before the gate — slice 12b. */
+  uploadedById: string | null;
+  fileSizeBytes: number | null;
+  /**
+   * True once a file is really stored and scanned behind this row.
+   *
+   * False on anything written by the old JSON endpoint, which recorded a name and a path and
+   * stored nothing. A download button on one of those answers 404, so the panel says
+   * "No file stored" instead of offering one.
+   */
+  isStored: boolean;
+  fileUploadRecordId: string | null;
+  documentRecordId: string | null;
+  documentVersionId: string | null;
   createdAt: string;
   createdBy: string | null;
   updatedAt: string | null;
@@ -860,10 +936,21 @@ export interface AssetImage {
   tenantId: string;
   assetId: string;
   fileName: string;
+  /** NOT a URL — the files live outside the web root. Use `openImage`. */
   filePath: string;
+  /** What the photograph is of — added with the upload gate in slice 12b. */
+  caption: string | null;
   uploadDate: string;
   /** A USER id, not an employee id, and not resolved to a name. */
   uploadedBy: string | null;
+  /** The EMPLOYEE who filed it — slice 12b. */
+  uploadedById: string | null;
+  fileSizeBytes: number | null;
+  /** See the note on `AssetAttachment.isStored`. */
+  isStored: boolean;
+  fileUploadRecordId: string | null;
+  documentRecordId: string | null;
+  documentVersionId: string | null;
   createdAt: string;
   createdBy: string | null;
   updatedAt: string | null;

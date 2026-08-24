@@ -242,7 +242,24 @@ public interface IAssetAttachmentService
 {
     Task<AssetAttachmentDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<AssetAttachmentDto>> GetByAssetIdAsync(Guid assetId);
-    Task<AssetAttachmentDto> CreateAsync(Guid assetId, CreateAssetAttachmentDto dto);
+    /// <summary>
+    /// Records a file that has already passed the controlled upload gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ There is deliberately no JSON <c>CreateAsync</c> any more. The one that existed took a
+    /// caller-supplied <c>FilePath</c> and stored nothing, so an "attachment" was a string somebody
+    /// typed. The controller runs the gate and hands the stored document in here.
+    /// </remarks>
+    Task<AssetAttachmentDto> CreateUploadedAsync(
+        Guid assetId,
+        CreateAssetAttachmentDto dto,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId);
     Task DeleteAsync(Guid id);
 }
 
@@ -250,7 +267,17 @@ public interface IAssetImageService
 {
     Task<AssetImageDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<AssetImageDto>> GetByAssetIdAsync(Guid assetId);
-    Task<AssetImageDto> CreateAsync(Guid assetId, CreateAssetImageDto dto);
+    /// <summary>Records a photograph that has already passed the controlled upload gate.</summary>
+    Task<AssetImageDto> CreateUploadedAsync(
+        Guid assetId,
+        CreateAssetImageDto dto,
+        Guid uploadedById,
+        string storedFileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId);
     Task DeleteAsync(Guid id);
 }
 

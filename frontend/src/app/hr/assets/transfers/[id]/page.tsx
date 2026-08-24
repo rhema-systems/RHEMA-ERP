@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, PackageCheck, Send, Undo2, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, PackageCheck, Send, Trash2, Undo2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -81,6 +81,7 @@ const DONE_TITLES: Record<Action, string> = {
  */
 export default function AssetTransferDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -114,6 +115,17 @@ export default function AssetTransferDetailPage() {
       toast({ title: 'The action was refused', description: e.message, variant: 'destructive' }),
   });
 
+  const remove = useMutation({
+    mutationFn: () => assetRegisterService.deleteTransfer(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr', 'assets'] });
+      toast({ title: 'Transfer deleted' });
+      router.push('/hr/assets/transfers');
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not delete it', description: e.message, variant: 'destructive' }),
+  });
+
   if (isLoading || !t) {
     return (
       <div className="flex justify-center p-10">
@@ -133,9 +145,14 @@ export default function AssetTransferDetailPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {t.status === 'Draft' && (
-              <Button onClick={() => setAction('submit')}>
-                <Send className="mr-2 h-4 w-4" /> Send for approval
-              </Button>
+              <>
+                <Button onClick={() => setAction('submit')}>
+                  <Send className="mr-2 h-4 w-4" /> Send for approval
+                </Button>
+                <Button variant="outline" onClick={() => remove.mutate()} disabled={remove.isPending}>
+                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                </Button>
+              </>
             )}
             {t.status === 'Pending' && (
               <>

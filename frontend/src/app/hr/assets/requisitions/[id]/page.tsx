@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, PackageCheck, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, PackageCheck, Send, Trash2, Undo2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -53,6 +53,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  */
 export default function AssetRequisitionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -60,6 +61,8 @@ export default function AssetRequisitionDetailPage() {
   const [comments, setComments] = useState('');
   const [fulfilling, setFulfilling] = useState(false);
   const [chosen, setChosen] = useState<string[]>([]);
+  const [recalling, setRecalling] = useState(false);
+  const [recallReason, setRecallReason] = useState('');
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hr', 'assets'] });
 
@@ -98,6 +101,38 @@ export default function AssetRequisitionDetailPage() {
       toast({ title: 'The decision was refused', description: e.message, variant: 'destructive' }),
   });
 
+  // A requisition is born a Draft: sending it is a separate act, and pulling it back is how it
+  // becomes editable again. Neither had a control on this screen.
+  const send = useMutation({
+    mutationFn: () => assetRegisterService.submitRequisition(id),
+    onSuccess: () => { invalidate(); toast({ title: 'Sent for approval' }); },
+    onError: (e: Error) =>
+      toast({ title: 'Could not send it', description: e.message, variant: 'destructive' }),
+  });
+
+  const recall = useMutation({
+    mutationFn: () => assetRegisterService.recallRequisition(id, recallReason),
+    onSuccess: () => {
+      invalidate();
+      setRecalling(false);
+      setRecallReason('');
+      toast({ title: 'Pulled back to draft' });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not pull it back', description: e.message, variant: 'destructive' }),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => assetRegisterService.deleteRequisition(id),
+    onSuccess: () => {
+      invalidate();
+      toast({ title: 'Request deleted' });
+      router.push('/hr/assets/requisitions');
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not delete it', description: e.message, variant: 'destructive' }),
+  });
+
   const fulfil = useMutation({
     mutationFn: () => assetRegisterService.fulfillRequisition(id, chosen),
     onSuccess: () => {
@@ -128,6 +163,21 @@ export default function AssetRequisitionDetailPage() {
         backHref="/hr/assets/requisitions"
         actions={
           <div className="flex flex-wrap gap-2">
+            {r.status === 'Draft' && (
+              <>
+                <Button onClick={() => send.mutate()} disabled={send.isPending}>
+                  <Send className="mr-2 h-4 w-4" /> Send for approval
+                </Button>
+                <Button variant="outline" onClick={() => remove.mutate()} disabled={remove.isPending}>
+                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                </Button>
+              </>
+            )}
+            {awaitingDecision && (
+              <Button variant="outline" onClick={() => setRecalling(true)}>
+                <Undo2 className="mr-2 h-4 w-4" /> Pull it back
+              </Button>
+            )}
             {awaitingDecision && (
               <>
                 <Button onClick={() => setDeciding('approve')}>
@@ -226,6 +276,31 @@ export default function AssetRequisitionDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={recalling} onOpenChange={setRecalling}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pull the request back</DialogTitle>
+            <DialogDescription>
+              The approval is withdrawn and the request returns to draft, where it can be edited or
+              deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Why *</Label>
+            <Textarea rows={3} value={recallReason}
+              onChange={(e) => setRecallReason(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecalling(false)}>Cancel</Button>
+            <Button onClick={() => recall.mutate()}
+              disabled={!recallReason.trim() || recall.isPending}>
+              {recall.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Pull it back
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deciding !== null} onOpenChange={(o) => !o && setDeciding(null)}>
         <DialogContent>

@@ -322,8 +322,25 @@ public class AssetImage : TenantEntity
     public string FilePath { get; set; } = string.Empty;
     
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the photograph is of — "as issued", "damage to the lid", "serial plate". Added with the
+    /// upload gate in slice 12b: a wall of thumbnails nobody captioned is not a record of anything.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? Caption { get; set; }
     
     public DateTime UploadDate { get; set; }
+
+    // ── the controlled upload gate — area 16 slice 12b. See AssetAttachment for the reasoning. ──
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Who took or filed it, as an Employee id from the token.</summary>
+    public Guid? UploadedById { get; set; }
+
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
 
     [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;
@@ -618,6 +635,32 @@ public class AssetAttachment : TenantEntity
     public string? Description { get; set; }
     
     public DateTime UploadDate { get; set; }
+
+    // ── the controlled upload gate — area 16 slice 12b ────────────────────────────────────
+    //
+    // Before this, the create endpoint took `FileName` and `FilePath` as JSON: the caller named a
+    // path and the server wrote it down. Nothing scanned anything, nothing stored anything, and
+    // the "attachment" was a string. These five columns are what an actual file needs, and they
+    // are the same five every other HR attachment carries.
+
+    /// <summary>Size of the stored file. Null on a row written before the gate existed.</summary>
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>
+    /// Who filed it, as an <b>Employee</b> id from the token. Nullable rather than required: rows
+    /// that predate the gate genuinely do not know, and inventing <c>Guid.Empty</c> for them is the
+    /// mistake four performance call sites made before <c>HrAttachmentUpload</c> existed.
+    /// </summary>
+    public Guid? UploadedById { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;

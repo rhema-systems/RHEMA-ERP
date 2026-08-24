@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ClipboardList, Inbox, Loader2, Search } from 'lucide-react';
+import { ClipboardList, Inbox, Loader2, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -136,6 +136,13 @@ export default function AssetRequisitionsPage() {
         title="Asset requisitions"
         description="Requests for equipment, and the approvals waiting on you."
         backHref="/hr/assets"
+        actions={
+          <Button asChild>
+            <Link href="/hr/assets/requisitions/new">
+              <Plus className="mr-2 h-4 w-4" /> Raise a request
+            </Link>
+          </Button>
+        }
       />
 
       <div className="flex flex-wrap gap-2">

@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Ban,
   CheckCircle2,
+  Coins,
   HandCoins,
   Loader2,
   Mail,
@@ -85,11 +86,14 @@ export default function AssetSurchargeDetailPage() {
   const queryClient = useQueryClient();
 
   const [dialog, setDialog] = useState<
-    null | 'notify' | 'submit' | 'approve' | 'reject' | 'plan' | 'waive' | 'cancel'
+    null | 'notify' | 'submit' | 'approve' | 'reject' | 'plan' | 'waive' | 'cancel' | 'recovery'
   >(null);
   const [text, setText] = useState('');
   const [approvedAmount, setApprovedAmount] = useState('');
   const [plan, setPlan] = useState({ recoveryMethod: '1', instalmentCount: '1', recoveryStartDate: today() });
+  const [recovery, setRecovery] = useState({
+    amount: '', recoveredOn: today(), method: '1', reference: '', notes: '',
+  });
 
   const { data: s, isLoading } = useQuery({
     queryKey: ['hr', 'assets', 'surcharge', id],
@@ -113,6 +117,13 @@ export default function AssetSurchargeDetailPage() {
           recoveryMethod: Number(plan.recoveryMethod),
           instalmentCount: Number(plan.instalmentCount),
           recoveryStartDate: plan.recoveryStartDate || null,
+        });
+        case 'recovery': return assetRegisterService.recordSurchargeRecovery(id, {
+          amount: Number(recovery.amount),
+          recoveredOn: recovery.recoveredOn,
+          method: Number(recovery.method),
+          reference: recovery.reference || null,
+          notes: recovery.notes || null,
         });
         case 'waive': return assetRegisterService.waiveSurcharge(id, text);
         case 'cancel': return assetRegisterService.cancelSurcharge(id, text);
@@ -167,9 +178,26 @@ export default function AssetSurchargeDetailPage() {
               </>
             )}
             {(s.status === 'Approved' || s.status === 'Recovering') && (
-              <Button variant="outline" onClick={() => setDialog('plan')}>
-                <HandCoins className="mr-2 h-4 w-4" /> Recovery plan
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setDialog('plan')}>
+                  <HandCoins className="mr-2 h-4 w-4" /> Recovery plan
+                </Button>
+                {/* ⚠ Without this the plan is only a statement of intent: `amountRecovered` never
+                    moves, the charge never reaches Recovered, and it sits on the outstanding list
+                    for ever. Payroll makes the deduction; HR records that it happened. */}
+                <Button onClick={() => {
+                  setRecovery((r) => ({
+                    ...r,
+                    amount: String(s.instalmentAmount ?? s.amountOutstanding),
+                    method: String(
+                      s.recoveryMethod === 'DirectPayment' ? 2
+                        : s.recoveryMethod === 'ExitSettlement' ? 3 : 1),
+                  }));
+                  setDialog('recovery');
+                }}>
+                  <Coins className="mr-2 h-4 w-4" /> Record a recovery
+                </Button>
+              </>
             )}
             {live && (
               <>
@@ -395,6 +423,52 @@ export default function AssetSurchargeDetailPage() {
               </div>
             </>
           )}
+          {dialog === 'recovery' && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Record a recovery</DialogTitle>
+                <DialogDescription>
+                  Money that has actually come back. {s.currencyCode} {fmtNum(s.amountOutstanding)}
+                  {' '}is outstanding.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Amount *</Label>
+                  <Input type="number" step="0.01" value={recovery.amount}
+                    onChange={(e) => setRecovery((r) => ({ ...r, amount: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Recovered on</Label>
+                  <Input type="date" value={recovery.recoveredOn}
+                    onChange={(e) => setRecovery((r) => ({ ...r, recoveredOn: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>How</Label>
+                  <Select value={recovery.method}
+                    onValueChange={(v) => setRecovery((r) => ({ ...r, method: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Payroll deduction</SelectItem>
+                      <SelectItem value="2">Direct payment</SelectItem>
+                      <SelectItem value="3">From the exit settlement</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Reference</Label>
+                  <Input value={recovery.reference}
+                    placeholder="Payslip, receipt, settlement line"
+                    onChange={(e) => setRecovery((r) => ({ ...r, reference: e.target.value }))} />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Notes</Label>
+                  <Textarea rows={2} value={recovery.notes}
+                    onChange={(e) => setRecovery((r) => ({ ...r, notes: e.target.value }))} />
+                </div>
+              </div>
+            </>
+          )}
           {dialog === 'plan' && (
             <>
               <DialogHeader>
@@ -437,6 +511,7 @@ export default function AssetSurchargeDetailPage() {
                 run.isPending
                 || (['reject', 'waive', 'cancel'].includes(dialog ?? '') && !text.trim())
                 || (dialog === 'submit' && !s.employeeRespondedAt && !text.trim())
+                || (dialog === 'recovery' && !(Number(recovery.amount) > 0))
               }
             >
               {run.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

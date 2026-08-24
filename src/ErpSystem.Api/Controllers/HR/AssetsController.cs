@@ -1,7 +1,11 @@
-﻿using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Api.Services.HR;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -69,6 +73,16 @@ public class AssetsController : ControllerBase
     private readonly IAssetTermsLetterService _termsLetterService;
     private readonly IAssetSurchargeService _surchargeService;
 
+    // ── the controlled upload gate — slice 12b ────────────────────────────────────────────
+    // Scanning + central-DMS registration on the way in, an authorized stream on the way out.
+    // The files live outside the web root, so the download endpoints are the ONLY way to them.
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ICurrentUserService _currentUser;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<AssetsController> _logger;
+
     public AssetsController(
         IAssetTypeService assetTypeService,
         IAssetTypeAttributeService assetTypeAttributeService,
@@ -81,7 +95,13 @@ public class AssetsController : ControllerBase
         IAssetRequisitionService requisitionService,
         IAssetTransferService transferService,
         IAssetTermsLetterService termsLetterService,
-        IAssetSurchargeService surchargeService)
+        IAssetSurchargeService surchargeService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ICurrentUserService currentUser,
+        ApplicationDbContext db,
+        ILogger<AssetsController> logger)
     {
         _assetTypeService = assetTypeService;
         _assetTypeAttributeService = assetTypeAttributeService;
@@ -95,6 +115,12 @@ public class AssetsController : ControllerBase
         _transferService = transferService;
         _termsLetterService = termsLetterService;
         _surchargeService = surchargeService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _currentUser = currentUser;
+        _db = db;
+        _logger = logger;
     }
 
     #region Asset Types
@@ -960,16 +986,88 @@ public class AssetsController : ControllerBase
     }
 
     /// <summary>Add image record to asset.</summary>
+    /// <summary>
+    /// Uploads a photograph of an asset through the controlled gate — area 16 slice 12b.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Multipart, and it replaces a JSON endpoint that stored nothing.</b> The old route
+    /// took <c>fileName</c> and <c>filePath</c> in a body: the caller named a path, the server wrote
+    /// the string down, and no file existed anywhere. Every other HR attachment surface goes through
+    /// <see cref="HrAttachmentUpload"/> — scanning, central-DMS registration, and a rollback if the
+    /// row write then fails — and there was no reason for this one not to.</para>
+    ///
+    /// <para>The category is <c>hr-asset-documents</c> and it is scan-mandatory. Most of what lands
+    /// here is mundane, but the same category carries photographs of damage taken at a return, which
+    /// are evidence in a money claim against a named employee.</para>
+    /// </remarks>
     [HttpPost("{assetId:guid}/images")]
     [Authorize(Roles = HrRoles)]
-    public async Task<ActionResult<AssetImageDto>> AddImage(
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<IActionResult> AddImage(
         Guid assetId,
-        [FromBody] CreateAssetImageDto dto)
+        IFormFile file,
+        [FromForm] string? caption,
+        CancellationToken cancellationToken = default)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        dto.AssetId = assetId;
-        var created = await _assetImageService.CreateAsync(assetId, dto);
-        return CreatedAtAction(nameof(GetImage), new { id = created.Id }, created);
+        // ⚠ **Resolve the asset FIRST, before a single byte is stored.**
+        //
+        // The first version of this ran the upload straight away and let the service's own
+        // "no asset was found" refusal come out of the persist callback, on the theory that
+        // `HrAttachmentUpload` would then roll the stored document back. It does not reach that
+        // far: DMS registration requires a non-empty source-record id and throws inside
+        // `UploadAsync`, which is *before* the persist try — so the bytes were written to disk,
+        // nothing rolled them back, and the caller met a generic 400 with the service's words
+        // discarded. An orphaned file for an asset that never existed.
+        //
+        // Every other HR upload site resolves its parent first (see `CheckInsController`). This one
+        // now does too, and the service keeps its own check as the guard against a race.
+        var asset = await _companyAssetService.GetByIdAsync(assetId);
+        if (asset is null)
+            return NotFound(new { message = $"No asset was found with id {assetId}." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "CompanyAsset",
+            sourceRecordId: assetId,
+            sourceLabel: "Company asset photograph",
+            documentType: "CompanyAssetImage",
+            description: caption,
+            persist: (uploadedById, document) => _assetImageService.CreateUploadedAsync(
+                assetId,
+                new CreateAssetImageDto { Caption = caption },
+                uploadedById,
+                document.OriginalFileName,
+                document.FilePath,
+                document.FileSize,
+                document.FileUploadRecordId,
+                document.DocumentRecordId,
+                document.DocumentVersionId),
+            cancellationToken,
+            category: ControlledFileUploadCategories.HrAssetDocuments);
+    }
+
+    /// <summary>
+    /// Streams an asset photograph. The file lives outside the web root, so this is the only way
+    /// to it — <c>filePath</c> on the DTO is a stored location, never a URL.
+    /// </summary>
+    [HttpGet("images/{id:guid}/download")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<IActionResult> DownloadImage(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // ⚠ The entitlement check is the CALLING endpoint's, always: neither the download helper
+        // nor the DMS performs one. Going through the service rather than the DbSet is what applies
+        // this area's tenant scoping.
+        var image = await _assetImageService.GetByIdAsync(id);
+        if (image is null) return NotFound(new { message = "Image not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            image.DocumentRecordId, image.DocumentVersionId, image.FileUploadRecordId,
+            image.FilePath, image.FileName, fallbackContentType: null,
+            inline: true, cancellationToken);
     }
 
     /// <summary>Delete image.</summary>
@@ -1004,16 +1102,72 @@ public class AssetsController : ControllerBase
     }
 
     /// <summary>Add attachment to asset.</summary>
+    /// <summary>
+    /// Uploads a document against an asset through the controlled gate — the invoice, the warranty
+    /// certificate, the manual. Multipart; see <see cref="AddImage"/> for what it replaced.
+    /// </summary>
     [HttpPost("{assetId:guid}/attachments")]
     [Authorize(Roles = HrRoles)]
-    public async Task<ActionResult<AssetAttachmentDto>> AddAttachment(
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<IActionResult> AddAttachment(
         Guid assetId,
-        [FromBody] CreateAssetAttachmentDto dto)
+        IFormFile file,
+        [FromForm] string? description,
+        CancellationToken cancellationToken = default)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        dto.AssetId = assetId;
-        var created = await _attachmentService.CreateAsync(assetId, dto);
-        return CreatedAtAction(nameof(GetAttachment), new { id = created.Id }, created);
+        // ⚠ **Resolve the asset FIRST, before a single byte is stored.**
+        //
+        // The first version of this ran the upload straight away and let the service's own
+        // "no asset was found" refusal come out of the persist callback, on the theory that
+        // `HrAttachmentUpload` would then roll the stored document back. It does not reach that
+        // far: DMS registration requires a non-empty source-record id and throws inside
+        // `UploadAsync`, which is *before* the persist try — so the bytes were written to disk,
+        // nothing rolled them back, and the caller met a generic 400 with the service's words
+        // discarded. An orphaned file for an asset that never existed.
+        //
+        // Every other HR upload site resolves its parent first (see `CheckInsController`). This one
+        // now does too, and the service keeps its own check as the guard against a race.
+        var asset = await _companyAssetService.GetByIdAsync(assetId);
+        if (asset is null)
+            return NotFound(new { message = $"No asset was found with id {assetId}." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "CompanyAsset",
+            sourceRecordId: assetId,
+            sourceLabel: "Company asset document",
+            documentType: "CompanyAssetAttachment",
+            description: description,
+            persist: (uploadedById, document) => _attachmentService.CreateUploadedAsync(
+                assetId,
+                new CreateAssetAttachmentDto { Description = description },
+                uploadedById,
+                document.OriginalFileName,
+                document.FilePath,
+                document.FileSize,
+                document.FileUploadRecordId,
+                document.DocumentRecordId,
+                document.DocumentVersionId),
+            cancellationToken,
+            category: ControlledFileUploadCategories.HrAssetDocuments);
+    }
+
+    /// <summary>Streams an asset document. The only way to the bytes — see <see cref="DownloadImage"/>.</summary>
+    [HttpGet("attachments/{id:guid}/download")]
+    [Authorize(Roles = HrRoles)]
+    public async Task<IActionResult> DownloadAttachment(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _attachmentService.GetByIdAsync(id);
+        if (attachment is null) return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId, attachment.FileUploadRecordId,
+            attachment.FilePath, attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
     }
 
     /// <summary>Delete attachment.</summary>
