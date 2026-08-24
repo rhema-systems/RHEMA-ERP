@@ -196,11 +196,13 @@ public sealed class ControlledOpeningBalancePostingTests
             GLAccountId = bankGl.Id, OpeningBalance = 0m, CurrentBalance = 0m, AvailableBalance = 0m,
             IsActive = true
         };
+        // The governed quote stores functional GHS per one USD; 12.5 therefore converts
+        // USD 50,000 to GHS 625,000, while the inverse remains USD 0.08 per GHS.
         var rate = new ExchangeRate
         {
             Id = Guid.NewGuid(), TenantId = tenantId,
             BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
-            Rate = 15m, InverseRate = 1m / 15m,
+            Rate = 12.5m, InverseRate = 0.08m,
             EffectiveDate = new DateTime(2026, 1, 1),
             RateType = ExchangeRateType.Daily,
             QuoteSide = ExchangeRateQuoteSide.Mid,
@@ -224,7 +226,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var bankOption = options.BankAccounts.Single(option => option.Id == bank.Id);
         bankOption.IsEligible.Should().BeTrue();
         bankOption.ExchangeRateId.Should().Be(rate.Id);
-        bankOption.ExchangeRate.Should().Be(15m);
+        bankOption.ExchangeRate.Should().Be(12.5m);
         bankOption.CurrencyCode.Should().Be("USD");
 
         var request = new CreateBankAccountOpeningBalanceDto
@@ -248,12 +250,12 @@ public sealed class ControlledOpeningBalancePostingTests
         var clearing = created.Lines.Single(line => line.CounterpartyType == "BankOpeningClearing");
         primary.TransactionCurrencyCode.Should().Be("USD");
         primary.TransactionDebitAmount.Should().Be(50_000m);
-        primary.DebitAmount.Should().Be(750_000m);
+        primary.DebitAmount.Should().Be(625_000m);
         primary.ExchangeRateId.Should().Be(rate.Id);
         primary.ExchangeRateDate.Should().Be(new DateTime(2026, 1, 1));
         clearing.TransactionCurrencyCode.Should().Be("GHS");
-        clearing.TransactionCreditAmount.Should().Be(750_000m);
-        clearing.CreditAmount.Should().Be(750_000m);
+        clearing.TransactionCreditAmount.Should().Be(625_000m);
+        clearing.CreditAmount.Should().Be(625_000m);
         clearing.ExchangeRateId.Should().BeNull();
 
         (await service.SubmitForApprovalAsync(created.Id)).Status.Should().Be("PendingApproval");
@@ -264,7 +266,7 @@ public sealed class ControlledOpeningBalancePostingTests
         reloadedBank.AvailableBalance.Should().Be(50_000m);
         var bankPosting = await db.AccountTransactions.SingleAsync(item =>
             item.JournalEntryId == posted.JournalEntryId && item.AccountId == bankGl.Id);
-        bankPosting.DebitAmount.Should().Be(750_000m);
+        bankPosting.DebitAmount.Should().Be(625_000m);
         bankPosting.TransactionCurrency.Should().Be("USD");
         bankPosting.TransactionDebitAmount.Should().Be(50_000m);
         bankPosting.ExchangeRateId.Should().Be(rate.Id);
@@ -2082,7 +2084,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var validation = await service.ValidateBatchAsync(batch.Id);
 
         validation.IsValid.Should().BeFalse();
-        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances require a controlled source and approved FX evidence", StringComparison.OrdinalIgnoreCase));
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
     }
 
@@ -2122,7 +2124,7 @@ public sealed class ControlledOpeningBalancePostingTests
         validation.Errors.Should().Contain(error =>
             error.Contains("must match the tenant functional currency 'GHS'", StringComparison.OrdinalIgnoreCase));
         validation.Errors.Should().Contain(error =>
-            error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+            error.Contains("foreign-currency opening balances require a controlled source and approved FX evidence", StringComparison.OrdinalIgnoreCase));
         Func<Task> submit = () => service.SubmitForApprovalAsync(batch.Id);
         await submit.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*tenant functional currency*");

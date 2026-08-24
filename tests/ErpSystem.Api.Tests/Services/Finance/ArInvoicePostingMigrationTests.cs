@@ -119,10 +119,10 @@ public sealed class ArInvoicePostingMigrationTests
         {
             invoice.IsOpeningBalance = true;
             invoice.CurrencyCode = "USD";
-            invoice.ExchangeRate = 15m;
-            invoice.BaseCurrencyAmount = 1500m;
+            invoice.ExchangeRate = 12.5m;
+            invoice.BaseCurrencyAmount = 1250m;
         });
-        var rate = SeedApprovedDailyRate(db, tenantId, "USD", 15m, ExchangeRateQuoteSide.Buying);
+        var rate = SeedApprovedDailyRate(db, tenantId, "USD", 12.5m, ExchangeRateQuoteSide.Buying);
         fixture.Invoice.ExchangeRateId = rate.Id;
         EnableCurrencyForAccounts(db, tenantId, "USD", fixture.ArAccount);
         var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
@@ -138,17 +138,17 @@ public sealed class ArInvoicePostingMigrationTests
         var journal = await db.JournalEntries.Include(item => item.Transactions)
             .SingleAsync(item => item.Id == result.JournalEntryId);
         var control = journal.Transactions.Single(item => item.AccountId == fixture.ArAccount.Id);
-        control.DebitAmount.Should().Be(1500m);
+        control.DebitAmount.Should().Be(1250m);
         control.TransactionCurrency.Should().Be("USD");
         control.TransactionDebitAmount.Should().Be(100m);
-        control.ExchangeRate.Should().Be(15m);
+        control.ExchangeRate.Should().Be(12.5m);
         control.ExchangeRateId.Should().Be(rate.Id);
         control.ExchangeRateSource.Should().Be("Regression approved rate");
 
         var clearing = journal.Transactions.Single(item => item.AccountId == clearingAccount.Id);
-        clearing.CreditAmount.Should().Be(1500m);
+        clearing.CreditAmount.Should().Be(1250m);
         clearing.TransactionCurrency.Should().Be("GHS");
-        clearing.TransactionCreditAmount.Should().Be(1500m);
+        clearing.TransactionCreditAmount.Should().Be(1250m);
         clearing.ExchangeRateId.Should().BeNull();
     }
 

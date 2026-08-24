@@ -17,17 +17,20 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<FinancePostingEngine> _logger;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IFinanceBudgetControlService? _budgetControl;
 
     public FinancePostingEngine(
         ApplicationDbContext context,
         ICurrentUserService currentUserService,
         ILogger<FinancePostingEngine> logger,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IFinanceBudgetControlService? budgetControl = null)
     {
         _context = context;
         _currentUserService = currentUserService;
         _logger = logger;
         _financeAuditService = financeAuditService;
+        _budgetControl = budgetControl;
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
@@ -111,6 +114,19 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
 
         var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
         await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
+
+        if (request.BudgetReservationIds.Count > 0)
+        {
+            if (_budgetControl == null)
+                throw new InvalidOperationException("Finance budget control is not configured for this budget-controlled posting.");
+            await _budgetControl.ConsumeReservationsAsync(
+                tenantId,
+                validation.SourceDocumentId,
+                request.BudgetReservationIds,
+                journalEntry.Id,
+                postingEvent.Id,
+                cancellationToken);
+        }
 
         if (!validation.ExistingJournalEntryId.HasValue)
         {

@@ -16,6 +16,8 @@ import type {
     SaveFinanceCloseTemplateVersion,
     JournalEntry,
     JournalEntryAttachment,
+    FinanceBudgetControlEvaluation,
+    FinanceBudgetOverrideRequest,
     FinanceJournalAuditLog,
     FinanceSettings,
     SegmentStructure,
@@ -516,6 +518,14 @@ class FinanceDataService {
     async requestJournalEntryApproval(id: string): Promise<JournalEntry> {
         const raw = await apiService.post<any>(`/finance/journal-entries/${id}/request-approval`);
         return normalizeJournalEntry(raw);
+    }
+
+    async getJournalEntryBudgetControl(id: string): Promise<FinanceBudgetControlEvaluation> {
+        return apiService.get<FinanceBudgetControlEvaluation>(`/finance/journal-entries/${id}/budget-control`);
+    }
+
+    async requestJournalEntryBudgetOverride(id: string, reason: string): Promise<FinanceBudgetOverrideRequest> {
+        return apiService.post<FinanceBudgetOverrideRequest>(`/finance/journal-entries/${id}/budget-override`, { reason });
     }
 
     async withdrawJournalEntryApproval(id: string, reason?: string): Promise<JournalEntry> {

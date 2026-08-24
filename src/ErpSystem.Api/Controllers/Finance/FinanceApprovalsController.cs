@@ -57,6 +57,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("BudgetScenario"),
         Normalize("BudgetReturn"),
         Normalize("BudgetRevision"),
+        Normalize("FinanceBudgetOverride"),
         Normalize("UnitJournalEntry"),
         Normalize("UnitAccountBudget"),
         Normalize("AllocationRule"),
@@ -89,6 +90,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly ILogger<FinanceApprovalsController> _logger;
     private readonly IProcurementInvoicePaymentSodService? _invoicePaymentSod;
     private readonly IVendorPaymentService? _vendorPaymentService;
+    private readonly IFinanceBudgetControlService? _budgetControl;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -104,7 +106,8 @@ public class FinanceApprovalsController : ControllerBase
         IVendorInvoiceService? vendorInvoiceService = null,
         IFinanceAuditService? financeAuditService = null,
         IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
-        IVendorPaymentService? vendorPaymentService = null)
+        IVendorPaymentService? vendorPaymentService = null,
+        IFinanceBudgetControlService? budgetControl = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -120,6 +123,7 @@ public class FinanceApprovalsController : ControllerBase
         _logger = logger;
         _invoicePaymentSod = invoicePaymentSod;
         _vendorPaymentService = vendorPaymentService;
+        _budgetControl = budgetControl;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -473,6 +477,33 @@ public class FinanceApprovalsController : ControllerBase
             }
         }
 
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("JournalEntry"))
+        {
+            if (_budgetControl == null)
+                return Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Finance budget control unavailable",
+                    detail: "The authoritative Finance budget-control service is unavailable.");
+            try
+            {
+                // Recheck at every approval stage. This occurs before the workflow transition,
+                // so a budget failure cannot consume an approver's task or complete the workflow.
+                await _budgetControl.ValidateManualJournalForPostingAsync(instance.EntityId, cancellationToken);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return BadRequest(new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = instance.CurrentStepId,
+                    Message = exception.Message
+                });
+            }
+        }
+
         var workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
             tenantId,
             entityType,
@@ -713,6 +744,16 @@ public class FinanceApprovalsController : ControllerBase
         var facts = await ResolveFactsAsync(approval.TenantId, entityType, instance.EntityId, cancellationToken);
         var reference = FirstNonEmpty(display.EntityNumber, facts.Reference, instance.EntityId.ToString("N")[..8].ToUpperInvariant());
         var title = FirstNonEmpty(display.EntityName, facts.Title, display.EntityType, entityType);
+        var detailHref = ResolveDetailHref(entityType, instance.EntityId, display.ActionUrl);
+        if (Normalize(entityType) == "FINANCEBUDGETOVERRIDE")
+        {
+            var journalId = await _db.FinanceBudgetOverrideRequests.AsNoTracking()
+                .Where(x => x.TenantId == approval.TenantId && x.Id == instance.EntityId && !x.IsDeleted)
+                .Select(x => (Guid?)x.SourceDocumentId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (journalId.HasValue)
+                detailHref = $"/finance/journal-entries/{journalId.Value:D}";
+        }
 
         return new FinanceApprovalQueueItemDto
         {
@@ -721,7 +762,7 @@ public class FinanceApprovalsController : ControllerBase
             EntityType = display.EntityType,
             Reference = reference,
             Title = title,
-            DetailHref = ResolveDetailHref(entityType, instance.EntityId, display.ActionUrl),
+            DetailHref = detailHref,
             DocumentType = GetDocumentType(entityType),
             Module = GetModule(entityType),
             CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
@@ -745,6 +786,25 @@ public class FinanceApprovalsController : ControllerBase
     private async Task<FinanceApprovalFacts> ResolveFactsAsync(Guid tenantId, string entityType, Guid entityId, CancellationToken cancellationToken)
     {
         var key = Normalize(entityType);
+
+        if (key == Normalize("FinanceBudgetOverride"))
+        {
+            var item = await _db.FinanceBudgetOverrideRequests.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            if (item == null)
+                return FinanceApprovalFacts.Empty;
+            var journalNumber = await _db.JournalEntries.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.Id == item.SourceDocumentId && !x.IsDeleted)
+                .Select(x => x.JournalEntryNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+            return new(
+                $"Budget override - {journalNumber ?? item.SourceDocumentId.ToString()}",
+                item.Reason,
+                item.Status,
+                item.RequestedAt,
+                item.ShortfallAmount,
+                item.CurrencyCode);
+        }
 
         if (key == Normalize("JournalEntry"))
         {
@@ -998,6 +1058,14 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("JournalEntry"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Approved", "Approved", userId, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("FinanceBudgetOverride"))
+        {
+            if (_budgetControl == null)
+                throw new InvalidOperationException("Finance budget control is not configured.");
+            await _budgetControl.ApplyOverrideOutcomeAsync(entityId, true, userId, comments, cancellationToken);
             return;
         }
 
@@ -1564,6 +1632,14 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("JournalEntry"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Rejected", "Rejected", rejectionReason: reason, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("FinanceBudgetOverride"))
+        {
+            if (_budgetControl == null)
+                throw new InvalidOperationException("Finance budget control is not configured.");
+            await _budgetControl.ApplyOverrideOutcomeAsync(entityId, false, userId, reason, cancellationToken);
             return;
         }
 
@@ -2401,6 +2477,7 @@ public class FinanceApprovalsController : ControllerBase
     {
         var key = Normalize(entityType);
         return key is "EXCHANGERATE"
+            or "FINANCEBUDGETOVERRIDE"
             or "VENDORPAYMENT"
             or "PAYMENTBATCH"
             or "OPENINGBALANCEBATCH"

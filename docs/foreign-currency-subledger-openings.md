@@ -16,12 +16,12 @@ The rate record is revalidated when AP is submitted, approved, and posted, and w
 
 ## Accounting contract
 
-For a USD 100 opening invoice at GHS 15 per USD:
+For a USD 100 opening invoice at GHS 12.5 per USD:
 
 | Source | Debit | Credit | Transaction evidence |
 | --- | ---: | ---: | --- |
-| AP opening | Migration clearing GHS 1,500 | AP control GHS 1,500 | AP control retains USD 100 and the approved rate ID; clearing is functional-only |
-| AR opening | AR control GHS 1,500 | Migration clearing GHS 1,500 | AR control retains USD 100 and the approved rate ID; clearing is functional-only |
+| AP opening | Migration clearing GHS 1,250 | AP control GHS 1,250 | AP control retains USD 100 and the approved rate ID; clearing is functional-only |
+| AR opening | AR control GHS 1,250 | Migration clearing GHS 1,250 | AR control retains USD 100 and the approved rate ID; clearing is functional-only |
 
 This avoids putting foreign-currency quantity on Migration Clearing while preserving the native supplier/customer balance on the subledger control account.
 

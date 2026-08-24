@@ -1,3 +1,4 @@
+using System.Globalization;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.GL;
@@ -120,10 +121,10 @@ public sealed class ApInvoicePostingMigrationTests
         {
             invoice.IsOpeningBalance = true;
             invoice.CurrencyCode = "USD";
-            invoice.ExchangeRate = 15m;
-            invoice.BaseCurrencyAmount = 1500m;
+            invoice.ExchangeRate = 12.5m;
+            invoice.BaseCurrencyAmount = 1250m;
         });
-        var rate = SeedApprovedDailyRate(db, tenantId, "USD", 15m, ExchangeRateQuoteSide.Selling);
+        var rate = SeedApprovedDailyRate(db, tenantId, "USD", 12.5m, ExchangeRateQuoteSide.Selling);
         fixture.Invoice.ExchangeRateId = rate.Id;
         EnableCurrencyForAccounts(db, tenantId, "USD", fixture.ApAccount);
         var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
@@ -139,16 +140,16 @@ public sealed class ApInvoicePostingMigrationTests
         var journal = await db.JournalEntries.Include(item => item.Transactions)
             .SingleAsync(item => item.Id == result.JournalEntryId);
         var clearing = journal.Transactions.Single(item => item.AccountId == clearingAccount.Id);
-        clearing.DebitAmount.Should().Be(1500m);
+        clearing.DebitAmount.Should().Be(1250m);
         clearing.TransactionCurrency.Should().Be("GHS");
-        clearing.TransactionDebitAmount.Should().Be(1500m);
+        clearing.TransactionDebitAmount.Should().Be(1250m);
         clearing.ExchangeRateId.Should().BeNull();
 
         var control = journal.Transactions.Single(item => item.AccountId == fixture.ApAccount.Id);
-        control.CreditAmount.Should().Be(1500m);
+        control.CreditAmount.Should().Be(1250m);
         control.TransactionCurrency.Should().Be("USD");
         control.TransactionCreditAmount.Should().Be(100m);
-        control.ExchangeRate.Should().Be(15m);
+        control.ExchangeRate.Should().Be(12.5m);
         control.ExchangeRateId.Should().Be(rate.Id);
         control.ExchangeRateSource.Should().Be("Regression approved rate");
     }
@@ -414,6 +415,13 @@ public sealed class ApInvoicePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var reversalDate = DateTime.UtcNow.Date;
+        if (reversalDate.Year != fixture.Invoice.InvoiceDate.Year ||
+            reversalDate.Month != fixture.Invoice.InvoiceDate.Month)
+        {
+            SeedOpenPeriod(db, tenantId, reversalDate);
+            await db.SaveChangesAsync();
+        }
         var (service, _) = CreateService(db, tenantId);
         var posted = await service.PostAsync(fixture.Invoice.Id);
 
@@ -590,19 +598,29 @@ public sealed class ApInvoicePostingMigrationTests
         Guid tenantId,
         bool isOpen = true,
         bool isClosed = false)
+        => SeedOpenPeriod(db, tenantId, new DateTime(2026, 7, 1), isOpen, isClosed);
+
+    private static FiscalPeriod SeedOpenPeriod(
+        ApplicationDbContext db,
+        Guid tenantId,
+        DateTime periodDate,
+        bool isOpen = true,
+        bool isClosed = false)
     {
+        var startDate = new DateTime(periodDate.Year, periodDate.Month, 1);
+        var endDate = startDate.AddMonths(1).AddDays(-1);
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             FiscalYearId = Guid.NewGuid(),
-            PeriodName = "July 2026",
-            PeriodCode = "2026-07",
-            PeriodNumber = 7,
+            PeriodName = startDate.ToString("MMMM yyyy", CultureInfo.InvariantCulture),
+            PeriodCode = startDate.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+            PeriodNumber = startDate.Month,
             PeriodType = PeriodType.Monthly,
-            StartDate = new DateTime(2026, 7, 1),
-            EndDate = new DateTime(2026, 7, 31),
-            PeriodDays = 31,
+            StartDate = startDate,
+            EndDate = endDate,
+            PeriodDays = (endDate - startDate).Days + 1,
             PeriodStatus = isClosed ? "Closed" : isOpen ? "Open" : "Future",
             IsOpen = isOpen,
             IsClosed = isClosed,

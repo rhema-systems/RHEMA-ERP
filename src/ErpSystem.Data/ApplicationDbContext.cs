@@ -176,6 +176,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
     public DbSet<BudgetRevision> BudgetRevisions { get; set; }
     public DbSet<BudgetRevisionLine> BudgetRevisionLines { get; set; }
+    public DbSet<FinanceBudgetReservation> FinanceBudgetReservations { get; set; }
+    public DbSet<FinanceBudgetOverrideRequest> FinanceBudgetOverrideRequests { get; set; }
     public DbSet<BankAccount> BankAccounts { get; set; }
     public DbSet<LiquidityAccount> LiquidityAccounts { get; set; }
     public DbSet<LiquidityAccountEntry> LiquidityAccountEntries { get; set; }
@@ -7660,6 +7662,25 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
+        });
+
+        builder.Entity<FinanceBudgetReservation>(entity =>
+        {
+            entity.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(x => new { x.TenantId, x.BudgetEntryId, x.Status });
+            entity.HasIndex(x => new { x.TenantId, x.SourceDocumentType, x.SourceDocumentId, x.BudgetEntryId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Status] = 'Reserved'");
+            entity.HasIndex(x => x.PostingEventId);
+        });
+
+        builder.Entity<FinanceBudgetOverrideRequest>(entity =>
+        {
+            entity.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(x => new { x.TenantId, x.SourceDocumentType, x.SourceDocumentId, x.EvaluationHash, x.Status });
+            entity.HasIndex(x => x.WorkflowInstanceId)
+                .IsUnique()
+                .HasFilter("[WorkflowInstanceId] IS NOT NULL");
         });
 
         builder.Entity<BudgetRevision>(entity =>
