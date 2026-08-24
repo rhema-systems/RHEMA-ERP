@@ -1,6 +1,9 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+// The exit register, for the one question this service asks of it: has a charge's balance already
+// been taken at exit? See ChargesTakenAtExitAsync.
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
@@ -12,6 +15,7 @@ using ErpSystem.Core.Interfaces.HR;
 // made every mention of that name ambiguous in `AssetsServices.cs` (build plan §3.3). One type,
 // named once.
 using ICurrencyService = ErpSystem.Core.Interfaces.Finance.ICurrencyService;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -242,13 +246,25 @@ public class AssetSurchargeService : IAssetSurchargeService
     /// count, rounded to two places. It is a <i>statement of intent</i>, not a schedule: HR does not
     /// know payroll's periods, its rounding or its net-pay floor, and inventing them here is
     /// precisely the parallel mechanism the ownership boundary exists to prevent.</para>
+    ///
+    /// <para>⚠ <b>A balance already taken at exit drops off this list</b> — area 16 slice 10. An
+    /// employee part-way through four instalments who then leaves has the remaining balance carried
+    /// onto their clearance form and deducted from the FR-HR-184 final settlement. Leaving the row
+    /// here as well would have payroll collect the same money a second time, and neither side could
+    /// see the other doing it: the settlement is a one-off statement, this list is a standing
+    /// instruction, and nothing connected them. Suppressed once the clearance form is COMPLETE,
+    /// not before — an exit that is abandoned mid-clearance must not stop a live recovery.</para>
     /// </remarks>
     public async Task<IEnumerable<AssetSurchargePayrollLineDto>> GetPayrollDeductionLinesAsync()
     {
-        var outstanding = await _surchargeRepo.GetOutstandingAsync(GetTenantId());
+        var tenantId = GetTenantId();
+        var outstanding = await _surchargeRepo.GetOutstandingAsync(tenantId);
+
+        var takenAtExit = await ChargesTakenAtExitAsync(tenantId);
 
         return outstanding
             .Where(x => x.RecoveryMethod == AssetSurchargeRecoveryMethod.PayrollDeduction)
+            .Where(x => !takenAtExit.Contains(x.Id))
             .Select(x => new AssetSurchargePayrollLineDto
             {
                 SurchargeId = x.Id,
@@ -269,6 +285,42 @@ public class AssetSurchargeService : IAssetSurchargeService
                 ApprovalDate = x.ApprovalDate
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// The charges whose balance a completed exit clearance has already carried to a final
+    /// settlement, and which payroll must therefore stop deducting — area 16 slice 10.
+    /// </summary>
+    /// <remarks>
+    /// <para>Read here rather than pushed from the separation side on purpose. Whether a charge is
+    /// still payroll's to collect is a question about the charge, and the answer belongs beside the
+    /// projection that answers it — a flag written onto the surcharge by another area's service
+    /// would be a second copy of a fact that can change (a settlement can be cancelled), and it
+    /// would drift.</para>
+    ///
+    /// <para>The join is <c>SourceSurchargeId</c>, set when the clearance line was drawn from the
+    /// asset register. A hand-entered amount on a hand-written property line carries no surcharge
+    /// id and correctly suppresses nothing — nobody can tell what it was about.</para>
+    /// </remarks>
+    private async Task<HashSet<Guid>> ChargesTakenAtExitAsync(Guid tenantId)
+    {
+        var ids = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .AsNoTracking()
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted
+                        && i.SourceSurchargeId != null
+                        && i.OutstandingAmount > 0
+                        // ⚠ The SEPARATION's deletion, not the item's. Deleting a separation does
+                        // not cascade to its clearance lines, so a voided exit would otherwise go
+                        // on suppressing a live payroll recovery for ever — money quietly not
+                        // collected, with nothing on either screen to say why.
+                        && !i.Separation.IsDeleted
+                        && i.Separation.Status >= SeparationStatus.ClearanceCompleted
+                        && i.Separation.Status != SeparationStatus.Cancelled)
+            .Select(i => i.SourceSurchargeId!.Value)
+            .Distinct()
+            .ToListAsync();
+
+        return ids.ToHashSet();
     }
 
     // ── raising a charge ─────────────────────────────────────────────────────

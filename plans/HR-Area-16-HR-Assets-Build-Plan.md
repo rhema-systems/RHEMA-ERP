@@ -39,9 +39,9 @@ decision — record the change where it happened.
 | **Backend proven** | *(at survey)* **Nothing** — all ten stores held 0 rows. Slice 0 executed all 82 routes and found **two sub-surfaces that can never have worked** (D-k, D-l) |
 | **Frontend today** | **the employee's own screen** — `/hr/assets/me`, `asset-portal.service.ts`, `types/hr/assets.ts`, one sidebar entry (slice 6). The HR register screens arrive at slice 12 |
 | **Authorization today** | *(at survey)* one bare `[Authorize]`, **no gate on any of the 82 routes**. **Closed in slice 1**: 71 routes `[Authorize(Roles = HrRoles)]`, 11 self-service routes gated by `AssetActor` on the service side |
-| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–9b green twice — 1,134 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), and maintenance is now monitored rather than merely recorded |
-| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice9b.mjs`, `probe-slice6-ui.mjs` |
-| **Blocks / unblocks** | Unblocks area 9b **D4** — asset return becomes an enforced clearance gate |
+| **Status** | 🔨 In progress. Decisions **D1–D10** settled. **Slices 0–10 green twice — 1,244 assertions.** Assets can be charged for and rented out (both money surfaces stopping at the payroll boundary: HR declares, payroll deducts), maintenance is monitored rather than merely recorded, and an exit can no longer close over property the leaver still holds |
+| **Harness** | `D:\Rhema\TDC ERPS\dev-harness\hr-assets\` — `api.mjs`, `setup.mjs`, `workflow-definition.mjs`, `run-slice0.mjs` … `run-slice10.mjs`, `probe-slice6-ui.mjs` |
+| **Blocks / unblocks** | ✅ **Unblocked area 9b D4 in slice 10** — asset return is now an enforced clearance gate, and the clearance form is drawn from the register rather than remembered |
 
 ---
 
@@ -516,13 +516,37 @@ Two consequences of the right of reply worth stating, because they are asymmetri
   adapter differs from its two siblings. Dropping to Draft would discard the fact that they were
   asked and what they said, on the record whose whole point is that they were asked.
 
-### D8 — the exit-clearance hook (FR-HR-183, closing 9b D4). *Recommendation, taken unless contradicted.*
+### D8 — the exit-clearance hook (FR-HR-183, closing 9b D4). ✅ **DELIVERED SLICE 10, with one revision.**
 
-When a separation's clearance form is generated, every `ClearanceItemKind.CompanyProperty` and
-`.OfficeEquipment` line is **sourced from HR Assets**: one line per unreturned active assignment,
-carrying the asset and, where damage was recorded, the surcharge amount into
-`SeparationClearanceItem.OutstandingAmount` — which the FR-HR-184 settlement already deducts. A
-manual line remains possible for property HR never registered.
+**As recommended:** when a separation's clearance form is generated, the property lines are
+**sourced from HR Assets** — one line per unreturned assignment, carrying the asset and, where a
+surcharge has been decided, its unrecovered balance into `SeparationClearanceItem.OutstandingAmount`,
+which the FR-HR-184 settlement deducts. A manual line remains for property HR never registered, and
+the catalogue line itself is what it is.
+
+**The revision, and it is a money one.** D8 said *every* `CompanyProperty` **and** `OfficeEquipment`
+line would be sourced. That cannot be built and would have been wrong if it could: a `CompanyAsset`
+is classified by `AssetType`, a free-text per-tenant lookup with **no notion** of "this one is office
+equipment and that one is not" — measured, and the table holds 0 rows on this tenant. Sourcing both
+kinds would have listed **every asset twice**, once under each heading, and the settlement would have
+**deducted every surcharge twice** with it. Every figure on the statement would still have added up.
+
+So the tenant names **one** line — `SeparationClearanceTemplate.SourcesFromAssetRegister`, defaulted
+onto "Company property" by the seeder — and `RequireSoleAssetSourceAsync` refuses a second, asked of
+retired lines too because `IsActive` is a switch. Same shape as D2's refinement in slice 8: the
+recommendation named a mechanism that could not carry what was asked of it.
+
+**Two things D8 did not anticipate, both delivered:**
+
+- **The gate.** 9b's D4 said clearance "becomes an enforced gate for free when 16 lands". Sourcing
+  the lines is not the gate; refusing to sign them off is. `Cleared` is refused while the asset is
+  still held, while a decided charge is unpaid, and while a charge is *undecided* — each with its own
+  sentence. `Blocked`, `Waived` and `NotApplicable` stay open, because an asset nobody can find must
+  remain answerable or the exit stops behind a line that can never close.
+- **Only a DECIDED charge is money.** A surcharge in Draft, with the employee, or awaiting approval
+  is not a debt; carrying it onto the form would deduct from a leaver's final pay a figure no
+  approver has authorised — on the one record whose whole point is that they were asked first (D9).
+  It blocks the line all the same. Those are two different questions and the bridge answers both.
 
 ---
 
@@ -620,7 +644,7 @@ overdue returns; and the full screen set.
 | **8** | ✅ Rental and the payroll seam | `IsRentable` + standard rate on the asset, seven rental columns on the assignment, the read-only projection, and **the rent closing at all three doors that close a custody** (AST-9, AST-10, D2). Migration `AddAssetRentalTerms` |
 | **9** | ✅ Maintenance monitoring | The schedule anchored on the work, three watchlist reads, the reminder engine, and the handle into the Maintenance module (AST-1; **D-aa, D-bb, D-cc, D-dd, D-ee, D-ff, D-gg, D-hh**; D10). Migration `AddAssetReminderEngine` |
 | **9b** | ✅ The push into Maintenance | D10 — the picker, link/unlink, `send-for-maintenance` on `AssetAdmission`, and completion discharging it. Migration `AddAssetMaintenanceAdmissionLink`. Found cross-module defect **10** |
-| **10** | Exit clearance | FR-HR-183 — clearance lines sourced from unreturned assignments, closing 9b D4 |
+| **10** | ✅ Exit clearance | FR-HR-183 — the form drawn from the register, the gate that refuses to clear an asset still out, the money onto the settlement, and `refresh-assets` for the notice period. **D-ii**, and the payroll double-recovery closed. Migration `AddClearanceAssetSourcing` |
 | **11** | Reminders and reports | Insurance expiry, overdue returns, the asset register report |
 | **12+** | Screens, then the content audit | Admin + HR screens, then the endpoint-by-endpoint content audit that areas 11–23 proved is not optional |
 
@@ -1421,4 +1445,88 @@ closing one hole turned a dormant one into a trap.
 
 **Screen.** None. The picker and the "send for maintenance" action are part of the HR register
 screens at slice 12.
+
+---
+
+### Slice 10 — exit clearance over company property. 2026-08-24, **110/110, run twice** (stamps 230003, 230004). Migration `AddClearanceAssetSourcing`.
+
+Delivers **FR-HR-183** and closes **area 9b's decision D4**, the one seam that area left open
+because this one did not exist yet. Area 16 now stands at **1,244 assertions**.
+
+**The bridge, and which way it points.** `AssetCustodyClearanceBridge` — a sealed class with no
+interface, following `StaffTravelCurrencyBridge` — answers one question for the separation service:
+*what has this leaver not given back?* `SeparationService` already reads `StaffTravelAdvance` rows
+directly, and that was fine because "an advance still owed" is one obvious predicate. Custody is not:
+what counts as unreturned spans **four** assignment statuses, two of which exist only because slice 7
+added them, and what counts as money owed is an eight-member state machine with a right of reply
+attached. Restating either inside area 9b is how two modules come to disagree about whether a leaver
+owes for a laptop. **Area 16 answers; area 9b asks.**
+
+**⚠ The predicate is `not (Returned or Transferred)`, never `ReturnDate == null`.** Slice 7's
+incident route deliberately leaves `ReturnDate` null on a loss and names *this* query in the comment
+explaining why. `ReturnDate == null` is true of an Active custody too and false of nothing that
+matters. Slice 4's `Transferred` ends a custody just as completely as a return — the employee passed
+the asset to a colleague through an approved transfer, and nobody took it back.
+
+**Defect D-ii — a settlement category that was mapped, directed, and unreachable.**
+`CategoryForClearance` has always sent the property kinds to `SettlementLineCategory.PropertyRecovery`
+and `DirectionOf` has always known it is a deduction — and **no line could ever reach it**, because
+the only path that sets an outstanding amount (`RecordClearanceItemAsync`) refused one on any kind
+not in `CarriesAmount`, and the two property kinds were not in it. An employee could walk out owing
+for a written-off laptop and the statement had no way to say so. This is the shape area 14 called a
+declared-and-unread field, one layer down: three functions agreeing about a category nothing could
+produce.
+
+**⚠ `Blocked` does not open the FR-HR-091 gate — `Waived` with an amount does.** `IsSettled` is
+Cleared, Waived or NotApplicable, so a blocked mandatory line holds the whole exit, correctly. The
+answer that carries money *through* the gate is a waiver with a reason, which is both what area 9b's
+own settlement fixtures use and what an unrecoverable asset actually is. §4 asserts the refusal
+head-on rather than routing around it.
+
+**A currency column, because a surcharge carries one and a settlement carries another.**
+`SeparationClearanceItem.OutstandingCurrencyCode`, null meaning "the settlement's own" — which is
+what every hand-entered amount has always meant. A figure in another currency reaches the statement
+as an **uncomputed** line with the amount in its text, the same treatment travel advances get:
+Finance owns conversion and its stored rates are known to be inverted (cross-module defect 2). A
+settlement that silently added 250 USD to a GHS total would be wrong by a factor of twelve and look
+arithmetically perfect.
+
+**`refresh-assets`, because the form is drawn weeks before it is signed.** Clearance starts at
+approval and the notice period runs after it, so custody moves underneath: an asset issued in the
+last fortnight would never appear, and a surcharge approved after the form was drawn would never
+reach the settlement. The route adds and reprices; it **never touches an answered line**, which is
+the same rule that makes the snapshotted name a snapshot.
+
+**The payroll double-recovery, closed in the same slice.** A charge part-way through a
+`PayrollDeduction` plan whose balance is then taken at exit was on **both** lists — the one-off
+settlement and payroll's standing instruction — and neither side could see the other.
+`GetPayrollDeductionLinesAsync` now drops any charge a **completed** clearance has carried, joined on
+`SourceSurchargeId`. Completed and not earlier: an exit abandoned mid-clearance must not stop a live
+recovery. Read from the surcharge side rather than flagged from the separation side, because a
+settlement can be cancelled and a written flag would drift.
+
+**No data migration, on the user's call.** The adoption of an existing "Company property" line lives
+in `SeedDefaultClearanceTemplatesAsync` instead — the endpoint that owns the catalogue, idempotent
+and re-runnable, guarded so a tenant that has deliberately pointed the register elsewhere is left
+alone. A migration that writes rows is a decision taken once, invisibly, that cannot be re-taken.
+
+**Both harness failures on the first full run were the probe's, for the third time in this area.**
+The refresh-refusal assertion expected the word `ClearanceCompleted` and met `SettlementPending` —
+§4 had prepared a settlement and moved the record on, so the expectation was aimed at a *transient*;
+it now asserts the invariant sentence. And `Guid.Empty` answers **400** on every route of this
+controller, before the service is reached, so `NIL` measured the id guard and never the not-found
+path. Both contracts are now asserted separately. *When a refusal arrives with the wrong words, read
+them before adjusting the product.*
+
+**⚠ A cross-harness hazard this slice created, and it is worth knowing.** Area 9b's `run-slice4.mjs`
+approves separations **without publishing an `EmployeeSeparation` workflow definition** — it has been
+passing on one an earlier slice left active. This harness retires leftovers at the start and its own
+at the end, so after a slice-10 run there is no active definition for that entity type and 9b's
+slice 4 will refuse every submit. That is 9b's harness passing for a reason it cannot state (the
+plan's trap 5), not a fault here; slice 10 publishes its own. Recorded in both READMEs.
+
+**Screen.** None. The clearance form is area 9b's screen (`/hr/separations/[id]`), which gains the
+asset lines, the live custody column and a "refresh from the asset register" action when that area's
+screens are revisited. The sourcing flag belongs on
+`/administration/hr/separation`'s clearance-template editor.
 

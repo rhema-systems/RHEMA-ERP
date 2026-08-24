@@ -913,6 +913,33 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Re-read the HR Assets register onto an in-progress form — FR-HR-183, area 16 slice 10.
+    /// </summary>
+    /// <remarks>
+    /// Adds a line for anything issued to the leaver since the form was drawn and reprices the
+    /// lines nobody has answered yet. Answered lines are never touched.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPost("{id:guid}/clearance/refresh-assets")]
+    [ProducesResponseType(typeof(SeparationClearanceDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SeparationClearanceDto>> RefreshClearanceAssets(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty) return BadRequest(new { message = "Invalid separation id." });
+
+        try
+        {
+            return Ok(await _service.RefreshClearanceAssetsAsync(id, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     /// <summary>This separation's clearance form, its totals, and whether the gate can open.</summary>
     [Authorize(Policy = HrPermissions.SeparationReadPolicy)]
     [HttpGet("{id:guid}/clearance")]

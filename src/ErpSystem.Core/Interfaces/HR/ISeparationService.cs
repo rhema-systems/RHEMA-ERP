@@ -268,7 +268,27 @@ public interface ISeparationService
     /// separation is not yet approved, where clearance has already begun, or where the catalogue is
     /// empty — a form with no lines would report "cleared" having checked nothing.
     /// </summary>
+    /// <remarks>
+    /// The line marked <c>SourcesFromAssetRegister</c> is expanded from HR Assets — one extra line
+    /// per thing the leaver has not given back, carrying any decided surcharge into the settlement
+    /// (FR-HR-183, area 16 slice 10).
+    /// </remarks>
     Task<SeparationClearanceDto> StartClearanceAsync(
+        Guid separationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-reads the HR Assets register onto an in-progress clearance form: adds a line for anything
+    /// the leaver has been issued since the form was drawn, and reprices the lines nobody has
+    /// answered yet.
+    /// </summary>
+    /// <remarks>
+    /// The form is drawn when the separation is approved and the notice period runs after it, so
+    /// custody moves under it — an asset issued in the last fortnight would otherwise never appear,
+    /// and a surcharge approved after the form was drawn would never reach the settlement. Answered
+    /// lines are never touched: a clearance form is evidence, and rewriting a signed line is the
+    /// one thing it must not do.
+    /// </remarks>
+    Task<SeparationClearanceDto> RefreshClearanceAssetsAsync(
         Guid separationId, CancellationToken cancellationToken = default);
 
     Task<SeparationClearanceDto> GetClearanceAsync(

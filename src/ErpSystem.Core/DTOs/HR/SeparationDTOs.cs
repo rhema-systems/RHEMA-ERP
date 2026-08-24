@@ -366,7 +366,13 @@ public class SeparationClearanceTemplateDto
     public bool IsActive { get; set; }
     public int SortOrder { get; set; }
 
-    /// <summary>True for the kinds that can carry money — a loan, an advance, a payroll recovery.</summary>
+    /// <summary>
+    /// This line is expanded from the HR Assets register — one extra line per thing the leaver has
+    /// not given back. At most one line on the form may be (FR-HR-183, area 16 slice 10).
+    /// </summary>
+    public bool SourcesFromAssetRegister { get; set; }
+
+    /// <summary>True for the kinds that can carry money — property, a loan, an advance, a recovery.</summary>
     public bool CarriesAmount { get; set; }
 }
 
@@ -385,6 +391,13 @@ public class CreateSeparationClearanceTemplateDto
     public Guid? OwningOrganizationUnitId { get; set; }
     public bool IsMandatory { get; set; } = true;
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Expand this line from the HR Assets register. Refused when another line already does —
+    /// two sourced lines would list every asset twice and deduct every surcharge twice with it.
+    /// </summary>
+    public bool SourcesFromAssetRegister { get; set; }
+
     public int SortOrder { get; set; }
 }
 
@@ -401,6 +414,10 @@ public class UpdateSeparationClearanceTemplateDto
     public Guid? OwningOrganizationUnitId { get; set; }
     public bool? IsMandatory { get; set; }
     public bool? IsActive { get; set; }
+
+    /// <summary>See <see cref="CreateSeparationClearanceTemplateDto.SourcesFromAssetRegister"/>.</summary>
+    public bool? SourcesFromAssetRegister { get; set; }
+
     public int? SortOrder { get; set; }
 }
 
@@ -426,7 +443,60 @@ public class SeparationClearanceItemDto
     public string StatusName { get; set; } = string.Empty;
 
     public decimal? OutstandingAmount { get; set; }
+
+    /// <summary>
+    /// The currency the amount is stated in. Null means the settlement's own currency, which is
+    /// what every hand-entered figure means.
+    /// </summary>
+    public string? OutstandingCurrencyCode { get; set; }
+
     public bool CarriesAmount { get; set; }
+
+    // ── Where this line came from, when it came from HR Assets (FR-HR-183) ───────
+
+    /// <summary>The custody this line is about, on a line expanded from the asset register.</summary>
+    public Guid? SourceAssignmentId { get; set; }
+
+    /// <summary>The surcharge the outstanding amount was taken from.</summary>
+    public Guid? SourceSurchargeId { get; set; }
+
+    /// <summary>Convenience for a screen: this line answers to an act in HR Assets, not to a signature.</summary>
+    public bool IsFromAssetRegister { get; set; }
+
+    /// <summary>
+    /// The custody as it stands <b>now</b>, re-read for every clearance read — not the snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Null on a hand-written line, and null on a sourced line whose assignment can no longer be
+    /// found. A screen needs this because the gate uses it: without it, HR is told "the asset is
+    /// still with the employee" by a refusal and has nothing on the form that says so.
+    /// </remarks>
+    public string? AssetCustodyStatusName { get; set; }
+
+    /// <summary>The asset has not been given back — it is held, lost or damaged.</summary>
+    public bool? AssetOutstanding { get; set; }
+
+    /// <summary>The employee physically has it, so a return is what would clear this line.</summary>
+    public bool? AssetStillHeld { get; set; }
+
+    /// <summary>
+    /// What is still owed on a <b>decided</b> surcharge against this custody, right now.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="OutstandingAmount"/>, not instead of it. That one is what the form
+    /// recorded and what the settlement will deduct; this is what the register says today. When
+    /// they disagree, somebody has paid an instalment — or been charged — since the form was drawn,
+    /// and refreshing the asset lines is what reconciles them.
+    /// </remarks>
+    public decimal? AssetOutstandingSurcharge { get; set; }
+
+    /// <summary>A charge against this custody has been raised and not yet decided.</summary>
+    /// <remarks>
+    /// It carries no amount and blocks the line all the same — see the gate on
+    /// <c>RecordClearanceItem</c>. Without this the form shows a line that refuses to clear for a
+    /// reason nothing on the page mentions.
+    /// </remarks>
+    public bool? AssetHasUndecidedCharge { get; set; }
 
     public string? Notes { get; set; }
     public string? SignedOffBy { get; set; }

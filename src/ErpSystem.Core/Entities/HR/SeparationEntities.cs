@@ -378,6 +378,30 @@ public class SeparationClearanceTemplate : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// This line is expanded from the HR Assets register — one extra line per thing the leaver has
+    /// not given back (FR-HR-183, area 16 slice 10).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A flag rather than a rule on <see cref="Kind"/>, because the register cannot tell
+    /// the two property kinds apart.</b> Area 16's decision D8 said every <c>CompanyProperty</c>
+    /// <i>and</i> <c>OfficeEquipment</c> line would be sourced from the register — which sounds
+    /// right and cannot be built: a <c>CompanyAsset</c> is classified by <c>AssetType</c>, a
+    /// free-text per-tenant lookup with no notion of "this one is office equipment and that one is
+    /// not". Sourcing both kinds would therefore have listed <b>every</b> asset twice, once under
+    /// each heading, and the FR-HR-184 settlement would have deducted each surcharge twice with
+    /// it. So the tenant says which single line the register feeds, and the default seeder points
+    /// it at "Company property".</para>
+    ///
+    /// <para><b>At most one line may carry it</b>, enforced on the write path for exactly that
+    /// reason. Double-counting money is not a display problem.</para>
+    ///
+    /// <para>The line itself still appears on every form, sourced or not. It is where property the
+    /// organisation never registered gets recorded by hand — a badge, a toolkit, a phone bought on
+    /// petty cash — and losing that to an automated list would narrow the form, not widen it.</para>
+    /// </remarks>
+    public bool SourcesFromAssetRegister { get; set; }
+
     /// <summary>Order the line appears on the form.</summary>
     public int SortOrder { get; set; }
 }
@@ -400,6 +424,31 @@ public class SeparationClearanceItem : TenantEntity
 
     /// <summary>The catalogue line this came from, where it came from one at all.</summary>
     public Guid? TemplateId { get; set; }
+
+    /// <summary>
+    /// The HR Assets custody this line is about — area 16 slice 10, FR-HR-183.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null on every hand-written line, set on the ones expanded from the register. It is
+    /// what makes this line <b>answerable by an act somewhere else</b>: the gate re-reads the
+    /// custody at the moment somebody tries to sign the line off, so an asset returned on the last
+    /// working day clears and one still in a drawer does not.</para>
+    ///
+    /// <para><b>No foreign key, deliberately.</b> Every delete in HR Assets is a soft delete, so an
+    /// FK would never fire — but it would tie a separation migration to the shape of the assets
+    /// tables for no gain. The bridge already answers "is this still a custody?" with null, and a
+    /// clearance line whose assignment has vanished must keep reading as the thing that was signed,
+    /// which is the same reason the name is snapshotted rather than read through.</para>
+    /// </remarks>
+    public Guid? SourceAssignmentId { get; set; }
+
+    /// <summary>The surcharge whose unrecovered balance <see cref="OutstandingAmount"/> came from.</summary>
+    /// <remarks>
+    /// The provenance of a number that becomes a deduction on somebody's final pay. Without it the
+    /// settlement can say an amount was "recorded on the clearance form" and nothing can say who
+    /// assessed it, who approved it, or what the employee said when they were asked.
+    /// </remarks>
+    public Guid? SourceSurchargeId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -431,6 +480,25 @@ public class SeparationClearanceItem : TenantEntity
     /// </remarks>
     [Column(TypeName = "decimal(18,2)")]
     public decimal? OutstandingAmount { get; set; }
+
+    /// <summary>
+    /// What currency <see cref="OutstandingAmount"/> is stated in, where anything stated it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added with the asset lines in area 16 slice 10, because a surcharge carries its own
+    /// currency and the settlement carries another. Null means "the settlement's own currency",
+    /// which is what every hand-entered amount has always meant and what the loan and advance
+    /// lines still mean.</para>
+    ///
+    /// <para>⚠ A figure in a currency the settlement is not stated in is <b>not converted here</b>.
+    /// It reaches the statement as an uncomputed line with the amount in its text — the same
+    /// treatment the travel-advance lines get, and for the same reason: Finance owns conversion,
+    /// and its stored rates are known to be inverted (cross-module defect 2). A settlement that
+    /// silently added 500 USD to a GHS total would be wrong by a factor of twelve and look
+    /// arithmetically perfect.</para>
+    /// </remarks>
+    [MaxLength(3)]
+    public string? OutstandingCurrencyCode { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }

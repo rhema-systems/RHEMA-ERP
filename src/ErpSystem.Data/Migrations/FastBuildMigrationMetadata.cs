@@ -214,3 +214,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824081736_AddAssetRentalTerms")] partial class AddAssetRentalTerms { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824093718_AddAssetReminderEngine")] partial class AddAssetReminderEngine { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824102403_AddAssetMaintenanceAdmissionLink")] partial class AddAssetMaintenanceAdmissionLink { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824122332_AddClearanceAssetSourcing")] partial class AddClearanceAssetSourcing { }

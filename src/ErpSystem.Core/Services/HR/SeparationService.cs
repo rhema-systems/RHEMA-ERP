@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.HR.Assets;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,17 @@ public class SeparationService : ISeparationService
     private readonly IEmployeeService _employeeService;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
+
+    /// <summary>
+    /// HR Assets' read-only answer to "what has this leaver not given back?" — FR-HR-183.
+    /// </summary>
+    /// <remarks>
+    /// Area 16 owns what counts as an unreturned custody and what counts as money owed on one;
+    /// this service owns the form and the gate. See <see cref="AssetCustodyClearanceBridge"/> for
+    /// why the query lives over there rather than being restated here.
+    /// </remarks>
+    private readonly AssetCustodyClearanceBridge _assetCustody;
+
     private readonly ILogger<SeparationService> _logger;
 
     /// <summary>
@@ -56,6 +68,7 @@ public class SeparationService : ISeparationService
         IEmployeeService employeeService,
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
+        AssetCustodyClearanceBridge assetCustody,
         ILogger<SeparationService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -65,6 +78,7 @@ public class SeparationService : ISeparationService
         _employeeService = employeeService;
         _workflow = workflow;
         _workflowAdapters = workflowAdapters;
+        _assetCustody = assetCustody;
         _logger = logger;
     }
 
@@ -1965,12 +1979,23 @@ public class SeparationService : ISeparationService
 
         foreach (var item in clearanceOutstanding)
         {
+            // ⚠ A figure in a currency this statement is not stated in cannot simply be added to
+            // it - the same treatment the travel advances below get, and for the same reason.
+            // Asset lines carry the currency their surcharge was assessed in (area 16 slice 10);
+            // null means the settlement's own, which is what every hand-entered amount means.
+            var sameCurrency = string.IsNullOrWhiteSpace(item.OutstandingCurrencyCode)
+                || string.Equals(item.OutstandingCurrencyCode, currency, StringComparison.OrdinalIgnoreCase);
+
             Add(CategoryForClearance(item.Kind), true,
                 $"{item.Name} — outstanding at clearance",
-                item.OutstandingAmount,
-                SettlementLineComputation.Computed,
+                sameCurrency ? item.OutstandingAmount : null,
+                sameCurrency ? SettlementLineComputation.Computed : SettlementLineComputation.CannotCompute,
                 $"Recorded on the clearance form as {item.Status}"
-                + (string.IsNullOrWhiteSpace(item.SignedOffBy) ? "." : $", signed off by {item.SignedOffBy}."),
+                + (string.IsNullOrWhiteSpace(item.SignedOffBy) ? "." : $", signed off by {item.SignedOffBy}.")
+                + (sameCurrency
+                    ? string.Empty
+                    : $" The amount is {item.OutstandingAmount:N2} {item.OutstandingCurrencyCode}; "
+                      + $"convert it to {currency} and enter the figure."),
                 clearanceItemId: item.Id);
         }
 
@@ -2492,12 +2517,6 @@ public class SeparationService : ISeparationService
 
     // ── Clearance: the catalogue ──────────────────────────────────────────────
 
-    /// <summary>The kinds that can carry money, and therefore feed the FR-HR-184 settlement.</summary>
-    /// <remarks>
-    /// Nobody owes a quantity of duty-post keys. Recording an amount against a kind that cannot
-    /// carry one is refused rather than stored and ignored — a number the settlement will never
-    /// read is worse than no number, because somebody will believe it.
-    /// </remarks>
     /// <summary>
     /// Which way a settlement category points: <c>true</c> a deduction, <c>false</c> an earning,
     /// <c>null</c> where the category genuinely does not say.
@@ -2546,27 +2565,52 @@ public class SeparationService : ISeparationService
             + "if that is really what this line is.");
     }
 
+    /// <summary>The kinds that can carry money, and therefore feed the FR-HR-184 settlement.</summary>
+    /// <remarks>
+    /// <para>⚠ <b>The two property kinds were added in area 16 slice 10, and their absence was a
+    /// defect rather than a decision.</b> <c>CategoryForClearance</c> has always mapped everything
+    /// it does not otherwise recognise to <c>SettlementLineCategory.PropertyRecovery</c>, and
+    /// <c>DirectionOf</c> has always known that category is a deduction — but no line could ever
+    /// reach it, because the only path that sets an outstanding amount refused one on any kind not
+    /// listed here. A settlement category that is mapped, directed and unreachable is a hole with a
+    /// lid on it: an employee could walk out owing for a written-off laptop and the statement had
+    /// no way to say so.</para>
+    ///
+    /// <para>Nobody owes a quantity of duty-post keys, and those kinds still refuse an amount.
+    /// Recording one against a kind that cannot carry it is refused rather than stored and ignored
+    /// — a number the settlement will never read is worse than no number, because somebody will
+    /// believe it.</para>
+    /// </remarks>
     private static bool CarriesAmount(ClearanceItemKind kind)
         => kind is ClearanceItemKind.OutstandingLoan
                 or ClearanceItemKind.SalaryAdvance
-                or ClearanceItemKind.PayrollRecovery;
+                or ClearanceItemKind.PayrollRecovery
+                or ClearanceItemKind.CompanyProperty
+                or ClearanceItemKind.OfficeEquipment;
 
     /// <summary>FR-HR-183's list, as a starting catalogue for a tenant that has none.</summary>
-    private static readonly (string Name, ClearanceItemKind Kind, string Description)[] DefaultTemplates =
+    /// <remarks>
+    /// <b>"Company property" is the line the HR Assets register feeds</b>, and it is the only one —
+    /// see <c>SeparationClearanceTemplate.SourcesFromAssetRegister</c> for why sourcing both
+    /// property kinds would list every asset, and deduct every surcharge, twice.
+    /// </remarks>
+    private static readonly (string Name, ClearanceItemKind Kind, bool SourcesAssets, string Description)[] DefaultTemplates =
     {
-        ("Outstanding loans", ClearanceItemKind.OutstandingLoan,
+        ("Outstanding loans", ClearanceItemKind.OutstandingLoan, false,
             "Any staff loan not yet repaid in full. The balance is recovered from the final settlement."),
-        ("Salary advances", ClearanceItemKind.SalaryAdvance,
+        ("Salary advances", ClearanceItemKind.SalaryAdvance, false,
             "Advances drawn against salary and not yet recovered."),
-        ("Company property", ClearanceItemKind.CompanyProperty,
-            "Vehicles, phones, tools, protective equipment and anything else issued to the employee."),
-        ("Office equipment", ClearanceItemKind.OfficeEquipment,
+        ("Company property", ClearanceItemKind.CompanyProperty, true,
+            "Vehicles, phones, tools, protective equipment and anything else issued to the employee. "
+            + "Everything on the HR Assets register that the employee has not given back is listed "
+            + "under this line automatically; use the line itself for property that was never registered."),
+        ("Office equipment", ClearanceItemKind.OfficeEquipment, false,
             "Computers, peripherals and office equipment assigned to the employee or their desk."),
-        ("Duty-post keys", ClearanceItemKind.DutyPostKeys,
+        ("Duty-post keys", ClearanceItemKind.DutyPostKeys, false,
             "Keys, access cards and passes for offices, stores, gates and vehicles."),
-        ("Documents and records", ClearanceItemKind.DocumentsAndRecords,
+        ("Documents and records", ClearanceItemKind.DocumentsAndRecords, false,
             "Files, drawings, contracts and records held by the employee, and the handover of work in progress."),
-        ("Payroll recoveries", ClearanceItemKind.PayrollRecovery,
+        ("Payroll recoveries", ClearanceItemKind.PayrollRecovery, false,
             "Any other amount due back to the organisation through payroll."),
     };
 
@@ -2610,6 +2654,9 @@ public class SeparationService : ISeparationService
 
         await RequireOrganizationUnitAsync(tenantId, dto.OwningOrganizationUnitId, cancellationToken);
 
+        if (dto.SourcesFromAssetRegister)
+            await RequireSoleAssetSourceAsync(tenantId, null, cancellationToken);
+
         var template = new SeparationClearanceTemplate
         {
             TenantId = tenantId,
@@ -2619,6 +2666,7 @@ public class SeparationService : ISeparationService
             OwningOrganizationUnitId = dto.OwningOrganizationUnitId,
             IsMandatory = dto.IsMandatory,
             IsActive = dto.IsActive,
+            SourcesFromAssetRegister = dto.SourcesFromAssetRegister,
             SortOrder = dto.SortOrder,
         };
 
@@ -2663,12 +2711,48 @@ public class SeparationService : ISeparationService
         }
         if (dto.IsMandatory is { } mandatory) template.IsMandatory = mandatory;
         if (dto.IsActive is { } active) template.IsActive = active;
+        if (dto.SourcesFromAssetRegister is { } sources)
+        {
+            if (sources && !template.SourcesFromAssetRegister)
+                await RequireSoleAssetSourceAsync(tenantId, id, cancellationToken);
+            template.SourcesFromAssetRegister = sources;
+        }
         if (dto.SortOrder is { } order) template.SortOrder = order;
 
         await _unitOfWork.Repository<SeparationClearanceTemplate>().UpdateAsync(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ToTemplateDto(await ReloadTemplateAsync(tenantId, template.Id, cancellationToken));
+    }
+
+    /// <summary>
+    /// Refuses a second line fed by the HR Assets register — FR-HR-183, area 16 slice 10.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>This is a money rule, not a tidiness rule.</b> Two sourced lines list every unreturned
+    /// asset twice, and each copy carries the same surcharge balance into
+    /// <c>SeparationClearanceItem.OutstandingAmount</c> — which the FR-HR-184 settlement then
+    /// deducts twice. The leaver's final pay would be short by the value of every damaged asset
+    /// they were charged for, and every figure on the statement would still add up.
+    ///
+    /// <para>Asked of ALL lines including retired ones, because <c>IsActive</c> is a switch: a
+    /// retired sourced line reactivated later would recreate the double without passing through
+    /// any check.</para>
+    /// </remarks>
+    private async Task RequireSoleAssetSourceAsync(
+        Guid tenantId, Guid? exceptId, CancellationToken cancellationToken)
+    {
+        var holder = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && !t.IsDeleted
+                                      && t.SourcesFromAssetRegister
+                                      && (exceptId == null || t.Id != exceptId), cancellationToken);
+
+        if (holder is not null)
+            throw new InvalidOperationException(
+                $"'{holder.Name}' is already the clearance line fed by the HR Assets register, and "
+                + "only one line may be. Two would list every unreturned asset twice and deduct "
+                + "every surcharge twice from the final settlement. Turn it off there first.");
     }
 
     /// <inheritdoc />
@@ -2700,11 +2784,21 @@ public class SeparationService : ISeparationService
             .ToListAsync(cancellationToken);
         var have = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // ⚠ Only claim the register if nothing else already has it. Seeding runs on a tenant that
+        // may have configured its own form, and a second sourced line is exactly what the write
+        // path refuses — a seeder that produced a state the API rejects would leave the catalogue
+        // unfixable through the API that owns it.
+        var sourcedAlready = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.SourcesFromAssetRegister, cancellationToken);
+
         var order = 0;
-        foreach (var (name, kind, description) in DefaultTemplates)
+        foreach (var (name, kind, sourcesAssets, description) in DefaultTemplates)
         {
             order += 10;
             if (have.Contains(name)) continue;
+
+            var sources = sourcesAssets && !sourcedAlready;
+            if (sources) sourcedAlready = true;
 
             await _unitOfWork.Repository<SeparationClearanceTemplate>().AddAsync(new SeparationClearanceTemplate
             {
@@ -2714,8 +2808,39 @@ public class SeparationService : ISeparationService
                 Description = description,
                 IsMandatory = true,
                 IsActive = true,
+                SourcesFromAssetRegister = sources,
                 SortOrder = order,
             });
+        }
+
+        // ⚠ A tenant that seeded its form BEFORE the asset register could feed it keeps every line
+        // it already has — the loop above skips by name — so nothing above would ever turn the
+        // feature on for them, and nothing would say so either. Adopt the company-property line
+        // they already have instead.
+        //
+        // Deliberately HERE rather than in a data migration. This is the endpoint that owns the
+        // catalogue, it is idempotent and re-runnable by an administrator, and a migration that
+        // writes rows is a decision taken once, invisibly, that cannot be re-taken when the data
+        // moves. Guarded by `sourcedAlready`, so a tenant that has deliberately pointed the
+        // register at some other line is left exactly as it is.
+        if (!sourcedAlready)
+        {
+            var adopt = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+                .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive
+                            && t.Kind == ClearanceItemKind.CompanyProperty)
+                .OrderBy(t => t.SortOrder)
+                .ThenBy(t => t.Name)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (adopt is not null)
+            {
+                adopt.SourcesFromAssetRegister = true;
+                await _unitOfWork.Repository<SeparationClearanceTemplate>().UpdateAsync(adopt);
+
+                _logger.LogInformation(
+                    "Clearance line '{Name}' now draws from the HR Assets register (FR-HR-183)",
+                    adopt.Name);
+            }
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2760,22 +2885,33 @@ public class SeparationService : ISeparationService
                 "No clearance lines are configured, so there is nothing to clear. Set up the "
                 + "clearance form first — the FR-HR-183 defaults can be seeded in one step.");
 
+        // FR-HR-183, area 16 slice 10. Everything the leaver has not given back, read from the HR
+        // Assets register rather than remembered by whoever fills in the form. Asked once, and only
+        // when some line actually claims the register.
+        var custody = templates.Any(t => t.SourcesFromAssetRegister)
+            ? await _assetCustody.GetOutstandingCustodyAsync(tenantId, separation.EmployeeId, cancellationToken)
+            : (IReadOnlyList<AssetCustodyLine>)Array.Empty<AssetCustodyLine>();
+
+        var sourcedLines = 0;
+
         foreach (var template in templates)
         {
-            await _unitOfWork.Repository<SeparationClearanceItem>().AddAsync(new SeparationClearanceItem
+            // The catalogue line itself is created whether or not it feeds from the register. On a
+            // sourced line it becomes the place property the organisation NEVER REGISTERED is
+            // recorded by hand - a badge, a toolkit, a phone bought on petty cash. Replacing it
+            // with the automated list would have narrowed the form, not widened it.
+            await _unitOfWork.Repository<SeparationClearanceItem>().AddAsync(
+                NewClearanceItem(tenantId, separationId, template));
+
+            if (!template.SourcesFromAssetRegister) continue;
+
+            foreach (var held in custody)
             {
-                TenantId = tenantId,
-                SeparationId = separationId,
-                TemplateId = template.Id,
-                // Snapshotted, not read through the template: editing the catalogue afterwards must
-                // not rewrite a form somebody has already signed.
-                Name = template.Name,
-                Kind = template.Kind,
-                OwningOrganizationUnitId = template.OwningOrganizationUnitId,
-                IsMandatory = template.IsMandatory,
-                SortOrder = template.SortOrder,
-                Status = ClearanceItemStatus.Pending,
-            });
+                var line = NewClearanceItem(tenantId, separationId, template);
+                ApplyCustody(line, held);
+                await _unitOfWork.Repository<SeparationClearanceItem>().AddAsync(line);
+                sourcedLines++;
+            }
         }
 
         separation.Status = SeparationStatus.ClearanceInProgress;
@@ -2783,11 +2919,69 @@ public class SeparationService : ISeparationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Clearance started for separation {Number} with {Count} lines",
-            separation.SeparationNumber, templates.Count);
+            "Clearance started for separation {Number} with {Count} lines, {Sourced} of them from the asset register",
+            separation.SeparationNumber, templates.Count + sourcedLines, sourcedLines);
 
         return await GetClearanceAsync(separationId, cancellationToken);
     }
+
+    /// <summary>One blank line of a form, snapshotted from its catalogue entry.</summary>
+    /// <remarks>
+    /// Snapshotted, not read through the template: editing the catalogue afterwards must not
+    /// rewrite a form somebody has already signed.
+    /// </remarks>
+    private static SeparationClearanceItem NewClearanceItem(
+        Guid tenantId, Guid separationId, SeparationClearanceTemplate template) => new()
+    {
+        TenantId = tenantId,
+        SeparationId = separationId,
+        TemplateId = template.Id,
+        Name = template.Name,
+        Kind = template.Kind,
+        OwningOrganizationUnitId = template.OwningOrganizationUnitId,
+        IsMandatory = template.IsMandatory,
+        SortOrder = template.SortOrder,
+        Status = ClearanceItemStatus.Pending,
+    };
+
+    /// <summary>Turns a blank line into the line about one particular unreturned asset.</summary>
+    /// <remarks>
+    /// <para><b>The sort order is the template's own, deliberately unchanged.</b> Asset lines
+    /// therefore group with the catalogue line that produced them however the tenant has numbered
+    /// its form, and the read's secondary sort by name orders them within the group. Numbering them
+    /// <c>SortOrder + 1, + 2 ...</c> looked tidier and breaks: the seeded gap is ten, so a leaver
+    /// holding more than nine assets would spill into the next heading.</para>
+    ///
+    /// <para><b>Only a DECIDED charge becomes an amount.</b> A surcharge still in draft, with the
+    /// employee or awaiting approval is not a debt - carrying it here would deduct from somebody's
+    /// final pay a figure no approver has authorised, on a record whose entire point is that they
+    /// were asked first (decision D9). It still stops the line being cleared; that is
+    /// <c>HasUndecidedCharge</c>'s job, and it is a different question.</para>
+    /// </remarks>
+    private static void ApplyCustody(SeparationClearanceItem item, AssetCustodyLine held)
+    {
+        item.Name = held.Label;
+        item.SourceAssignmentId = held.AssignmentId;
+        item.SourceSurchargeId = held.SurchargeId;
+        item.OutstandingAmount = held.OutstandingSurcharge;
+        item.OutstandingCurrencyCode = held.SurchargeCurrencyCode;
+    }
+
+    /// <summary>The live state of every custody a form names, keyed by assignment.</summary>
+    private async Task<IReadOnlyDictionary<Guid, AssetCustodyLine>> CustodyOnFormAsync(
+        Guid tenantId, IEnumerable<SeparationClearanceItem> items, CancellationToken cancellationToken)
+    {
+        var ids = items.Where(i => i.SourceAssignmentId is not null)
+            .Select(i => i.SourceAssignmentId!.Value)
+            .Distinct()
+            .ToList();
+
+        return await _assetCustody.GetCustodiesAsync(tenantId, ids, cancellationToken);
+    }
+
+    private static AssetCustodyLine? Custody(
+        IReadOnlyDictionary<Guid, AssetCustodyLine> map, SeparationClearanceItem item)
+        => item.SourceAssignmentId is { } id && map.TryGetValue(id, out var line) ? line : null;
 
     /// <inheritdoc />
     public async Task<SeparationClearanceDto> GetClearanceAsync(
@@ -2807,6 +3001,13 @@ public class SeparationService : ISeparationService
             .ThenBy(i => i.Name)
             .ToListAsync(cancellationToken);
 
+        // The custody behind each sourced line, re-read LIVE rather than taken from the snapshot.
+        // The form is drawn when the separation is approved and the whole notice period sits
+        // between that and somebody signing a line, so the snapshot's "still held" is the oldest
+        // fact on the page. Without this the gate below refuses a line for a reason the form itself
+        // cannot show.
+        var custody = await CustodyOnFormAsync(tenantId, items, cancellationToken);
+
         var mandatoryOutstanding = items.Count(i => i.IsMandatory && !IsSettled(i.Status));
 
         return new SeparationClearanceDto
@@ -2816,7 +3017,7 @@ public class SeparationService : ISeparationService
             EmployeeName = FullName(separation.Employee),
             SeparationStatus = separation.Status,
             SeparationStatusName = separation.Status.ToString(),
-            Items = items.Select(ToClearanceItemDto).ToList(),
+            Items = items.Select(i => ToClearanceItemDto(i, Custody(custody, i))).ToList(),
             TotalItems = items.Count,
             PendingItems = items.Count(i => i.Status == ClearanceItemStatus.Pending),
             ClearedItems = items.Count(i => i.Status == ClearanceItemStatus.Cleared),
@@ -2869,10 +3070,20 @@ public class SeparationService : ISeparationService
                     + "outstanding in the notes instead.");
         }
 
+        // FR-HR-183's teeth - area 16 slice 10, closing area 9b's decision D4. A line the asset
+        // register raised is answered by an act in HR Assets, not by a signature on this form.
+        await RequireCustodySettledAsync(tenantId, item, dto.Status, cancellationToken);
+
         item.Status = dto.Status;
         item.SignedOffBy = string.IsNullOrWhiteSpace(dto.SignedOffBy) ? null : dto.SignedOffBy.Trim();
         item.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
         item.OutstandingAmount = dto.OutstandingAmount;
+        // The currency belongs to the amount. Clearing the figure clears it; overwriting the figure
+        // on a sourced line keeps it, because the person adjusting it is adjusting the same claim
+        // in the currency it was assessed in. A hand-entered figure on a line that never had one
+        // means the settlement's own currency, which is what every loan and advance line has always
+        // meant - see SeparationClearanceItem.OutstandingCurrencyCode.
+        if (dto.OutstandingAmount is null) item.OutstandingCurrencyCode = null;
         item.RecordedById = actorEmployeeId;
         item.RecordedOn = DateTime.UtcNow;
 
@@ -2886,7 +3097,135 @@ public class SeparationService : ISeparationService
             .FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken)
             ?? throw new InvalidOperationException("Clearance line saved but could not be reloaded.");
 
-        return ToClearanceItemDto(saved);
+        // ⚠ The custody is read here too, so this response and the clearance read agree. Mapping it
+        // on one path and not the other is the exact shape that has produced a blank field six
+        // times in area 16 — and it is worse on a write response, because the screen that just
+        // saved the line renders THIS.
+        var custody = await CustodyOnFormAsync(tenantId, new[] { saved }, cancellationToken);
+
+        return ToClearanceItemDto(saved, Custody(custody, saved));
+    }
+
+    /// <summary>
+    /// Refuses to mark an asset-sourced clearance line <c>Cleared</c> while the asset has not come
+    /// back or money is still owed on it - FR-HR-183, area 16 slice 10.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This is the gate area 9b's decision D4 promised and could not build.</b> That
+    /// slice shipped clearance as a configurable checklist with a manual signature per line,
+    /// because HR Assets did not exist yet, and said so: "it becomes an enforced gate for free when
+    /// 16 lands". This is that, and free it was not - what makes it work is that area 16 knows the
+    /// difference between four ways of not having something back.</para>
+    ///
+    /// <para><b>Only <c>Cleared</c> is refused.</b> <c>Blocked</c> is how a leaver walks out still
+    /// holding something the organisation intends to recover, and it is the answer that carries an
+    /// amount into the settlement; <c>Waived</c> takes a written reason; <c>NotApplicable</c>
+    /// records that the line was wrong about them. None of those claims the asset came back.
+    /// Refusing them all would have left an unreturnable asset with no answer at all and the whole
+    /// exit stuck behind it.</para>
+    ///
+    /// <para><b>A custody that can no longer be found does not block.</b> The register is another
+    /// area's data and its rows can be deleted; a clearance form is evidence about a particular
+    /// exit and must stay answerable. The line still reads as the thing that was signed, because
+    /// its name was snapshotted.</para>
+    /// </remarks>
+    private async Task RequireCustodySettledAsync(
+        Guid tenantId, SeparationClearanceItem item, ClearanceItemStatus answer,
+        CancellationToken cancellationToken)
+    {
+        if (answer != ClearanceItemStatus.Cleared) return;
+        if (item.SourceAssignmentId is not { } assignmentId) return;
+
+        var custody = await _assetCustody.GetCustodyAsync(tenantId, assignmentId, cancellationToken);
+        if (custody is null) return;
+
+        if (custody.StillHeld)
+            throw new InvalidOperationException(
+                $"'{item.Name}' has not been given back - the assignment is still {custody.Status}. "
+                + "Record the return in HR Assets, or report it lost or damaged there if it is not "
+                + "coming back. A clearance form cannot close a custody.");
+
+        if (custody.OutstandingSurcharge > 0)
+            throw new InvalidOperationException(
+                $"{custody.OutstandingSurcharge:N2} {custody.SurchargeCurrencyCode} is still outstanding on surcharge "
+                + $"{custody.SurchargeNumber} for '{item.Name}'. Mark this line blocked so the "
+                + "amount reaches the final settlement, or waive it with a reason - 'cleared' says "
+                + "nothing further is owed.");
+
+        if (custody.HasUndecidedCharge)
+            throw new InvalidOperationException(
+                $"A surcharge against '{item.Name}' has been raised and not yet decided. Approve, "
+                + "reject or cancel it before clearing this line - 'cleared' says the organisation "
+                + "has no further claim, at the moment it is deciding one.");
+    }
+
+    /// <inheritdoc />
+    public async Task<SeparationClearanceDto> RefreshClearanceAssetsAsync(
+        Guid separationId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var separation = await RequireAsync(tenantId, separationId, cancellationToken);
+
+        if (separation.Status != SeparationStatus.ClearanceInProgress)
+            throw new InvalidOperationException(
+                $"This separation is {separation.Status}; the asset lines can only be refreshed "
+                + "while clearance is in progress.");
+
+        var sourcedTemplate = await _unitOfWork.Repository<SeparationClearanceTemplate>().GetQueryable()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive
+                                      && t.SourcesFromAssetRegister, cancellationToken);
+
+        if (sourcedTemplate is null)
+            throw new InvalidOperationException(
+                "No clearance line is fed by the HR Assets register, so there is nothing to "
+                + "refresh. Turn it on for one line of the clearance form first.");
+
+        var items = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted && i.SeparationId == separationId)
+            .ToListAsync(cancellationToken);
+
+        var already = items.Where(i => i.SourceAssignmentId is not null)
+            .Select(i => i.SourceAssignmentId!.Value)
+            .ToHashSet();
+
+        var custody = await _assetCustody.GetOutstandingCustodyAsync(
+            tenantId, separation.EmployeeId, cancellationToken);
+
+        var added = 0;
+        foreach (var held in custody.Where(c => !already.Contains(c.AssignmentId)))
+        {
+            var line = NewClearanceItem(tenantId, separationId, sourcedTemplate);
+            ApplyCustody(line, held);
+            await _unitOfWork.Repository<SeparationClearanceItem>().AddAsync(line);
+            added++;
+        }
+
+        // ⚠ Only lines nobody has answered yet. Re-reading an amount onto a line somebody has
+        // already signed would rewrite the evidence, which is the one thing a clearance form must
+        // never do - the same rule that makes the name a snapshot.
+        var repriced = 0;
+        var live = await CustodyOnFormAsync(tenantId, items, cancellationToken);
+        foreach (var item in items.Where(i => i.SourceAssignmentId is not null
+                                              && i.Status == ClearanceItemStatus.Pending))
+        {
+            if (Custody(live, item) is not { } held) continue;
+            if (item.OutstandingAmount == held.OutstandingSurcharge
+                && item.SourceSurchargeId == held.SurchargeId) continue;
+
+            item.SourceSurchargeId = held.SurchargeId;
+            item.OutstandingAmount = held.OutstandingSurcharge;
+            item.OutstandingCurrencyCode = held.SurchargeCurrencyCode;
+            await _unitOfWork.Repository<SeparationClearanceItem>().UpdateAsync(item);
+            repriced++;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Clearance asset lines refreshed for separation {Number}: {Added} added, {Repriced} repriced",
+            separation.SeparationNumber, added, repriced);
+
+        return await GetClearanceAsync(separationId, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -2980,11 +3319,20 @@ public class SeparationService : ISeparationService
         OwningOrganizationUnitName = t.OwningOrganizationUnit?.Name,
         IsMandatory = t.IsMandatory,
         IsActive = t.IsActive,
+        SourcesFromAssetRegister = t.SourcesFromAssetRegister,
         SortOrder = t.SortOrder,
         CarriesAmount = CarriesAmount(t.Kind),
     };
 
-    private static SeparationClearanceItemDto ToClearanceItemDto(SeparationClearanceItem i) => new()
+    /// <param name="custody">
+    /// The live state of the custody behind a sourced line, where there is one. ⚠ Passing null for
+    /// a line that HAS a source is not the same as a line that has none - the first renders as
+    /// "the register no longer knows about this", the second as an ordinary hand-written line -
+    /// which is why <c>IsFromAssetRegister</c> is taken from the item and the three custody fields
+    /// from the lookup.
+    /// </param>
+    private static SeparationClearanceItemDto ToClearanceItemDto(
+        SeparationClearanceItem i, AssetCustodyLine? custody = null) => new()
     {
         Id = i.Id,
         SeparationId = i.SeparationId,
@@ -2999,7 +3347,16 @@ public class SeparationService : ISeparationService
         Status = i.Status,
         StatusName = i.Status.ToString(),
         OutstandingAmount = i.OutstandingAmount,
+        OutstandingCurrencyCode = i.OutstandingCurrencyCode,
         CarriesAmount = CarriesAmount(i.Kind),
+        SourceAssignmentId = i.SourceAssignmentId,
+        SourceSurchargeId = i.SourceSurchargeId,
+        IsFromAssetRegister = i.SourceAssignmentId is not null,
+        AssetCustodyStatusName = custody?.Status.ToString(),
+        AssetOutstanding = custody?.Outstanding,
+        AssetStillHeld = custody?.StillHeld,
+        AssetOutstandingSurcharge = custody?.OutstandingSurcharge,
+        AssetHasUndecidedCharge = custody?.HasUndecidedCharge,
         Notes = i.Notes,
         SignedOffBy = i.SignedOffBy,
         RecordedById = i.RecordedById,

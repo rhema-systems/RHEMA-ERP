@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR;
 using ErpSystem.Core.Services.HR.Appraisal;
+using ErpSystem.Core.Services.HR.Assets;
 using ErpSystem.Core.Services.HR.Handlers;
 using ErpSystem.Core.Services.HR.Benefits;
 using ErpSystem.Core.Services.Common;
@@ -648,6 +649,11 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmployeeOathOfSecrecyService, EmployeeOathOfSecrecyService>();
         // The exit register (area 9b) — one separation record per employee leaving, by any route.
         services.AddScoped<ISeparationService, SeparationService>();
+        // HR Assets' read-only answer to "what has this leaver not given back?" — FR-HR-183, the
+        // seam area 9b's decision D4 left open because area 16 did not exist yet. Registered beside
+        // the separation service it feeds rather than with the asset services it reads, so that the
+        // one place this crosses areas is visible from the side that consumes it.
+        services.AddScoped<AssetCustodyClearanceBridge>();
         // The sixth reminder engine in the system, after SHE, movements, discipline, travel and
         // probation. Same shape: a run header, one dispatch row per reminder, a dedupe key.
         services.AddScoped<ISeparationReminderService, SeparationReminderService>();
