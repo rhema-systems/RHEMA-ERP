@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -44,6 +45,7 @@ public class PositionOvertimePoliciesController : AttendanceControllerBase
         => Ok(await _service.GetActiveForPositionAsync(positionId, allowanceType, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PositionOvertimePolicyDto>> Create(
         [FromBody] CreatePositionOvertimePolicyDto dto, CancellationToken ct = default)
     {
@@ -55,6 +57,7 @@ public class PositionOvertimePoliciesController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<PositionOvertimePolicyDto>> Update(
         Guid id, [FromBody] UpdatePositionOvertimePolicyDto dto, CancellationToken ct = default)
     {
@@ -66,6 +69,7 @@ public class PositionOvertimePoliciesController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);
@@ -73,11 +77,13 @@ public class PositionOvertimePoliciesController : AttendanceControllerBase
     }
 
     [HttpGet("{id:guid}/overrides")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOvertimeOverrideDto>>> GetOverrides(
         Guid id, CancellationToken ct = default)
         => Ok(await _service.GetOverridesAsync(id, ct));
 
     [HttpPost("{id:guid}/overrides")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<EmployeeOvertimeOverrideDto>> AddOverride(
         Guid id, [FromBody] CreateEmployeeOvertimeOverrideDto dto, CancellationToken ct = default)
     {
@@ -89,6 +95,7 @@ public class PositionOvertimePoliciesController : AttendanceControllerBase
     }
 
     [HttpPut("overrides/{overrideId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<EmployeeOvertimeOverrideDto>> UpdateOverride(
         Guid overrideId, [FromBody] UpdateEmployeeOvertimeOverrideDto dto, CancellationToken ct = default)
     {
@@ -100,6 +107,7 @@ public class PositionOvertimePoliciesController : AttendanceControllerBase
     }
 
     [HttpDelete("overrides/{overrideId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> DeleteOverride(Guid overrideId, CancellationToken ct = default)
     {
         await _service.DeleteOverrideAsync(overrideId, ct);

@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -43,6 +44,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now delegates to intent-based read service; returns 404 when missing.
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeDetailDto?>> GetEmployeeDetails(Guid id, CancellationToken cancellationToken)
@@ -55,6 +57,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINT: full profile (HR 360) read model.
     [HttpGet("{id:guid}/profile")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeFullProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeFullProfileDto?>> GetEmployeeFullProfile(Guid id, CancellationToken cancellationToken)
@@ -79,6 +82,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINT: details read by employee number.
     [HttpGet("number/{employeeNumber}/details")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeDetailDto?>> GetEmployeeDetailsByEmployeeNumber(string employeeNumber, CancellationToken cancellationToken)
@@ -91,6 +95,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINT: full profile read by employee number.
     [HttpGet("number/{employeeNumber}/profile")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeFullProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeFullProfileDto?>> GetEmployeeFullProfileByEmployeeNumber(string employeeNumber, CancellationToken cancellationToken)
@@ -115,6 +120,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now returns the canonical details model (no legacy summary create).
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeDetailDto>> CreateEmployee([FromBody] CreateEmployeeDto dto, CancellationToken cancellationToken)
@@ -134,6 +140,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now returns the canonical details model (no legacy summary update).
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -155,6 +162,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now returns 404 when employee not found (instead of always 204).
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteEmployee(Guid id, CancellationToken cancellationToken)
@@ -174,6 +182,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now delegates to lifecycle service; keeps legacy response shape.
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -194,6 +203,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now delegates to lifecycle service; keeps legacy response shape.
     [HttpPost("{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -214,6 +224,7 @@ public class EmployeesController : ControllerBase
 
     // MODIFIED ENDPOINT: now delegates to lifecycle service; keeps legacy response shape.
     [HttpPost("{id:guid}/terminate")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -235,6 +246,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINT: reinstate a terminated employee.
     [HttpPost("{id:guid}/reinstate")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -402,6 +414,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Emergency contacts
     [HttpGet("{employeeId:guid}/emergency-contacts")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeEmergencyContactDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<EmployeeEmergencyContactDto>>> GetEmergencyContacts(Guid employeeId, CancellationToken cancellationToken)
@@ -419,6 +432,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/emergency-contacts")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeEmergencyContactDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -441,6 +455,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/emergency-contacts/{emergencyContactId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeEmergencyContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -464,6 +479,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/emergency-contacts/{emergencyContactId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveEmergencyContact(Guid employeeId, Guid emergencyContactId, CancellationToken cancellationToken)
@@ -483,6 +499,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/emergency-contacts/{emergencyContactId:guid}/set-primary")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeEmergencyContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeEmergencyContactDto>> SetPrimaryEmergencyContact(Guid employeeId, Guid emergencyContactId, CancellationToken cancellationToken)
@@ -501,6 +518,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/emergency-contacts/{emergencyContactId:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeEmergencyContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeEmergencyContactDto>> ActivateEmergencyContact(Guid employeeId, Guid emergencyContactId, CancellationToken cancellationToken)
@@ -519,6 +537,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/emergency-contacts/{emergencyContactId:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeEmergencyContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeEmergencyContactDto>> DeactivateEmergencyContact(Guid employeeId, Guid emergencyContactId, CancellationToken cancellationToken)
@@ -538,6 +557,7 @@ public class EmployeesController : ControllerBase
 
     // Address contacts
     [HttpGet("{employeeId:guid}/contacts")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeContactDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<EmployeeContactDto>>> GetContacts(Guid employeeId, CancellationToken cancellationToken)
@@ -555,6 +575,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/contacts")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContactDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -577,6 +598,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/contacts/{contactId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -602,6 +624,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/contacts/{contactId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveContact(Guid employeeId, Guid contactId, CancellationToken cancellationToken)
@@ -624,6 +647,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/contacts/{contactId:guid}/set-primary")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeContactDto>> SetPrimaryContact(Guid employeeId, Guid contactId, CancellationToken cancellationToken)
@@ -654,6 +678,7 @@ public class EmployeesController : ControllerBase
     /// <response code="400">Invalid employee identifier provided.</response>
     /// <response code="404">Employee not found.</response>
     [HttpGet("{employeeId:guid}/dependents")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDependentReadDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<EmployeeDependentReadDto>>> GetDependents(Guid employeeId, CancellationToken cancellationToken)
@@ -671,6 +696,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/dependents")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDependentReadDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -693,6 +719,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/dependents/{dependentId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDependentReadDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -716,6 +743,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/dependents/{dependentId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveDependent(Guid employeeId, Guid dependentId, CancellationToken cancellationToken)
@@ -736,6 +764,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Dependent benefits (under employee-dependent id)
     [HttpGet("{employeeId:guid}/dependents/{employeeDependentId:guid}/benefits")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDependentBenefitDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeDependentBenefitDto>>> GetDependentBenefits(Guid employeeId, Guid employeeDependentId, CancellationToken cancellationToken)
     {
@@ -746,6 +775,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/dependents/{employeeDependentId:guid}/benefits")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDependentBenefitDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeDependentBenefitDto>> AddDependentBenefit(Guid employeeId, Guid employeeDependentId, [FromBody] CreateEmployeeDependentBenefitDto dto, CancellationToken cancellationToken)
@@ -768,6 +798,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/dependents/{employeeDependentId:guid}/benefits/{dependentBenefitId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDependentBenefitDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -792,6 +823,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/dependents/{employeeDependentId:guid}/benefits/{dependentBenefitId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveDependentBenefit(Guid employeeId, Guid employeeDependentId, Guid dependentBenefitId, CancellationToken cancellationToken)
@@ -812,6 +844,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/dependents/{employeeDependentId:guid}/benefits/{dependentBenefitId:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDependentBenefitDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeDependentBenefitDto>> ActivateDependentBenefit(Guid employeeId, Guid employeeDependentId, Guid dependentBenefitId, CancellationToken cancellationToken)
@@ -831,6 +864,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/dependents/{employeeDependentId:guid}/benefits/{dependentBenefitId:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeDependentBenefitDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeDependentBenefitDto>> DeactivateDependentBenefit(Guid employeeId, Guid employeeDependentId, Guid dependentBenefitId, CancellationToken cancellationToken)
@@ -851,6 +885,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Qualifications
     [HttpGet("{employeeId:guid}/qualifications")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeQualificationDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeQualificationDto>>> GetQualifications(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -859,6 +894,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/qualifications")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeQualificationDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeQualificationDto>> AddQualification(Guid employeeId, [FromBody] CreateEmployeeQualificationDto dto, CancellationToken cancellationToken)
@@ -880,6 +916,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/qualifications/{qualificationId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeQualificationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -903,6 +940,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/qualifications/{qualificationId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveQualification(Guid employeeId, Guid qualificationId, CancellationToken cancellationToken)
@@ -922,6 +960,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/qualifications/{qualificationId:guid}/verify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeQualificationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeQualificationDto>> VerifyQualification(Guid employeeId, Guid qualificationId, CancellationToken cancellationToken)
@@ -940,6 +979,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/qualifications/{qualificationId:guid}/unverify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeQualificationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeQualificationDto>> UnverifyQualification(Guid employeeId, Guid qualificationId, CancellationToken cancellationToken)
@@ -959,6 +999,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Skills & certifications
     [HttpGet("{employeeId:guid}/skills")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeSkillDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeSkillDto>>> GetSkills(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -967,6 +1008,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/skills")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeSkillDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeSkillDto>> AddSkill(Guid employeeId, [FromBody] CreateEmployeeSkillDto dto, CancellationToken cancellationToken)
@@ -988,6 +1030,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/skills/{employeeSkillId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeSkillDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1011,6 +1054,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/skills/{employeeSkillId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveSkill(Guid employeeId, Guid employeeSkillId, CancellationToken cancellationToken)
@@ -1030,6 +1074,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/skills/{employeeSkillId:guid}/verify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeSkillDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeSkillDto>> VerifySkill(Guid employeeId, Guid employeeSkillId, CancellationToken cancellationToken)
@@ -1048,6 +1093,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/skills/{employeeSkillId:guid}/unverify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeSkillDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeSkillDto>> UnverifySkill(Guid employeeId, Guid employeeSkillId, CancellationToken cancellationToken)
@@ -1067,6 +1113,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Identification cards
     [HttpGet("{employeeId:guid}/identification-cards")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeIdentificationCardListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeIdentificationCardListDto>>> GetIdentificationCards(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1075,6 +1122,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/identification-cards/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeIdentificationCardDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeIdentificationCardDetailDto?>> GetIdentificationCardById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1087,6 +1135,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/identification-cards")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeIdentificationCardDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeIdentificationCardDetailDto>> AddIdentificationCard(Guid employeeId, [FromBody] CreateEmployeeIdentificationCardDto dto, CancellationToken cancellationToken)
@@ -1108,6 +1157,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/identification-cards/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeIdentificationCardDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1131,6 +1181,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/identification-cards/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveIdentificationCard(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1150,6 +1201,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/identification-cards/{id:guid}/verify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeIdentificationCardDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1171,6 +1223,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/identification-cards/{id:guid}/unverify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeIdentificationCardDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeIdentificationCardDetailDto>> UnverifyIdentificationCard(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1191,6 +1244,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Work history
     [HttpGet("{employeeId:guid}/work-histories")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeWorkHistoryListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeWorkHistoryListDto>>> GetWorkHistories(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1199,6 +1253,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/work-histories/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeWorkHistoryDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeWorkHistoryDetailDto?>> GetWorkHistoryById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1211,6 +1266,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/work-histories")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeWorkHistoryDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeWorkHistoryDetailDto>> AddWorkHistory(Guid employeeId, [FromBody] CreateEmployeeWorkHistoryDto dto, CancellationToken cancellationToken)
@@ -1232,6 +1288,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/work-histories/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeWorkHistoryDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1255,6 +1312,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/work-histories/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveWorkHistory(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1275,6 +1333,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Contracts
     [HttpGet("{employeeId:guid}/contracts")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeContractDetailDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeContractDetailDto>>> GetContracts(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1283,6 +1342,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/contracts/active")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeContractDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeContractDetailDto?>> GetActiveContract(Guid employeeId, CancellationToken cancellationToken)
@@ -1294,6 +1354,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/contracts")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContractDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeContractDetailDto>> AddContract(Guid employeeId, [FromBody] CreateEmployeeContractDetailDto dto, CancellationToken cancellationToken)
@@ -1315,6 +1376,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/contracts/{contractId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContractDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1338,6 +1400,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/contracts/{contractId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveContract(Guid employeeId, Guid contractId, CancellationToken cancellationToken)
@@ -1357,6 +1420,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/contracts/{contractId:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContractDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeContractDetailDto>> ActivateContract(Guid employeeId, Guid contractId, CancellationToken cancellationToken)
@@ -1375,6 +1439,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/contracts/{contractId:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContractDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeContractDetailDto>> DeactivateContract(Guid employeeId, Guid contractId, CancellationToken cancellationToken)
@@ -1393,6 +1458,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/contracts/{contractId:guid}/terminate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeContractDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1416,6 +1482,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Expatriate assignments
     [HttpGet("{employeeId:guid}/expatriate-assignments")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<ExpatriateAssignmentListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<ExpatriateAssignmentListDto>>> GetExpatriateAssignments(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1424,6 +1491,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/expatriate-assignments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(ExpatriateAssignmentDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ExpatriateAssignmentDetailDto?>> GetExpatriateAssignmentById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1436,6 +1504,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/expatriate-assignments")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(ExpatriateAssignmentDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ExpatriateAssignmentDetailDto>> AddExpatriateAssignment(Guid employeeId, [FromBody] CreateExpatriateAssignmentDto dto, CancellationToken cancellationToken)
@@ -1457,6 +1526,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/expatriate-assignments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(ExpatriateAssignmentDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1480,6 +1550,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/expatriate-assignments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveExpatriateAssignment(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1500,6 +1571,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Position history
     [HttpGet("{employeeId:guid}/position-histories")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeePositionHistoryListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeePositionHistoryListDto>>> GetPositionHistories(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1508,6 +1580,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/position-histories/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeePositionHistoryDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeePositionHistoryDetailDto?>> GetPositionHistoryById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1520,6 +1593,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/position-histories")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeePositionHistoryDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeePositionHistoryDetailDto>> AddPositionHistory(Guid employeeId, [FromBody] CreateEmployeePositionHistoryDto dto, CancellationToken cancellationToken)
@@ -1541,6 +1615,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/position-histories/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeePositionHistoryDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1564,6 +1639,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/position-histories/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemovePositionHistory(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1584,6 +1660,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Salary assignments
     [HttpGet("{employeeId:guid}/salary-assignments")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeSalaryAssignmentListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeSalaryAssignmentListDto>>> GetSalaryAssignments(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1592,6 +1669,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/salary-assignments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeSalaryAssignmentDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeSalaryAssignmentDetailDto?>> GetSalaryAssignmentById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1604,6 +1682,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/salary-assignments")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeSalaryAssignmentDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeSalaryAssignmentDetailDto>> AssignSalary(Guid employeeId, [FromBody] CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken)
@@ -1625,6 +1704,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/salary-assignments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeSalaryAssignmentDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1648,6 +1728,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/salary-assignments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveSalaryAssignment(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1668,6 +1749,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Referees
     [HttpGet("{employeeId:guid}/referees")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeRefereeListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeRefereeListDto>>> GetReferees(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1676,6 +1758,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/referees/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeRefereeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeRefereeDetailDto?>> GetRefereeById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1688,6 +1771,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/referees")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeRefereeDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeRefereeDetailDto>> AddReferee(Guid employeeId, [FromBody] CreateEmployeeRefereeDto dto, CancellationToken cancellationToken)
@@ -1709,6 +1793,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/referees/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeRefereeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1732,6 +1817,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/referees/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveReferee(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1751,6 +1837,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/referees/{id:guid}/set-primary")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeRefereeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeRefereeDetailDto>> SetPrimaryReferee(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1769,6 +1856,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/referees/{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeRefereeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeRefereeDetailDto>> ActivateReferee(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1787,6 +1875,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/referees/{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeRefereeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeRefereeDetailDto>> DeactivateReferee(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1806,6 +1895,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINTS: Guarantors
     [HttpGet("{employeeId:guid}/guarantors")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmployeeGuarantorListDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeeGuarantorListDto>>> GetGuarantors(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1814,6 +1904,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/guarantors/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeGuarantorDetailDto?>> GetGuarantorById(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1826,6 +1917,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/guarantors")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeeGuarantorDetailDto>> AddGuarantor(Guid employeeId, [FromBody] CreateEmployeeGuarantorDto dto, CancellationToken cancellationToken)
@@ -1847,6 +1939,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/guarantors/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1870,6 +1963,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/guarantors/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveGuarantor(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1889,6 +1983,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/guarantors/{id:guid}/set-primary")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeGuarantorDetailDto>> SetPrimaryGuarantor(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1907,6 +2002,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/guarantors/{id:guid}/verify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1928,6 +2024,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/guarantors/{id:guid}/unverify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeGuarantorDetailDto>> UnverifyGuarantor(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1946,6 +2043,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/guarantors/{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeGuarantorDetailDto>> ActivateGuarantor(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1964,6 +2062,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/guarantors/{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeGuarantorDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeGuarantorDetailDto>> DeactivateGuarantor(Guid employeeId, Guid id, CancellationToken cancellationToken)
@@ -1982,6 +2081,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/bank-details")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeBankDetailDto>>> GetBankDetails(Guid employeeId, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -1989,6 +2089,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpGet("{employeeId:guid}/bank-details/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> GetBankDetailById(Guid employeeId, Guid id, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -1999,6 +2100,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/bank-details")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> AddBankDetail(Guid employeeId, [FromBody] CreateEmployeeBankDetailDto dto, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2014,6 +2116,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPut("{employeeId:guid}/bank-details/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> UpdateBankDetail(Guid employeeId, Guid id, [FromBody] UpdateEmployeeBankDetailDto dto, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2033,6 +2136,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpDelete("{employeeId:guid}/bank-details/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     public async Task<ActionResult> RemoveBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2052,6 +2156,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/bank-details/{id:guid}/set-primary")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> SetPrimaryBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2070,6 +2175,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/bank-details/{id:guid}/verify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> VerifyBankDetail(Guid employeeId, Guid id, [FromQuery] Guid verifiedById, [FromQuery] DateTime verifiedDate, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2089,6 +2195,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/bank-details/{id:guid}/unverify")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> UnverifyBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2107,6 +2214,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/bank-details/{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> ActivateBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
@@ -2125,6 +2233,7 @@ public class EmployeesController : ControllerBase
     }
 
     [HttpPost("{employeeId:guid}/bank-details/{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     public async Task<ActionResult<EmployeeBankDetailDto>> DeactivateBankDetail(Guid employeeId, Guid id, CancellationToken cancellationToken)
     {
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");

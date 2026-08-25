@@ -30,14 +30,9 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class OrganogramController : ControllerBase
 {
-    /// <summary>
-    /// Who may read the people dimension. Matches the company-profile gate from slice 1 — if TDC
-    /// wants the reporting chart visible company-wide, adding <c>Constants.Roles.Employee</c> here
-    /// is the whole change, but do it knowing the payload includes everyone's email.
-    /// </summary>
-    private const string PeopleRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
+    // The people dimension is HR.Employee.Read (W3 slice 11; previously SuperAdmin/TenantAdmin/HR).
+    // If TDC wants the reporting chart visible company-wide, opening GetPeople is the whole change,
+    // but do it knowing the payload includes everyone's email.
     private readonly IOrganogramService _service;
     private readonly ILogger<OrganogramController> _logger;
 
@@ -58,7 +53,7 @@ public class OrganogramController : ControllerBase
         => await SafeAsync(() => _service.GetPositionsAsync(cancellationToken), "positions");
 
     [HttpGet("people")]
-    [Authorize(Roles = PeopleRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(OrganogramResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<OrganogramResponseDto>> GetPeople(CancellationToken cancellationToken)

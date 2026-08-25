@@ -17,9 +17,9 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <para>⚠ <b>Gated self-or-HR from areas 19-23 slice 7.</b> It carried a bare <c>[Authorize]</c>,
 /// so any authenticated user could read <i>anyone's</i> roster and write one for <i>anyone</i> —
 /// and a roster is a statement about who covers for whom, which is org-authority information about
-/// identifiable people. An employee manages their own; HR and the admin roles manage anyone's.
-/// This is the pattern the rest of HR uses: a role gate plus an ownership check, rather than a
-/// per-area permission.</para>
+/// identifiable people. An employee manages their own; the desk manages anyone's. W3 slice 11
+/// converted the role arm to the tiered HR.Employee policy check (Read on reads, Write on writes),
+/// the same shape the rest of the swept module uses.</para>
 /// </remarks>
 [ApiController]
 [Route("api/hr/employee-relievers")]
@@ -46,20 +46,22 @@ public class EmployeeRelieversController : ControllerBase
     private Guid? CurrentEmployeeId()
         => Guid.TryParse(User.FindFirst("employee_id")?.Value, out var id) && id != Guid.Empty ? id : null;
 
-    private bool IsHrOrAdmin()
-        => User.IsInRole(Constants.Roles.Hr)
-           || User.IsInRole(Constants.Roles.TenantAdmin)
-           || User.IsInRole(Constants.Roles.SuperAdmin);
-
     /// <summary>
     /// Whether the caller may see or change the roster belonging to <paramref name="employeeId"/>.
     /// </summary>
     /// <remarks>
-    /// ⚠ An account with no employee link is not "everybody's owner" — it is nobody's. An HR actor
-    /// passes on the role alone; anyone else must BE the employee whose roster it is.
+    /// <para>⚠ An account with no employee link is not "everybody's owner" — it is nobody's. A desk
+    /// actor passes on the tier alone; anyone else must BE the employee whose roster it is.</para>
+    /// <para>W3 slice 11 converted the HR-role arm to the tiered HR.Employee policy check (Read on
+    /// read call sites, Write on write call sites) — evaluated via <see cref="IAuthorizationService"/>
+    /// so both the seeded grants and the role fallback count.</para>
     /// </remarks>
-    private bool MayTouch(Guid employeeId)
-        => IsHrOrAdmin() || (CurrentEmployeeId() is Guid me && me == employeeId);
+    private async Task<bool> MayTouchAsync(Guid employeeId, string policy)
+    {
+        if (CurrentEmployeeId() is Guid me && me == employeeId) return true;
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     private IActionResult Forbidden()
         => StatusCode(StatusCodes.Status403Forbidden,
@@ -70,7 +72,7 @@ public class EmployeeRelieversController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetForEmployee(Guid employeeId, [FromQuery] bool activeOnly = false)
     {
-        if (!MayTouch(employeeId))
+        if (!await MayTouchAsync(employeeId, HrPermissions.EmployeeReadPolicy))
             return Forbidden();
 
         try
@@ -118,7 +120,7 @@ public class EmployeeRelieversController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Create([FromBody] CreateEmployeeRelieverDto dto)
     {
-        if (!MayTouch(dto.EmployeeId))
+        if (!await MayTouchAsync(dto.EmployeeId, HrPermissions.EmployeeWritePolicy))
             return Forbidden();
 
         try
@@ -148,7 +150,7 @@ public class EmployeeRelieversController : ControllerBase
         // caller answer it.
         var owner = await OwnerOfAsync(id);
         if (owner is null) return NotFound(new { message = $"Reliever setup '{id}' not found." });
-        if (!MayTouch(owner.Value)) return Forbidden();
+        if (!await MayTouchAsync(owner.Value, HrPermissions.EmployeeWritePolicy)) return Forbidden();
 
         try { return Ok(await _service.UpdateAsync(id, dto)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
@@ -168,7 +170,7 @@ public class EmployeeRelieversController : ControllerBase
     {
         var owner = await OwnerOfAsync(id);
         if (owner is null) return NotFound(new { message = $"Reliever setup '{id}' not found." });
-        if (!MayTouch(owner.Value)) return Forbidden();
+        if (!await MayTouchAsync(owner.Value, HrPermissions.EmployeeWritePolicy)) return Forbidden();
 
         try { await _service.DeleteAsync(id); return NoContent(); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }

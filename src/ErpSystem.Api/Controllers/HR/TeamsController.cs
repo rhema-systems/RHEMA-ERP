@@ -34,9 +34,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class TeamsController : ControllerBase
 {
-    private const string WriteRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly ITeamService _service;
     private readonly ILogger<TeamsController> _logger;
 
@@ -83,7 +80,7 @@ public class TeamsController : ControllerBase
         => Guard(async () => Ok(await _service.GetDetailByIdAsync(id, ct)), "retrieving the team detail");
 
     [HttpPost]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(TeamDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public Task<IActionResult> Create([FromBody] CreateTeamDto dto, CancellationToken ct = default)
@@ -95,7 +92,7 @@ public class TeamsController : ControllerBase
         }, "creating the team");
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(TeamDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -108,7 +105,7 @@ public class TeamsController : ControllerBase
         }, "updating the team");
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -125,7 +122,7 @@ public class TeamsController : ControllerBase
         => Guard(async () => Ok(await _service.GetMembersAsync(id, currentOnly, ct)), "retrieving the roster");
 
     [HttpPost("{id:guid}/members")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(TeamMemberDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -137,7 +134,7 @@ public class TeamsController : ControllerBase
         }, "adding the team member");
 
     [HttpPut("{id:guid}/members/{memberId:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(TeamMemberDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -154,7 +151,7 @@ public class TeamsController : ControllerBase
     /// it is part of what the register is for.
     /// </summary>
     [HttpDelete("{id:guid}/members/{memberId:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

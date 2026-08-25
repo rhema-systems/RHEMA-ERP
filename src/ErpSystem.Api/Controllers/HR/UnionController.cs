@@ -30,9 +30,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class UnionController : ControllerBase
 {
-    private const string WriteRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly IUnionService _unionService;
     private readonly ILogger<UnionController> _logger;
 
@@ -93,7 +90,7 @@ public class UnionController : ControllerBase
         => RunAsync(() => _unionService.GetByIdAsync(id), "retrieving the union");
 
     [HttpPost]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(UnionDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateUnionDto dto)
@@ -115,7 +112,7 @@ public class UnionController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(UnionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -128,7 +125,7 @@ public class UnionController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -158,7 +155,7 @@ public class UnionController : ControllerBase
     #region Collective Bargaining Agreements
 
     [HttpPost("{unionId:guid}/agreements")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(CollectiveBargainingAgreementDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -193,7 +190,7 @@ public class UnionController : ControllerBase
         => RunAsync(() => _unionService.GetAgreementsAsync(unionId), "retrieving the union's agreements");
 
     [HttpPut("agreements/{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(CollectiveBargainingAgreementDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -206,7 +203,7 @@ public class UnionController : ControllerBase
     }
 
     [HttpDelete("agreements/{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAgreement(Guid id)

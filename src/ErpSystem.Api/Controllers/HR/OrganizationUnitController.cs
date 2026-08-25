@@ -29,11 +29,9 @@ public class OrganizationUnitController : ControllerBase
     ///
     /// The gate costs nothing in reach, and that was measured before it was chosen (slice 9's rule):
     /// every frontend caller of a unit write lives under <c>/administration/hr/organization/units</c>.
-    /// Same split as the teams register two slices over — reads open, writes SuperAdmin/TenantAdmin/HR.
+    /// Same split as the teams register two slices over — reads open, writes gated. W3 slice 11
+    /// converted the role gate to the HR.Employee family (writes → Write, delete → Admin).
     /// </remarks>
-    private const string WriteRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly IOrganizationUnitService _organizationUnitService;
     private readonly ILogger<OrganizationUnitController> _logger;
 
@@ -339,7 +337,7 @@ public class OrganizationUnitController : ControllerBase
     /// Creates a new organization unit
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(OrganizationUnitDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateOrganizationUnitDto createDto)
@@ -373,7 +371,7 @@ public class OrganizationUnitController : ControllerBase
     /// Updates an existing organization unit
     /// </summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(OrganizationUnitDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -413,7 +411,7 @@ public class OrganizationUnitController : ControllerBase
     /// Deletes an organization unit
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id)
@@ -444,7 +442,7 @@ public class OrganizationUnitController : ControllerBase
     /// Moves an organization unit to a new parent (restructure)
     /// </summary>
     [HttpPost("{unitId:guid}/move")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> MoveUnit(Guid unitId, [FromBody] MoveUnitRequest request)
@@ -478,7 +476,7 @@ public class OrganizationUnitController : ControllerBase
     /// Changes the head employee of an organization unit
     /// </summary>
     [HttpPost("{unitId:guid}/change-head")]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ChangeHeadEmployee(Guid unitId, [FromBody] ChangeHeadRequest request)

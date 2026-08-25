@@ -303,8 +303,60 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    entries exclude even permission holders (deliberate, matches the HR exclusion), calibration
    reads tenant-open per area-5. Frontend: sidebar-only — nine desk children on
    HR.Performance.Read, Deadline Enforcement on Write, all self/manager surfaces open.
-7. **Foundation/Employee core** (280 bare — pickers feed every module; follow medical's
-   precedent of leaving name-lookup reads open to internal users)
+7. **Foundation/Employee core** — ✅ **DONE 2026-08-25 (slice 11), harness
+   `run-slice11-foundation.mjs` 142/142 green + full no-regression
+   (39/23/47/27/90/66/167 = 601 assertions total), `seed-db` run, grant rows verified in DB
+   (HR → Read+Write; SuperAdmin/TenantAdmin → all three), harness run against the seeded
+   rows in Staging.** `HR.Employee.{Read,Write,Admin}` (category "HR - Employee Records &
+   Foundation") over the employee master and the foundation registers: 244 scripted placements
+   (226 inserts + 18 role-gate replacements in OrganizationUnit/Teams/Union/Organogram — their
+   `WriteRoles`/`PeopleRoles` consts removed) across 27 controllers, plus hand edits
+   (EmployeeRelievers' `MayTouch` role arm → tiered `MayTouchAsync(id, policy)`).
+   **The line on the employee master (the decision that shaped the slice):** LEAN directory
+   reads stay open — POST paged (the single shared `EmployeePicker`, imported by ~120 files,
+   is the only picker and it calls exactly this), by-unit/level/location, by-id, by-number,
+   by-email, direct-reports, management-chain, stats (the /hr landing tiles) and the dead
+   technician routes — the summary `EmployeeDto` carries name/org/contact only. The PII reads
+   are Read: `{id}/details` / `{id}/profile` (+ by-number twins) and all 14 sub-record familes
+   (incl. bank details, salary assignments, guarantors — previously ANY internal user could
+   pull ANY employee's salary, SSN/TIN, DOB, home address and bank account). All writes incl.
+   sub-record verify/set-primary/activate → Write; deletes AND the legacy lifecycle quartet
+   (activate/deactivate/terminate/reinstate — the separation module is the governed exit
+   path) → Admin. Legacy root `api/Employees`: lean list reads stay open (live consumers:
+   finance fixed-assets transfers, maintenance pickers, UserEmployeeLinks admin screen);
+   its `{id}`/by-number reads returned the same `EmployeeDetailDto` PII → Read; writes
+   Write, delete/terminate Admin. Foundation registers: ALL reads open (pickers feed every
+   module — org/location structures/levels/units, positions lists, teams, unions, staff
+   levels, skills, qualifications, identification types, reason codes, countries, the
+   bank/branch reference master, departments, organogram units/positions/locations/teams);
+   writes → Write; deletes → Admin; Organogram `people` (everyone's email) keeps its old
+   SA/TA/HR reach as Read; `EmployeePositions/{id}` + `code/{code}` → Read (only the by-id
+   reads Include the `PositionAmount` benefit money — list reads don't and stay open for the
+   requisition/succession forms). EmployeePortal untouched (token-actor by construction,
+   service-enforced `EnsureSelfOrHr` — verified). Relievers: reads self-or-Read, writes
+   self-or-Write (row-derived owner, unchanged shape). Frontend: sidebar Employees item →
+   HR.Employee.Read (the picker rides the open paged read); admin.hr keeps the setup tree.
+   RoleGrants: HR → Read+Write.
+   **⚠ Slice-6 gap closed here: SEVEN AttendanceControllerBase controllers the attendance
+   conversion missed** (its "all 24 concrete controllers" census was wrong — the family has 31):
+   StaffDailyAttendance (18), StaffOvertimeRequests (14), StaffMonthlyAttendanceSummaries (10),
+   PositionOvertimePolicies (11), EmployeeOvertimeOverrides (6), StaffBulkAttendanceImports (9),
+   EmployeeWorkSchedules (8) — 76 bare actions with live screens. Same split as slice 6:
+   registers → AttendanceRead, desk ops → Write, deletes → Admin, by-employee reads
+   self-or-Read (base-class `SelfOrPolicyAsync`), overtime request update/delete
+   self-or-Write (withdrawal shape; `GetOwnedAsync` had NO caller check). Real holes closed:
+   **file-overtime-as-anyone** (create takes `dto.EmployeeId` — now self-or-Write, the leave
+   shape), edit/delete anyone's pending overtime request, and **confirm-actual-hours had no
+   supervisor check at all** (any employee could set their own actual overtime hours → pay);
+   confirm is now Write — a residual: the true supervisor confirm needs the org-authority
+   model, until then the desk holds it. Position overtime policy reads stay open (employee-
+   facing reference) except `{id}/overrides` (per-person rates) → Read.
+   Residuals recorded: no self-profile screen exists (nothing self-facing broke; if one is
+   built it must ride a narrowed self projection or self-or arms on the sub-record reads);
+   `LeaveRequestForm` still reads relievers by client-supplied id where `getMine()` exists
+   (works — self id on the self surface, desk holds Read — but is the warned-against
+   pattern); the maintenance inspectors admin page calls a nonexistent
+   `GET /api/hr/employees?department=` route (already broken before this slice).
 8. **SHE** (employee incident reporting is an any-internal-actor act by design)
 9. Orientation, Assets, Movements, Discipline: mostly role-gated already — convert
    role → permission mechanically, per-area.

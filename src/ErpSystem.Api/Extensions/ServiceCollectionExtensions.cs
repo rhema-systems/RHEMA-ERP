@@ -1571,6 +1571,30 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerPerformance)));
 
+            // W3 slice 11 — Employee records & foundation. Same ladder. Deliberately NOT gated on
+            // this family: the lean directory reads that feed the shared employee picker (POST
+            // paged and the by-unit/level/location, direct-report, management-chain, by-id and
+            // by-number reads all return the summary EmployeeDto — no DOB, pay or identifiers),
+            // the aggregate stats tiles on the HR landing page, the dead technician routes
+            // (in-process maintenance consumers bypass HTTP), the foundation reference reads
+            // (org/location structures, positions lists, lookups — pickers feed every module),
+            // and the whole employee portal (token-actor by construction, service-enforced
+            // self-or-HR). The PII line: {id}/details and {id}/profile and every per-employee
+            // sub-record read carry salary, tax/SSN, address and bank data — those are Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.EmployeeReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewEmployees,
+                        HrPermissions.MaintainEmployees,
+                        HrPermissions.AdministerEmployees)))
+                .AddPolicy(HrPermissions.EmployeeWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainEmployees,
+                        HrPermissions.AdministerEmployees)))
+                .AddPolicy(HrPermissions.EmployeeAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerEmployees)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

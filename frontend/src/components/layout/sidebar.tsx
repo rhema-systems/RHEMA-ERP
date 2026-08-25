@@ -417,7 +417,10 @@ export const navigationItems: NavItem[] = [
     // accounts, not to hide HR from staff. SuperAdmin/TenantAdmin auto-pass.
     permissions: ['hr.access'],
     children: [
-      { title: 'Employees', href: '/hr/employees', icon: Users },
+      // W3 slice 11: the register's detail/profile/sub-record reads are HR.Employee.Read on the
+      // API now (they carry salary, identifiers and bank data), so the desk entry follows. The
+      // shared employee picker rides the open paged read and does not need this.
+      { title: 'Employees', href: '/hr/employees', icon: Users, permissions: ['HR.Employee.Read'] },
       // Read-only view of the org's own records. Lives here rather than under Administration
       // because it is looked at daily, not configured — and the administration tree is gated to
       // admin roles, which would hide it from the HR officers the API gate lets in.

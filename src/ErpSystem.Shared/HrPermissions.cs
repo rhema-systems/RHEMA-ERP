@@ -37,6 +37,7 @@ public static class HrPermissions
     public const string CategorySeparation = "HR - Separation, Clearance & Exit";
     public const string CategoryAwards = "HR - Staff Awards & Recognition";
     public const string CategoryPerformance = "HR - Performance";
+    public const string CategoryEmployee = "HR - Employee Records & Foundation";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -152,6 +153,14 @@ public static class HrPermissions
     public const string PerformanceReadPolicy = "HR.Policy.PerformanceRead";
     public const string PerformanceWritePolicy = "HR.Policy.PerformanceWrite";
     public const string PerformanceAdminPolicy = "HR.Policy.PerformanceAdmin";
+
+    public const string ViewEmployees = "HR.Employee.Read";
+    public const string MaintainEmployees = "HR.Employee.Write";
+    public const string AdministerEmployees = "HR.Employee.Admin";
+
+    public const string EmployeeReadPolicy = "HR.Policy.EmployeeRead";
+    public const string EmployeeWritePolicy = "HR.Policy.EmployeeWrite";
+    public const string EmployeeAdminPolicy = "HR.Policy.EmployeeAdmin";
 
     public const string ViewAwards = "HR.Awards.Read";
     public const string MaintainAwards = "HR.Awards.Write";
@@ -303,6 +312,16 @@ public static class HrPermissions
             "Administer the award-type catalogue, levels, eligibility targets, budgets and committees, and delete award records. Nominating and voting are NOT this permission — every employee may do both from their own self-service surface.",
             CategoryAwards),
 
+        new(ViewEmployees, "View Employee Records",
+            "View any employee's full record — personal details, home address, tax and social-security numbers, salary, contacts, dependents, qualifications, skills, identification, work and position history, contracts, referees, guarantors and bank details. The lean directory reads (the shared name picker, org lookups) stay open to internal staff and do not need this.",
+            CategoryEmployee),
+        new(MaintainEmployees, "Maintain Employee Records",
+            "Create and amend employee records and every sub-record, verify qualifications, skills, identification, guarantors and bank details, and maintain the foundation registers — organization and location structures, positions, teams, unions, staff levels, banks, and the skill, qualification, identification-type, reason-code and country catalogues.",
+            CategoryEmployee),
+        new(AdministerEmployees, "Administer Employee Records",
+            "Delete employees and their sub-records, decide the legacy lifecycle acts (activate, deactivate, terminate, reinstate — the separation module is the governed exit path), and delete foundation reference data — organization and location nodes, positions, teams, unions and lookup entries.",
+            CategoryEmployee),
+
         new(ViewPerformance, "View Performance",
             "View the org-wide performance surface: appraisal and appeal registers, cycle progress and coverage, the HR cycle dashboard, org-wide at-risk goals, development-plan and improvement-plan registers, review-event and check-in registers, rating analytics and goal-library usage. Employees, managers and peers do not need this for their own appraisal work — self access is an ownership check on the endpoint.",
             CategoryPerformance),
@@ -397,7 +416,8 @@ public static class HrPermissions
         ViewManpowerBudget, MaintainManpowerBudget,
         ViewSeparation, MaintainSeparation,
         ViewAwards, MaintainAwards,
-        ViewPerformance, MaintainPerformance
+        ViewPerformance, MaintainPerformance,
+        ViewEmployees, MaintainEmployees
     };
 
     /// <summary>

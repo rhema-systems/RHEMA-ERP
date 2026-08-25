@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -24,6 +25,7 @@ public class StaffBulkAttendanceImportsController : AttendanceControllerBase
     }
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<StaffBulkAttendanceImportSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -31,30 +33,36 @@ public class StaffBulkAttendanceImportsController : AttendanceControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<StaffBulkAttendanceImportDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("reference/{importReference}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<StaffBulkAttendanceImportDto?>> GetByImportReference(
         string importReference, CancellationToken ct = default)
         => Ok(await _service.GetByImportReferenceAsync(importReference, ct));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffBulkAttendanceImportSummaryDto>>> GetByStatus(
         AttendanceImportStatus status, CancellationToken ct = default)
         => Ok(await _service.GetByStatusAsync(status, ct));
 
     [HttpGet("{id:guid}/rows")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffBulkAttendanceImportRowDto>>> GetRows(
         Guid id, CancellationToken ct = default)
         => Ok(await _service.GetRowsAsync(id, ct));
 
     [HttpGet("{id:guid}/rows/failed")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffBulkAttendanceImportRowDto>>> GetFailedRows(
         Guid id, CancellationToken ct = default)
         => Ok(await _service.GetFailedRowsAsync(id, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffBulkAttendanceImportDto>> Initiate(
         [FromBody] CreateStaffBulkAttendanceImportDto dto, CancellationToken ct = default)
     {
@@ -66,6 +74,7 @@ public class StaffBulkAttendanceImportsController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/process")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffBulkAttendanceImportDto>> Process(Guid id, CancellationToken ct = default)
     {
         if (TryGetEmployee(out var employeeId) is { } error) return error;
@@ -74,6 +83,7 @@ public class StaffBulkAttendanceImportsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);
