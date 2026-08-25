@@ -41,6 +41,23 @@ dimension set remains authoritative for transaction-dimension reporting.
 `SegmentString` remains a legacy account-segment display snapshot. It is not a substitute for a
 validated dimension set.
 
+## Implementation status (25 August 2026)
+
+The data model, optional posting-engine contract, immutable set persistence, exact reversal reuse,
+tenant administration API/UI, and manual-journal capture/read display are implemented. Manual
+journals are the first certified producer and may use source-scoped Required, Optional, Fixed and
+Prohibited rules (`GL` / `ManualJournalEntry` / `Post`).
+
+Operational adapters remain deliberately uncertified. AP, AR, Cash, Fixed Assets, Payroll,
+Procurement and Inventory continue posting without mandatory transaction dimensions until their
+owner-specific source evidence and consumer tests land. This is a compatibility gate, not permission
+to encode those facts as free-text or arbitrary stored dimension-set IDs.
+
+Dimension-aware report filtering/breakdown and dimension-grained budget cells are the next two
+Finance-owned phases. Until those phases land, ordinary unfiltered reports and the existing
+account/period budget-control grain remain authoritative; the UI must not imply that a dimension
+selection has constrained budget availability when it has not.
+
 Producers submit structured dimension facts on `FinancePostingLineDto.Dimensions`. They do not
 select a stored Finance dimension-set ID. Finance resolves the tenant-owned value, effective date,
 canonical combination and immutable set. A stored set ID may be reused only by Finance when posting
@@ -132,7 +149,8 @@ unchanged.
 1. Add the Finance dimension masters, sets, rules and nullable ledger linkage.
 2. Accept optional structured dimensions through `IFinancePostingEngine`.
 3. Preserve exact sets on existing-journal posting and reversal.
-4. Add Finance administration and journal-line UX, defaults and warning diagnostics.
+4. Add Finance administration and journal-line UX, defaults and warning diagnostics. **Implemented
+   for manual journals.**
 5. Move financial-report filters to transaction-line semantics and add optional breakdowns.
 6. Extend budget cells and actual matching to the configured control dimensions.
 7. Certify Finance and operational adapters individually.

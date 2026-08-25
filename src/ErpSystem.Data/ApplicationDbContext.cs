@@ -3001,7 +3001,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FinanceDimensionAccountRule>(entity =>
         {
             entity.ToTable("FinanceDimensionAccountRules");
-            entity.HasIndex(e => new { e.TenantId, e.AccountId, e.FinanceDimensionDefinitionId }).IsUnique();
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.AccountId,
+                e.FinanceDimensionDefinitionId,
+                e.SourceModule,
+                e.SourceDocumentType,
+                e.PostingAction
+            }).IsUnique();
             entity.HasCheckConstraint("CK_FinanceDimensionAccountRules_RuleType",
                 "[RuleType] IN ('Required','Optional','Prohibited','Fixed')");
             entity.HasOne(e => e.Account).WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);

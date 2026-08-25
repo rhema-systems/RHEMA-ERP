@@ -527,6 +527,7 @@ export default function JournalEntryDetailPage() {
                                         <tr className="border-b bg-muted/50">
                                             <th className="p-3 text-left font-medium">Account</th>
                                             <th className="p-3 text-left font-medium">Description</th>
+                                            <th className="p-3 text-left font-medium">Coding dimensions</th>
                                             <th className="p-3 text-right font-medium">Debit</th>
                                             <th className="p-3 text-right font-medium">Credit</th>
                                         </tr>
@@ -553,6 +554,17 @@ export default function JournalEntryDetailPage() {
                                                     {line.description}
                                                     {isSystemClearing && <div className="text-xs text-amber-600 mt-1">Auto-generated balancing line</div>}
                                                 </td>
+                                                <td className="p-3">
+                                                    {line.dimensions?.length ? (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {line.dimensions.map(item => (
+                                                                <Badge key={`${item.definitionId}-${item.valueId}`} variant="secondary">
+                                                                    {item.dimensionCode}: {item.valueCode}
+                                                                </Badge>
+                                                            ))}
+                                                        </div>
+                                                    ) : <span className="text-sm text-muted-foreground">—</span>}
+                                                </td>
                                                 <td className="p-3 text-right font-mono">
                                                     {debitAmount > 0 ? formatCurrency(debitAmount) : '-'}
                                                 </td>
@@ -564,7 +576,7 @@ export default function JournalEntryDetailPage() {
                                     </tbody>
                                     <tfoot>
                                         <tr className="bg-muted/50 font-bold">
-                                            <td colSpan={2} className="p-3 text-right">Totals:</td>
+                                            <td colSpan={3} className="p-3 text-right">Totals:</td>
                                             <td className="p-3 text-right">{formatCurrency(entry.totalDebitAmount)}</td>
                                             <td className="p-3 text-right">{formatCurrency(entry.totalCreditAmount)}</td>
                                         </tr>
