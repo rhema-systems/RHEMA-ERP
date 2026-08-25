@@ -41,6 +41,7 @@ namespace ErpSystem.Api.Controllers
         private readonly ITenantSmsSender _tenantSmsSender;
         private readonly ICaptchaVerificationService _captchaVerificationService;
         private readonly IOtpService _otpService;
+        private readonly IEmployeeLinkResolutionService _employeeLinkResolution;
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
@@ -65,6 +66,7 @@ namespace ErpSystem.Api.Controllers
             ITenantSmsSender tenantSmsSender,
             ICaptchaVerificationService captchaVerificationService,
             IOtpService otpService,
+            IEmployeeLinkResolutionService employeeLinkResolution,
             ApplicationDbContext context,
             IConfiguration configuration,
             ILogger<AuthController> logger)
@@ -88,6 +90,7 @@ namespace ErpSystem.Api.Controllers
             _tenantSmsSender = tenantSmsSender;
             _captchaVerificationService = captchaVerificationService;
             _otpService = otpService;
+            _employeeLinkResolution = employeeLinkResolution;
             _context = context;
             _configuration = configuration;
             _logger = logger;
@@ -383,11 +386,55 @@ namespace ErpSystem.Api.Controllers
                     TemporaryPasswordExpiresAtUtc = user.TemporaryPasswordExpiresAtUtc,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                     Permissions = await GetUserPermissionsAsync(user),
-                    AuthenticationProvider = user.AuthenticationProvider.ToString()
+                    AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                    EmployeeId = user.EmployeeId
                 }
             };
 
             return Ok(response);
+        }
+
+        /// <summary>
+        /// Area 25 D5: links a just-provisioned LDAP user to their employee record when — and
+        /// only when — exactly one exact match exists (AD mail → Employee.EmailAddress, else
+        /// sAMAccountName → EmployeeNumber; unlinked employees only). The Employee role rides
+        /// the link because a linked employee IS the portal's audience. Zero or multiple
+        /// matches provision as before; the HR unlinked-users queue shows the candidates.
+        /// </summary>
+        private async Task TryAutoLinkProvisionedLdapUserAsync(ApplicationUser user, LdapUser ldapUser, Guid tenantId)
+        {
+            try
+            {
+                var match = await _employeeLinkResolution.FindExactMatchAsync(tenantId, ldapUser.Email, ldapUser.Username);
+                if (match == null)
+                {
+                    _logger.LogInformation("LDAP provision: no unambiguous employee match for {Username}; left unlinked for the HR queue", user.UserName);
+                    return;
+                }
+
+                user.EmployeeId = match.EmployeeId;
+                var update = await _userManager.UpdateAsync(user);
+                if (!update.Succeeded)
+                {
+                    _logger.LogWarning("LDAP auto-link failed to save for {Username}: {Errors}",
+                        user.UserName, string.Join(", ", update.Errors.Select(e => e.Description)));
+                    return;
+                }
+
+                var roleResult = await _userManager.AddToRoleAsync(user, Constants.Roles.Employee);
+                if (!roleResult.Succeeded)
+                {
+                    _logger.LogWarning("LDAP auto-link: Employee role grant failed for {Username}: {Errors}",
+                        user.UserName, string.Join(", ", roleResult.Errors.Select(e => e.Description)));
+                }
+
+                _logger.LogInformation("LDAP provision auto-linked {Username} to employee {EmployeeId} (matched by {MatchedBy})",
+                    user.UserName, match.EmployeeId, match.MatchedBy);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "LDAP auto-link errored for {Username}; user left unlinked", user.UserName);
+            }
         }
 
         [HttpPost("login")]
@@ -453,6 +500,27 @@ namespace ErpSystem.Api.Controllers
                 user = await _userManager.FindByNameAsync(request.Username) ??
                        await _userManager.FindByEmailAsync(request.Username);
 
+                // Area 25 D1: the identifier may be an employee number. Only consulted when no
+                // username/email matched (that precedence is the contract), and it resolves
+                // through the user↔employee link — an unlinked employee's number is nothing to
+                // authenticate. The resolved user then goes down the NORMAL path for their own
+                // provider, so the LDAP bind below must use their real username, not the number.
+                var effectiveUsername = request.Username;
+                if (user == null)
+                {
+                    var resolvedUserId = await _employeeLinkResolution.ResolveUserIdByEmployeeNumberAsync(
+                        request.Username, (tenant ?? defaultTenant)?.Id);
+                    if (resolvedUserId.HasValue)
+                    {
+                        user = await _userManager.FindByIdAsync(resolvedUserId.Value.ToString());
+                        if (user?.UserName != null)
+                        {
+                            effectiveUsername = user.UserName;
+                            _logger.LogInformation("Login identifier resolved as employee number to user {UserId}", user.Id);
+                        }
+                    }
+                }
+
                 // Prefer LDAP authentication when available. If a tenant code isn't provided, use the default tenant's LDAP config.
                 var tenantForLdap = tenant ?? defaultTenant;
 
@@ -466,7 +534,7 @@ namespace ErpSystem.Api.Controllers
                         tenantForLdap.LdapPort ?? 389,
                         tenantForLdap.LdapBaseDn);
 
-                    var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenantForLdap);
+                    var ldapResult = await _ldapAuthService.AuthenticateAsync(effectiveUsername, request.Password, tenantForLdap);
                     ldapFailureReason = ldapResult.ErrorMessage;
 
                     _logger.LogInformation(
@@ -512,6 +580,12 @@ namespace ErpSystem.Api.Controllers
                                     string.Join(", ", createResult.Errors.Select(e => e.Description)));
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
+
+                            // Area 25 D5: exact-match auto-link on provision. One unambiguous
+                            // match links the account and grants the Employee role; anything
+                            // else leaves the user for the HR unlinked-users queue. Never fails
+                            // the login — an unlinked portal beats a locked-out employee.
+                            await TryAutoLinkProvisionedLdapUserAsync(user, ldapUser, provisionTenantId);
                         }
                         else
                         {
@@ -840,7 +914,8 @@ namespace ErpSystem.Api.Controllers
                         TemporaryPasswordExpiresAtUtc = user.TemporaryPasswordExpiresAtUtc,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                         Permissions = await GetUserPermissionsAsync(user),
-                        AuthenticationProvider = user.AuthenticationProvider.ToString()
+                        AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                        EmployeeId = user.EmployeeId
                     }
                 };
 
@@ -1198,7 +1273,8 @@ namespace ErpSystem.Api.Controllers
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                     Permissions = await GetUserPermissionsAsync(user),
-                    AuthenticationProvider = user.AuthenticationProvider.ToString()
+                    AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                    EmployeeId = user.EmployeeId
                 };
 
                 return Ok(userInfo);
@@ -1375,7 +1451,8 @@ namespace ErpSystem.Api.Controllers
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                         Permissions = await GetUserPermissionsAsync(user),
-                        AuthenticationProvider = user.AuthenticationProvider.ToString()
+                        AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                        EmployeeId = user.EmployeeId
                     }
                 };
 

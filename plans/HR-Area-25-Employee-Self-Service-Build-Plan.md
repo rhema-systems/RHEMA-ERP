@@ -24,7 +24,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | Slice | Title | Status |
 |---|---|---|
 | 0 | Survey, fixtures, and the link census | **COMPLETE 2026-08-25** — 111 assertions ×2 green; census in `HR-Area-25-Slice0-Census.md` |
-| 1 | Identity & access: employee-number login, the AD link gap, the portal gate | not started |
+| 1 | Identity & access: employee-number login, the AD link gap, the portal gate | **COMPLETE 2026-08-25** — 33 assertions ×2 + 111 no-regression |
 | 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | not started |
 | 3 | The dashboard: one personal aggregate | not started |
 | 4 | Move-in: leave + attendance | not started |
@@ -310,3 +310,36 @@ DB states) + `census-slice0.sql`.
 - FRD sweep: no un-built Mandatory requirement lands uniquely here; parity target stays the
   Blazor PortalTopNav 40. Portal-bearing IDs AST-5/6/8, AWD-03/04/11 already have their
   backend surfaces.
+
+### Slice 1 — identity & access. CLOSED 2026-08-25.
+
+`run-slice1.mjs` 33 assertions ×2 green + the 111 slice-0 ladder (with its Auth/me
+assertion deliberately flipped: the gap it recorded is now closed). No migration — no
+schema change.
+
+- **The matching rules live in ONE service** (`EmployeeLinkResolutionService`): D1's login
+  resolver, D5's auto-link and the queue's suggestions all consume it. That seam is also
+  the testability story — the auto-link fires only inside LDAP provisioning (unreachable
+  without a live directory, and TDC has 0 LDAP users today), so the harness proves the
+  matrix through the queue and what the queue shows IS what auto-link would do. Exact-match
+  only; ambiguity always resolves to "no link".
+- **D1**: an identifier matching no username/email resolves as an employee number through
+  the link; the resolved user authenticates by their own provider (the LDAP bind uses the
+  resolved username, not the number); inside the existing `AuthPolicy` rate limit; refusals
+  indistinguishable from any failed login. Precedence proven live with a manufactured
+  username↔number collision.
+- **D5**: on LDAP auto-provision, exact-one match (AD mail → EmailAddress, else
+  sAMAccountName → EmployeeNumber, unlinked employees only) links the account and grants
+  the Employee role; failure never blocks the login. **Finding:** the employee API refuses
+  duplicate emails (400), so email ambiguity is structurally impossible via the API — the
+  flagged-ambiguous branch stays as defense-in-depth for imported data.
+- **D8 surface**: `UserInfo.EmployeeId` at all four construction sites (login, refresh,
+  me, select-tenant); linked → id, unlinked → null. Slice 2's route gate reads this.
+- **The queue**: `GET api/UserEmployeeLink/unlinked-users` (+ `POST bulk-link`, per-pair
+  guards) and the screen at `administration/user-employee-links/unlinked` — suggestion
+  chips, "Link all exact matches", manual paged search; cross-linked with the existing
+  links screen. Admin-gated like the rest of the controller.
+- Noted in passing: the old `components/admin/UserEmployeeLinks.tsx` fetches
+  `/employees?pageSize=1000`, a route that doesn't exist (`api/hr/Employees` has no GET
+  list) — its employee picker has likely been empty forever. Not this slice's surface;
+  worth folding into a later polish pass.

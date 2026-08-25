@@ -114,6 +114,10 @@ namespace ErpSystem.Api.Models
 
         // Authentication provider (Local or LDAP)
         public string AuthenticationProvider { get; set; } = "Local";
+
+        // Area 25: the user↔employee link. Null = not linked; the portal's D8 route gate
+        // reads presence/absence of this to route to /me or the "not linked yet" page.
+        public Guid? EmployeeId { get; set; }
     }
 
     public class RegisterRequest

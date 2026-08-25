@@ -576,6 +576,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             });
             services.AddScoped<ErpSystem.Api.Services.ICaptchaVerificationService, ErpSystem.Api.Services.CaptchaVerificationService>();
 
+            // Area 25: user↔employee matching rules (D1 login resolver, D5 auto-link, HR unlinked queue)
+            services.AddScoped<ErpSystem.Api.Services.IEmployeeLinkResolutionService, ErpSystem.Api.Services.EmployeeLinkResolutionService>();
+
             services.AddScoped<ISecurityService, SecurityService>();
             // User context services
             services.AddHttpContextAccessor();
