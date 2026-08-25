@@ -170,6 +170,7 @@
     <Compile Include="Services\Finance\AccountingPeriodClosePostingDateTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseAlertServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceClosePackDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\JournalVoucherDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApPaymentVoucherDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
