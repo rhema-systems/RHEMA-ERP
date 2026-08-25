@@ -710,7 +710,7 @@ public class FinanceApprovalsController : ControllerBase
         });
     }
 
-    private IQueryable<WorkflowApproval> QueryPendingApprovals(Guid tenantId)
+    internal IQueryable<WorkflowApproval> QueryPendingApprovals(Guid tenantId)
         => _db.WorkflowApprovals
             .Include(a => a.StepInstance)
                 .ThenInclude(si => si.WorkflowStep)
@@ -728,7 +728,18 @@ public class FinanceApprovalsController : ControllerBase
                 a.Status == WorkflowApprovalStatus.Pending &&
                 !a.IsDeleted &&
                 !a.StepInstance.IsDeleted &&
-                !a.StepInstance.WorkflowInstance.IsDeleted);
+                !a.StepInstance.WorkflowInstance.IsDeleted &&
+                // Approval rows are retained as immutable workflow history. Only the active
+                // instance/current step is actionable; otherwise an earlier Pending row can
+                // reappear after the Finance document has already been approved and posted.
+                (a.StepInstance.WorkflowInstance.Status == WorkflowInstanceStatus.Created ||
+                 a.StepInstance.WorkflowInstance.Status == WorkflowInstanceStatus.InProgress ||
+                 a.StepInstance.WorkflowInstance.Status == WorkflowInstanceStatus.Waiting ||
+                 a.StepInstance.WorkflowInstance.Status == WorkflowInstanceStatus.Suspended) &&
+                a.StepInstance.WorkflowInstance.CurrentStepId.HasValue &&
+                a.StepInstance.WorkflowStepId == a.StepInstance.WorkflowInstance.CurrentStepId.Value &&
+                (a.StepInstance.Status == WorkflowStepInstanceStatus.Pending ||
+                 a.StepInstance.Status == WorkflowStepInstanceStatus.InProgress));
 
     private async Task<FinanceApprovalQueueItemDto> MapApprovalAsync(
         WorkflowApproval approval,
