@@ -15,7 +15,11 @@ public sealed class DocumentsController : ControllerBase
 {
     public static readonly IReadOnlyDictionary<string, string> FinanceDocumentPolicies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        [DocumentTypes.FinanceJournalVoucher] = FinancePermissions.ExportFinanceReports,
+        // A journal voucher is the printable representation of the same tenant-scoped journal
+        // already exposed by JournalEntryController under Finance.Read. Keep print/export aligned
+        // with that read boundary; analytical reports and sensitive payment documents retain their
+        // stronger export/issue permissions below.
+        [DocumentTypes.FinanceJournalVoucher] = FinancePermissions.ViewFinance,
         // AP vouchers contain supplier banking references, approval identities and evidence
         // hashes. Route them through the same explicit Finance export/print permission as other
         // controlled accounting documents instead of relying only on authenticated access.
