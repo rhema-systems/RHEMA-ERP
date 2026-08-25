@@ -394,6 +394,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Where(b => b.OutstandingAmount != 0)
                 .ToList();
 
+            var functionalCurrencyCode = await ResolveAgingFunctionalCurrencyAsync(balances);
+
             var customerNames = await LoadArCustomerNamesAsync(balances.Select(b => b.SourceDocumentId).Distinct().ToList(), cancellationToken);
             var adjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
 
@@ -420,7 +422,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var aging = GetOrCreate(
                     balance.CounterpartyId,
                     customerNames.GetValueOrDefault(balance.SourceDocumentId) ?? "Customer");
-                AddToAgingBucket(aging, balance.OutstandingAmount, balance.DueDate, balance.TransactionDate, effectiveDate);
+                AddToAgingBucket(
+                    aging,
+                    ToFunctionalAmount(balance, balance.OutstandingAmount),
+                    balance.DueDate,
+                    balance.TransactionDate,
+                    effectiveDate);
             }
 
             foreach (var adjustment in adjustments)
@@ -428,7 +435,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (!adjustment.CustomerId.HasValue)
                     continue;
 
-                var amount = GetSignedSubledgerAmount(adjustment);
+                var amount = GetSignedSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
@@ -442,6 +449,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var report = new AgingReportDto
             {
                 AsOfDate = effectiveDate,
+                CurrencyCode = functionalCurrencyCode,
                 UsesSettlementReadModel = true,
                 Customers = customerAging.Where(c => c.TotalOutstanding != 0).OrderByDescending(c => c.TotalOutstanding).ToList(),
                 Diagnostics = rebuild.Diagnostics,
@@ -484,6 +492,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Where(b => b.OutstandingAmount != 0)
                 .ToList();
 
+            var functionalCurrencyCode = await ResolveAgingFunctionalCurrencyAsync(balances);
+
             var customerNames = await LoadArCustomerNamesAsync(balances.Select(b => b.SourceDocumentId).Distinct().ToList(), cancellationToken);
             var adjustments = await GetPostedArAdjustmentsAsync(customerId, cancellationToken);
             var detailed = new List<CustomerDetailedAgingDto>();
@@ -517,12 +527,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (!adjustment.CustomerId.HasValue)
                     continue;
 
-                var amount = GetSignedSubledgerAmount(adjustment);
+                var amount = GetSignedSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
                 var row = GetOrCreate(adjustment.CustomerId.Value, adjustment.Customer?.PartnerName ?? "Customer");
-                row.Invoices.Add(MapArAdjustmentToAgingInvoice(adjustment, effectiveDate));
+                row.Invoices.Add(MapArAdjustmentToAgingInvoice(adjustment, effectiveDate, functionalCurrencyCode));
             }
 
             foreach (var row in detailed)
@@ -532,6 +542,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var report = new DetailedAgingReportDto
             {
                 AsOfDate = effectiveDate,
+                CurrencyCode = functionalCurrencyCode,
                 UsesSettlementReadModel = true,
                 Customers = customerRows,
                 Diagnostics = rebuild.Diagnostics,
@@ -762,6 +773,18 @@ namespace ErpSystem.Api.Services.Finance.AR
             report.TotalDebits = RoundMoney(report.Customers.Sum(c => c.TotalDebits));
             report.TotalCredits = RoundMoney(report.Customers.Sum(c => c.TotalCredits));
             report.TotalClosingBalance = RoundMoney(report.Customers.Sum(c => c.ClosingBalance));
+            report.CurrencyTotals = report.Customers
+                .GroupBy(c => c.CurrencyCode, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new DetailedLedgerCurrencyTotalDto
+                {
+                    CurrencyCode = group.Key,
+                    OpeningBalance = RoundMoney(group.Sum(c => c.OpeningBalance)),
+                    TotalDebits = RoundMoney(group.Sum(c => c.TotalDebits)),
+                    TotalCredits = RoundMoney(group.Sum(c => c.TotalCredits)),
+                    ClosingBalance = RoundMoney(group.Sum(c => c.ClosingBalance))
+                })
+                .ToList();
             report.Warnings = report.Warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             return report;
@@ -1114,11 +1137,18 @@ namespace ErpSystem.Api.Services.Finance.AR
                 InvoiceDate = balance.TransactionDate,
                 DueDate = balance.DueDate,
                 DaysOverdue = Math.Max(0, daysOverdue),
-                TotalAmount = balance.OriginalDocumentAmount,
-                PaidAmount = balance.SettledAmount,
-                CreditedAmount = balance.CreditedAmount,
-                WithheldAmount = balance.WithheldAmount,
-                BalanceAmount = balance.OutstandingAmount,
+                TotalAmount = RoundMoney(balance.OriginalFunctionalAmount),
+                PaidAmount = ToFunctionalAmount(balance, balance.SettledAmount),
+                CreditedAmount = ToFunctionalAmount(balance, balance.CreditedAmount),
+                WithheldAmount = ToFunctionalAmount(balance, balance.WithheldAmount),
+                BalanceAmount = ToFunctionalAmount(balance, balance.OutstandingAmount),
+                CurrencyCode = NormalizeCurrency(balance.FunctionalCurrencyCode, "GHS"),
+                DocumentCurrencyCode = NormalizeCurrency(balance.DocumentCurrencyCode, "GHS"),
+                DocumentTotalAmount = RoundMoney(balance.OriginalDocumentAmount),
+                DocumentPaidAmount = RoundMoney(balance.SettledAmount),
+                DocumentCreditedAmount = RoundMoney(balance.CreditedAmount),
+                DocumentWithheldAmount = RoundMoney(balance.WithheldAmount),
+                DocumentBalanceAmount = RoundMoney(balance.OutstandingAmount),
                 SourcePostingEventId = balance.SourcePostingEventId,
                 SourceJournalEntryId = balance.SourceJournalEntryId,
                 SettlementStatus = balance.SettlementStatus,
@@ -1129,9 +1159,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private static InvoiceAgingDto MapArAdjustmentToAgingInvoice(
             SubledgerAdjustmentJournal adjustment,
-            DateTime asOfDate)
+            DateTime asOfDate,
+            string functionalCurrencyCode)
         {
-            var amount = GetSignedSubledgerAmount(adjustment);
+            var amount = GetSignedSubledgerFunctionalAmount(adjustment);
+            var documentAmount = GetSignedSubledgerAmount(adjustment);
             var daysOverdue = GetDaysOverdue(adjustment.DueDate, adjustment.AdjustmentDate, asOfDate);
             return new InvoiceAgingDto
             {
@@ -1143,9 +1175,58 @@ namespace ErpSystem.Api.Services.Finance.AR
                 TotalAmount = amount,
                 PaidAmount = 0,
                 BalanceAmount = amount,
+                CurrencyCode = functionalCurrencyCode,
+                DocumentCurrencyCode = NormalizeCurrency(adjustment.CurrencyCode, "GHS"),
+                DocumentTotalAmount = documentAmount,
+                DocumentBalanceAmount = documentAmount,
                 AgingBucket = GetAgingBucket(daysOverdue, adjustment.DueDate),
                 SettlementStatus = "PostedAdjustment"
             };
+        }
+
+        private async Task<string> ResolveAgingFunctionalCurrencyAsync(
+            IReadOnlyCollection<SubledgerSettlementBalance> balances)
+        {
+            if (_tenantSettingsService != null)
+            {
+                return NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
+            }
+
+            var currencies = balances
+                .Select(balance => NormalizeCurrency(balance.FunctionalCurrencyCode, "GHS"))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (currencies.Count > 1)
+            {
+                throw new InvalidOperationException("AR aging cannot consolidate balances with multiple functional currencies.");
+            }
+
+            return currencies.SingleOrDefault() ?? "GHS";
+        }
+
+        private static decimal ToFunctionalAmount(SubledgerSettlementBalance balance, decimal documentAmount)
+        {
+            if (documentAmount == 0m)
+                return 0m;
+
+            if (balance.OriginalDocumentAmount == 0m)
+                return RoundMoney(documentAmount);
+
+            return RoundMoney(documentAmount * balance.OriginalFunctionalAmount / balance.OriginalDocumentAmount);
+        }
+
+        private static decimal GetSignedSubledgerFunctionalAmount(SubledgerAdjustmentJournal adjustment)
+        {
+            var documentAmount = GetSignedSubledgerAmount(adjustment);
+            if (documentAmount == 0m)
+                return 0m;
+
+            var functionalAmount = adjustment.BaseCurrencyAmount != 0m
+                ? Math.Abs(adjustment.BaseCurrencyAmount)
+                : Math.Abs(adjustment.Amount) * NormalizeExchangeRate(adjustment.ExchangeRate);
+
+            return RoundMoney(documentAmount > 0m ? functionalAmount : -functionalAmount);
         }
 
         private async Task<List<CustomerLedgerSelection>> GetCustomerLedgerSelectionsAsync(

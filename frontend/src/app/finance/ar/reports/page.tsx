@@ -3,10 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import {
-    Calendar as CalendarIcon,
-    Download,
-} from 'lucide-react';
+import { Calendar as CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
     Card,
@@ -39,6 +36,8 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { useAuth } from '@/hooks/use-auth';
+import { ArAgingExportButton } from '@/components/finance/ar/ArAgingExportButton';
 
 const REPORT_TABS = ['aging', 'statements'] as const;
 
@@ -83,6 +82,8 @@ export default function ArReportsPage() {
 }
 
 function AgingReportView() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [asOfDate, setAsOfDate] = useState<Date>(new Date());
 
     const { data: agingReport, isLoading } = useQuery({
@@ -121,9 +122,12 @@ function AgingReportView() {
                                 />
                             </PopoverContent>
                         </Popover>
-                        <Button variant="outline" size="icon">
-                            <Download className="h-4 w-4" />
-                        </Button>
+                        {canExport && (
+                            <ArAgingExportButton
+                                asOfDate={format(asOfDate, 'yyyy-MM-dd')}
+                                isReportLoading={isLoading}
+                            />
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -143,7 +147,7 @@ function AgingReportView() {
                                 <Card key={i} className="bg-muted/30">
                                     <CardContent className="p-4 text-center">
                                         <div className="text-sm font-medium text-muted-foreground mb-1">{bucket.bucketName}</div>
-                                        <div className="text-xl font-bold">{formatCurrency(bucket.amount)}</div>
+                                        <div className="text-xl font-bold">{formatCurrency(bucket.amount, agingReport.currencyCode)}</div>
                                         <div className="text-xs text-muted-foreground mt-1">{bucket.customerCount} customers</div>
                                     </CardContent>
                                 </Card>
@@ -164,13 +168,13 @@ function AgingReportView() {
                                     {agingReport.buckets.map((bucket, i) => (
                                         <TableRow key={i}>
                                             <TableCell className="font-medium">{bucket.bucketName}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(bucket.amount)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(bucket.amount, agingReport.currencyCode)}</TableCell>
                                             <TableCell className="text-right">{bucket.customerCount}</TableCell>
                                         </TableRow>
                                     ))}
                                     <TableRow className="bg-muted/50 font-bold">
                                         <TableCell>Total</TableCell>
-                                        <TableCell className="text-right">{formatCurrency(agingReport.totalOutstanding)}</TableCell>
+                                        <TableCell className="text-right">{formatCurrency(agingReport.summary.grandTotal, agingReport.currencyCode)}</TableCell>
                                         <TableCell className="text-right"></TableCell>
                                     </TableRow>
                                 </TableBody>
@@ -184,6 +188,8 @@ function AgingReportView() {
 }
 
 function CustomerStatementsView() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
     const [partnersLoading, setPartnersLoading] = useState(true);
 
@@ -231,6 +237,7 @@ function CustomerStatementsView() {
             exportFilePrefix="customer-statement"
             partners={partners}
             partnersLoading={partnersLoading}
+            canExport={canExport}
             loadReport={async (params): Promise<DetailedLedgerReport> => {
                 const report = await arService.getCustomerDetailedLedger({
                     fromDate: params.fromDate,
@@ -247,6 +254,7 @@ function CustomerStatementsView() {
                     totalDebits: report.totalDebits,
                     totalCredits: report.totalCredits,
                     totalClosingBalance: report.totalClosingBalance,
+                    currencyTotals: report.currencyTotals ?? [],
                     warnings: report.warnings ?? [],
                     accounts: report.customers.map((customer) => ({
                         id: customer.customerId,

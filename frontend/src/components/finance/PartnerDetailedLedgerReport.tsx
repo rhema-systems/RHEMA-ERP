@@ -54,6 +54,13 @@ export interface DetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals?: Array<{
+        currencyCode: string;
+        openingBalance: number;
+        totalDebits: number;
+        totalCredits: number;
+        closingBalance: number;
+    }>;
     warnings: string[];
     accounts: DetailedLedgerAccount[];
 }

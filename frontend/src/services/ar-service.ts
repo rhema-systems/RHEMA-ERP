@@ -213,6 +213,14 @@ class ArService {
         return apiService.get<AgingReport>(`${this.baseUrl}/reports/aging?${params.toString()}`);
     }
 
+    public async downloadAgingReportCsv(asOfDate: string): Promise<Blob> {
+        return apiService.postBlob('/finance/report-exports/export', {
+            reportType: 'ArAging',
+            format: 'Csv',
+            asOfDate,
+        });
+    }
+
     public async getCustomerStatement(customerId: string, startDate: string, endDate: string): Promise<any> {
         const params = new URLSearchParams();
         params.append('fromDate', startDate);

@@ -231,6 +231,8 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function ApAgingReportView() {
     const { currentTenantCode, isLoadingTenants } = useTenant();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [asOfDate, setAsOfDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
 
     const { data: agingReport, isLoading, isError, error } = useQuery({
@@ -255,7 +257,9 @@ function ApAgingReportView() {
                             onChange={(event) => event.target.value && setAsOfDate(event.target.value)}
                             className="w-full sm:w-[200px]"
                         />
-                        <ApAgingExportButton asOfDate={asOfDate} isReportLoading={isLoading} />
+                        {canExport && (
+                            <ApAgingExportButton asOfDate={asOfDate} isReportLoading={isLoading} />
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -521,6 +525,7 @@ function SupplierStatementsView() {
                     totalDebits: report.totalDebits,
                     totalCredits: report.totalCredits,
                     totalClosingBalance: report.totalClosingBalance,
+                    currencyTotals: report.currencyTotals ?? [],
                     warnings: report.warnings ?? [],
                     accounts: report.suppliers.map((supplier) => ({
                         id: supplier.businessPartnerId ?? supplier.supplierId,
