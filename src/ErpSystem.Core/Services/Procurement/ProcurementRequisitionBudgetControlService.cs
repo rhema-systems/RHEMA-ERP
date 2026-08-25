@@ -71,17 +71,48 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         return await EvaluateAsync(requisition, budget, commitment, cancellationToken);
     }
 
-    public async Task<PurchaseRequisitionBudgetReadinessDto> ReserveAsync(
+    public Task<PurchaseRequisitionBudgetReadinessDto> ReserveAsync(
         PurchaseRequisition requisition,
         string correlationId,
         CancellationToken cancellationToken = default)
+        => ReserveCoreAsync(
+            requisition,
+            SubmitPermission,
+            requireDraft: true,
+            correlationId,
+            cancellationToken);
+
+    public Task<PurchaseRequisitionBudgetReadinessDto> ReserveForDownstreamAsync(
+        PurchaseRequisition requisition,
+        string requiredPermissionCode,
+        string correlationId,
+        CancellationToken cancellationToken = default)
     {
-        EnsureRequisition(requisition);
-        await EnsureCapabilityAsync(SubmitPermission, requisition.RequisitionNumber, correlationId, cancellationToken);
+        if (!string.Equals(requisition.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_NOT_APPROVED",
+                "Only an approved purchase requisition can create a downstream budget commitment.");
+        return ReserveCoreAsync(
+            requisition,
+            requiredPermissionCode,
+            requireDraft: false,
+            correlationId,
+            cancellationToken);
+    }
+
+    private async Task<PurchaseRequisitionBudgetReadinessDto> ReserveCoreAsync(
+        PurchaseRequisition requisition,
+        string requiredPermissionCode,
+        bool requireDraft,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        EnsureRequisition(requisition, requireDraft);
+        await EnsureCapabilityAsync(requiredPermissionCode, requisition.RequisitionNumber, correlationId, cancellationToken);
         if (!_reservationStore.HasRequiredTransaction)
             throw new ProcurementRequisitionBudgetConflictException(
                 "PR_BUDGET_TRANSACTION_REQUIRED",
-                "Budget reservation must execute inside the purchase-requisition submission transaction.");
+                "Budget commitment must execute inside the downstream purchase-order or contract transaction.");
 
         ProcurementBudget? budget = null;
         if (requisition.BudgetId.HasValue)
@@ -409,10 +440,6 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             return PopulateCommitment(result, commitment, budget);
         }
 
-        if (!string.Equals(requisition.Status, "Draft", StringComparison.OrdinalIgnoreCase))
-            return Block(result, "PR_BUDGET_RESERVATION_NOT_AVAILABLE",
-                "Budget reservation is available only while the purchase requisition is Draft.",
-                "Return the requisition to its authorized Draft correction path before resubmitting.");
         if (requisition.TotalAmount <= 0)
             return Block(result, "PR_AMOUNT_REQUIRED", "The requisition total must be greater than zero.",
                 "Add valid requisition lines with a positive total amount.");
@@ -459,7 +486,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             result.IsCompliant = true;
             result.CanReserve = true;
             result.DecisionCode = "PR_BUDGET_AVAILABLE";
-            result.Message = $"Budget {budget.BudgetCode} has sufficient available funds for an atomic commitment.";
+            result.Message = $"Budget {budget.BudgetCode} has sufficient available funds. A commitment will be created when an approved purchase order or contract is issued.";
             result.Basis = "ApprovedBudget";
             return result;
         }

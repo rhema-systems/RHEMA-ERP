@@ -23,12 +23,12 @@ export function getBudgetControlPresentation(
     const activeCommitment = readiness.basis === 'ExistingCommitment';
     return {
       tone: 'ready',
-      title: activeCommitment ? 'Budget commitment protected' : 'Ready for atomic reservation',
+      title: activeCommitment ? 'Existing commitment retained' : 'Approved budget is available',
       basisLabel: readiness.isOverride
         ? 'Authorized override'
         : activeCommitment
           ? 'Active commitment'
-          : 'Approved budget'
+          : 'Availability confirmed'
     };
   }
 

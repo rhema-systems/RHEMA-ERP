@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -681,6 +682,7 @@ export default function EditPurchaseRequisitionPage() {
                       <TableHead>UOM</TableHead>
                       <TableHead className="text-right">Est. Unit Price</TableHead>
                       <TableHead className="text-right">Line Total</TableHead>
+                      <TableHead>Specifications</TableHead>
                       <TableHead>Preferred Supplier</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -705,6 +707,17 @@ export default function EditPurchaseRequisitionPage() {
                         </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatProcurementMoney(calculateLineTotal(item.quantity, item.estimatedUnitPrice), documentCurrency)}
+                        </TableCell>
+                        <TableCell>
+                          {linkage.specificationTemplateId || item.specifications?.trim() ? (
+                            <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+                              Complete
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                              Required before submission
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">{item.preferredSupplierName || '-'}</div>
@@ -973,7 +986,9 @@ export default function EditPurchaseRequisitionPage() {
               </div>
               
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="specifications">Specifications</Label>
+                <Label htmlFor="specifications">
+                  Specifications{linkage.specificationTemplateId ? '' : ' *'}
+                </Label>
                 <Textarea
                   id="specifications"
                   value={itemFormData.specifications}
@@ -981,6 +996,11 @@ export default function EditPurchaseRequisitionPage() {
                   placeholder="Technical specifications, requirements, etc."
                   rows={2}
                 />
+                <p className="text-xs text-muted-foreground">
+                  {linkage.specificationTemplateId
+                    ? 'The selected requisition specification template satisfies the submission requirement; add line-specific details here when needed.'
+                    : 'Required before submission. Enter the technical, quality, compatibility, delivery, or warranty requirements for this item.'}
+                </p>
               </div>
               
               <div className="space-y-2 md:col-span-2">

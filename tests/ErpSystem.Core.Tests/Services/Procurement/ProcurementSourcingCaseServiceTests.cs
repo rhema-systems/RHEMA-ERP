@@ -50,6 +50,24 @@ public sealed class ProcurementSourcingCaseServiceTests
         events.Should().ContainSingle(item => item.Action == "SourcingCaseCreated" && item.RuleCode == "TDC-0201");
     }
 
+    [Fact]
+    public async Task ApprovedReleaseWithoutLegacyPlanOrAuthorityLineageCanLockAControlledCase()
+    {
+        await using var fixture = new Fixture();
+        fixture.RemoveLegacyAdvancedLineage();
+        var request = fixture.ValidRequest();
+        request.Justification = null;
+
+        var created = await fixture.Service.CreateAsync(request, "trace-simplified-lineage");
+
+        created.SourcePlanId.Should().BeNull();
+        created.SourcePlanItemId.Should().BeNull();
+        created.AuthorityRouteId.Should().BeNull();
+        created.AuthorityRouteReference.Should().BeNull();
+        created.Justification.Should().Contain("selected automatically by policy");
+        created.Status.Should().Be(ProcurementSourcingCaseStatus.Ready);
+    }
+
     [Theory]
     [InlineData(ProcurementMethodType.RequestForQuotation)]
     [InlineData(ProcurementMethodType.NationalCompetitiveTendering)]
@@ -516,6 +534,21 @@ public sealed class ProcurementSourcingCaseServiceTests
                     Requisition.Id, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ProcurementRequisitionSourcingNotFoundException(
                     "PR_NOT_FOUND", "The purchase requisition is no longer operationally available."));
+
+        public void RemoveLegacyAdvancedLineage()
+        {
+            Requisition.SourcePlanId = null;
+            Requisition.SourcePlanItemId = null;
+            _release.SourcePlanId = null;
+            _release.SourcePlanItemId = null;
+            _release.AuthorityRouteId = null;
+            _release.AuthorityRouteReference = null;
+            ReleaseDto.SourcePlanId = null;
+            ReleaseDto.SourcePlanItemId = null;
+            ReleaseDto.AuthorityRouteId = null;
+            ReleaseDto.AuthorityRouteReference = null;
+            Context.SaveChanges();
+        }
 
         public void DenyOverrideCapability()
         {

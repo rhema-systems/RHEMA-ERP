@@ -170,6 +170,19 @@ public sealed class ProcurementPurchaseOrderComplianceRulesTests
     }
 
     [Fact]
+    public void SimplifiedReleaseUsesTheRequisitionsAuthoritativeCommitment()
+    {
+        var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
+            ValidCommitment() with
+            {
+                ReleaseCommitmentId = null,
+                ReleaseCommitmentReference = null
+            });
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
     public void GovernedCommitmentRejectsMissingRequisitionBudgetLineage()
     {
         var result = ProcurementPurchaseOrderComplianceRules

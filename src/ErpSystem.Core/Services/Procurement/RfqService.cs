@@ -164,8 +164,9 @@ public class RfqService : IRfqService
         }
 
         await SyncInvitationsAsync(rfq.Id, dto.SupplierIds, isDraftSelection: true);
-        await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId, "RequestForQuotation",
-            rfq.Id, rfq.RfqNumber, Guid.NewGuid().ToString("N"));
+        if (gate.SourcingCaseId.HasValue)
+            await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId.Value, "RequestForQuotation",
+                rfq.Id, rfq.RfqNumber, Guid.NewGuid().ToString("N"));
 
         await _unitOfWork.SaveChangesAsync();
 

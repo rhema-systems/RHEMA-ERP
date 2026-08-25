@@ -1030,11 +1030,31 @@ export const navigationItems: NavItem[] = [
         href: '/development/planning',
         icon: MapPin,
         children: [
-          { title: 'Planning Dashboard', href: '/development/planning/dashboard', icon: BarChart3 },
-          { title: 'SOP Procedures', href: '/development/planning', icon: ClipboardList },
-          { title: 'Workflow Setup', href: '/administration/workflow?q=Planning', icon: Workflow },
-          { title: 'Documents', href: '/document-management?module=Planning', icon: FileText },
-          { title: 'Reports', href: '/reports?module=planning', icon: FileCheck },
+          {
+            title: 'Planning Dashboard',
+            href: '/development/planning/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'SOP Procedures',
+            href: '/development/planning',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Workflow Setup',
+            href: '/administration/workflow?q=Planning',
+            icon: Workflow,
+          },
+          {
+            title: 'Documents',
+            href: '/document-management?module=Planning',
+            icon: FileText,
+          },
+          {
+            title: 'Reports',
+            href: '/reports?module=planning',
+            icon: FileCheck,
+          },
         ],
       },
       {
@@ -1496,7 +1516,10 @@ export const navigationItems: NavItem[] = [
             title: 'Supplier Returns',
             href: '/inventory/supplier-returns',
             icon: RotateCcw,
-            permissions: ['procurement.inventory.issue', 'procurement.inventory.adjust.approve'],
+            permissions: [
+              'procurement.inventory.issue',
+              'procurement.inventory.adjust.approve',
+            ],
             accessMode: 'any',
           },
           {
@@ -2272,7 +2295,11 @@ export const navigationItems: NavItem[] = [
         icon: ShoppingCart,
       },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
-      { title: 'Quantity Survey Reports', href: '/reports/quantity-survey', icon: Scale },
+      {
+        title: 'Quantity Survey Reports',
+        href: '/reports/quantity-survey',
+        icon: Scale,
+      },
       {
         title: 'Audit & Compliance Reports',
         href: '/reports/audit-compliance',
@@ -2653,7 +2680,7 @@ export const navigationItems: NavItem[] = [
             icon: ShieldCheck,
           },
           {
-            title: 'Executable Policies',
+            title: 'Policy Sets',
             href: '/administration/procurement/policy-sets',
             icon: ShieldCheck,
           },

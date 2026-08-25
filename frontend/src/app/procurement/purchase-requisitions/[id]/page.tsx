@@ -338,6 +338,14 @@ export default function PurchaseRequisitionDetailPage() {
     sourcingReadiness,
     sourcingReadinessLoading
   );
+  const itemsMissingSpecifications =
+    requisition?.linkage.specificationTemplateId
+      ? []
+      : (requisition?.items || []).filter(
+          (item) =>
+            item.status?.toLowerCase() !== 'cancelled' &&
+            !item.specifications?.trim()
+        );
 
   const workflow = useWorkflowRecord({
     entityType: 'PurchaseRequisition',
@@ -349,8 +357,7 @@ export default function PurchaseRequisitionDetailPage() {
     canSubmit:
       requisition?.status === 'Draft' &&
       submissionReadiness?.canSubmit === true &&
-      budgetReadiness?.canReserve === true &&
-      authorityReadiness?.canSubmit === true,
+      budgetReadiness?.canReserve === true,
     canApproveReject:
       requisition?.status === 'Pending Approval' ||
       requisition?.status === 'Submitted',
@@ -611,8 +618,9 @@ export default function PurchaseRequisitionDetailPage() {
               Submission control
             </CardTitle>
             <CardDescription className="mt-1">
-              An acknowledged APP linkage or a traceable approved exception is
-              required before workflow submission.
+              Required requisition details are checked before the configured
+              approval workflow starts. APP exchange is shown for traceability
+              and does not block submission.
             </CardDescription>
           </div>
           <Badge variant="outline">{submissionPresentation.basisLabel}</Badge>
@@ -683,18 +691,33 @@ export default function PurchaseRequisitionDetailPage() {
               </div>
             )}
 
+          {itemsMissingSpecifications.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-background p-4 text-sm">
+              <p className="font-medium">Items needing specifications</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                {itemsMissingSpecifications.map((item) => (
+                  <li key={item.id}>{item.itemDescription}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Edit each listed line and enter its requirements, or select a
+                published requisition specification template.
+              </p>
+            </div>
+          )}
+
           {canEdit && (
             <div className="flex flex-wrap gap-2">
               <Link href={`/procurement/purchase-requisitions/${id}/edit`}>
                 <Button variant="outline" size="sm">
                   <Edit className="mr-2 h-4 w-4" />
-                  Edit governance linkage
+                  Edit requisition
                 </Button>
               </Link>
               <Link href="/procurement/planning/app-submissions">
                 <Button variant="outline" size="sm">
                   <ShieldCheck className="mr-2 h-4 w-4" />
-                  Open APP register
+                  View APP register
                 </Button>
               </Link>
             </div>
@@ -724,8 +747,9 @@ export default function PurchaseRequisitionDetailPage() {
               Finance budget control
             </CardTitle>
             <CardDescription className="mt-1">
-              Submission atomically reserves current approved budget; concurrent
-              requests cannot spend the same availability.
+              The approved budget and current availability are validated here.
+              The Finance commitment is created when an approved PO or contract
+              is issued.
             </CardDescription>
           </div>
           <Badge variant="outline">{budgetPresentation.basisLabel}</Badge>
@@ -870,12 +894,12 @@ export default function PurchaseRequisitionDetailPage() {
               ) : (
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               )}
-              Approval authority route
+              Policy authority guidance
             </CardTitle>
             <CardDescription className="mt-1">
-              Category, amount, currency, effective policy, authority stages,
-              quorum, SOD, and one exact shared-workflow version are resolved
-              server-side.
+              Optional policy routing metadata is shown for administrators. PR
+              submission uses the published Purchase Requisition workflow and
+              is not blocked by an executable-policy authority band.
             </CardDescription>
           </div>
           <Badge variant="outline">{authorityPresentation.basisLabel}</Badge>
@@ -1002,11 +1026,14 @@ export default function PurchaseRequisitionDetailPage() {
 
           {authorityReadiness &&
             authorityReadiness.requiredActions.length > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-medium text-amber-950">
-                  Configuration action required
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-medium text-slate-900">
+                  Optional administrator note
                 </p>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+                <p className="mt-1 text-xs text-slate-600">
+                  This does not prevent requisition submission or approval.
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
                   {authorityReadiness.requiredActions.map((action) => (
                     <li key={action}>{action}</li>
                   ))}

@@ -111809,6 +111809,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<Guid?>("AuthorityRoleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("Category")
                         .HasColumnType("int");
 
@@ -111843,6 +111846,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("EscalationAuthority")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("EscalationAuthorityRoleId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -112191,6 +112197,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid?>("ApproverRoleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("Category")
                         .HasColumnType("int");
 
@@ -112357,6 +112366,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("JustificationRequired")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
@@ -112695,6 +112707,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<Guid?>("ConflictingRoleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -112732,6 +112747,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid?>("InitiatorRoleId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -115559,19 +115577,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("AttemptNumber")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("AuthorityRouteId")
+                    b.Property<Guid?>("AuthorityRouteId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AuthorityRouteReference")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<Guid>("BudgetCommitmentId")
+                    b.Property<Guid?>("BudgetCommitmentId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("BudgetCommitmentReference")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -115651,22 +115667,21 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid>("SourcePlanId")
+                    b.Property<Guid?>("SourcePlanId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("SourcePlanItemId")
+                    b.Property<Guid?>("SourcePlanItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SpecificationTemplateCode")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .IsUnicode(false)
                         .HasColumnType("varchar(50)");
 
-                    b.Property<Guid>("SpecificationTemplateId")
+                    b.Property<Guid?>("SpecificationTemplateId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("SpecificationTemplateVersion")
+                    b.Property<int?>("SpecificationTemplateVersion")
                         .HasColumnType("int");
 
                     b.Property<Guid>("TenantId")
@@ -115678,7 +115693,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid>("WorkflowInstanceId")
+                    b.Property<Guid?>("WorkflowInstanceId")
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
@@ -115722,7 +115737,6 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Hashes", "LEN([ControlFingerprint]) = 64 AND LEN([IntegrityHash]) = 64");
 
-                            t.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Lineage", "[SourcePlanId] <> '00000000-0000-0000-0000-000000000000' AND [SourcePlanItemId] <> '00000000-0000-0000-0000-000000000000' AND [SpecificationTemplateId] <> '00000000-0000-0000-0000-000000000000' AND [BudgetCommitmentId] <> '00000000-0000-0000-0000-000000000000' AND [AuthorityRouteId] <> '00000000-0000-0000-0000-000000000000' AND [WorkflowInstanceId] <> '00000000-0000-0000-0000-000000000000'");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -116800,11 +116814,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedExceptionRuleId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("AuthorityRouteId")
+                    b.Property<Guid?>("AuthorityRouteId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AuthorityRouteReference")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -116959,10 +116972,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("char(64)")
                         .IsFixedLength();
 
-                    b.Property<Guid>("SourcePlanId")
+                    b.Property<Guid?>("SourcePlanId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("SourcePlanItemId")
+                    b.Property<Guid?>("SourcePlanItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("SourcingReleaseId")
@@ -186957,8 +186970,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementRequisitionAuthorityRoute", "AuthorityRoute")
                         .WithMany()
                         .HasForeignKey("AuthorityRouteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowInstance", "MethodOverrideWorkflowInstance")
                         .WithMany()
@@ -186986,14 +186998,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPlan", "SourcePlan")
                         .WithMany()
                         .HasForeignKey("SourcePlanId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPlanItem", "SourcePlanItem")
                         .WithMany()
                         .HasForeignKey("SourcePlanItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementRequisitionSourcingRelease", "SourcingRelease")
                         .WithMany("SourcingCases")

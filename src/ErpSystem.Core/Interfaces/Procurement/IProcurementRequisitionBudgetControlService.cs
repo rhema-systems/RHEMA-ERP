@@ -17,6 +17,12 @@ public interface IProcurementRequisitionBudgetControlService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task<PurchaseRequisitionBudgetReadinessDto> ReserveForDownstreamAsync(
+        PurchaseRequisition requisition,
+        string requiredPermissionCode,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
     Task<PurchaseRequisitionBudgetReleaseDto> ReleaseAsync(
         PurchaseRequisition requisition,
         string reason,

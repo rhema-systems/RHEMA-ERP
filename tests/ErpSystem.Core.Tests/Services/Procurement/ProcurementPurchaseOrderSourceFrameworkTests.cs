@@ -85,7 +85,9 @@ public sealed class ProcurementPurchaseOrderSourceFrameworkTests
                 TenantId = TenantId,
                 RequisitionNumber = "PR-FRAME-EX-001",
                 RequestedById = Guid.NewGuid(),
-                Status = "Approved"
+                Status = "Approved",
+                ProcurementCategory = ProcurementCategoryClass.Goods,
+                Currency = "GHS"
             };
             Release = new ProcurementRequisitionSourcingRelease
             {
@@ -192,6 +194,7 @@ public sealed class ProcurementPurchaseOrderSourceFrameworkTests
                 current.Object,
                 new Mock<IProcurementAccessControlService>().Object,
                 new Mock<IProcurementControlEventService>().Object,
+                new Mock<IProcurementRequisitionBudgetControlService>().Object,
                 new Mock<INotificationTopicPublisher>().Object,
                 NullLogger<ProcurementPurchaseOrderSourceService>.Instance);
         }

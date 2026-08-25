@@ -15,8 +15,8 @@ public sealed class ProcurementRequisitionSourcingRelease : TenantEntity
     [Range(1, int.MaxValue)] public int AttemptNumber { get; set; }
     [Required, StringLength(100)] public string ReleaseReference { get; set; } = string.Empty;
 
-    public Guid SourcePlanId { get; set; }
-    public Guid SourcePlanItemId { get; set; }
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public Guid? AppSubmissionId { get; set; }
     public int? AppSubmissionAttemptNumber { get; set; }
     [StringLength(100)] public string? AppAcknowledgementReference { get; set; }
@@ -24,15 +24,15 @@ public sealed class ProcurementRequisitionSourcingRelease : TenantEntity
     public Guid? ExceptionWorkflowInstanceId { get; set; }
     [StringLength(200)] public string? ExceptionApprovalReference { get; set; }
 
-    public Guid SpecificationTemplateId { get; set; }
-    [Required, StringLength(50)] public string SpecificationTemplateCode { get; set; } = string.Empty;
-    [Range(1, int.MaxValue)] public int SpecificationTemplateVersion { get; set; }
+    public Guid? SpecificationTemplateId { get; set; }
+    [StringLength(50)] public string? SpecificationTemplateCode { get; set; }
+    [Range(1, int.MaxValue)] public int? SpecificationTemplateVersion { get; set; }
 
-    public Guid BudgetCommitmentId { get; set; }
-    [Required, StringLength(100)] public string BudgetCommitmentReference { get; set; } = string.Empty;
-    public Guid AuthorityRouteId { get; set; }
-    [Required, StringLength(100)] public string AuthorityRouteReference { get; set; } = string.Empty;
-    public Guid WorkflowInstanceId { get; set; }
+    public Guid? BudgetCommitmentId { get; set; }
+    [StringLength(100)] public string? BudgetCommitmentReference { get; set; }
+    public Guid? AuthorityRouteId { get; set; }
+    [StringLength(100)] public string? AuthorityRouteReference { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
 
     public DateTime ReleasedAtUtc { get; set; }
     public Guid ReleasedById { get; set; }
@@ -47,9 +47,9 @@ public sealed class ProcurementRequisitionSourcingRelease : TenantEntity
     public ProcurementAppSubmission? AppSubmission { get; set; }
     public ProcurementPolicyExceptionRule? ApprovedExceptionRule { get; set; }
     public WorkflowInstance? ExceptionWorkflowInstance { get; set; }
-    public ProcurementSpecificationTemplate SpecificationTemplate { get; set; } = null!;
-    public ProcurementBudgetCommitment BudgetCommitment { get; set; } = null!;
-    public ProcurementRequisitionAuthorityRoute AuthorityRoute { get; set; } = null!;
-    public WorkflowInstance WorkflowInstance { get; set; } = null!;
+    public ProcurementSpecificationTemplate? SpecificationTemplate { get; set; }
+    public ProcurementBudgetCommitment? BudgetCommitment { get; set; }
+    public ProcurementRequisitionAuthorityRoute? AuthorityRoute { get; set; }
+    public WorkflowInstance? WorkflowInstance { get; set; }
     public ICollection<ProcurementSourcingCase> SourcingCases { get; set; } = new List<ProcurementSourcingCase>();
 }

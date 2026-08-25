@@ -500,6 +500,14 @@ function Invoke-Preflight {
     # trigger bodies without mutating legacy rows. The preflight probe above
     # rejects missing source tables and any partial column apply before startup.
     Write-Output 'GUARD_COVERAGE|20260820100000_AddInventoryOpeningStockBook'
+    # The simplified PR control migration only relaxes existing columns to nullable
+    # and replaces the insert-time tenant/approval-lineage trigger. Its THROW is in
+    # the new trigger body and is not evaluated against stored rows during apply.
+    Write-Output 'GUARD_COVERAGE|20260824183000_SimplifyPurchaseRequisitionControls'
+    # This migration only relaxes advanced sourcing-case lineage columns. Its
+    # Up THROW statements are contained in the replacement lifecycle trigger;
+    # the stored-row guard belongs to Down and is not executed during deploy.
+    Write-Output 'GUARD_COVERAGE|20260825120000_SimplifyProcurementSourcingCaseLineage'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
@@ -693,6 +701,40 @@ function Start-ApiWithControlledMigrations {
     }
 }
 
+function Stop-ManagedService {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('RhemaERPAPI', 'RhemaERPFrontend')]
+        [string]$Name,
+        [int]$GracefulTimeoutSeconds = 45
+    )
+
+    $service = Get-Service $Name
+    if ($service.Status -eq 'Stopped') { return }
+
+    # Submit the graceful stop without allowing a stuck wrapper process to
+    # block the whole release indefinitely.
+    & sc.exe stop $Name | Out-Null
+    $deadline = (Get-Date).AddSeconds($GracefulTimeoutSeconds)
+    do {
+        Start-Sleep -Seconds 2
+        $service.Refresh()
+    } while ($service.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
+
+    if ($service.Status -ne 'Stopped') {
+        $serviceProcess = Get-CimInstance Win32_Service |
+            Where-Object Name -eq $Name
+        if ($null -ne $serviceProcess -and $serviceProcess.ProcessId -gt 0) {
+            Stop-Process -Id $serviceProcess.ProcessId -Force
+        }
+        (Get-Service $Name).WaitForStatus(
+            'Stopped', [TimeSpan]::FromSeconds(30))
+    }
+
+    Assert-True ((Get-Service $Name).Status -eq 'Stopped') `
+        "Service '$Name' did not stop within the controlled deployment window."
+}
+
 function Invoke-Apply {
     Assert-DeploymentId
     foreach ($value in @($ApiPackageName, $FrontendPackageName, $ApiSha256,
@@ -751,9 +793,7 @@ function Invoke-Apply {
     Set-TestServerConfiguration
     $apiStartedAt = Get-Date
     try {
-        Stop-Service RhemaERPAPI -Force
-        (Get-Service RhemaERPAPI).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPAPI
         Invoke-RobocopyChecked @(
             $stageApi, $ApiRoot, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
             '/NJH', '/NJS', '/NP',
@@ -782,9 +822,7 @@ function Invoke-Apply {
     }
 
     try {
-        Stop-Service RhemaERPFrontend -Force
-        (Get-Service RhemaERPFrontend).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPFrontend
         if (Test-Path (Join-Path $FrontendRoot '.next')) {
             Move-Item (Join-Path $FrontendRoot '.next') (Join-Path $retired '.next')
         }
@@ -873,9 +911,7 @@ function Invoke-ResumeFrontend {
     New-Item -ItemType Directory -Path $rollbackFrontend | Out-Null
     $swapped = $false
     try {
-        Stop-Service RhemaERPFrontend -Force
-        (Get-Service RhemaERPFrontend).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPFrontend
         foreach ($name in @('.next', 'public')) {
             Move-Item (Join-Path $FrontendRoot $name) `
                 (Join-Path $rollbackFrontend $name)

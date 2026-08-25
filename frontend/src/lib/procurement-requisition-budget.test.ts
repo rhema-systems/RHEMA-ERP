@@ -32,15 +32,15 @@ describe('getBudgetControlPresentation', () => {
     });
   });
 
-  it('labels sufficient approved budget as ready for atomic reservation', () => {
+  it('labels sufficient approved budget as available without reserving it', () => {
     expect(getBudgetControlPresentation(readiness({
       isCompliant: true,
       canReserve: true,
       basis: 'ApprovedBudget'
     }))).toMatchObject({
       tone: 'ready',
-      title: 'Ready for atomic reservation',
-      basisLabel: 'Approved budget'
+      title: 'Approved budget is available',
+      basisLabel: 'Availability confirmed'
     });
   });
 
@@ -69,7 +69,7 @@ describe('getBudgetControlPresentation', () => {
       commitmentStatus: 'Reserved'
     }))).toMatchObject({
       tone: 'ready',
-      title: 'Budget commitment protected',
+      title: 'Existing commitment retained',
       basisLabel: 'Active commitment'
     });
   });

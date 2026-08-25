@@ -42,6 +42,7 @@ public sealed class ProcurementContractActivationService :
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IProcurementContractActivationStore _store;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementRequisitionBudgetControlService _budgetControl;
     private readonly INotificationTopicPublisher _notifications;
     private readonly IContractService _contracts;
     private readonly ILogger<ProcurementContractActivationService> _logger;
@@ -56,6 +57,7 @@ public sealed class ProcurementContractActivationService :
         IWorkflowIntegrationService workflow,
         IProcurementContractActivationStore store,
         IProcurementControlEventService controlEvents,
+        IProcurementRequisitionBudgetControlService budgetControl,
         INotificationTopicPublisher notifications,
         IContractService contracts,
         ILogger<ProcurementContractActivationService> logger)
@@ -69,6 +71,7 @@ public sealed class ProcurementContractActivationService :
         _workflow = workflow;
         _store = store;
         _controlEvents = controlEvents;
+        _budgetControl = budgetControl;
         _notifications = notifications;
         _contracts = contracts;
         _logger = logger;
@@ -215,6 +218,8 @@ public sealed class ProcurementContractActivationService :
                 throw Conflict("CONTRACT_ACTIVATION_OPEN_REQUEST",
                     "The contract already has an open activation request.");
 
+            await EnsureBudgetCommitmentForActivationAsync(
+                contract, correlation, cancellationToken);
             var evidence = await ValidateEvidenceAsync(
                 contract, request.Evidence, cancellationToken);
             var evaluation = await EvaluateAsync(
@@ -888,18 +893,25 @@ public sealed class ProcurementContractActivationService :
                 item.PurchaseRequisitionId == tender.SourcePurchaseRequisitionId.Value &&
                 !item.IsDeleted)
             .Include(item => item.PurchaseRequisition)
-            .Include(item => item.BudgetCommitment)
-                .ThenInclude(item => item.ProcurementBudget)
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken);
-        if (release?.BudgetCommitment?.ProcurementBudget is null)
+        var commitment = release is null
+            ? null
+            : await _unitOfWork.Repository<ProcurementBudgetCommitment>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == release.PurchaseRequisitionId &&
+                    !item.IsDeleted)
+                .Include(item => item.ProcurementBudget)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+        if (release is null || commitment?.ProcurementBudget is null)
         {
             return Failed("commitment", "Budget commitment",
                 "CONTRACT_ACTIVATION_BUDGET_COMMITMENT_MISSING",
                 "The contract sourcing release has no authoritative budget commitment.");
         }
 
-        var commitment = release.BudgetCommitment;
         var budget = commitment.ProcurementBudget;
         var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
             new ProcurementCommitmentLifecycleSnapshot(
@@ -937,6 +949,62 @@ public sealed class ProcurementContractActivationService :
                 result.Message, commitment.Id, commitment.ReservationReference)
             : Failed("commitment", "Budget commitment", result.Code,
                 result.Message);
+    }
+
+    private async Task EnsureBudgetCommitmentForActivationAsync(
+        Contract contract,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (!_unitOfWork.HasActiveTransaction)
+            throw Conflict(
+                "CONTRACT_ACTIVATION_BUDGET_TRANSACTION_REQUIRED",
+                "The contract budget commitment must be created inside the activation transaction.");
+
+        var tender = await _unitOfWork.Repository<Tender>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == contract.TenderId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (tender is null || !tender.SourcePurchaseRequisitionId.HasValue ||
+            !tender.SourcingReleaseId.HasValue)
+            throw Validation(
+                "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
+                "The approved contract source must identify its purchase requisition and sourcing release.");
+
+        var release = await _unitOfWork.Repository<ProcurementRequisitionSourcingRelease>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == tender.SourcingReleaseId.Value &&
+                item.PurchaseRequisitionId == tender.SourcePurchaseRequisitionId.Value &&
+                !item.IsDeleted)
+            .Include(item => item.PurchaseRequisition)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Validation(
+                "CONTRACT_ACTIVATION_SOURCING_RELEASE_MISSING",
+                "The contract source has no current requisition sourcing release.");
+
+        var existingCommitment = await _unitOfWork.Repository<ProcurementBudgetCommitment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == release.PurchaseRequisitionId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .AnyAsync(cancellationToken);
+        if (existingCommitment)
+            return;
+
+        var readiness = await _budgetControl.ReserveForDownstreamAsync(
+            release.PurchaseRequisition,
+            ManagePermission,
+            correlationId,
+            cancellationToken);
+        if (!readiness.IsCompliant || !readiness.CommitmentId.HasValue)
+            throw Validation(readiness.DecisionCode, readiness.Message);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<bool> IsEvidenceCurrentAsync(

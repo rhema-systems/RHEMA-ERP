@@ -25,21 +25,21 @@ public sealed class PurchaseRequisitionSourcingReleaseDto
     public string RequisitionNumber { get; set; } = string.Empty;
     public int AttemptNumber { get; set; }
     public string ReleaseReference { get; set; } = string.Empty;
-    public Guid SourcePlanId { get; set; }
-    public Guid SourcePlanItemId { get; set; }
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public Guid? AppSubmissionId { get; set; }
     public int? AppSubmissionAttemptNumber { get; set; }
     public string? AppAcknowledgementReference { get; set; }
     public Guid? ApprovedExceptionRuleId { get; set; }
     public string? ExceptionApprovalReference { get; set; }
-    public Guid SpecificationTemplateId { get; set; }
-    public string SpecificationTemplateCode { get; set; } = string.Empty;
-    public int SpecificationTemplateVersion { get; set; }
-    public Guid BudgetCommitmentId { get; set; }
-    public string BudgetCommitmentReference { get; set; } = string.Empty;
-    public Guid AuthorityRouteId { get; set; }
-    public string AuthorityRouteReference { get; set; } = string.Empty;
-    public Guid WorkflowInstanceId { get; set; }
+    public Guid? SpecificationTemplateId { get; set; }
+    public string? SpecificationTemplateCode { get; set; }
+    public int? SpecificationTemplateVersion { get; set; }
+    public Guid? BudgetCommitmentId { get; set; }
+    public string? BudgetCommitmentReference { get; set; }
+    public Guid? AuthorityRouteId { get; set; }
+    public string? AuthorityRouteReference { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
     public DateTime ReleasedAtUtc { get; set; }
     public Guid ReleasedById { get; set; }
     public string ReleasedByName { get; set; } = string.Empty;

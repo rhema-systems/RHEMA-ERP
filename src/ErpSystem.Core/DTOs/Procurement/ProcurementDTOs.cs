@@ -489,6 +489,7 @@ public class PurchaseRequisitionSummaryDto
     public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
     public string? SourcePlanNumber { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public string? SourcePlanItemDescription { get; set; }
     public string? BudgetCode { get; set; }
     public ProcurementCategoryClass? ProcurementCategory { get; set; }

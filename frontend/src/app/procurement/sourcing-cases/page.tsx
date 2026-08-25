@@ -156,8 +156,8 @@ export default function ProcurementSourcingCasesPage() {
   const effectiveMethod = form.selectedMethod ?? recommendedMethod;
   const isMethodOverride = Boolean(
     form.selectedMethod &&
-      recommendedMethod &&
-      form.selectedMethod !== recommendedMethod
+    recommendedMethod &&
+    form.selectedMethod !== recommendedMethod
   );
   const recommendationCandidate = readiness.data?.methodCandidates.find(
     (candidate) => candidate.method === recommendedMethod
@@ -860,7 +860,10 @@ export default function ProcurementSourcingCasesPage() {
           )}
 
           <div className="space-y-2">
-            <Label>Method justification</Label>
+            <Label>
+              Sourcing and lot notes
+              {form.lots.length > 1 ? ' *' : ' (optional)'}
+            </Label>
             <Textarea
               value={form.justification}
               onChange={(event) =>
@@ -869,9 +872,18 @@ export default function ProcurementSourcingCasesPage() {
                   justification: event.target.value,
                 }))
               }
-              placeholder="Record why this method and lot structure are appropriate for the released demand."
+              placeholder={
+                form.lots.length > 1
+                  ? 'Explain why this requisition is divided into multiple sourcing lots.'
+                  : 'Add any useful operational notes. The system records the policy-selected method and rationale automatically.'
+              }
               rows={3}
             />
+            <p className="text-xs text-muted-foreground">
+              {form.lots.length > 1
+                ? 'Multiple lots require a short structure explanation. A separate approval reason is required for a method override.'
+                : 'A separate reason is required only when requesting a method other than the policy recommendation.'}
+            </p>
           </div>
 
           <div className="space-y-3">

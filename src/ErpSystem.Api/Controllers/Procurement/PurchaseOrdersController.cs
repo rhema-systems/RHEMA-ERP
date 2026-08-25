@@ -1340,6 +1340,18 @@ public class PurchaseOrdersController : ControllerBase
             {
                 return BadRequest($"Purchase order cannot be submitted in current status: {purchaseOrder.Status}");
             }
+
+            ownsWorkflowTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsWorkflowTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+            }
+            await _purchaseOrderSources.EnsureBudgetCommitmentForIssueAsync(
+                purchaseOrder,
+                correlationId,
+                HttpContext.RequestAborted);
             await _purchaseOrderCompliance.EnforceAsync(
                 purchaseOrder,
                 "Submit",
@@ -1349,13 +1361,6 @@ public class PurchaseOrdersController : ControllerBase
             WorkflowIntegrationResult workflowResult;
             try
             {
-                ownsWorkflowTransaction = !_unitOfWork.HasActiveTransaction;
-                if (ownsWorkflowTransaction)
-                {
-                    await _unitOfWork.BeginTransactionAsync(
-                        IsolationLevel.Serializable,
-                        HttpContext.RequestAborted);
-                }
                 workflowResult = await _workflowIntegrationService.SubmitAsync("PurchaseOrder", id);
             }
             catch (InvalidOperationException ex)

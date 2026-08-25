@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
@@ -196,7 +197,8 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         var now = DateTime.UtcNow;
         var sourcePlanItem = request.SourcePlanItemId.HasValue
             ? await PlanItems.GetQueryable(item => item.Id == request.SourcePlanItemId.Value && item.TenantId == tenantId && !item.IsDeleted)
-                .Include(item => item.ProcurementPlan).AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.Department)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
                 ?? throw new ProcurementRequisitionLinkageNotFoundException("PLAN_ITEM_NOT_FOUND", "The plan item was not found in the current tenant.")
             : null;
 
@@ -207,6 +209,22 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
              !string.Equals(sourcePlanItem.Status, "Planned", StringComparison.OrdinalIgnoreCase)))
             throw new ProcurementRequisitionLinkageConflictException(
                 "PLAN_ITEM_NOT_EXECUTABLE", "Only an Approved item from an Approved or Active procurement plan can start a purchase requisition.");
+
+        if (sourcePlanItem is not null)
+        {
+            var existingRequisition = await Requisitions.GetQueryable(item =>
+                    item.TenantId == tenantId && !item.IsDeleted && item.Id != requisition.Id &&
+                    item.SourcePlanItemId == sourcePlanItem.Id &&
+                    item.Status != "Rejected" && item.Status != "Cancelled")
+                .AsNoTracking()
+                .OrderByDescending(item => item.CreatedAt)
+                .Select(item => new { item.Id, item.RequisitionNumber, item.Status })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existingRequisition is not null)
+                throw new ProcurementRequisitionLinkageConflictException(
+                    "PLAN_ITEM_REQUISITION_EXISTS",
+                    $"Plan item {sourcePlanItem.ItemDescription} is already linked to {existingRequisition.RequisitionNumber} ({existingRequisition.Status}). Open that requisition instead of creating a duplicate.");
+        }
 
         var sourceBudgetId = sourcePlanItem is null
             ? null
@@ -321,10 +339,14 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         if (budget is not null)
             requisition.Currency = budget.Currency;
         requisition.ProcurementCategory = request.ProcurementCategory ?? ParseCategory(sourcePlanItem?.ItemCategory);
-        // A planned requisition already carries its department through the source plan.
-        // Finance owns any department-to-cost-centre mapping, so the requester must not
-        // type or override a cost-centre value for this governed path.
-        requisition.CostCenter = sourcePlanItem is null ? TrimOrNull(request.CostCenter, 100) : null;
+        // A planned requisition already carries its accounting ownership through the
+        // source plan department. Keep the field out of the requester UI, but persist a
+        // stable Finance dimension so the downstream commitment/release gate is not left
+        // with an impossible null value. AccountCode is the explicit accounting mapping;
+        // older departments fall back to their controlled department code.
+        requisition.CostCenter = sourcePlanItem is null
+            ? TrimOrNull(request.CostCenter, 100)
+            : ResolveDepartmentCostCenter(sourcePlanItem.ProcurementPlan.Department);
         requisition.ProjectId = project?.Id;
         requisition.ProjectCode = project?.ProjectCode;
         requisition.ProjectName = project?.Title;
@@ -545,6 +567,17 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : Truncate(correlationId.Trim(), 100);
     private static string? TrimOrNull(string? value, int maxLength) =>
         string.IsNullOrWhiteSpace(value) ? null : Truncate(value.Trim(), maxLength);
+    private static string ResolveDepartmentCostCenter(Department department)
+    {
+        var value = TrimOrNull(department.AccountCode, 100)
+            ?? TrimOrNull(department.Code, 100);
+        if (value is null)
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PLAN_DEPARTMENT_COST_CENTER_REQUIRED",
+                $"Department {department.Name} has no accounting or department code from which to derive the cost centre.");
+
+        return value;
+    }
     private static string Truncate(string value, int maxLength) => value.Length <= maxLength ? value : value[..maxLength];
     private static ProcurementCategoryClass? ParseCategory(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : Enum.TryParse<ProcurementCategoryClass>(value.Replace(" ", string.Empty), true, out var parsed)

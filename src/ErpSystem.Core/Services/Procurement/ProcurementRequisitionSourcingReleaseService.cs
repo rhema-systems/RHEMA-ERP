@@ -201,6 +201,119 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         bool linkedControl = false)
     {
         var evaluatedAtUtc = DateTime.UtcNow;
+        var budget = linkedControl
+            ? await _budgetControl.GetLinkedControlReadinessAsync(requisition.Id, cancellationToken)
+            : await _budgetControl.GetReadinessAsync(requisition.Id, cancellationToken);
+        var items = await RequisitionItems.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.RequisitionId == requisition.Id && !item.IsDeleted && item.Status != "Cancelled")
+            .AsNoTracking().OrderBy(item => item.CreatedAt).ToListAsync(cancellationToken);
+        var workflow = await WorkflowInstances.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && item.EntityId == requisition.Id &&
+                !item.IsDeleted && item.Status == WorkflowInstanceStatus.Completed)
+            .AsNoTracking().OrderByDescending(item => item.CompletedDate).ThenByDescending(item => item.CreatedDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var requirements = new List<PurchaseRequisitionSourcingRequirementDto>();
+        Add(requirements, "PR_STATUS", "Approved requisition",
+            string.Equals(requisition.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+            requisition.ApprovedAt.HasValue && requisition.ApprovedById.HasValue,
+            "PR_NOT_APPROVED",
+            "Complete the configured Purchase Requisition approval workflow with a different authorized approver before sourcing.");
+
+        var completeItems = items.Count > 0 && items.All(item =>
+            !string.IsNullOrWhiteSpace(item.ItemDescription) && item.Quantity > 0 &&
+            !string.IsNullOrWhiteSpace(item.UnitOfMeasure) && item.EstimatedUnitPrice > 0 && item.LineTotal > 0 &&
+            (requisition.SpecificationTemplateId.HasValue || !string.IsNullOrWhiteSpace(item.Specifications)));
+        var mandatory = requisition.RequiredDate.HasValue && !string.IsNullOrWhiteSpace(requisition.Department) &&
+            !string.IsNullOrWhiteSpace(requisition.Justification) && requisition.BudgetId.HasValue &&
+            requisition.ProcurementCategory.HasValue && requisition.TotalAmount > 0 &&
+            NormalizeCurrency(requisition.Currency).Length == 3 && NormalizeCurrency(requisition.Currency).All(char.IsLetter) &&
+            (requisition.RequisitionType != PurchaseRequisitionType.ProjectPurchase || requisition.ProjectId.HasValue) &&
+            completeItems;
+        Add(requirements, "MANDATORY_FIELDS", "Complete requisition and specifications", mandatory,
+            "PR_SOURCING_FIELDS_INCOMPLETE",
+            "Complete the department, required date, justification, budget, category, currency, amount, project linkage where applicable, and positive item lines with specifications.");
+
+        Add(requirements, "BUDGET_AVAILABILITY", "Approved budget availability",
+            budget.IsCompliant && budget.CanReserve,
+            budget.DecisionCode,
+            budget.Message,
+            budget.BudgetCode);
+
+        var fingerprintObject = new
+        {
+            schemaVersion = "tdc.pr-sourcing-release.v2",
+            requisition.Id,
+            requisition.Status,
+            requisition.ApprovedById,
+            requisition.ApprovedAt,
+            requisition.SourcePlanId,
+            requisition.SourcePlanItemId,
+            requisition.SpecificationTemplateId,
+            requisition.BudgetId,
+            WorkflowInstanceId = workflow?.Id,
+            workflow?.CompletedDate,
+            requisition.TotalAmount,
+            Currency = NormalizeCurrency(requisition.Currency),
+            requisition.ProcurementCategory,
+            ItemState = items.Select(item => new
+            {
+                item.Id,
+                item.ItemDescription,
+                item.Specifications,
+                item.Quantity,
+                item.UnitOfMeasure,
+                item.EstimatedUnitPrice,
+                item.LineTotal
+            }).ToArray()
+        };
+        var fingerprint = ComputeHash(JsonSerializer.Serialize(fingerprintObject, JsonOptions));
+        var latest = await Releases.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id && !item.IsDeleted)
+            .AsNoTracking().OrderByDescending(item => item.AttemptNumber).FirstOrDefaultAsync(cancellationToken);
+        var latestIntegrityValid = latest is null || ComputeHash(latest.SnapshotJson) == latest.IntegrityHash;
+        if (!latestIntegrityValid)
+            Add(requirements, "RELEASE_INTEGRITY", "Release snapshot integrity", false,
+                "PR_SOURCING_RELEASE_INTEGRITY_INVALID",
+                "The latest immutable sourcing-release snapshot failed integrity verification.");
+        var isCompliant = requirements.All(item => item.Satisfied);
+        var current = latest is not null && latest.ControlFingerprint == fingerprint && latestIntegrityValid;
+        return new PurchaseRequisitionSourcingReadinessDto
+        {
+            RequisitionId = requisition.Id,
+            RequisitionNumber = requisition.RequisitionNumber,
+            Status = requisition.Status,
+            IsCompliant = isCompliant,
+            CanRelease = isCompliant && !current,
+            IsReleased = isCompliant && current,
+            HasStaleRelease = latest is not null && !current,
+            DecisionCode = !isCompliant ? requirements.First(item => !item.Satisfied).Code : current
+                ? "PR_SOURCING_RELEASE_CURRENT" : "PR_SOURCING_READY",
+            Message = !isCompliant ? requirements.First(item => !item.Satisfied).Message : current
+                ? $"Sourcing release {latest!.ReleaseReference} matches the approved requisition."
+                : "The approved requisition is ready to be released for the selected sourcing process.",
+            EvaluatedAtUtc = evaluatedAtUtc,
+            ControlFingerprint = fingerprint,
+            SourcePlanId = requisition.SourcePlanId,
+            SourcePlanItemId = requisition.SourcePlanItemId,
+            SpecificationTemplateId = requisition.SpecificationTemplateId,
+            SpecificationTemplateCode = requisition.SpecificationTemplateCode,
+            SpecificationTemplateVersion = requisition.SpecificationTemplateVersion,
+            BudgetCommitmentId = budget.CommitmentId,
+            BudgetCommitmentReference = budget.CommitmentReference,
+            WorkflowInstanceId = workflow?.Id,
+            CurrentRelease = current ? Map(latest!, requisition.RequisitionNumber) : null,
+            Requirements = requirements,
+            RequiredActions = requirements.Where(item => !item.Satisfied).Select(item => item.Message).Distinct().ToList()
+        };
+    }
+
+    private async Task<PurchaseRequisitionSourcingReadinessDto> EvaluateLegacyAsync(
+        PurchaseRequisition requisition,
+        CancellationToken cancellationToken,
+        bool linkedControl = false)
+    {
+        var evaluatedAtUtc = DateTime.UtcNow;
         var submission = linkedControl
             ? await _submissionControl.GetLinkedControlReadinessAsync(requisition.Id, cancellationToken)
             : await _submissionControl.GetReadinessAsync(requisition.Id, cancellationToken);
@@ -324,7 +437,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
 
         var fingerprintObject = new
         {
-            schemaVersion = "tdc.pr-sourcing-release.v1",
+            schemaVersion = "tdc.pr-sourcing-release.v2",
             requisition.Id,
             requisition.Status,
             requisition.ApprovedById,
@@ -437,22 +550,22 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             PurchaseRequisitionId = requisition.Id,
             AttemptNumber = attempt,
             ReleaseReference = releaseReference,
-            SourcePlanId = requisition.SourcePlanId!.Value,
-            SourcePlanItemId = requisition.SourcePlanItemId!.Value,
+            SourcePlanId = requisition.SourcePlanId,
+            SourcePlanItemId = requisition.SourcePlanItemId,
             AppSubmissionId = readiness.AppSubmissionId,
             AppSubmissionAttemptNumber = readiness.AppSubmissionAttemptNumber,
             AppAcknowledgementReference = readiness.AppAcknowledgementReference,
             ApprovedExceptionRuleId = readiness.ApprovedExceptionRuleId,
             ExceptionWorkflowInstanceId = readiness.ExceptionWorkflowInstanceId,
             ExceptionApprovalReference = readiness.ExceptionApprovalReference,
-            SpecificationTemplateId = requisition.SpecificationTemplateId!.Value,
-            SpecificationTemplateCode = requisition.SpecificationTemplateCode!,
-            SpecificationTemplateVersion = requisition.SpecificationTemplateVersion!.Value,
-            BudgetCommitmentId = readiness.BudgetCommitmentId!.Value,
-            BudgetCommitmentReference = readiness.BudgetCommitmentReference!,
-            AuthorityRouteId = readiness.AuthorityRouteId!.Value,
-            AuthorityRouteReference = readiness.AuthorityRouteReference!,
-            WorkflowInstanceId = readiness.WorkflowInstanceId!.Value,
+            SpecificationTemplateId = requisition.SpecificationTemplateId,
+            SpecificationTemplateCode = requisition.SpecificationTemplateCode,
+            SpecificationTemplateVersion = requisition.SpecificationTemplateVersion,
+            BudgetCommitmentId = readiness.BudgetCommitmentId,
+            BudgetCommitmentReference = readiness.BudgetCommitmentReference,
+            AuthorityRouteId = readiness.AuthorityRouteId,
+            AuthorityRouteReference = readiness.AuthorityRouteReference,
+            WorkflowInstanceId = readiness.WorkflowInstanceId,
             ReleasedAtUtc = now,
             ReleasedById = _currentUser.UserId,
             ReleasedByName = ActorName(),
@@ -486,9 +599,9 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             EventType = EventType,
             Action = action,
             Result = result,
-            RuleCode = "TDC-0107",
+            RuleCode = "PR-SOURCING-READINESS",
             RuleVersion = "1",
-            DecisionKeys = ["DEC-002", "DEC-003", "DEC-004", "DEC-006", "DEC-009", "DEC-010", "DEC-011", "DEC-012"],
+            DecisionKeys = ["PR-002", "PR-003", "PR-014"],
             SourceType = SourceType,
             SourceId = requisition.Id,
             SourceReference = requisition.RequisitionNumber,

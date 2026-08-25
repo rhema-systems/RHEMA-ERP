@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -58,6 +59,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     private IGenericRepository<PurchaseRequisitionItem> RequisitionItems => _unitOfWork.Repository<PurchaseRequisitionItem>();
     private IGenericRepository<ProcurementRequisitionSourcingRelease> Releases => _unitOfWork.Repository<ProcurementRequisitionSourcingRelease>();
     private IGenericRepository<ProcurementPolicyMethodRule> MethodRules => _unitOfWork.Repository<ProcurementPolicyMethodRule>();
+    private IGenericRepository<ProcurementPolicyThresholdRule> ThresholdRules => _unitOfWork.Repository<ProcurementPolicyThresholdRule>();
     private IGenericRepository<ProcurementPolicyExceptionRule> ExceptionRules => _unitOfWork.Repository<ProcurementPolicyExceptionRule>();
     private IGenericRepository<WorkflowInstance> WorkflowInstances => _unitOfWork.Repository<WorkflowInstance>();
 
@@ -246,8 +248,28 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             ?? throw new ProcurementSourcingCaseConflictException("SOURCING_CASE_THRESHOLD_RULE_MISSING", "The selected method did not resolve one exact threshold rule.");
         if (methodRule.PolicySetId != thresholdRule.PolicySetId || methodRule.PolicySetId != compliance.Policy.PolicySetId)
             throw new ProcurementSourcingCaseConflictException("SOURCING_CASE_RULE_LINEAGE_INVALID", "Method and threshold rules must belong to the selected effective policy version.");
+        var threshold = await ThresholdRules.GetQueryable(item => item.Id == thresholdRule.RuleId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.IsEnabled)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new ProcurementSourcingCaseConflictException("SOURCING_CASE_THRESHOLD_RULE_STALE",
+                "The matched threshold rule is no longer available in the current tenant.");
+
+        var caseJustification = BuildAutomaticJustification(
+            selectedMethod,
+            compliance.Policy.PolicyCode,
+            compliance.Policy.Version,
+            requisition.ProcurementCategory!.Value,
+            requisition.TotalAmount,
+            NormalizeCurrency(requisition.Currency),
+            methodRule.RuleCode,
+            threshold,
+            request.Justification);
 
         var lotSpecs = ValidateLots(request.Lots, lines, readiness.CurrentRelease, requisition);
+        if (lotSpecs.Count > 1 && (request.Justification?.Trim().Length ?? 0) < 10)
+            throw new ProcurementSourcingCaseValidationException("SOURCING_CASE_LOT_JUSTIFICATION_REQUIRED",
+                "Explain in at least 10 characters why the requisition is divided into multiple sourcing lots.");
         var fingerprintObject = new
         {
             schemaVersion = "tdc.sourcing-case.v1",
@@ -266,7 +288,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             overrideApprovalActorUserIds = selection.Override?.ApprovalActorUserIds.OrderBy(item => item).ToArray(),
             requisition.TotalAmount,
             currency = NormalizeCurrency(requisition.Currency),
-            justification = request.Justification.Trim(),
+            justification = caseJustification,
             lots = lotSpecs.Select(item => new { item.Code, item.Title, item.Description, item.EstimatedValue, item.ItemIds }).ToArray()
         };
         var caseFingerprint = ComputeHash(JsonSerializer.Serialize(fingerprintObject, JsonOptions));
@@ -327,7 +349,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
                 approvalActorUserIds = selection.Override.ApprovalActorUserIds.OrderBy(item => item).ToArray(),
                 reason = request.MethodOverrideReason!.Trim()
             },
-            justification = request.Justification.Trim(), lots = lotEntities.Select((item, index) => new
+            justification = caseJustification, lots = lotEntities.Select((item, index) => new
             {
                 item.Id, item.LotNumber, item.LotCode, item.Title, item.Description, item.EstimatedValue,
                 itemIds = lotSpecs[index].ItemIds
@@ -357,7 +379,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             MethodOverrideApprovedAtUtc = selection.Override?.ApprovedAtUtc,
             ExceptionApprovalReference = readiness.CurrentRelease.ExceptionApprovalReference,
             ExceptionEvidenceReference = requisition.ExceptionEvidenceReference,
-            Justification = request.Justification.Trim(), Status = ProcurementSourcingCaseStatus.Ready,
+            Justification = caseJustification, Status = ProcurementSourcingCaseStatus.Ready,
             CreatedByName = ActorName(), SourceControlFingerprint = readiness.CurrentRelease.ControlFingerprint,
             CaseFingerprint = caseFingerprint, SnapshotJson = snapshotJson, IntegrityHash = ComputeHash(snapshotJson),
             CreatedAt = now, CreatedBy = _currentUser.Username, CreatedById = _currentUser.UserId,
@@ -430,8 +452,26 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         var release = await _sourcingReleases.EnforceSourcingAsync(requisitionId, sourceType, sourceReference, normalizedCorrelation, cancellationToken);
         var entity = await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == release.Id, cancellationToken);
         if (entity is null)
-            throw new ProcurementRequisitionSourcingValidationException("SOURCING_CASE_REQUIRED",
-                $"Create and validate a sourcing case for release {release.ReleaseReference} before starting {sourceType}.");
+        {
+            var requisition = await LoadRequisitionAsync(requisitionId, false, cancellationToken);
+            var selectedMethod = expectedMethod ?? (string.Equals(sourceType, "RequestForQuotation", StringComparison.OrdinalIgnoreCase)
+                ? ProcurementMethodType.RequestForQuotation
+                : ProcurementMethodType.NationalCompetitiveTendering);
+            return new ProcurementSourcingCaseEntryGateDto
+            {
+                SourcingCaseId = null,
+                SourcingCaseNumber = string.Empty,
+                SourcingReleaseId = release.Id,
+                SourcePlanItemId = release.SourcePlanItemId,
+                SelectedMethod = selectedMethod,
+                MethodRuleId = null,
+                MethodRuleCode = string.Empty,
+                MinimumQuotationCount = 0,
+                WorkflowDefinitionId = null,
+                EstimatedValue = requisition.TotalAmount,
+                CurrencyCode = NormalizeCurrency(requisition.Currency)
+            };
+        }
         if (entity.Status is ProcurementSourcingCaseStatus.Closed or ProcurementSourcingCaseStatus.Cancelled)
             throw new ProcurementRequisitionSourcingValidationException("SOURCING_CASE_TERMINAL",
                 $"Sourcing case {entity.CaseNumber} is {entity.Status} and cannot start another source request.");
@@ -1027,9 +1067,10 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     {
         var evidence = new List<ProcurementControlEventEvidenceReference>
         {
-            External(item.SourcingRelease?.ReleaseReference ?? item.SourcingReleaseId.ToString("N"), "Immutable sourcing release", "SOURCING_RELEASE"),
-            External(item.AuthorityRouteReference, "PR authority route", "AUTHORITY_ROUTE")
+            External(item.SourcingRelease?.ReleaseReference ?? item.SourcingReleaseId.ToString("N"), "Immutable sourcing release", "SOURCING_RELEASE")
         };
+        if (!string.IsNullOrWhiteSpace(item.AuthorityRouteReference))
+            evidence.Add(External(item.AuthorityRouteReference, "PR authority route", "AUTHORITY_ROUTE"));
         if (!string.IsNullOrWhiteSpace(item.ExceptionApprovalReference))
             evidence.Add(External(item.ExceptionApprovalReference, "Approved exception", "EXCEPTION"));
         await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
@@ -1131,8 +1172,45 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     private static void ValidateCreate(CreateProcurementSourcingCaseRequest request)
     {
         if (request.RequisitionId == Guid.Empty) throw new ProcurementSourcingCaseValidationException("REQUISITION_REQUIRED", "A released requisition is required.");
-        EnsureReason(request.Justification);
     }
+
+    private static string BuildAutomaticJustification(
+        ProcurementMethodType method,
+        string policyCode,
+        int policyVersion,
+        ProcurementCategoryClass category,
+        decimal amount,
+        string currencyCode,
+        string methodRuleCode,
+        ProcurementPolicyThresholdRule threshold,
+        string? operationalNotes)
+    {
+        var amountText = amount.ToString("N2", CultureInfo.InvariantCulture);
+        var lowerOperator = threshold.LowerInclusive ? ">=" : ">";
+        var upperText = threshold.UpperBound.HasValue
+            ? $" and {(threshold.UpperInclusive ? "<=" : "<")} {currencyCode} {threshold.UpperBound.Value.ToString("N2", CultureInfo.InvariantCulture)}"
+            : " with no upper limit";
+        var rationale = $"{MethodLabel(method)} was selected automatically by policy {policyCode} v{policyVersion}. " +
+                        $"Category: {category}; evaluated amount: {currencyCode} {amountText}; " +
+                        $"matched threshold {threshold.RuleCode}: {lowerOperator} {currencyCode} {threshold.LowerBound.ToString("N2", CultureInfo.InvariantCulture)}{upperText}; " +
+                        $"method rule: {methodRuleCode}.";
+        var notes = NullIfWhiteSpace(operationalNotes);
+        return Truncate(notes is null ? rationale : $"{rationale} Operational notes: {notes}", 1000);
+    }
+
+    private static string MethodLabel(ProcurementMethodType method) => method switch
+    {
+        ProcurementMethodType.RequestForQuotation => "Request for quotation",
+        ProcurementMethodType.NationalCompetitiveTendering => "National competitive tendering",
+        ProcurementMethodType.InternationalCompetitiveTendering => "International competitive tendering",
+        ProcurementMethodType.RestrictedTendering => "Restricted tendering",
+        ProcurementMethodType.SingleSource => "Single source",
+        ProcurementMethodType.PettyPurchase => "Petty purchase",
+        ProcurementMethodType.FrameworkCallOff => "Framework call-off",
+        ProcurementMethodType.QualityBasedSelection => "Quality-based selection",
+        ProcurementMethodType.QualityAndCostBasedSelection => "Quality and cost-based selection",
+        _ => method.ToString()
+    };
     private static void EnsureReason(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Trim().Length < 5)

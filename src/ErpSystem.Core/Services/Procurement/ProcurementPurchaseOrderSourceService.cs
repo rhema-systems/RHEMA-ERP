@@ -25,6 +25,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementRequisitionBudgetControlService _budgetControl;
     private readonly INotificationTopicPublisher _notificationTopics;
     private readonly ILogger<ProcurementPurchaseOrderSourceService> _logger;
 
@@ -33,6 +34,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         ICurrentUserProvider currentUser,
         IProcurementAccessControlService accessControl,
         IProcurementControlEventService controlEvents,
+        IProcurementRequisitionBudgetControlService budgetControl,
         INotificationTopicPublisher notificationTopics,
         ILogger<ProcurementPurchaseOrderSourceService> logger)
     {
@@ -40,6 +42,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         _currentUser = currentUser;
         _accessControl = accessControl;
         _controlEvents = controlEvents;
+        _budgetControl = budgetControl;
         _notificationTopics = notificationTopics;
         _logger = logger;
     }
@@ -554,12 +557,6 @@ public sealed class ProcurementPurchaseOrderSourceService :
             }
 
             EnsureOrderMatchesSource(current, lines, totalAmount, currencyCode);
-            await EnsureBudgetCommitmentAsync(
-                current,
-                totalAmount,
-                currencyCode,
-                purchaseOrderId,
-                cancellationToken);
             if (current.SourceType ==
                 ProcurementPurchaseOrderSourceType.Contract)
             {
@@ -622,6 +619,26 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 cancellationToken);
             throw;
         }
+    }
+
+    public async Task EnsureBudgetCommitmentForIssueAsync(
+        PurchaseOrder purchaseOrder,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_unitOfWork.HasActiveTransaction)
+            throw Invalid(
+                "PO_BUDGET_TRANSACTION_REQUIRED",
+                "The purchase-order budget commitment must be created inside the submission transaction.");
+
+        var source = await EvaluateCurrentAsync(purchaseOrder, cancellationToken);
+        await EnsureBudgetCommitmentAsync(
+            source,
+            purchaseOrder.TotalAmount,
+            purchaseOrder.Currency,
+            purchaseOrder.Id,
+            correlationId,
+            cancellationToken);
     }
 
     public async Task ClaimTenderAwardAsync(
@@ -1507,6 +1524,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         decimal totalAmount,
         string? currencyCode,
         Guid purchaseOrderId,
+        string correlationId,
         CancellationToken cancellationToken)
     {
         var release = await SourcingReleases.GetQueryable(item =>
@@ -1522,6 +1540,29 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 "The approved sourcing release and budget commitment were not found in the current tenant.");
         var commitment = release.BudgetCommitment;
         var budget = commitment?.ProcurementBudget;
+        if (commitment is null || budget is null)
+        {
+            var readiness = await _budgetControl.ReserveForDownstreamAsync(
+                release.PurchaseRequisition,
+                Permission,
+                correlationId,
+                cancellationToken);
+            if (!readiness.IsCompliant || !readiness.CommitmentId.HasValue)
+                throw Invalid(
+                    readiness.DecisionCode,
+                    readiness.Message);
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            commitment = await _unitOfWork.Repository<ProcurementBudgetCommitment>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == readiness.CommitmentId.Value &&
+                    !item.IsDeleted)
+                .Include(item => item.ProcurementBudget)
+                .SingleOrDefaultAsync(cancellationToken);
+            budget = commitment?.ProcurementBudget;
+        }
         if (commitment is null || budget is null)
             throw Invalid("PO_BUDGET_COMMITMENT_NOT_FOUND",
                 "The approved sourcing release has no authoritative budget commitment.");

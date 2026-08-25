@@ -40,7 +40,7 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         saved.SourcePlanNumber.Should().Be(references.Plan.PlanNumber);
         saved.BudgetId.Should().Be(references.Budget.Id);
         saved.ProcurementCategory.Should().Be(ProcurementCategoryClass.Goods);
-        saved.CostCenter.Should().BeNull("a planned requisition derives its accounting ownership from the plan department");
+        saved.CostCenter.Should().Be("IT", "a planned requisition derives its cost centre from the plan department");
         saved.ProjectCode.Should().Be(references.Project.ProjectCode);
         saved.RequisitionType.Should().Be(PurchaseRequisitionType.ProjectPurchase);
         saved.SpecificationTemplateCode.Should().Be(references.Template.TemplateCode);
@@ -71,6 +71,48 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         requisition.Currency.Should().Be(references.Budget.Currency);
         requisition.SpecificationTemplateId.Should().BeNull();
         requisition.ApprovedExceptionRuleId.Should().BeNull();
+        requisition.CostCenter.Should().Be("IT");
+    }
+
+    [Fact]
+    public async Task PlanItemPrefersDepartmentAccountingCodeForCostCenter()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Plan.Department.AccountCode = "CC-IT-001";
+        await fixture.Context.SaveChangesAsync();
+        var requisition = fixture.NewRequisition();
+
+        await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-plan-accounting-code");
+
+        requisition.CostCenter.Should().Be("CC-IT-001");
+    }
+
+    [Fact]
+    public async Task PlanItemCannotCreateAnotherLivePurchaseRequisition()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var existing = fixture.NewRequisition();
+        existing.RequisitionNumber = "PR-2026-EXISTING";
+        existing.SourcePlanId = references.Plan.Id;
+        existing.SourcePlanItemId = references.PlanItem.Id;
+        fixture.Context.PurchaseRequisitions.Add(existing);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(fixture.NewRequisition(), new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-duplicate-plan-item");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_ITEM_REQUISITION_EXISTS" &&
+                                exception.Message.Contains(existing.RequisitionNumber));
     }
 
     [Fact]

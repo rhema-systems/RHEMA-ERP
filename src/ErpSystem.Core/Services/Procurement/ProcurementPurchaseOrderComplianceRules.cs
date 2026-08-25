@@ -20,12 +20,14 @@ public static class ProcurementPurchaseOrderComplianceRules
 
         if (value.ReleaseRequisitionId != value.RequisitionId ||
             value.CommitmentRequisitionId != value.RequisitionId ||
-            value.ReleaseCommitmentId != value.CommitmentId ||
-            !string.Equals(value.ReleaseCommitmentReference,
-                value.CommitmentReference, StringComparison.Ordinal))
+            (value.ReleaseCommitmentId.HasValue &&
+             value.ReleaseCommitmentId.Value != value.CommitmentId) ||
+            (!string.IsNullOrWhiteSpace(value.ReleaseCommitmentReference) &&
+             !string.Equals(value.ReleaseCommitmentReference,
+                 value.CommitmentReference, StringComparison.Ordinal)))
         {
             return Invalid("PO_BUDGET_COMMITMENT_LINEAGE_MISMATCH",
-                "The sourcing release no longer identifies the requisition's authoritative budget commitment.");
+                "The approved requisition, sourcing release, and authoritative budget commitment do not agree.");
         }
 
         if (!value.RequisitionBudgetId.HasValue ||
@@ -141,8 +143,8 @@ public sealed record ProcurementCommitmentLifecycleSnapshot(
     Guid? RequisitionBudgetId,
     Guid ReleaseTenantId,
     Guid ReleaseRequisitionId,
-    Guid ReleaseCommitmentId,
-    string ReleaseCommitmentReference,
+    Guid? ReleaseCommitmentId,
+    string? ReleaseCommitmentReference,
     Guid CommitmentId,
     Guid CommitmentTenantId,
     Guid CommitmentRequisitionId,

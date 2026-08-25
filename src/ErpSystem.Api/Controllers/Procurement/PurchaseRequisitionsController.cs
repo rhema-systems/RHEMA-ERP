@@ -448,12 +448,13 @@ public class PurchaseRequisitionsController : ControllerBase
         [FromQuery] string? priority = null,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null,
-        [FromQuery] string? department = null)
+        [FromQuery] string? department = null,
+        [FromQuery] Guid? sourcePlanId = null)
     {
         try
         {
             var requisitions = await _purchaseRequisitionRepository.GetRequisitionsAsync(
-                page, pageSize, search, status, priority, startDate, endDate, department);
+                page, pageSize, search, status, priority, startDate, endDate, department, sourcePlanId);
 
             var requisitionDtos = requisitions.Items.Select(MapSummary).ToList();
 
@@ -679,7 +680,7 @@ public class PurchaseRequisitionsController : ControllerBase
             {
                 return Conflict(Problem(
                     "PR_WORKFLOW_STATUS_REQUIRES_ACTION",
-                    "Workflow-controlled requisition statuses cannot be assigned directly. Use the submit or approval action so APP/exception, budget-reservation, and workflow controls execute.",
+                    "Workflow-controlled requisition statuses cannot be assigned directly. Use the submit or approval action so required-data, budget-availability, and workflow controls execute.",
                     409));
             }
 
@@ -786,8 +787,14 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Unauthorized("User identifier claim is missing or invalid");
             }
 
-            var authorityApproval = await _authorityRouteService.EnforceApprovalAsync(
-                requisition, CorrelationId, HttpContext.RequestAborted);
+            if (approvalDto.Approved && requisition.RequestedById == userId)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, Problem(
+                    "PR_SELF_APPROVAL_FORBIDDEN",
+                    "The requisition requester cannot approve their own purchase requisition.",
+                    StatusCodes.Status403Forbidden));
+            }
+
             var canApprove = await _workflowIntegrationService.CanUserApproveAsync("PurchaseRequisition", id, userId);
             if (!canApprove)
             {
@@ -885,7 +892,6 @@ public class PurchaseRequisitionsController : ControllerBase
                     status = requisition.Status,
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
                     workflowOutcome = workflowResult.Outcome.ToString(),
-                    authorityControl = authorityApproval,
                     budgetRelease
                 }
             });
@@ -963,28 +969,13 @@ public class PurchaseRequisitionsController : ControllerBase
                 {
                     var retryReadiness = await _budgetControlService.GetReadinessAsync(
                         requisition.Id, HttpContext.RequestAborted);
-                    var retryRoute = await _authorityRouteService.GetLatestRouteAsync(
-                        requisition.Id, HttpContext.RequestAborted);
-                    if (string.Equals(retryReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(retryReadiness.CommitmentStatus, "Reserved", StringComparison.OrdinalIgnoreCase) &&
-                        retryRoute is not null)
+                    return Ok(new
                     {
-                        var authorityReadiness = await _authorityRouteService.GetReadinessAsync(
-                            requisition.Id, HttpContext.RequestAborted);
-                        return Ok(new
-                        {
-                            success = true,
-                            idempotent = true,
-                            message = "The purchase requisition was already submitted and its active budget commitment was reused.",
-                            data = new
-                            {
-                                id = requisition.Id,
-                                status = requisition.Status,
-                                budgetControl = retryReadiness,
-                                authorityControl = authorityReadiness
-                            }
-                        });
-                    }
+                        success = true,
+                        idempotent = true,
+                        message = "The purchase requisition was already submitted to its approval workflow.",
+                        data = new { id = requisition.Id, status = requisition.Status, budgetControl = retryReadiness }
+                    });
                 }
                 return Conflict(Problem("PR_NOT_DRAFT", $"Purchase requisition cannot be submitted in current status: {requisition.Status}.", 409));
             }
@@ -992,40 +983,32 @@ public class PurchaseRequisitionsController : ControllerBase
 
             var submissionReadiness = await _submissionControlService.EnforceAsync(
                 requisition, CorrelationId, HttpContext.RequestAborted);
-            var authorityDecision = await _authorityRouteService.EnforceSubmissionAsync(
-                requisition, CorrelationId, HttpContext.RequestAborted);
+
+            var budgetReadiness = await _budgetControlService.GetReadinessAsync(
+                requisition.Id, HttpContext.RequestAborted);
+            if (!budgetReadiness.CanReserve)
+            {
+                var problem = Problem(budgetReadiness.DecisionCode, budgetReadiness.Message, 422);
+                problem.Extensions["budgetReadiness"] = budgetReadiness;
+                return UnprocessableEntity(problem);
+            }
+
+            if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync("PurchaseRequisition"))
+            {
+                return UnprocessableEntity(Problem(
+                    "PR_WORKFLOW_NOT_CONFIGURED",
+                    "A published Purchase Requisition approval workflow must be configured before submission.",
+                    422));
+            }
 
             WorkflowIntegrationResult? workflowResult = null;
-            PurchaseRequisitionBudgetReadinessDto? budgetReadiness = null;
-            ProcurementRequisitionAuthorityRoute? authorityRoute = null;
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
                 await _unitOfWork.BeginTransactionAsync(HttpContext.RequestAborted);
                 try
                 {
-                    budgetReadiness = await _budgetControlService.ReserveAsync(
-                        requisition, CorrelationId, HttpContext.RequestAborted);
-                    if (!budgetReadiness.CanReserve)
-                    {
-                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
-                        return;
-                    }
-                    if (string.Equals(budgetReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase))
-                    {
-                        authorityRoute = await _authorityRouteService.GetLatestRouteAsync(
-                            requisition.Id, HttpContext.RequestAborted);
-                        if (authorityRoute is null)
-                            throw new ProcurementRequisitionAuthorityConflictException(
-                                "PR_AUTHORITY_ROUTE_NOT_CAPTURED",
-                                "An active budget commitment exists without an immutable authority route. Recall or cancel the requisition before resubmitting.");
-                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
-                        return;
-                    }
-
-                    authorityRoute = await _authorityRouteService.CaptureAsync(
-                        requisition, authorityDecision, CorrelationId, HttpContext.RequestAborted);
                     workflowResult = await _workflowIntegrationService.SubmitAsync(
-                        "PurchaseRequisition", id, authorityRoute.WorkflowDefinitionId);
+                        "PurchaseRequisition", id);
                     var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
                     statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, _currentUserProvider.UserId);
                     await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
@@ -1038,36 +1021,8 @@ public class PurchaseRequisitionsController : ControllerBase
                 }
             }, HttpContext.RequestAborted);
 
-            if (budgetReadiness is null)
-                return Conflict(Problem("PR_BUDGET_RESULT_MISSING", "The budget control did not return a result.", 409));
-            if (!budgetReadiness.CanReserve)
-            {
-                var problem = Problem(budgetReadiness.DecisionCode, budgetReadiness.Message, 422);
-                problem.Extensions["budgetReadiness"] = budgetReadiness;
-                return UnprocessableEntity(problem);
-            }
-            if (string.Equals(budgetReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase) &&
-                workflowResult is null)
-            {
-                var authorityReadiness = await _authorityRouteService.GetReadinessAsync(
-                    requisition.Id, HttpContext.RequestAborted);
-                return Ok(new
-                {
-                    success = true,
-                    idempotent = true,
-                    message = "The purchase requisition submission already has an active budget commitment.",
-                    data = new
-                    {
-                        id = requisition.Id,
-                        budgetControl = budgetReadiness,
-                        authorityControl = authorityReadiness
-                    }
-                });
-            }
             if (workflowResult is null)
                 return Conflict(Problem("PR_WORKFLOW_RESULT_MISSING", "The workflow did not return a submission outcome.", 409));
-            var capturedAuthorityReadiness = await _authorityRouteService.GetReadinessAsync(
-                requisition.Id, HttpContext.RequestAborted);
 
             // Publish event for admin-configurable notification topics (best-effort).
             try
@@ -1106,8 +1061,7 @@ public class PurchaseRequisitionsController : ControllerBase
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
                     workflowOutcome = workflowResult.Outcome.ToString(),
                     submissionControl = submissionReadiness,
-                    budgetControl = budgetReadiness,
-                    authorityControl = capturedAuthorityReadiness
+                    budgetControl = budgetReadiness
                 }
             });
         }
@@ -1475,6 +1429,7 @@ public class PurchaseRequisitionsController : ControllerBase
         Currency = requisition.Currency,
         ItemCount = requisition.Items?.Count ?? 0,
         SourcePlanNumber = requisition.SourcePlanNumber,
+        SourcePlanItemId = requisition.SourcePlanItemId,
         SourcePlanItemDescription = requisition.SourcePlanItemDescription,
         BudgetCode = requisition.BudgetCode,
         ProcurementCategory = requisition.ProcurementCategory,
@@ -1514,6 +1469,7 @@ public class PurchaseRequisitionsController : ControllerBase
             Currency = requisition.Currency,
             ItemCount = items.Count(),
             SourcePlanNumber = requisition.SourcePlanNumber,
+            SourcePlanItemId = requisition.SourcePlanItemId,
             SourcePlanItemDescription = requisition.SourcePlanItemDescription,
             BudgetCode = requisition.BudgetCode,
             ProcurementCategory = requisition.ProcurementCategory,

@@ -47,6 +47,26 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
     }
 
     [Fact]
+    public async Task ApprovedRequisitionCreatesCommitmentOnlyAtDownstreamBoundary()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(1_000m);
+        var requisition = fixture.NewRequisition(budget, 400m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            "procurement.purchase-order.create",
+            "trace-po-issue");
+
+        readiness.CommitmentStatus.Should().Be("Reserved");
+        budget.CommittedAmount.Should().Be(400m);
+        (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     public async Task InsufficientBudgetBlocksWithoutCreatingACommitmentOrMutatingFinanceTotals()
     {
         await using var fixture = new Fixture();

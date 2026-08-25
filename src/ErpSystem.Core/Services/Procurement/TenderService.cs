@@ -286,8 +286,9 @@ public class TenderService : ITenderService
                 }
             }
 
-            await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId, sourceType,
-                tender.Id, tender.TenderNumber, Guid.NewGuid().ToString("N"));
+            if (gate.SourcingCaseId.HasValue)
+                await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId.Value, sourceType,
+                    tender.Id, tender.TenderNumber, Guid.NewGuid().ToString("N"));
 
             await _unitOfWork.SaveChangesAsync();
 
