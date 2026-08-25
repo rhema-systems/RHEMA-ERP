@@ -198,6 +198,7 @@
     <Compile Include="Services\Finance\GhanaTaxReportingExportFoundationTests.cs" />
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
+    <Compile Include="Services\Finance\FinanceApprovalQueueProjectionTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
     <Compile Include="Services\Finance\CrossCurrencyBankTransferMigrationTests.cs" />
     <!-- Cross-currency settlement is a Finance release gate. Keep both pure arithmetic and
