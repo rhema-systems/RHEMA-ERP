@@ -32,7 +32,7 @@ export default function EnrollmentDetailPage() {
   const { toast } = useToast();
   const [recalculating, setRecalculating] = useState(false);
 
-  const queryKey = ['hr', 'training', 'learning-paths', 'enrollments', id];
+  const queryKey = ['me', 'learning', 'enrollments', id];
   const { data: enrollment, isLoading, isError } = useQuery({
     queryKey,
     queryFn: () => learningPathService.getEnrollmentById(id),
@@ -84,11 +84,11 @@ export default function EnrollmentDetailPage() {
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={enrollment.learningPathName}
         description={`${enrollment.employeeName} · enrolled ${fmt(enrollment.enrolledDate)}`}
-        backHref="/hr/training/my-learning"
+        backHref="/me/learning"
         actions={
           <Button variant="outline" size="sm" onClick={recalculate} disabled={recalculating}>
             {recalculating ? (
@@ -151,7 +151,7 @@ export default function EnrollmentDetailPage() {
                   key={s.id}
                   type="button"
                   disabled={locked}
-                  onClick={() => router.push(`/hr/training/my-learning/${id}/steps/${s.id}`)}
+                  onClick={() => router.push(`/me/learning/${id}/steps/${s.id}`)}
                   className={`flex w-full items-center gap-3 rounded-md border p-3 text-left transition-colors ${
                     locked ? 'cursor-not-allowed opacity-60' : 'hover:bg-muted/50'
                   }`}

@@ -59,8 +59,8 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
       { label: 'My Goals', hint: 'Draft, submit and track your goals', href: '/me/performance/goals', icon: Gauge },
       { label: 'My Check-Ins', hint: 'Conversations with your manager', href: '/me/performance/check-ins', icon: MessageSquare },
       { label: 'My Journal', hint: 'Your private work notes', href: '/me/performance/journal', icon: BookOpen },
-      { label: 'My Training', hint: 'Courses, requests and certificates', href: '/hr/training/my-training', icon: GraduationCap },
-      { label: 'My Learning Paths', hint: 'Guided development journeys', href: '/hr/training/my-learning', icon: Compass },
+      { label: 'My Training', hint: 'Courses, requests and certificates', href: '/me/training', icon: GraduationCap },
+      { label: 'My Learning Paths', hint: 'Guided development journeys', href: '/me/learning', icon: Compass },
       { label: 'My Orientations', hint: 'Onboarding checklists', href: '/hr/orientation/mine', icon: ClipboardList },
       { label: 'Peer Reviews', hint: 'Feedback you owe colleagues', href: '/me/performance/peer-reviews', icon: Users },
     ],
@@ -282,7 +282,7 @@ export default function MeLandingPage() {
                   ? `${expiringCerts} certificate${expiringCerts === 1 ? '' : 's'} expiring soon`
                   : `${home?.activeCertificatesCount ?? 0} active certificates`
               }
-              href="/hr/training/my-training"
+              href="/me/training"
             />
           </div>
         )}
@@ -298,7 +298,7 @@ export default function MeLandingPage() {
             {home.expiringDocuments.map((doc) => (
               <Link
                 key={doc.id}
-                href="/hr/training/my-training"
+                href="/me/training"
                 className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent"
               >
                 <span className="flex items-center gap-2">

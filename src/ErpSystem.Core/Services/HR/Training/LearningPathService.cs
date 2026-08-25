@@ -500,7 +500,7 @@ public class LearningPathService : ILearningPathService
 
     /// <summary>
     /// Whether anything on the record justifies calling this step complete: the learner was marked
-    /// present on the nominated run, or a completion record exists for it.
+    /// present on a run of this step's programme, or a completion record exists for it.
     /// </summary>
     private async Task<bool> HasCompletionEvidenceAsync(
         EmployeeLearningPathStep step, Guid learnerId, CancellationToken cancellationToken)
@@ -508,13 +508,53 @@ public class LearningPathService : ILearningPathService
         if (step.Nomination?.CompletionRecord != null)
             return true;
 
-        if (step.NominationId == null || step.Nomination == null)
+        var nom = await ResolveLearnerNominationAsync(step, learnerId, cancellationToken);
+        if (nom == null)
             return false;
 
+        if (nom.HasCompletionRecord)
+            return true;
+
         var attendance = await _nominationService.GetAttendanceForScheduleAsync(
-            step.Nomination.ScheduleId, cancellationToken);
+            nom.ScheduleId, cancellationToken);
 
         return attendance.Any(a => a.EmployeeId == learnerId && a.IsPresent);
+    }
+
+    /// <summary>
+    /// The learner's live nomination for this step's programme.
+    ///
+    /// The step's own <c>NominationId</c> is only ever written by the completion payload, so
+    /// before the first completion the stored link is always empty — a shape area 25 slice 6
+    /// measured live: evidence never counted for a learner and the step page never showed the
+    /// nomination, because both looked only at the stored link. Resolving by programme here is
+    /// what lets attendance on a scheduled run actually evidence the step, without the learner
+    /// having to know any ids. Withdrawn and rejected nominations are not live and never count.
+    /// </summary>
+    private async Task<TrainingNominationDto?> ResolveLearnerNominationAsync(
+        EmployeeLearningPathStep step, Guid learnerId, CancellationToken cancellationToken)
+    {
+        if (step.NominationId.HasValue)
+            return await _nominationService.GetByIdAsync(step.NominationId.Value, cancellationToken);
+
+        var programId = step.LearningPathProgram?.ProgramId;
+        if (programId == null)
+            return null;
+
+        var scheduleIds = (await _scheduleService.GetByProgramIdAsync(programId.Value, cancellationToken))
+            .Select(s => s.Id)
+            .ToHashSet();
+
+        var candidate = (await _nominationService.GetByEmployeeIdAsync(learnerId, cancellationToken))
+            .Where(n => scheduleIds.Contains(n.ScheduleId)
+                     && n.Status != NominationStatus.Withdrawn
+                     && n.Status != NominationStatus.Rejected)
+            .OrderByDescending(n => n.NominationDate)
+            .FirstOrDefault();
+
+        return candidate == null
+            ? null
+            : await _nominationService.GetByIdAsync(candidate.Id, cancellationToken);
     }
 
     public async Task<IEnumerable<EmployeeLearningPathSummaryDto>> GetEnrollmentsByPathIdAsync(Guid pathId, CancellationToken cancellationToken = default)
@@ -607,10 +647,10 @@ public class LearningPathService : ILearningPathService
         StepCompletionDto?       myCompletion = null;
         StepFeedbackDto?         myFeedback   = null;
 
-        if (step.NominationId.HasValue)
+        // Resolved by programme when the stored link is empty — see ResolveLearnerNominationAsync.
+        var nom = await ResolveLearnerNominationAsync(step, learnerId, cancellationToken);
+        if (nom != null)
         {
-            var nom = await _nominationService.GetByIdAsync(step.NominationId.Value, cancellationToken);
-
             myNomination = new StepNominationDto
             {
                 Id                = nom.Id,
@@ -638,8 +678,8 @@ public class LearningPathService : ILearningPathService
                     CheckOutTime   = a.CheckOutTime
                 }).ToList();
 
-            // Completion from the Include chain (avoids extra DB round-trip)
-            var comp = step.Nomination?.CompletionRecord;
+            // Completion from the resolved nomination's own record.
+            var comp = nom.CompletionRecord;
             if (comp != null)
             {
                 myCompletion = new StepCompletionDto

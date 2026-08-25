@@ -29,7 +29,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 3 | The dashboard: one personal aggregate | **COMPLETE 2026-08-25** — 37+35 assertions + 144 ladder |
 | 4 | Move-in: leave + attendance | **COMPLETE 2026-08-25** — 68 assertions ×2 + 179 ladder; 2 backend fixes; 2 TDC data gaps recorded |
 | 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | **COMPLETE 2026-08-25** — 47 assertions ×2 + 247 ladder; 12 pages re-homed + my-goals built; 3 backend fixes; 16 deep-links re-pointed |
-| 6 | Move-in: training & learning (+ the owed bond self-accept) | not started |
+| 6 | Move-in: training & learning (+ the owed bond self-accept) | **COMPLETE 2026-08-25** — 85 assertions ×2 + 294 ladder; 4 pages moved + 7 built; learner step-completion dead path fixed |
 | 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | not started |
 | 8 | Move-in: medical + safety | not started |
 | 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | not started |
@@ -485,3 +485,57 @@ verdict-S, #8 (my goals) the one verdict-E hole built from nothing.
   journal privacy proven two-sided against the manager's team view; and the unlinked
   wall, noting the module's own convention that /me READS answer honestly-empty for an
   unlinked account while writes refuse.
+
+### Slice 6 — move-in: training & learning. CLOSED 2026-08-25.
+
+`run-slice6.mjs` 85 assertions ×2 green + the 294 ladder (111/33/35/68/47). No migration.
+Spec rows #13–#15 were verdict-S and re-homed; #16 (my waitlist) the verdict-E hole built
+from nothing; both training residuals owed to this slice closed (bond self-accept, requests
+mine-fallback). D9's mentoring move-in landed here too (mentoring lives under training).
+
+- **The move (D3, atomic):** my-learning's 3 pages → `/me/learning/*` and the mentoring
+  pair detail → `/me/mentoring/[id]` via `git mv` + adapt; `/me/training` rebuilt from
+  my-training with a certificates tab (issued `training-completions/certificates/mine` +
+  external `employee-certificates/mine`) and a pending-bond banner; my-training deleted.
+  **Built fresh:** portal requests (new + [id] — self-shaped, no employee picker; the
+  rejection reason finally reaches whoever raised it), the nominee's nomination detail
+  (withdraw + bond cross-link), `/me/training/waitlist` (offer accept/decline + leave
+  queue), and `/me/training/bonds` + `[id]` (the owed self-accept: full terms on screen,
+  the dialog restates duration + amount, server stamps the window). **Split:** the desk
+  keeps requests (register + on-behalf create + approve/reject) untouched; my-learning's
+  org-wide tabs became the new `/hr/training/enrollments` register and mentoring became
+  register-only — both registers' rows open the PORTAL detail (the slice-5 dev-plans
+  one-working-surface precedent). Sidebar/hub/nav/dashboard/admin deep-links re-pointed;
+  the two moved desk sidebar items replaced by Enrollments + Mentoring (both
+  HR.Training.Read — mentoring's register read was always desk-gated).
+- **The big find, measured then fixed: learner step completion was a DEAD PATH.** The
+  evidence check and the step page both read only `EmployeeLearningPathStep.NominationId` —
+  which nothing ever writes before first completion (the completion payload is its only
+  writer, and it is applied AFTER the evidence check). So attendance never counted for a
+  learner, the step page never showed their nomination, and only the HR override worked.
+  `LearningPathService` now resolves the learner's live nomination BY PROGRAMME (withdrawn/
+  rejected never count) for both the evidence check and the step-detail read model; the
+  first harness run failed exactly there and passes now. Area-7's run6 never caught it
+  because its evidenced-completion leg ran as HR (who bypasses the gate) — the two-actor
+  rule again.
+- **Two more fixes:** the workflow inbox's TrainingNomination ActionUrl pointed at
+  `/hr/training/nominations?nominationId=` — a route that never existed; now the desk
+  detail `/hr/training/nominations/{id}` with EntityNumber/Name filled like its neighbours
+  (the approver is the reader). And the frontend `TrainingBondStatus` union was missing
+  `Cancelled`, which the server emits — tsc caught it only because the new pages compare
+  against it (a type written before the enum grew; the fiction-that-type-checks shape).
+- **The probe's accidental discovery, asserted by name:** withdrawing a nomination CANCELS
+  its still-pending bond (`CancelForNominationAsync`), and a cancelled bond can never be
+  accepted — the portal withdraw dialog says so before the employee commits.
+- Harness legs worth keeping: the rejection-reason promise read back as the requester; the
+  bond matrix (cross-accept 422 "own service bond", self-accept stamps NO on-behalf actor,
+  re-accept refused, cancelled refused); the waitlist offer lifecycle two-sided (respond
+  before offer 422, the manager cannot answer the employee's offer, acceptance alone does
+  NOT enrol); evidence-gating end-to-end as the LEARNER (unevidenced 422 → HR attendance →
+  completable → 50% → step 2 unlocks → history row); mentoring note privacy two-sided
+  (MENTOR-PRIVATE withheld from mentee and vice versa, non-participant 403); and the
+  unlinked wall's per-route conventions recorded as measured (403 / 400 / honest-empty).
+- **Residual recorded, not built:** employee feedback filing stays API-only. The self-armed
+  POST exists and is proven, but there is no `feedback/mine` read to show what was filed or
+  gate a duplicate (`SubmitFeedbackAsync` dedupes nothing) — a portal feedback form needs
+  that read first. Parked for the slice-14 polish pass or a later backend addition.

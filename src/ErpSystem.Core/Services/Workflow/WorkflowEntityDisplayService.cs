@@ -502,8 +502,24 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
             {
+                var nomination = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingNomination>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee, x => x.Schedule);
+                string? nomProgramName = null;
+                if (nomination?.Schedule != null)
+                {
+                    var nomProgram = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingProgram>()
+                        .FirstOrDefaultAsync(p => p.Id == nomination.Schedule.ProgramId);
+                    nomProgramName = nomProgram?.ProgramName;
+                }
                 info.EntityType = "TrainingNomination";
-                info.ActionUrl = $"/hr/training/nominations?nominationId={entityId}";
+                info.EntityNumber = nomination?.NominationNumber;
+                info.EntityName = nomination == null
+                    ? null
+                    : $"{nomination.Employee?.FullName} — {nomProgramName ?? nomination.Schedule?.ScheduleNumber}";
+                // Area 25 slice 6: the old "/hr/training/nominations?nominationId=" pointed at a
+                // route that never existed. The reader of a workflow item is the APPROVER, so it
+                // lands on the desk nomination detail.
+                info.ActionUrl = $"/hr/training/nominations/{entityId}";
                 return info;
             }
 

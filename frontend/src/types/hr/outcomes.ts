@@ -248,7 +248,9 @@ export type TrainingBondStatus =
   | 'Fulfilled'
   | 'Breached'
   | 'Settled'
-  | 'Waived';
+  | 'Waived'
+  /** Cancelled before acceptance — e.g. the nomination was withdrawn or rejected. */
+  | 'Cancelled';
 
 export interface TrainingServiceBond extends AuditFields {
   nominationId: string;

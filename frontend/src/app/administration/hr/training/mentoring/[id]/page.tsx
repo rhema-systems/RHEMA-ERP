@@ -300,7 +300,7 @@ export default function MentoringProgramDetailPage() {
                     <TableRow
                       key={p.id}
                       className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => router.push(`/hr/training/mentoring/${p.id}`)}
+                      onClick={() => router.push(`/me/mentoring/${p.id}`)}
                     >
                       <TableCell className="font-medium">{p.mentorName}</TableCell>
                       <TableCell>{p.menteeName}</TableCell>

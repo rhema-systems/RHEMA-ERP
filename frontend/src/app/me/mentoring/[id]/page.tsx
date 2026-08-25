@@ -72,8 +72,8 @@ export default function MentoringPairPage() {
   const [deleteTarget, setDeleteTarget] = useState<MentoringSession | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const pairKey = ['hr', 'mentoring', 'pairs', id];
-  const sessionsKey = ['hr', 'mentoring', 'pairs', id, 'sessions'];
+  const pairKey = ['me', 'mentoring', 'pairs', id];
+  const sessionsKey = ['me', 'mentoring', 'pairs', id, 'sessions'];
 
   const { data: pair, isLoading, isError } = useQuery({
     queryKey: pairKey,
@@ -226,7 +226,7 @@ export default function MentoringPairPage() {
     }
     try {
       await mentoringService.closePair(id, closureNotes.trim());
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'mentoring'] });
+      await queryClient.invalidateQueries({ queryKey: ['me', 'mentoring'] });
       toast({ title: 'Pair closed' });
       setCloseOpen(false);
       return true;
@@ -241,11 +241,11 @@ export default function MentoringPairPage() {
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={`${pair.mentorName} → ${pair.menteeName}`}
         description={`${pair.programName} · started ${fmt(pair.startDate)}`}
-        backHref="/hr/training/mentoring"
+        backHref="/me/mentoring"
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge status={pair.statusName} />

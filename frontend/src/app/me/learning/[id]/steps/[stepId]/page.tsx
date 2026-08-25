@@ -56,14 +56,14 @@ export default function StepDetailPage() {
   // HR may complete a step nothing evidences; everyone else may only confirm what the record supports.
   const isHr = hasRole('HR') || hasRole('SuperAdmin') || hasRole('TenantAdmin');
 
-  const queryKey = ['hr', 'training', 'learning-paths', 'steps', stepId];
+  const queryKey = ['me', 'learning', 'steps', stepId];
   const { data: step, isLoading, isError } = useQuery({
     queryKey,
     queryFn: () => learningPathService.getStepDetail(stepId),
     enabled: !!stepId,
   });
 
-  const historyKey = ['hr', 'training', 'learning-paths', 'steps', stepId, 'history'];
+  const historyKey = ['me', 'learning', 'steps', stepId, 'history'];
   const { data: history } = useQuery({
     queryKey: historyKey,
     queryFn: () => learningPathService.getStepHistory(stepId),
@@ -113,7 +113,7 @@ export default function StepDetailPage() {
         queryClient.invalidateQueries({ queryKey }),
         queryClient.invalidateQueries({ queryKey: historyKey }),
         queryClient.invalidateQueries({
-          queryKey: ['hr', 'training', 'learning-paths', 'enrollments'],
+          queryKey: ['me', 'learning', 'enrollments'],
         }),
       ]);
       setReason('');
@@ -135,13 +135,13 @@ export default function StepDetailPage() {
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={step.programName}
         description={`${step.learningPathName} · step ${step.stepSequence} of ${step.totalSteps}${
           step.isOwnStep ? '' : ` · ${step.learnerName}`
         }`}
-        backHref={`/hr/training/my-learning/${enrollmentId}`}
+        backHref={`/me/learning/${enrollmentId}`}
         actions={
           <div className="flex items-center gap-2">
             {!step.isMandatory && <Badge variant="outline">Optional</Badge>}

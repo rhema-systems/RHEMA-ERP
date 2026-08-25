@@ -578,17 +578,19 @@ export const navigationItems: NavItem[] = [
         // The catalog, plans and budgets are setup and live under Administration → HR → Training.
         //
         // W3 slice 8: desk registers gate on HR.Training.Read (leave-slice shape — the parent stays
-        // open so the self-service children remain reachable). My Training / My Learning Paths /
-        // Mentoring / Certificates are self-service (mine-shaped reads), Schedules is the published
-        // calendar, Requests is the self-service entry point (its register tab needs the desk read),
-        // and Nomination Approvals is the approver queue — workflow-validated per request.
+        // open so the self-service children remain reachable). Schedules is the published calendar,
+        // Requests is the desk register + on-behalf create, and Nomination Approvals is the approver
+        // queue — workflow-validated per request.
+        //
+        // Area 25 slice 6: the my-* screens (My Training, My Learning Paths, my mentoring pairs)
+        // re-homed to the portal (/me/training, /me/learning, /me/mentoring); Mentoring and the new
+        // Enrollments entry are the desk registers that remained.
         title: 'Training',
         href: '/hr/training',
         icon: GraduationCap,
         children: [
-          { title: 'My Training', href: '/hr/training/my-training', icon: GraduationCap },
-          { title: 'My Learning Paths', href: '/hr/training/my-learning', icon: Route },
-          { title: 'Mentoring', href: '/hr/training/mentoring', icon: Handshake },
+          { title: 'Enrollments', href: '/hr/training/enrollments', icon: Route, permissions: ['HR.Training.Read'] },
+          { title: 'Mentoring', href: '/hr/training/mentoring', icon: Handshake, permissions: ['HR.Training.Read'] },
           { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp, permissions: ['HR.Training.Read'] },
           { title: 'Schedules', href: '/hr/training/schedules', icon: CalendarClock },
           { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList },

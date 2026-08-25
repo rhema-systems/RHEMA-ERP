@@ -89,9 +89,13 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Learning',
     icon: GraduationCap,
     links: [
-      { label: 'My Training', href: '/hr/training/my-training' },
-      { label: 'Request Training', href: '/hr/training/requests/new' },
-      { label: 'My Learning Paths', href: '/hr/training/my-learning' },
+      // Slice 6: training & learning live in the portal.
+      { label: 'My Training', href: '/me/training' },
+      { label: 'Request Training', href: '/me/training/requests/new' },
+      { label: 'My Learning Paths', href: '/me/learning' },
+      { label: 'My Waitlist', href: '/me/training/waitlist' },
+      { label: 'My Service Bonds', href: '/me/training/bonds' },
+      { label: 'My Mentoring', href: '/me/mentoring' },
       { label: 'My Orientations', href: '/hr/orientation/mine' },
     ],
   },

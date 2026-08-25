@@ -435,7 +435,7 @@ export default function LearningPathDetailPage() {
                         <TableRow
                           key={e.id}
                           className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => router.push(`/hr/training/my-learning/${e.id}`)}
+                          onClick={() => router.push(`/me/learning/${e.id}`)}
                         >
                           <TableCell className="font-medium">{e.employeeName}</TableCell>
                           <TableCell className="text-muted-foreground">{fmt(e.enrolledDate)}</TableCell>

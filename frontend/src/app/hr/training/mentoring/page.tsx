@@ -1,9 +1,19 @@
 'use client';
 
+/**
+ * Area 25 slice 6 — the desk register of active mentoring pairs.
+ *
+ * The caller's own relationships re-homed to /me/mentoring (D3/D9: my-mentorships are
+ * self-service; programme administration stays desk). What remains here is the org-wide
+ * view — HR.Training.Read-gated server-side — and rows open the PORTAL pair detail: one
+ * working surface for a pair's session log, not one per world (the enrollments-register
+ * precedent from this same slice).
+ */
+
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Handshake, Search, Settings, UserCheck } from 'lucide-react';
+import { UserCheck, Search, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,41 +25,25 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
-import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { mentoringService } from '@/services/hr/mentoring.service';
 
 const fmt = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
-/**
- * Mentoring from the operational side: the caller's own relationships, and — for whoever is entitled
- * to it — the active ones across the organisation.
- *
- * "Mine" is token-derived, so the page never sends an employee id for the caller's own data. Opening
- * a pair someone is not part of is refused by the server rather than hidden here, because hiding a
- * row is a UI convenience and refusing a request is the actual rule.
- */
-export default function MentoringPage() {
+export default function MentoringRegisterPage() {
   const router = useRouter();
-  const [view, setView] = useState<'mine' | 'active'>('mine');
   const [search, setSearch] = useState('');
 
-  const { data: mine, isLoading: loadingMine } = useQuery({
-    queryKey: ['hr', 'mentoring', 'pairs', 'mine'],
-    queryFn: () => mentoringService.getMyPairs(),
-  });
-  const { data: active, isLoading: loadingActive } = useQuery({
+  const { data: active, isLoading } = useQuery({
     queryKey: ['hr', 'mentoring', 'pairs', 'active'],
     queryFn: () => mentoringService.getActivePairs(),
-    enabled: view === 'active',
   });
 
   const rows = useMemo(() => {
-    const list = view === 'mine' ? mine ?? [] : active ?? [];
+    const list = active ?? [];
     const term = search.trim().toLowerCase();
     if (!term) return list;
     return list.filter(
@@ -58,29 +52,13 @@ export default function MentoringPage() {
         p.menteeName.toLowerCase().includes(term) ||
         p.programName.toLowerCase().includes(term),
     );
-  }, [mine, active, view, search]);
-
-  const isLoading = view === 'mine' ? loadingMine : loadingActive;
-  const myRows = mine ?? [];
-
-  const tiles = useMemo(
-    () => [
-      { label: 'My pairs', value: myRows.length, icon: Handshake },
-      { label: 'Active', value: myRows.filter((p) => p.status === 'Active').length },
-      {
-        label: 'Sessions logged',
-        value: myRows.reduce((a, p) => a + p.totalSessionsCount, 0),
-      },
-      { label: 'Completed', value: myRows.filter((p) => p.status === 'Completed').length },
-    ],
-    [myRows],
-  );
+  }, [active, search]);
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Mentoring"
-        description="Your mentoring relationships and their session logs."
+        description="Active mentoring pairs across the organisation. Your own relationships live in your self-service portal."
         backHref="/hr/training"
         actions={
           <Button
@@ -93,33 +71,24 @@ export default function MentoringPage() {
         }
       />
 
-      <MetricTiles tiles={tiles} />
-
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <CardTitle>Pairs</CardTitle>
+              <CardTitle>Active pairs</CardTitle>
               <CardDescription>
-                Open one to log a session. What you write in your own notes stays yours.
+                A row opens the pair&apos;s working surface — private notes stay withheld from
+                anyone who is not in the pair.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
-                <TabsList>
-                  <TabsTrigger value="mine">Mine</TabsTrigger>
-                  <TabsTrigger value="active">All active</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <div className="relative w-56">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search…"
-                  className="pl-8"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
+            <div className="relative w-56">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search…"
+                className="pl-8"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
           </div>
         </CardHeader>
@@ -152,12 +121,8 @@ export default function MentoringPage() {
                     <TableCell colSpan={6}>
                       <EmptyState
                         icon={UserCheck}
-                        title={view === 'mine' ? 'You are not in a mentoring pair' : 'No active pairs'}
-                        description={
-                          view === 'mine'
-                            ? 'Pairs you mentor or are mentored in will appear here.'
-                            : 'Pairs are created inside a programme, under Administration.'
-                        }
+                        title="No active pairs"
+                        description="Pairs are created inside a programme, under Administration."
                       />
                     </TableCell>
                   </TableRow>
@@ -166,7 +131,7 @@ export default function MentoringPage() {
                     <TableRow
                       key={p.id}
                       className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => router.push(`/hr/training/mentoring/${p.id}`)}
+                      onClick={() => router.push(`/me/mentoring/${p.id}`)}
                     >
                       <TableCell className="font-medium">{p.mentorName}</TableCell>
                       <TableCell>{p.menteeName}</TableCell>
