@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Calendar as CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
     Card,
     CardContent,
@@ -13,14 +13,8 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
 import { arService } from '@/services/ar-service';
-import { formatCurrency, cn } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PartnerStatementReport } from '@/components/finance/PartnerStatementReport';
@@ -38,6 +32,7 @@ import {
 } from '@/components/ui/table';
 import { useAuth } from '@/hooks/use-auth';
 import { ArAgingExportButton } from '@/components/finance/ar/ArAgingExportButton';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
 
 const REPORT_TABS = ['aging', 'statements'] as const;
 
@@ -84,11 +79,11 @@ export default function ArReportsPage() {
 function AgingReportView() {
     const { hasPermission } = useAuth();
     const canExport = hasPermission('Finance.Reports.Export');
-    const [asOfDate, setAsOfDate] = useState<Date>(new Date());
+    const [asOfDate, setAsOfDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
 
     const { data: agingReport, isLoading } = useQuery({
         queryKey: ['ar-aging-report', asOfDate],
-        queryFn: () => arService.getAgingReport(format(asOfDate, 'yyyy-MM-dd')),
+        queryFn: () => arService.getAgingReport(asOfDate),
     });
 
     return (
@@ -100,33 +95,23 @@ function AgingReportView() {
                         <CardDescription>Breakdown of outstanding balances by days overdue</CardDescription>
                     </div>
                     <div className="flex items-center space-x-2">
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    className={cn(
-                                        "w-[200px] justify-start text-left font-normal",
-                                        !asOfDate && "text-muted-foreground"
-                                    )}
-                                >
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {asOfDate ? format(asOfDate, "PPP") : <span>As of Date</span>}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0">
-                                <Calendar
-                                    mode="single"
-                                    selected={asOfDate}
-                                    onSelect={(date) => date && setAsOfDate(date)}
-                                    initialFocus
-                                />
-                            </PopoverContent>
-                        </Popover>
+                        <Input
+                            type="date"
+                            aria-label="AR aging as-of date"
+                            value={asOfDate}
+                            onChange={(event) => event.target.value && setAsOfDate(event.target.value)}
+                            className="w-full sm:w-[200px]"
+                        />
                         {canExport && (
-                            <ArAgingExportButton
-                                asOfDate={format(asOfDate, 'yyyy-MM-dd')}
-                                isReportLoading={isLoading}
-                            />
+                            <>
+                                <ArAgingExportButton asOfDate={asOfDate} isReportLoading={isLoading} />
+                                <ReportPdfActions
+                                    reportName="AR aging report"
+                                    onDownloadPdf={() => arService.downloadAgingReportPdf(asOfDate)}
+                                    onPrint={() => arService.printAgingReport(asOfDate)}
+                                    disabled={isLoading || !agingReport}
+                                />
+                            </>
                         )}
                     </div>
                 </div>
@@ -270,6 +255,18 @@ function CustomerStatementsView() {
                 };
             }}
             downloadCsv={(params) => arService.downloadCustomerStatementCsv({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                customerIds: params.partnerIds,
+                showCustomerCurrency: params.showPartnerCurrency,
+            })}
+            downloadPdf={(params) => arService.downloadCustomerStatementPdf({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                customerIds: params.partnerIds,
+                showCustomerCurrency: params.showPartnerCurrency,
+            })}
+            printPdf={(params) => arService.printCustomerStatement({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
                 customerIds: params.partnerIds,

@@ -41,6 +41,7 @@ import { Badge } from '@/components/ui/badge';
 import type { VendorInvoiceMatchExceptionStatus } from '@/types/ap';
 import { ProcurementFinanceReconciliation } from '@/components/finance/ProcurementFinanceReconciliation';
 import { ApAgingExportButton } from '@/components/finance/ap/ApAgingExportButton';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
 import { useTenant } from '@/contexts/TenantContext';
 import {
     apAgingReportQueryKey,
@@ -119,6 +120,8 @@ export default function ApReportsPage() {
 }
 
 function MatchExceptionReportView() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const today = format(new Date(), 'yyyy-MM-dd');
     const thirtyDaysAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
     const [fromDate, setFromDate] = useState(thirtyDaysAgo);
@@ -172,9 +175,27 @@ function MatchExceptionReportView() {
                             <option value="Cancelled">Cancelled</option>
                             <option value="Expired">Expired</option>
                         </select>
-                        <Button variant="outline" disabled={downloading || query.isLoading} onClick={download}>
-                            <Download className="mr-2 h-4 w-4" /> {downloading ? 'Exporting…' : 'Export CSV'}
-                        </Button>
+                        {canExport && (
+                            <>
+                                <Button variant="outline" disabled={downloading || query.isLoading} onClick={download}>
+                                    <Download className="mr-2 h-4 w-4" /> {downloading ? 'Exporting…' : 'Export CSV'}
+                                </Button>
+                                <ReportPdfActions
+                                    reportName="AP match exception report"
+                                    onDownloadPdf={() => accountsPayableService.downloadMatchExceptionReportPdf({
+                                        fromDate,
+                                        toDate,
+                                        status: status || undefined,
+                                    })}
+                                    onPrint={() => accountsPayableService.printMatchExceptionReport({
+                                        fromDate,
+                                        toDate,
+                                        status: status || undefined,
+                                    })}
+                                    disabled={query.isLoading || !query.data}
+                                />
+                            </>
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -258,7 +279,15 @@ function ApAgingReportView() {
                             className="w-full sm:w-[200px]"
                         />
                         {canExport && (
-                            <ApAgingExportButton asOfDate={asOfDate} isReportLoading={isLoading} />
+                            <>
+                                <ApAgingExportButton asOfDate={asOfDate} isReportLoading={isLoading} />
+                                <ReportPdfActions
+                                    reportName="AP aging report"
+                                    onDownloadPdf={() => accountsPayableService.downloadAgingReportPdf(asOfDate)}
+                                    onPrint={() => accountsPayableService.printAgingReport(asOfDate)}
+                                    disabled={isLoading || !agingReport}
+                                />
+                            </>
                         )}
                     </div>
                 </div>
@@ -370,6 +399,8 @@ function ApAgingReportView() {
 
 function CashRequirementsView() {
     const { currentTenantCode, isLoadingTenants } = useTenant();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [asOfDate, setAsOfDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
 
     const { data: forecastReport, isLoading } = useQuery({
@@ -394,6 +425,14 @@ function CashRequirementsView() {
                             onChange={(event) => event.target.value && setAsOfDate(event.target.value)}
                             className="w-[200px]"
                         />
+                        {canExport && (
+                            <ReportPdfActions
+                                reportName="AP cash requirements forecast"
+                                onDownloadPdf={() => accountsPayableService.downloadCashRequirementsPdf(asOfDate)}
+                                onPrint={() => accountsPayableService.printCashRequirements(asOfDate)}
+                                disabled={isLoading || !forecastReport}
+                            />
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -552,6 +591,12 @@ function SupplierStatementsView() {
                 supplierIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
                 format: 'pdf',
+            })}
+            printPdf={(params) => accountsPayableService.printSupplierStatementDocument({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
             })}
             downloadXlsx={(params) => accountsPayableService.downloadSupplierStatementDocument({
                 fromDate: params.fromDate,

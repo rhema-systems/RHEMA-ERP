@@ -11,7 +11,8 @@ import {
     ChevronRight,
     Search,
     Calendar,
-    Table as TableIcon
+    Table as TableIcon,
+    Printer
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -44,6 +45,7 @@ import {
     AssetTransferReportItem
 } from '@/types/fixed-asset-reports';
 import { toast } from 'sonner';
+import { useAuth } from '@/hooks/use-auth';
 
 const REPORT_TYPES = [
     { id: 'AssetRegister', slug: 'asset-register', title: 'Asset Register', description: 'Comprehensive list of all fixed assets with their current valuation.' },
@@ -56,6 +58,8 @@ function getReportType(reportSlug: string | null) {
 }
 
 export default function FixedAssetReportsPage() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const searchParams = useSearchParams();
     const reportParam = searchParams.get('report');
     const [selectedReport, setSelectedReport] = useState(() => getReportType(reportParam));
@@ -121,6 +125,19 @@ export default function FixedAssetReportsPage() {
         } catch (error) {
             console.error(`Export to ${format} failed:`, error);
             toast.error(`Failed to export report as ${format.toUpperCase()}`);
+        } finally {
+            setExporting(null);
+        }
+    };
+
+    const handlePrint = async () => {
+        setExporting('print');
+        try {
+            await fixedAssetsDataService.printPdf(selectedReport.id, filters);
+            toast.success(`${selectedReport.title} opened for printing`);
+        } catch (error) {
+            console.error('Print failed:', error);
+            toast.error(`Failed to print ${selectedReport.title}`);
         } finally {
             setExporting(null);
         }
@@ -289,7 +306,7 @@ export default function FixedAssetReportsPage() {
                                 <CardTitle>{selectedReport.title}</CardTitle>
                                 <CardDescription>{selectedReport.description}</CardDescription>
                             </div>
-                            <div className="flex gap-2">
+                            {canExport && <div className="flex gap-2">
                                 <Button
                                     onClick={() => handleDownload('excel')}
                                     disabled={exporting !== null}
@@ -308,7 +325,15 @@ export default function FixedAssetReportsPage() {
                                     {exporting === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
                                     PDF
                                 </Button>
-                            </div>
+                                <Button
+                                    onClick={handlePrint}
+                                    disabled={exporting !== null}
+                                    variant="outline"
+                                >
+                                    {exporting === 'print' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Printer className="h-4 w-4 mr-2" />}
+                                    Print
+                                </Button>
+                            </div>}
                         </CardHeader>
                         <CardContent>
                             {/* Filter Panel */}

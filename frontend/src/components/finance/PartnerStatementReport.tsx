@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Check, ChevronsUpDown, Download, FileSpreadsheet, FileText, Loader2, Play, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Download, FileSpreadsheet, FileText, Loader2, Play, Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -35,6 +35,7 @@ interface PartnerStatementReportProps {
     loadReport: (params: StatementReportParams) => Promise<DetailedLedgerReport>;
     downloadCsv: (params: StatementReportParams) => Promise<Blob>;
     downloadPdf?: (params: StatementReportParams) => Promise<void>;
+    printPdf?: (params: StatementReportParams) => Promise<void>;
     downloadXlsx?: (params: StatementReportParams) => Promise<void>;
     canExport?: boolean;
 }
@@ -71,6 +72,7 @@ export function PartnerStatementReport({
     loadReport,
     downloadCsv,
     downloadPdf,
+    printPdf,
     downloadXlsx,
     canExport = true,
 }: PartnerStatementReportProps) {
@@ -80,7 +82,7 @@ export function PartnerStatementReport({
     const [showPartnerCurrency, setShowPartnerCurrency] = useState(false);
     const [report, setReport] = useState<DetailedLedgerReport | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [exportingFormat, setExportingFormat] = useState<'csv' | 'pdf' | 'xlsx' | null>(null);
+    const [exportingFormat, setExportingFormat] = useState<'csv' | 'pdf' | 'print' | 'xlsx' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [partnerPickerOpen, setPartnerPickerOpen] = useState(false);
 
@@ -139,9 +141,12 @@ export function PartnerStatementReport({
 
     const exportControlledDocument = async (
         formatName: 'PDF' | 'XLSX',
-        download: (params: StatementReportParams) => Promise<void>
+        download: (params: StatementReportParams) => Promise<void>,
+        action: 'download' | 'print' = 'download'
     ) => {
-        const format = formatName.toLowerCase() as 'pdf' | 'xlsx';
+        const format = action === 'print'
+            ? 'print'
+            : formatName.toLowerCase() as 'pdf' | 'xlsx';
         setExportingFormat(format);
         setError(null);
         try {
@@ -181,6 +186,17 @@ export function PartnerStatementReport({
                                     >
                                         {exportingFormat === 'pdf' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
                                         PDF
+                                    </Button>
+                                )}
+                                {printPdf && (
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => exportControlledDocument('PDF', printPdf, 'print')}
+                                        disabled={exportingFormat !== null || partnersLoading}
+                                        aria-label={`Print ${title}`}
+                                    >
+                                        {exportingFormat === 'print' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                                        Print
                                     </Button>
                                 )}
                                 {downloadXlsx && (

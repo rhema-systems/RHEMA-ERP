@@ -1,4 +1,5 @@
 import { apiService } from './api.service';
+import { DOCUMENT_TYPES, documentOutputService } from './document-output.service';
 import type {
     Customer,
     CustomerCreateRequest,
@@ -221,6 +222,22 @@ class ArService {
         });
     }
 
+    public async downloadAgingReportPdf(asOfDate: string): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeArAgingReport,
+            { asOfDate },
+            { format: 'pdf' }
+        );
+    }
+
+    public async printAgingReport(asOfDate: string): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeArAgingReport,
+            { asOfDate },
+            { format: 'pdf' }
+        );
+    }
+
     public async getCustomerStatement(customerId: string, startDate: string, endDate: string): Promise<any> {
         const params = new URLSearchParams();
         params.append('fromDate', startDate);
@@ -259,6 +276,42 @@ class ArService {
             customerIds: query.customerIds ?? [],
             showCustomerCurrency: query.showCustomerCurrency === true,
         });
+    }
+
+    public async downloadCustomerStatementPdf(query: {
+        fromDate: string;
+        toDate: string;
+        customerIds?: string[];
+        showCustomerCurrency?: boolean;
+    }): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeArCustomerStatement,
+            {
+                fromDate: query.fromDate,
+                toDate: query.toDate,
+                customerIds: query.customerIds ?? [],
+                showCustomerCurrency: query.showCustomerCurrency === true,
+            },
+            { format: 'pdf' }
+        );
+    }
+
+    public async printCustomerStatement(query: {
+        fromDate: string;
+        toDate: string;
+        customerIds?: string[];
+        showCustomerCurrency?: boolean;
+    }): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeArCustomerStatement,
+            {
+                fromDate: query.fromDate,
+                toDate: query.toDate,
+                customerIds: query.customerIds ?? [],
+                showCustomerCurrency: query.showCustomerCurrency === true,
+            },
+            { format: 'pdf' }
+        );
     }
 
     public async getCollectionsDashboard(): Promise<CollectionsDashboardStats> {

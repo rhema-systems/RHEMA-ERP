@@ -9,6 +9,12 @@ export const DOCUMENT_TYPES = {
   financeCashBankPaymentSlip: 'Finance.CashBank.PaymentSlip',
   financeArCustomerReceipt: 'Finance.AR.CustomerReceipt',
   financeApSupplierStatement: 'Finance.AP.SupplierStatement',
+  financeApAgingReport: 'Finance.AP.AgingReport',
+  financeApCashRequirements: 'Finance.AP.CashRequirements',
+  financeApMatchExceptionReport: 'Finance.AP.MatchExceptionReport',
+  financeApProcurementReconciliation: 'Finance.AP.ProcurementReconciliation',
+  financeArAgingReport: 'Finance.AR.AgingReport',
+  financeArCustomerStatement: 'Finance.AR.CustomerStatement',
   financeTrialBalance: 'Finance.TrialBalance',
   financeIncomeStatement: 'Finance.IncomeStatement',
   financeBalanceSheet: 'Finance.BalanceSheet',
@@ -165,6 +171,14 @@ class DocumentOutputService {
     options: DocumentOptions = {}
   ): Promise<void> {
     const file = await this.fetchReportDocument(documentType, parameters, { ...options, format: options.format || 'pdf' });
+    await this.printFile(file);
+  }
+
+  /**
+   * Prints a PDF already returned by a controlled Finance report endpoint. This lets legacy
+   * report endpoints join the shared isolated-PDF print pipeline without printing the app page.
+   */
+  async printRenderedFile(file: RenderedDocumentFile): Promise<void> {
     await this.printFile(file);
   }
 
