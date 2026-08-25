@@ -42,6 +42,8 @@ public sealed class DocumentsController : ControllerBase
         [DocumentTypes.FinanceTaxOutputRegister] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceTaxVatReconciliation] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceTaxWhtPayable] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxWhtCertificateRegister] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxWhtRemittanceRegister] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceBudgetConsolidated] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceBudgetScenarioComparison] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceTrialBalance] = FinancePermissions.ExportFinanceReports,

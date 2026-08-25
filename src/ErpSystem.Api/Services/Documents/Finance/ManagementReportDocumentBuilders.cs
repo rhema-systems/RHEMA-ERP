@@ -91,6 +91,21 @@ public abstract class TaxReportDocumentBuilderBase : FinanceTabularReportDocumen
             ? []
             : [$"{diagnostics.Count} tax diagnostic(s) accompany this report; review them in the canonical Tax report before filing."];
 
+    protected static string? TextOption(DocumentRenderRequestDto request, string key)
+    {
+        if (request.Options == null
+            || !request.Options.TryGetValue(key, out var value)
+            || string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
+
+    protected static string CurrencyCode(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "GHS" : value.Trim().ToUpperInvariant();
+
     protected static FinancePrintableSection SnapshotSection(
         string title,
         IReadOnlyCollection<GhanaTaxSnapshotLineDto> lines) =>
@@ -247,6 +262,220 @@ public sealed class WhtPayableReportDocumentBuilder : TaxReportDocumentBuilderBa
                     $"{line.TaxAccountNumber} {line.TaxAccountName}".Trim()
                 ]).ToArray(),
                 [0.8f, 1.4f, 1.4f, 1.1f, 0.6f, 0.9f, 0.9f, 1.1f, 1.5f])]);
+    }
+}
+
+public sealed class WhtCertificateRegisterDocumentBuilder : TaxReportDocumentBuilderBase
+{
+    private readonly IWithholdingTaxCertificateService _certificates;
+
+    public WhtCertificateRegisterDocumentBuilder(
+        IWithholdingTaxCertificateService certificates,
+        ApplicationDbContext context,
+        ICurrentUserService currentUser,
+        ITenantSettingsService tenantSettings,
+        IFinanceAuditService? financeAuditService = null)
+        : base(context, currentUser, tenantSettings, financeAuditService) => _certificates = certificates;
+
+    public override string DocumentType => DocumentTypes.FinanceTaxWhtCertificateRegister;
+
+    protected override async Task<FinancePrintableReport> BuildReportAsync(
+        DocumentRenderRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var fromDate = RequiredDateOption(request, "fromDate");
+        var toDate = RequiredDateOption(request, "toDate");
+        if (toDate < fromDate)
+            throw new ArgumentException("The WHT certificate register end date must be on or after the start date.");
+
+        var status = TextOption(request, "status");
+        if (string.Equals(status, "All", StringComparison.OrdinalIgnoreCase)) status = null;
+        var searchTerm = TextOption(request, "searchTerm");
+        var rows = await LoadAllCertificatesAsync(fromDate, toDate, status, searchTerm, cancellationToken);
+        var currencies = rows.Select(row => CurrencyCode(row.CurrencyCode)).Distinct().Order().ToArray();
+        var sections = rows
+            .GroupBy(row => CurrencyCode(row.CurrencyCode))
+            .OrderBy(group => group.Key)
+            .Select((group, index) => new FinancePrintableSection(
+                $"Certificate register - {group.Key}",
+                $"Amounts remain in {group.Key}; unlike currencies are never combined.",
+                ["Payment", "Supplier / TIN", "Tax", "Taxable base", "WHT", "Certificate", "Status", "Remittance"],
+                group.OrderBy(row => row.PaymentDate).ThenBy(row => row.PaymentNumber)
+                    .Select(row => (IReadOnlyList<string>)[
+                        $"{DateText(row.PaymentDate)}\n{row.PaymentNumber}",
+                        $"{row.SupplierName}\n{row.SupplierTin ?? "TIN not supplied"}",
+                        $"{row.TaxCode ?? "WHT"} {row.TaxRate:0.####}%",
+                        Money(row.TaxableBase),
+                        Money(row.WithholdingAmount),
+                        $"{row.CertificateNumber ?? "-"}\nv{row.VersionNumber}",
+                        row.CertificateStatus,
+                        $"{row.RemittanceNumber ?? "-"}\n{row.RemittanceStatus}"
+                    ]).ToArray(),
+                [1.1f, 1.8f, 0.9f, 1f, 1f, 1.2f, 0.8f, 1.2f],
+                PageBreakBefore: index > 0))
+            .ToList();
+        if (sections.Count == 0)
+        {
+            sections.Add(new FinancePrintableSection(
+                "Certificate register", null,
+                ["Payment", "Supplier", "Tax", "Taxable base", "WHT", "Certificate", "Status", "Remittance"],
+                [], [1.1f, 1.8f, 0.9f, 1f, 1f, 1.2f, 0.8f, 1.2f]));
+        }
+
+        return new FinancePrintableReport(
+            "WHT Statutory Certificate Register",
+            "Eligible posted AP withholding payments and controlled certificate/remittance evidence",
+            $"{DateText(fromDate)} to {DateText(toDate)}",
+            $"wht-statutory-certificate-register-{fromDate:yyyy-MM-dd}-{toDate:yyyy-MM-dd}",
+            [
+                new("Eligible payments", rows.Count.ToString(InvariantCulture)),
+                new("Issued", rows.Count(row => row.CertificateStatus == "Issued").ToString(InvariantCulture)),
+                new("Missing", rows.Count(row => row.CertificateStatus == "Missing").ToString(InvariantCulture)),
+                new("Currencies", currencies.Length.ToString(InvariantCulture))
+            ],
+            ["Monetary values are grouped by payment currency; no cross-currency statutory total is presented."],
+            sections);
+    }
+
+    private async Task<IReadOnlyList<WhtCertificateDto>> LoadAllCertificatesAsync(
+        DateTime fromDate,
+        DateTime toDate,
+        string? status,
+        string? searchTerm,
+        CancellationToken cancellationToken)
+    {
+        const int pageSize = 200;
+        var rows = new List<WhtCertificateDto>();
+        for (var page = 1; ; page++)
+        {
+            var result = await _certificates.GetApCertificatesAsync(new WhtCertificateQueryDto
+            {
+                Page = page,
+                PageSize = pageSize,
+                FromDate = fromDate,
+                ToDate = toDate,
+                Status = status,
+                SearchTerm = searchTerm
+            }, cancellationToken);
+            var pageRows = result.Items.ToList();
+            rows.AddRange(pageRows);
+            if (pageRows.Count == 0 || rows.Count >= result.TotalCount) break;
+        }
+        return rows;
+    }
+}
+
+public sealed class WhtRemittanceRegisterDocumentBuilder : TaxReportDocumentBuilderBase
+{
+    private readonly IWithholdingTaxCertificateService _certificates;
+
+    public WhtRemittanceRegisterDocumentBuilder(
+        IWithholdingTaxCertificateService certificates,
+        ApplicationDbContext context,
+        ICurrentUserService currentUser,
+        ITenantSettingsService tenantSettings,
+        IFinanceAuditService? financeAuditService = null)
+        : base(context, currentUser, tenantSettings, financeAuditService) => _certificates = certificates;
+
+    public override string DocumentType => DocumentTypes.FinanceTaxWhtRemittanceRegister;
+
+    protected override async Task<FinancePrintableReport> BuildReportAsync(
+        DocumentRenderRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var fromDate = RequiredDateOption(request, "fromDate");
+        var toDate = RequiredDateOption(request, "toDate");
+        if (toDate < fromDate)
+            throw new ArgumentException("The WHT remittance register end date must be on or after the start date.");
+
+        var rows = await LoadAllRemittancesAsync(fromDate, toDate, cancellationToken);
+        var currencies = rows.Select(row => CurrencyCode(row.CurrencyCode)).Distinct().Order().ToArray();
+        var sections = new List<FinancePrintableSection>();
+        foreach (var group in rows.GroupBy(row => CurrencyCode(row.CurrencyCode)).OrderBy(group => group.Key))
+        {
+            sections.Add(new FinancePrintableSection(
+                $"Remittance batches - {group.Key}",
+                $"Amounts remain in {group.Key}; unlike currencies are never combined.",
+                ["Remittance", "Period / due", "Status", "Items", "WHT", "Submission", "Payment / GRA receipt"],
+                group.OrderBy(row => row.PeriodFrom).ThenBy(row => row.RemittanceNumber)
+                    .Select(row => (IReadOnlyList<string>)[
+                        row.RemittanceNumber,
+                        $"{DateText(row.PeriodFrom)} to {DateText(row.PeriodTo)}\nDue {DateText(row.DueDate)}",
+                        row.Status,
+                        row.LineCount.ToString(InvariantCulture),
+                        Money(row.TotalWithholdingAmount),
+                        $"{row.SubmissionReference ?? "-"}\n{(row.SubmittedAtUtc.HasValue ? DateText(row.SubmittedAtUtc.Value) : "-")}",
+                        $"{row.PaymentReference ?? "-"}\n{row.AuthorityReceiptReference ?? "-"}"
+                    ]).ToArray(),
+                [1.2f, 1.6f, 0.8f, 0.5f, 0.9f, 1.4f, 1.4f],
+                PageBreakBefore: sections.Count > 0));
+
+            var liabilityRows = group
+                .SelectMany(remittance => remittance.Lines.Select(line => new { Remittance = remittance, Line = line }))
+                .OrderBy(item => item.Line.PaymentDate)
+                .ThenBy(item => item.Line.PaymentNumber)
+                .Select(item => (IReadOnlyList<string>)[
+                    item.Remittance.RemittanceNumber,
+                    $"{DateText(item.Line.PaymentDate)}\n{item.Line.PaymentNumber}",
+                    $"{item.Line.SupplierName}\n{item.Line.SupplierTin ?? "TIN not supplied"}",
+                    item.Line.TaxCode ?? "WHT",
+                    Money(item.Line.TaxableBase),
+                    Money(item.Line.WithholdingAmount)
+                ]).ToArray();
+            sections.Add(new FinancePrintableSection(
+                $"Underlying liabilities - {group.Key}",
+                "Immutable payment evidence included in the remittance batches above.",
+                ["Remittance", "Payment", "Supplier / TIN", "Tax", "Taxable base", "WHT"],
+                liabilityRows,
+                [1.2f, 1.2f, 2f, 0.8f, 1f, 1f],
+                PageBreakBefore: true));
+        }
+        if (sections.Count == 0)
+        {
+            sections.Add(new FinancePrintableSection(
+                "Remittance batches", null,
+                ["Remittance", "Period / due", "Status", "Items", "WHT", "Submission", "Payment / GRA receipt"],
+                [], [1.2f, 1.6f, 0.8f, 0.5f, 0.9f, 1.4f, 1.4f]));
+        }
+
+        return new FinancePrintableReport(
+            "WHT Remittance Register",
+            "Submission, settlement, cancellation, and underlying AP liability evidence",
+            $"{DateText(fromDate)} to {DateText(toDate)}",
+            $"wht-remittance-register-{fromDate:yyyy-MM-dd}-{toDate:yyyy-MM-dd}",
+            [
+                new("Batches", rows.Count.ToString(InvariantCulture)),
+                new("Draft", rows.Count(row => row.Status == "Draft").ToString(InvariantCulture)),
+                new("Submitted", rows.Count(row => row.Status == "Submitted").ToString(InvariantCulture)),
+                new("Paid", rows.Count(row => row.Status == "Paid").ToString(InvariantCulture)),
+                new("Cancelled", rows.Count(row => row.Status == "Cancelled").ToString(InvariantCulture)),
+                new("Currencies", currencies.Length.ToString(InvariantCulture))
+            ],
+            ["Monetary values are grouped by remittance currency; no cross-currency statutory total is presented."],
+            sections);
+    }
+
+    private async Task<IReadOnlyList<WhtRemittanceDto>> LoadAllRemittancesAsync(
+        DateTime fromDate,
+        DateTime toDate,
+        CancellationToken cancellationToken)
+    {
+        const int pageSize = 200;
+        var rows = new List<WhtRemittanceDto>();
+        for (var page = 1; ; page++)
+        {
+            var result = await _certificates.GetRemittancesAsync(new WhtRemittanceQueryDto
+            {
+                Page = page,
+                PageSize = pageSize,
+                FromDate = fromDate,
+                ToDate = toDate
+            }, cancellationToken);
+            var pageRows = result.Items.ToList();
+            rows.AddRange(pageRows);
+            if (pageRows.Count == 0 || rows.Count >= result.TotalCount) break;
+        }
+        return rows;
     }
 }
 

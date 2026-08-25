@@ -115,6 +115,10 @@ public static class DocumentTypes
     public const string FinanceTaxVatReconciliation = "Finance.Tax.VatReconciliation";
     /// <summary>WHT payable register rendered from posted withholding records.</summary>
     public const string FinanceTaxWhtPayable = "Finance.Tax.WhtPayable";
+    /// <summary>Statutory WHT certificate register across eligible posted AP payments.</summary>
+    public const string FinanceTaxWhtCertificateRegister = "Finance.Tax.WhtCertificateRegister";
+    /// <summary>WHT remittance lifecycle register with underlying liability evidence.</summary>
+    public const string FinanceTaxWhtRemittanceRegister = "Finance.Tax.WhtRemittanceRegister";
     /// <summary>Consolidated budget-versus-actual scenario report.</summary>
     public const string FinanceBudgetConsolidated = "Finance.Budget.Consolidated";
     public const string FinanceBudgetScenarioComparison = "Finance.Budget.ScenarioComparison";

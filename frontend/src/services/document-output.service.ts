@@ -20,6 +20,8 @@ export const DOCUMENT_TYPES = {
   financeTaxOutputRegister: 'Finance.Tax.OutputRegister',
   financeTaxVatReconciliation: 'Finance.Tax.VatReconciliation',
   financeTaxWhtPayable: 'Finance.Tax.WhtPayable',
+  financeTaxWhtCertificateRegister: 'Finance.Tax.WhtCertificateRegister',
+  financeTaxWhtRemittanceRegister: 'Finance.Tax.WhtRemittanceRegister',
   financeBudgetConsolidated: 'Finance.Budget.Consolidated',
   financeBudgetScenarioComparison: 'Finance.Budget.ScenarioComparison',
   financeTrialBalance: 'Finance.TrialBalance',
