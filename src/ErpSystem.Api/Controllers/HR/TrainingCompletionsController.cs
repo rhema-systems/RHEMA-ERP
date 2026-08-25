@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -15,11 +16,24 @@ public class TrainingCompletionsController : ControllerBase
 {
     private readonly ITrainingCompletionService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAuthorizationService _authorization;
 
-    public TrainingCompletionsController(ITrainingCompletionService service, ICurrentUserService currentUser)
+    public TrainingCompletionsController(
+        ITrainingCompletionService service,
+        ICurrentUserService currentUser,
+        IAuthorizationService authorization)
     {
         _service = service;
         _currentUser = currentUser;
+        _authorization = authorization;
+    }
+
+    /// <summary>Self-or-permission (W3), as on LeavesController — see the remarks there.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUser.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+            return true;
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
     // =========================================================================
@@ -27,10 +41,12 @@ public class TrainingCompletionsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingCompletionDto>> GetById(Guid id, CancellationToken ct)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("nomination/{nominationId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingCompletionDto?>> GetByNominationId(Guid nominationId, CancellationToken ct)
         => Ok(await _service.GetByNominationIdAsync(nominationId, ct));
 
@@ -45,13 +61,19 @@ public class TrainingCompletionsController : ControllerBase
 
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<TrainingCompletionDto>>> GetByEmployeeId(Guid employeeId, CancellationToken ct)
-        => Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.TrainingReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
+    }
 
     [HttpGet("schedule/{scheduleId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingCompletionDto>>> GetByScheduleId(Guid scheduleId, CancellationToken ct)
         => Ok(await _service.GetByScheduleIdAsync(scheduleId, ct));
 
     [HttpGet("pending-verification")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingCompletionDto>>> GetPendingVerification(CancellationToken ct)
         => Ok(await _service.GetPendingVerificationAsync(ct));
 
@@ -60,6 +82,7 @@ public class TrainingCompletionsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingCompletionDto>> RecordCompletion([FromBody] RecordTrainingCompletionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -75,6 +98,7 @@ public class TrainingCompletionsController : ControllerBase
     }
 
     [HttpPost("bulk")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<BulkCompletionResultDto>> BulkRecordCompletion([FromBody] BulkRecordCompletionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -88,6 +112,7 @@ public class TrainingCompletionsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingCompletionDto>> Update(Guid id, [FromBody] UpdateTrainingCompletionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -98,6 +123,7 @@ public class TrainingCompletionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/verify")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<IActionResult> VerifyCompletion(Guid id, [FromBody] VerifyTrainingCompletionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -115,6 +141,7 @@ public class TrainingCompletionsController : ControllerBase
     // =========================================================================
 
     [HttpPost("certificates")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingCertificateDto>> IssueCertificate([FromBody] IssueCertificateDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -129,6 +156,7 @@ public class TrainingCompletionsController : ControllerBase
     }
 
     [HttpPost("certificates/{id:guid}/revoke")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> RevokeCertificate(Guid id, [FromBody] RevokeCertificateDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -150,9 +178,14 @@ public class TrainingCompletionsController : ControllerBase
 
     [HttpGet("certificates/employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<TrainingCertificateSummaryDto>>> GetCertificatesForEmployee(Guid employeeId, CancellationToken ct)
-        => Ok(await _service.GetCertificatesForEmployeeAsync(employeeId, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.TrainingReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetCertificatesForEmployeeAsync(employeeId, ct));
+    }
 
     [HttpGet("certificates/expiring")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingCertificateSummaryDto>>> GetExpiringCertificates(
         [FromQuery] int daysAhead = 30,
         CancellationToken ct = default)

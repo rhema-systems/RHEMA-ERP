@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -28,22 +29,27 @@ public class TrainingPlansController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingPlanSummaryDto>>> GetAll(CancellationToken ct)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingPlanDto>> GetById(Guid id, CancellationToken ct)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("number/{planNumber}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingPlanDto?>> GetByPlanNumber(string planNumber, CancellationToken ct)
         => Ok(await _service.GetByPlanNumberAsync(planNumber, ct));
 
     [HttpGet("year/{year:int}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingPlanSummaryDto>>> GetByYear(int year, CancellationToken ct)
         => Ok(await _service.GetByYearAsync(year, ct));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingPlanSummaryDto>>> GetByStatus(TrainingPlanStatus status, CancellationToken ct)
         => Ok(await _service.GetByStatusAsync(status, ct));
 
@@ -52,6 +58,7 @@ public class TrainingPlansController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingPlanDto>> Create([FromBody] CreateTrainingPlanDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -67,6 +74,7 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingPlanDto>> Update(Guid id, [FromBody] UpdateTrainingPlanDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -79,6 +87,7 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -90,6 +99,7 @@ public class TrainingPlansController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/submit")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<IActionResult> Submit(Guid id, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -100,6 +110,7 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpPost("{id:guid}/approve")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveTrainingPlanDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -117,6 +128,7 @@ public class TrainingPlansController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/items")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingPlanItemDto>> AddItem(Guid id, [FromBody] CreateTrainingPlanItemDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -132,10 +144,12 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpGet("{id:guid}/items")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingPlanItemDto>>> GetItems(Guid id, CancellationToken ct)
         => Ok(await _service.GetItemsAsync(id, ct));
 
     [HttpPut("items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingPlanItemDto>> UpdateItem(Guid itemId, [FromBody] UpdateTrainingPlanItemDto dto, CancellationToken ct)
     {
         if (itemId != dto.Id) return BadRequest("ID mismatch.");
@@ -148,6 +162,7 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpDelete("items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteItem(Guid itemId, CancellationToken ct)
     {
         await _service.DeleteItemAsync(itemId, ct);
@@ -159,6 +174,7 @@ public class TrainingPlansController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/budget-lines")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingPlanBudgetLineDto>> AddBudgetLine(Guid id, [FromBody] CreateTrainingPlanBudgetLineDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -174,10 +190,12 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpGet("{id:guid}/budget-lines")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingPlanBudgetLineDto>>> GetBudgetLines(Guid id, CancellationToken ct)
         => Ok(await _service.GetBudgetLinesAsync(id, ct));
 
     [HttpPut("budget-lines/{lineId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingPlanBudgetLineDto>> UpdateBudgetLine(Guid lineId, [FromBody] UpdateTrainingPlanBudgetLineDto dto, CancellationToken ct)
     {
         if (lineId != dto.Id) return BadRequest("ID mismatch.");
@@ -190,6 +208,7 @@ public class TrainingPlansController : ControllerBase
     }
 
     [HttpDelete("budget-lines/{lineId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteBudgetLine(Guid lineId, CancellationToken ct)
     {
         await _service.DeleteBudgetLineAsync(lineId, ct);

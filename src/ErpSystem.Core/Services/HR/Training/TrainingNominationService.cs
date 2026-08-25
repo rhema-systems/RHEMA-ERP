@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -392,6 +393,8 @@ public class TrainingNominationService : ITrainingNominationService
         }
 
         // ── Legacy Supervisor→HR path ─────────────────────────────────────────
+        EnsureLegacyDecisionAllowed();
+
         if (dto.ApproverRole.Equals("Supervisor", StringComparison.OrdinalIgnoreCase))
         {
             if (entity.Status != NominationStatus.Submitted && entity.Status != NominationStatus.SupervisorReview)
@@ -438,6 +441,26 @@ public class TrainingNominationService : ITrainingNominationService
     /// <summary>Current authenticated user's id (ApplicationUser id) for workflow-engine approver checks.</summary>
     private Guid GetCurrentUserId()
         => Guid.TryParse(_currentUser.UserId, out var uid) ? uid : Guid.Empty;
+
+    /// <summary>
+    /// W3 slice 8: the legacy no-workflow approve/reject path previously accepted ANY authenticated
+    /// caller — the approver role came from the request body, so any employee could post
+    /// <c>{"approverRole":"HR"}</c> and approve a nomination outright. The live path is
+    /// workflow-validated per request (<see cref="IWorkflowIntegrationService.CanUserApproveAsync"/>);
+    /// the legacy path survives only for nominations created before the workflow wiring, so it is
+    /// held to the HR-shaped roles (the MentoringService IsHr shape). A legacy line-supervisor
+    /// approval is deliberately not supported: the org holds no reporting lines to validate a
+    /// supervisor claim against, and new nominations all take the workflow path.
+    /// </summary>
+    private void EnsureLegacyDecisionAllowed()
+    {
+        var allowed = _currentUserProvider.HasRole(Constants.Roles.Hr)
+            || _currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
+            || _currentUserProvider.HasRole(Constants.Roles.TenantAdmin);
+        if (!allowed)
+            throw new UnauthorizedAccessException(
+                "This nomination has no approval workflow; only HR or an administrator may decide it.");
+    }
 
     /// <summary>Blocks approval when the schedule has no remaining seats (confirmed/approved ≥ capacity).</summary>
     private async Task EnforceScheduleCapacityAsync(TrainingNomination entity, CancellationToken cancellationToken)
@@ -494,6 +517,8 @@ public class TrainingNominationService : ITrainingNominationService
         }
 
         // ── Legacy path ───────────────────────────────────────────────────────
+        EnsureLegacyDecisionAllowed();
+
         entity.Status = NominationStatus.Rejected;
         entity.RejectionReason = dto.RejectionReason;
         entity.RejectedDate = DateTime.UtcNow;

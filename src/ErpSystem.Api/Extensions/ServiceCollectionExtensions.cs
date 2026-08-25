@@ -1342,6 +1342,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerCompensation)));
 
+            // HR training & learning policies (W3 slice 8): programs, plans, schedules,
+            // nominations, requests, completions, needs assessments, budgets, vendors, trainers,
+            // learning paths, mentoring, compliance training and service bonds. Same split as the
+            // earlier slices: org-wide surfaces authorize here, an employee's own training record
+            // and self-service acts (nominate self, respond, withdraw) are ownership checks on
+            // the endpoint, and workflow-validated approvals stay with the assignee.
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.TrainingReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewTraining,
+                        HrPermissions.MaintainTraining,
+                        HrPermissions.AdministerTraining)))
+                .AddPolicy(HrPermissions.TrainingWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainTraining,
+                        HrPermissions.AdministerTraining)))
+                .AddPolicy(HrPermissions.TrainingAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerTraining)));
+
             // HR occupational-health policies. The medical controllers previously carried a bare
             // [Authorize], so every authenticated employee could read and delete medical records.
             // Administer implies Write implies Read, so an admin does not need all three granted.

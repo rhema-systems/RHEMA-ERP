@@ -25,6 +25,7 @@ public static class HrPermissions
     public const string CategoryLeave = "HR - Leave";
     public const string CategoryAttendance = "HR - Attendance & Time";
     public const string CategoryCompensation = "HR - Compensation & Benefits";
+    public const string CategoryTraining = "HR - Training & Learning";
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
@@ -61,6 +62,14 @@ public static class HrPermissions
     public const string CompensationReadPolicy = "HR.Policy.CompensationRead";
     public const string CompensationWritePolicy = "HR.Policy.CompensationWrite";
     public const string CompensationAdminPolicy = "HR.Policy.CompensationAdmin";
+
+    public const string ViewTraining = "HR.Training.Read";
+    public const string MaintainTraining = "HR.Training.Write";
+    public const string AdministerTraining = "HR.Training.Admin";
+
+    public const string TrainingReadPolicy = "HR.Policy.TrainingRead";
+    public const string TrainingWritePolicy = "HR.Policy.TrainingWrite";
+    public const string TrainingAdminPolicy = "HR.Policy.TrainingAdmin";
 
     public const string ViewMedicalRecords = "HR.Medical.Read";
     public const string MaintainMedicalRecords = "HR.Medical.Write";
@@ -165,6 +174,16 @@ public static class HrPermissions
         new(AdministerCompensation, "Administer Compensation & Benefits",
             "Delete emolument assignments, benefit policies and their grade values, and salary grades/levels/notches, and deactivate pay components and benefit policies.",
             CategoryCompensation),
+
+        new(ViewTraining, "View Training & Learning",
+            "View the organisation-wide training surface: the nomination and request registers, completions, needs assessments, budgets, plans, vendors, trainers, enrollments, mentoring pairs, service bonds and the dashboard. Employees do not need this for their own training record — self access is an ownership check on the endpoint.",
+            CategoryTraining),
+        new(MaintainTraining, "Maintain Training & Learning",
+            "Run the training desk: maintain programs, plans, schedules, nominate and enroll on behalf of staff, decide training requests, record and verify completions, issue certificates, mark attendance, and maintain needs assessments, budgets, vendors, trainers, learning paths, mentoring and compliance assignments. Employee self-acts (self-nomination, requests, waitlist, bond acceptance, mentoring sessions, learning-path steps) are ownership checks on the endpoint, not this permission.",
+            CategoryTraining),
+        new(AdministerTraining, "Administer Training & Learning",
+            "Approve training budgets and annual training plans, revoke certificates, blacklist vendors, waive service bonds, and delete training records and catalogue configuration. Approving a nomination is NOT this permission — that belongs to the workflow assignee, validated per request by the workflow engine.",
+            CategoryTraining),
 
         new(ViewMedicalRecords, "View Medical Records",
             "View employee health profiles, conditions, allergies, exams, claims, and medical documents.",
@@ -329,6 +348,7 @@ public static class HrPermissions
         ViewLeave, MaintainLeave,
         ViewAttendance, MaintainAttendance,
         ViewCompensation, MaintainCompensation,
+        ViewTraining, MaintainTraining,
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,

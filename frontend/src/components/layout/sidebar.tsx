@@ -561,6 +561,12 @@ export const navigationItems: NavItem[] = [
         // (or queued on its waitlist), those nominations are approved, and the run is closed off
         // with a completion. Self-service sits at the top because most people only ever need that.
         // The catalog, plans and budgets are setup and live under Administration → HR → Training.
+        //
+        // W3 slice 8: desk registers gate on HR.Training.Read (leave-slice shape — the parent stays
+        // open so the self-service children remain reachable). My Training / My Learning Paths /
+        // Mentoring / Certificates are self-service (mine-shaped reads), Schedules is the published
+        // calendar, Requests is the self-service entry point (its register tab needs the desk read),
+        // and Nomination Approvals is the approver queue — workflow-validated per request.
         title: 'Training',
         href: '/hr/training',
         icon: GraduationCap,
@@ -568,14 +574,14 @@ export const navigationItems: NavItem[] = [
           { title: 'My Training', href: '/hr/training/my-training', icon: GraduationCap },
           { title: 'My Learning Paths', href: '/hr/training/my-learning', icon: Route },
           { title: 'Mentoring', href: '/hr/training/mentoring', icon: Handshake },
-          { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp },
+          { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp, permissions: ['HR.Training.Read'] },
           { title: 'Schedules', href: '/hr/training/schedules', icon: CalendarClock },
           { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList },
           { title: 'Nomination Approvals', href: '/hr/training/approvals', icon: UserCheck },
-          { title: 'Completions', href: '/hr/training/completions', icon: Award },
+          { title: 'Completions', href: '/hr/training/completions', icon: Award, permissions: ['HR.Training.Read'] },
           { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp },
           { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard },
-          { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert },
+          { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert, permissions: ['HR.Training.Read'] },
         ],
       },
       {
@@ -635,9 +641,14 @@ export const navigationItems: NavItem[] = [
         // The enforcement side of a sponsored training nomination. It sits outside Performance
         // because the obligation is a training commitment, not an appraisal outcome — Training
         // links here too once that area is built.
+        //
+        // W3 slice 8: the screen is the desk register (getAll + on-behalf/waive/settle actions),
+        // so it rides on the desk read. The employee's own bonds surface through My Training /
+        // the API's /mine read; a self-service accept screen is still owed.
         title: 'Service Bonds',
         href: '/hr/service-bonds',
         icon: HandCoins,
+        permissions: ['HR.Training.Read'],
       },
       {
         // Area 16. Company property in a named employee's hands: the register, the requisition that

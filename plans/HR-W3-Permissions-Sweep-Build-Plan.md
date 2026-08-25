@@ -178,7 +178,50 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    own earlier rule had just gated, stacking Write on top of Admin (ANDed, functionally
    harmless, still wrong) — when rule N excludes rule M's lines, test the exclusion against the
    INSERTED text, not the matched line.
-4. **Training** (266 bare; nominations/self-enrollment are employee acts)
+4. **Training** — ✅ **DONE 2026-08-25, harness `run-slice8-training.mjs` 90/90 green (+ 39/39,
+   23/23, 47/47, 27/27 no-regression — 226 assertions total), grant rows verified in DB
+   (HR → Read+Write; SuperAdmin/TenantAdmin → all three), re-verified green on the seeded rows
+   after `seed-db`.** ⚠ Two operational traps caught here: **permission grants are seeded by the
+   `seed-db` COMMAND, not at API startup** — a green harness straight after a build is running on
+   the role-fallback handler, so run `seed-db` and re-verify before calling a slice done; and
+   **`Permissions.Description` is nvarchar(500)** — an over-long description fails the whole
+   permission SaveChanges, so keep new family descriptions under 500 chars. `HR.Training.{Read,Write,Admin}` over the 21 controllers carrying
+   `[TrainingBusinessRulesAttribute]` (the definitive family marker — a `*Training*/Trainer/
+   Learning/Mentor/Compliance` filename glob missed `EmployeeCertificatesController`; grep the
+   FILTER, not the name). 178 scripted attribute inserts keyed by (file, method-name) — no verb
+   catch-alls — plus hand edits for every self-or-permission action (per-controller private
+   `SelfOrPolicyAsync`, the Emoluments idiom, in 10 controllers).
+   The split: org-wide registers (requests/nominations paged, budgets, plans, vendors, trainers,
+   pending-verification, needs assessments, enrollments, active pairs, bonds, unverified certs,
+   compliance overdue, dashboard/analytics, status-history-free trainer reads) → Read; desk ops
+   (create/update everywhere, request approve/reject — NO workflow integration exists for
+   requests, attendance marking, completion record/verify — the `IsVerifiedByManager` flag had NO
+   manager check and triggers skill write-back, certificate issue, schedule approve/cancel/
+   complete, waitlist offer/promote, bond create/accept-on-behalf/record-exit/settle, pairing) →
+   Write; deletes, budget approve + plan approve (spend authorization, manpower-budget precedent),
+   certificate revoke, vendor blacklist/unblacklist, bond waive (forgives money) → Admin;
+   catalogue/calendar reads (programs + materials/skills/competencies, program groups, category
+   options, schedules incl. upcoming/open-for-registration/sessions, learning-path definitions,
+   mentoring programmes, status history — the my-learning step page feeds on it, and the two
+   nomination pending queues — the approver's survey surface) stay OPEN; self-or-permission:
+   every by-employee read (11 routes), nomination create/submit/withdraw + feedback + follow-up
+   (subject from body/record), request create/update/submit + delete-as-withdrawal (Admin arm),
+   waitlist join/remove/respond, learning-path enroll/enrollment-read/recalculate/step-detail
+   (recalculate is CALLED BY the my-learning screens — a Write-only gate would have broken the
+   learner flow), employee-certificate CRUD (employees register their own external certs).
+   **Kept validated-in-service, endpoint open:** nomination approve/reject (workflow-assignee via
+   `CanUserApproveAsync` — but the LEGACY no-WorkflowInstanceId path accepted any caller posting
+   `approverRole:"HR"`; now held to HR-shaped roles by `EnsureLegacyDecisionAllowed()` in the
+   service), bond self-accept (service checks own-bond), learning-path step update (learner-or-HR
+   + evidence rules), mentoring pair/session acts (`EnsurePairVisible`) — **except `ClosePairAsync`,
+   the one pair mutation that skipped the gate (any internal user could end anyone's mentorship);
+   it now calls `EnsurePairVisible`.** Manager-observation stays open, self-attributed (7%
+   ManagerId coverage — org-authority model deferred). `TrainingCertificatesController`'s
+   anonymous verify untouched (D-4). TrainingDashboard's `employee/{id}` role gate converted to
+   Read. Frontend: sidebar-only (slices 5–7 shape) — Analytics/Completions/Compliance children +
+   Service Bonds on HR.Training.Read, self-service children open; the Requests page's register
+   tab now needs the desk read (self-service create still works; a mine-view fallback is a UI
+   nicety left for the area's own backlog, as is a bond self-accept screen).
 5. **Recruitment** (147 bare; panelist confirms stay anonymous-tokened)
 6. **Performance** (350 bare — the largest and most actor-diverse: self, peer, manager, HR;
    do last of the big areas, with the area-5 actor matrix open)

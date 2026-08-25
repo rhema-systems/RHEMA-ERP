@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -67,6 +68,7 @@ public class TrainingProgramsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingProgramDto>> Create([FromBody] CreateTrainingProgramDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -82,6 +84,7 @@ public class TrainingProgramsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingProgramDto>> Update(Guid id, [FromBody] UpdateTrainingProgramDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -94,6 +97,7 @@ public class TrainingProgramsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -105,6 +109,7 @@ public class TrainingProgramsController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/materials")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingMaterialDto>> AddMaterial(Guid id, [FromBody] CreateTrainingMaterialDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -124,6 +129,7 @@ public class TrainingProgramsController : ControllerBase
         => Ok(await _service.GetMaterialsAsync(id, ct));
 
     [HttpPut("materials/{materialId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingMaterialDto>> UpdateMaterial(Guid materialId, [FromBody] UpdateTrainingMaterialDto dto, CancellationToken ct)
     {
         if (materialId != dto.Id) return BadRequest("ID mismatch.");
@@ -136,6 +142,7 @@ public class TrainingProgramsController : ControllerBase
     }
 
     [HttpDelete("materials/{materialId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteMaterial(Guid materialId, CancellationToken ct)
     {
         await _service.DeleteMaterialAsync(materialId, ct);
@@ -147,6 +154,7 @@ public class TrainingProgramsController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/competencies")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingProgramCompetencyDto>> AddCompetency(Guid id, [FromBody] CreateTrainingProgramCompetencyDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -166,6 +174,7 @@ public class TrainingProgramsController : ControllerBase
         => Ok(await _service.GetCompetenciesAsync(id, ct));
 
     [HttpDelete("competencies/{competencyId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteCompetency(Guid competencyId, CancellationToken ct)
     {
         await _service.DeleteCompetencyAsync(competencyId, ct);
@@ -177,6 +186,7 @@ public class TrainingProgramsController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/skills")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingProgramSkillDto>> AddSkill(Guid id, [FromBody] CreateTrainingProgramSkillDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -196,6 +206,7 @@ public class TrainingProgramsController : ControllerBase
         => Ok(await _service.GetSkillsAsync(id, ct));
 
     [HttpDelete("skills/{skillId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteSkill(Guid skillId, CancellationToken ct)
     {
         await _service.DeleteSkillAsync(skillId, ct);

@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -28,10 +29,12 @@ public class TrainingVendorsController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingVendorSummaryDto>>> GetAll(CancellationToken ct)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<Core.DTOs.Common.PagedResult<TrainingVendorSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -39,32 +42,39 @@ public class TrainingVendorsController : ControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingVendorDto>> GetById(Guid id, CancellationToken ct)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("code/{vendorCode}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingVendorDto?>> GetByVendorCode(string vendorCode, CancellationToken ct)
         => Ok(await _service.GetByVendorCodeAsync(vendorCode, ct));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingVendorSummaryDto>>> GetActive(CancellationToken ct)
         => Ok(await _service.GetActiveAsync(ct));
 
     [HttpGet("preferred")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingVendorSummaryDto>>> GetPreferred(CancellationToken ct)
         => Ok(await _service.GetPreferredAsync(ct));
 
     [HttpGet("blacklisted")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingVendorSummaryDto>>> GetBlacklisted(CancellationToken ct)
         => Ok(await _service.GetBlacklistedAsync(ct));
 
     [HttpGet("expiring-accreditation")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingVendorSummaryDto>>> GetWithExpiringAccreditation(
         [FromQuery] int daysAhead = 30,
         CancellationToken ct = default)
         => Ok(await _service.GetWithExpiringAccreditationAsync(daysAhead, ct));
 
     [HttpGet("type/{vendorType}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingVendorSummaryDto>>> GetByVendorType(TrainingVendorType vendorType, CancellationToken ct)
         => Ok(await _service.GetByVendorTypeAsync(vendorType, ct));
 
@@ -73,6 +83,7 @@ public class TrainingVendorsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingVendorDto>> Create([FromBody] CreateTrainingVendorDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -88,6 +99,7 @@ public class TrainingVendorsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingVendorDto>> Update(Guid id, [FromBody] UpdateTrainingVendorDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -100,6 +112,7 @@ public class TrainingVendorsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -111,6 +124,7 @@ public class TrainingVendorsController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/blacklist")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Blacklist(Guid id, [FromBody] BlacklistVendorDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -124,6 +138,7 @@ public class TrainingVendorsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/unblacklist")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Unblacklist(Guid id, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;

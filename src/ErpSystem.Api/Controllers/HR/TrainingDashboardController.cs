@@ -23,16 +23,15 @@ public class TrainingDashboardController : ControllerBase
         _currentUser = currentUser;
     }
 
-    private const string HrRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     [HttpGet]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingDashboardDto>> GetDashboard(
         [FromQuery] int? year = null,
         CancellationToken ct = default)
         => Ok(await _service.GetDashboardAsync(year, ct));
 
     [HttpGet("analytics")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingAnalyticsDto>> GetAnalytics([FromQuery] int? year = null, CancellationToken ct = default)
         => Ok(await _service.GetAnalyticsAsync(year, ct));
 
@@ -53,11 +52,12 @@ public class TrainingDashboardController : ControllerBase
     }
 
     /// <summary>
-    /// Someone else's training record. Restricted to HR — it carries compliance standing and
-    /// certificate history, which is not colleague-readable simply because both work here.
+    /// Someone else's training record. Restricted to the desk read — it carries compliance
+    /// standing and certificate history, which is not colleague-readable simply because both
+    /// work here. (W3: converted from the HR-role gate to the Training permission family.)
     /// </summary>
     [HttpGet("employee/{employeeId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<EmployeeTrainingSummaryDto>> GetEmployeeSummary(Guid employeeId, CancellationToken ct)
         => Ok(await _service.GetEmployeeSummaryAsync(employeeId, ct));
 }

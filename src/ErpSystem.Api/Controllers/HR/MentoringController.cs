@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -19,10 +20,24 @@ public class MentoringController : ControllerBase
     // Simple request model for closing a mentoring pair
     public sealed record ClosePairRequest(string ClosureNotes);
 
-    public MentoringController(IMentoringService service, ICurrentUserService currentUser)
+    public MentoringController(
+        IMentoringService service,
+        ICurrentUserService currentUser,
+        IAuthorizationService authorization)
     {
         _service = service;
         _currentUser = currentUser;
+        _authorization = authorization;
+    }
+
+    private readonly IAuthorizationService _authorization;
+
+    /// <summary>Self-or-permission (W3), as on LeavesController — see the remarks there.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUser.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+            return true;
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
     // =========================================================================
@@ -42,6 +57,7 @@ public class MentoringController : ControllerBase
         => Ok(await _service.GetProgramByIdAsync(id, ct));
 
     [HttpPost("programs")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<MentoringProgramDto>> CreateProgram([FromBody] CreateMentoringProgramDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -57,6 +73,7 @@ public class MentoringController : ControllerBase
     }
 
     [HttpPut("programs/{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<MentoringProgramDto>> UpdateProgram(Guid id, [FromBody] UpdateMentoringProgramDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -69,6 +86,7 @@ public class MentoringController : ControllerBase
     }
 
     [HttpDelete("programs/{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteProgram(Guid id, CancellationToken ct)
     {
         await _service.DeleteProgramAsync(id, ct);
@@ -99,18 +117,27 @@ public class MentoringController : ControllerBase
     }
 
     [HttpGet("programs/{programId:guid}/pairs")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<MentoringPairSummaryDto>>> GetPairsForProgram(Guid programId, CancellationToken ct)
         => Ok(await _service.GetPairsForProgramAsync(programId, ct));
 
     [HttpGet("pairs/employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<MentoringPairSummaryDto>>> GetPairsForEmployee(Guid employeeId, CancellationToken ct)
-        => Ok(await _service.GetPairsForEmployeeAsync(employeeId, ct));
+    {
+        // W3: the summary shape bypasses EnsurePairVisible in the service, so the route itself
+        // is self-or-permission.
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.TrainingReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetPairsForEmployeeAsync(employeeId, ct));
+    }
 
     [HttpGet("pairs/active")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<MentoringPairSummaryDto>>> GetActivePairs(CancellationToken ct)
         => Ok(await _service.GetActivePairsAsync(ct));
 
     [HttpPost("pairs")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<MentoringPairDto>> CreatePair([FromBody] CreateMentoringPairDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

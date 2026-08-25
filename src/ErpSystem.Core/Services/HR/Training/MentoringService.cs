@@ -322,7 +322,11 @@ public class MentoringService : IMentoringService
 
     public async Task<MentoringPairDto> ClosePairAsync(Guid pairId, string closureNotes, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedPairAsync(pairId);
+        // W3 slice 8: closing was the one pair mutation that skipped the visibility gate, so any
+        // internal user holding a pair id could end anyone's mentoring relationship. Ending one is
+        // for the people in it, the coordinator, or HR — the same circle that may look inside it.
+        var entity = await GetOwnedPairWithDetailsAsync(pairId);
+        EnsurePairVisible(entity, updatedByUserId);
 
         if (entity.Status == MentoringStatus.Completed || entity.Status == MentoringStatus.Cancelled)
             throw new InvalidOperationException($"Mentoring pair is already closed with status '{entity.Status}'.");
