@@ -276,6 +276,8 @@ public static class FinanceAuditEvents
     public const string WithholdingCertificateReissued = "Finance.Tax.WithholdingCertificateReissued";
     public const string WithholdingCertificateCancelled = "Finance.Tax.WithholdingCertificateCancelled";
     public const string WithholdingCertificatePrinted = "Finance.Tax.WithholdingCertificatePrinted";
+    public const string WithholdingCertificatePdfIssued = "Finance.Tax.WithholdingCertificatePdfIssued";
+    public const string WithholdingCertificatePdfReplacementIssued = "Finance.Tax.WithholdingCertificatePdfReplacementIssued";
     public const string WhtCertificateRegisterExported = "Finance.Tax.WHTCertificateRegisterExported";
     public const string WhtRemittanceCreated = "Finance.Tax.WHTRemittanceCreated";
     public const string WhtRemittanceSubmitted = "Finance.Tax.WHTRemittanceSubmitted";

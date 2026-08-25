@@ -395,12 +395,6 @@ class TaxDataService {
         return apiService.post<WhtCalculationResult>('/finance/tax/wht-certificates/calculate', request);
     }
 
-    async getWhtCertificatePrintHtml(vendorPaymentId: string, certificateId?: string): Promise<string> {
-        return apiService.get<string>(`/finance/tax/wht-certificates/${vendorPaymentId}/print`, {
-            certificateId,
-        });
-    }
-
     async getUnremittedWhtLiabilities(fromDate?: string, toDate?: string, currencyCode = 'GHS'): Promise<WhtRemittanceLiability[]> {
         return apiService.get<WhtRemittanceLiability[]>('/finance/tax/wht-certificates/remittances/liabilities', {
             fromDate,
