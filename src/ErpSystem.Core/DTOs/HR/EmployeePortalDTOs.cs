@@ -109,3 +109,93 @@ public sealed class EmployeePortalAssetSummaryDto
     public IEnumerable<AssetRequisitionSummaryDto> OpenRequisitions { get; set; } = [];
     public IEnumerable<AssetSurchargeSummaryDto> SurchargesAwaitingMyResponse { get; set; } = [];
 }
+
+// ============================================================================
+// THE PORTAL HOME — area 25 slice 3
+// ============================================================================
+
+/// <summary>
+/// The personal aggregate behind the portal landing: what needs the employee's action, and
+/// the handful of numbers they came to check. One read, every figure deep-linkable.
+/// </summary>
+/// <remarks>
+/// A sibling of <c>EmployeePortalDashboardDto</c> for the same reason that one gives above:
+/// that payload is the movements dashboard and this one is the landing; each screen pays
+/// only for what it shows. Every figure here must agree with the detail read it links to —
+/// the harness asserts that equality (the area-7 wrong-numbers lesson).
+/// </remarks>
+public sealed class EmployeePortalHomeDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+
+    // ── Waiting on me ───────────────────────────────────────────────────────
+    public int MovementsAwaitingMyResponse { get; set; }
+    public int SurchargesAwaitingMyResponse { get; set; }
+    public int AssetsAwaitingAcknowledgement { get; set; }
+
+    // ── Leave ───────────────────────────────────────────────────────────────
+    public IEnumerable<PortalLeaveBalanceDto> LeaveBalances { get; set; } = [];
+    public PortalHolidayDto? NextHoliday { get; set; }
+
+    // ── Assets ──────────────────────────────────────────────────────────────
+    public int AssetsHeldCount { get; set; }
+    public int OpenAssetRequisitionCount { get; set; }
+
+    // ── Learning ────────────────────────────────────────────────────────────
+    public int ActiveCertificatesCount { get; set; }
+    public int ExpiringCertificatesCount { get; set; }
+    public decimal TrainingComplianceRate { get; set; }
+    public int LearningPathsEnrolledCount { get; set; }
+
+    // ── Expiring personal documents (externally-held certificates/IDs) ─────
+    public IEnumerable<PortalExpiringDocumentDto> ExpiringDocuments { get; set; } = [];
+
+    /// <summary>Slice-10 stub: stays null until the payslip adapter lands; the shape is the contract.</summary>
+    public PortalPayslipStubDto? LatestPayslip { get; set; }
+
+    /// <summary>Slice-12 stub: stays empty until announcements land; the shape is the contract.</summary>
+    public IEnumerable<PortalAnnouncementStubDto> Announcements { get; set; } = [];
+}
+
+/// <summary>One leave type's standing for the current year — the lean, employee-safe cut.</summary>
+public sealed class PortalLeaveBalanceDto
+{
+    public Guid LeaveTypeId { get; set; }
+    public string LeaveTypeName { get; set; } = string.Empty;
+    public decimal AvailableDays { get; set; }
+    public decimal UsedDays { get; set; }
+    public decimal PendingDays { get; set; }
+    public decimal EntitledDays { get; set; }
+}
+
+public sealed class PortalHolidayDto
+{
+    public string Name { get; set; } = string.Empty;
+    public DateOnly Date { get; set; }
+}
+
+public sealed class PortalExpiringDocumentDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Kind { get; set; }
+    public DateTime ExpiryDate { get; set; }
+    public int DaysUntilExpiry { get; set; }
+}
+
+/// <summary>Slice-10 placeholder shape — period, number and net once the adapter exists.</summary>
+public sealed class PortalPayslipStubDto
+{
+    public string PayslipNumber { get; set; } = string.Empty;
+    public DateTime GeneratedAt { get; set; }
+    public decimal NetPay { get; set; }
+}
+
+/// <summary>Slice-12 placeholder shape.</summary>
+public sealed class PortalAnnouncementStubDto
+{
+    public Guid Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public DateTime PublishedAt { get; set; }
+}

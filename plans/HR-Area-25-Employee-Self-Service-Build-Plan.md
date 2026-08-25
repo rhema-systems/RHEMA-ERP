@@ -26,7 +26,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 0 | Survey, fixtures, and the link census | **COMPLETE 2026-08-25** — 111 assertions ×2 green; census in `HR-Area-25-Slice0-Census.md` |
 | 1 | Identity & access: employee-number login, the AD link gap, the portal gate | **COMPLETE 2026-08-25** — 33 assertions ×2 + 111 no-regression |
 | 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | **COMPLETE 2026-08-25** — tsc/lint/route-resolution clean + 144 ladder |
-| 3 | The dashboard: one personal aggregate | not started |
+| 3 | The dashboard: one personal aggregate | **COMPLETE 2026-08-25** — 37+35 assertions + 144 ladder |
 | 4 | Move-in: leave + attendance | not started |
 | 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | not started |
 | 6 | Move-in: training & learning (+ the owed bond self-accept) | not started |
@@ -370,3 +370,30 @@ sidebar↔topnav contrast IS the "which world am I in?" signal for switcher user
   through; `hasDeskAccess` gates the Back-to-ERP switcher. Desk side: a "My Self-Service"
   sidebar entry right under Dashboard.
 - `types/index.ts` — `User.employeeId` so the slice-1 payload reaches the client typed.
+
+### Slice 3 — the dashboard. CLOSED 2026-08-25.
+
+`run-slice3.mjs` 37 then 35 assertions green (the two runs exercise both next-holiday
+branches) + the 144 ladder. No migration.
+
+- **"Extend the dashboard" landed as a SIBLING read**, `GET api/employee-portal/home`, not
+  more fields on `EmployeePortalDashboardDto` — that payload is the movements dashboard
+  consumed by `hr/movements/mine`, and its own docstring already states the rule: each
+  screen pays only for what it shows. Home aggregates: waiting-on-me counts (movements /
+  surcharges / acknowledgements), leave balances + next holiday (12-month window), assets
+  held + open requisitions, training figures, documents expiring ≤90 days, and **typed
+  stubs** for latest payslip (slice 10) and announcements (slice 12) so the frontend
+  contract never changes shape twice.
+- **Every figure is computed from the same service call the detail screen makes** and the
+  harness asserts equality against the independent reads; the two seeded deltas prove the
+  numbers move (a 30-day certificate surfaces with the right days-left; a requisition
+  draft moves the open count by exactly one).
+- **The no-vacuous-green rule got teeth**: the DEFAULT tenant had NO holiday calendar at
+  all (finding — TDC's holiday data is unentered; recorded for seeding/ops, my-leave UX
+  will show "none coming" honestly), so the run seeds a calendar + holiday when needed and
+  asserts the real first-future-holiday selection.
+- Frontend: `me-portal.service.ts` (typed getHome, no employee id by design) and the
+  landing rebuilt — "Waiting on you" amber chips (only non-zero counts render; calm
+  all-caught-up line otherwise), four at-a-glance stat cards (leave / next holiday /
+  assets / learning) each deep-linking, expiring-documents list, quick-link tiles kept; if
+  the aggregate read fails the tiles still render (degrade, don't die).

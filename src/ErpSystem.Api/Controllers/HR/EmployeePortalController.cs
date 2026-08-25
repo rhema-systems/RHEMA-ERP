@@ -28,6 +28,10 @@ public class EmployeePortalController : ControllerBase
     private readonly IAssetRequisitionService      _requisitionService;
     private readonly IAssetTermsLetterService      _termsLetterService;
     private readonly IAssetSurchargeService        _surchargeService;
+    private readonly ILeaveService                 _leaveService;
+    private readonly IPublicHolidayService         _holidayService;
+    private readonly ITrainingDashboardService     _trainingDashboardService;
+    private readonly IEmployeeCertificateService   _certificateService;
     private readonly ICurrentUserService           _currentUser;
 
     public EmployeePortalController(
@@ -37,6 +41,10 @@ public class EmployeePortalController : ControllerBase
         IAssetRequisitionService       requisitionService,
         IAssetTermsLetterService       termsLetterService,
         IAssetSurchargeService         surchargeService,
+        ILeaveService                  leaveService,
+        IPublicHolidayService          holidayService,
+        ITrainingDashboardService      trainingDashboardService,
+        IEmployeeCertificateService    certificateService,
         ICurrentUserService            currentUser)
     {
         _movementService    = movementService;
@@ -45,6 +53,10 @@ public class EmployeePortalController : ControllerBase
         _requisitionService = requisitionService;
         _termsLetterService = termsLetterService;
         _surchargeService   = surchargeService;
+        _leaveService       = leaveService;
+        _holidayService     = holidayService;
+        _trainingDashboardService = trainingDashboardService;
+        _certificateService = certificateService;
         _currentUser        = currentUser;
     }
 
@@ -110,6 +122,104 @@ public class EmployeePortalController : ControllerBase
         };
 
         return Ok(dashboard);
+    }
+
+    // =========================================================================
+    // HOME — area 25 slice 3
+    // =========================================================================
+
+    /// <summary>
+    /// The personal aggregate behind the portal landing: what needs the employee's action,
+    /// their leave standing, assets, learning, and expiring documents — one read.
+    /// </summary>
+    /// <remarks>
+    /// Every figure here MUST agree with the detail read its tile links to — each count is
+    /// computed from the same service call the detail screen makes, never re-derived. The
+    /// payslip and announcements fields are typed stubs (slices 10 and 12 wire them); they
+    /// exist now so the frontend contract does not change shape twice.
+    /// </remarks>
+    [HttpGet("home")]
+    public async Task<IActionResult> GetHome(CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var year  = DateTime.UtcNow.Year;
+
+        var movements    = (await _movementService.GetByEmployeeAsync(empId, ct)).ToList();
+        var held         = (await _assignmentService.GetActiveAssignmentsForEmployeeAsync(empId)).ToList();
+        var requisitions = (await _requisitionService.GetForEmployeeAsync(empId)).ToList();
+        var surcharges   = (await _surchargeService.GetByEmployeeIdAsync(empId)).ToList();
+        var balances     = (await _leaveService.GetEmployeeLeaveBalancesAsync(empId, year)).ToList();
+        var training     = await _trainingDashboardService.GetEmployeeSummaryAsync(empId, ct);
+        var certificates = (await _certificateService.GetByEmployeeIdAsync(empId, ct)).ToList();
+        // Next 12 months is enough to always find "the next holiday" without scanning years.
+        var holidays     = (await _holidayService.GetInRangeAsync(today, today.AddYears(1), ct)).ToList();
+
+        var openRequisitionStatuses = new[]
+        {
+            AssetRequisitionStatus.Draft,
+            AssetRequisitionStatus.Submitted,
+            AssetRequisitionStatus.UnderReview,
+            AssetRequisitionStatus.Approved
+        };
+
+        var nextHoliday = holidays
+            .Where(h => h.DateTo >= today)
+            .OrderBy(h => h.DateFrom)
+            .FirstOrDefault();
+
+        var expiringDocuments = certificates
+            .Where(c => c.ExpiryDate is { } exp && exp >= DateTime.UtcNow && exp <= DateTime.UtcNow.AddDays(90))
+            .OrderBy(c => c.ExpiryDate)
+            .Take(5)
+            .Select(c => new PortalExpiringDocumentDto
+            {
+                Id              = c.Id,
+                Name            = c.CertificateName,
+                Kind            = c.CategoryName,
+                ExpiryDate      = c.ExpiryDate!.Value,
+                DaysUntilExpiry = (int)(c.ExpiryDate!.Value - DateTime.UtcNow).TotalDays,
+            })
+            .ToList();
+
+        return Ok(new EmployeePortalHomeDto
+        {
+            EmployeeId   = empId,
+            EmployeeName = _currentUser.UserName ?? string.Empty,
+
+            MovementsAwaitingMyResponse  = movements.Count(m => m.Status == StaffMovementStatus.EmployeeAcceptancePending),
+            SurchargesAwaitingMyResponse = surcharges.Count(x =>
+                x.Status == AssetSurchargeStatus.WithEmployee
+                && x.EmployeeResponse == AssetSurchargeEmployeeResponse.NotYetGiven),
+            AssetsAwaitingAcknowledgement = held.Count(a => !a.EmployeeAcknowledged),
+
+            LeaveBalances = balances.Select(b => new PortalLeaveBalanceDto
+            {
+                LeaveTypeId   = b.LeaveTypeId,
+                LeaveTypeName = b.LeaveTypeName,
+                AvailableDays = b.AvailableDays,
+                UsedDays      = b.UsedDays,
+                PendingDays   = b.PendingDays,
+                EntitledDays  = b.EntitledDays,
+            }).ToList(),
+            NextHoliday = nextHoliday is null
+                ? null
+                : new PortalHolidayDto { Name = nextHoliday.HolidayName, Date = nextHoliday.DateFrom },
+
+            AssetsHeldCount           = held.Count,
+            OpenAssetRequisitionCount = requisitions.Count(r => openRequisitionStatuses.Contains(r.Status)),
+
+            ActiveCertificatesCount    = training.ActiveCertificatesCount,
+            ExpiringCertificatesCount  = training.ExpiringCertificatesCount,
+            TrainingComplianceRate     = training.ComplianceRate,
+            LearningPathsEnrolledCount = training.LearningPathsEnrolledCount,
+
+            ExpiringDocuments = expiringDocuments,
+
+            LatestPayslip = null,   // slice 10 wires the payroll snapshot adapter
+            Announcements = [],     // slice 12 wires announcements
+        });
     }
 
     // =========================================================================
