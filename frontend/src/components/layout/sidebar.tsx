@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   AlarmClock,
   Building2,
+  Sparkles,
   DoorOpen,
   Plus,
   FireExtinguisher,
@@ -163,6 +164,13 @@ export const navigationItems: NavItem[] = [
     title: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    // Area 25: the two-way switcher's desk side — /me has its own chrome ("Back to ERP"
+    // lives there). The /me layout handles unlinked users with a friendly page.
+    title: 'My Self-Service',
+    href: '/me',
+    icon: Sparkles,
   },
   {
     title: 'Finance',

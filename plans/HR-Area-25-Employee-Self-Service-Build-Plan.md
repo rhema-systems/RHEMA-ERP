@@ -25,7 +25,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 |---|---|---|
 | 0 | Survey, fixtures, and the link census | **COMPLETE 2026-08-25** — 111 assertions ×2 green; census in `HR-Area-25-Slice0-Census.md` |
 | 1 | Identity & access: employee-number login, the AD link gap, the portal gate | **COMPLETE 2026-08-25** — 33 assertions ×2 + 111 no-regression |
-| 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | not started |
+| 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | **COMPLETE 2026-08-25** — tsc/lint/route-resolution clean + 144 ladder |
 | 3 | The dashboard: one personal aggregate | not started |
 | 4 | Move-in: leave + attendance | not started |
 | 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | not started |
@@ -343,3 +343,30 @@ schema change.
   `/employees?pageSize=1000`, a route that doesn't exist (`api/hr/Employees` has no GET
   list) — its employee picker has likely been empty forever. Not this slice's surface;
   worth folding into a later polish pass.
+
+### Slice 2 — the shell. CLOSED 2026-08-25.
+
+Frontend-only (no backend change; the 144-assertion ladder re-run green as no-regression).
+Verification: tsc clean in the touched files, lint clean, every emitted href resolves to a
+`page.tsx`. **Layout decision re-confirmed with the user: top-nav, no sidebar, not both**
+— ESS users are casual users (Workday/SuccessFactors/BambooHR pattern), the dashboard
+tiles are the primary navigation, mobile (punch!) collapses a top-nav cleanly, and the
+sidebar↔topnav contrast IS the "which world am I in?" signal for switcher users.
+
+- `app/me/layout.tsx` — the D8 gate: AuthGuard + external users routed home + the link
+  resolved once from the fresh `Auth/me` (slice 1's `employeeId`); unlinked users get one
+  friendly explanation page (with Back-to-ERP for desk users) instead of broken screens.
+- `components/me/portal-top-nav.tsx` — the six spec groups + actions (approvals,
+  notifications, theme, avatar menu with Back-to-ERP for desk users), mobile sheet;
+  signature accent band so the portal reads as its own world on the same tokens.
+  **D3 discipline encoded in the file:** groups list ONLY genuinely-self-service
+  destinations; the `/hr/*` hrefs are re-pointed by each move-in slice in the same commit;
+  no dead "coming soon" links ever.
+- `app/me/page.tsx` — placeholder landing: greeting + three tile sections ("Things to act
+  on" / "My work life" / "Benefits, kit & safety") over the 15 live destinations; slice 3
+  replaces the copy with the real personal aggregate.
+- `lib/auth-routing.ts` — `isEmployeeOnlyUser` (all roles == Employee) → lands at `/me`
+  via `getAuthenticatedHomePath`, which all four post-login call sites already route
+  through; `hasDeskAccess` gates the Back-to-ERP switcher. Desk side: a "My Self-Service"
+  sidebar entry right under Dashboard.
+- `types/index.ts` — `User.employeeId` so the slice-1 payload reaches the client typed.
