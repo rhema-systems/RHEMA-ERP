@@ -26,6 +26,7 @@ public static class HrPermissions
     public const string CategoryAttendance = "HR - Attendance & Time";
     public const string CategoryCompensation = "HR - Compensation & Benefits";
     public const string CategoryTraining = "HR - Training & Learning";
+    public const string CategoryRecruitment = "HR - Recruitment";
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
@@ -70,6 +71,14 @@ public static class HrPermissions
     public const string TrainingReadPolicy = "HR.Policy.TrainingRead";
     public const string TrainingWritePolicy = "HR.Policy.TrainingWrite";
     public const string TrainingAdminPolicy = "HR.Policy.TrainingAdmin";
+
+    public const string ViewRecruitment = "HR.Recruitment.Read";
+    public const string MaintainRecruitment = "HR.Recruitment.Write";
+    public const string AdministerRecruitment = "HR.Recruitment.Admin";
+
+    public const string RecruitmentReadPolicy = "HR.Policy.RecruitmentRead";
+    public const string RecruitmentWritePolicy = "HR.Policy.RecruitmentWrite";
+    public const string RecruitmentAdminPolicy = "HR.Policy.RecruitmentAdmin";
 
     public const string ViewMedicalRecords = "HR.Medical.Read";
     public const string MaintainMedicalRecords = "HR.Medical.Write";
@@ -184,6 +193,16 @@ public static class HrPermissions
         new(AdministerTraining, "Administer Training & Learning",
             "Approve training budgets and annual training plans, revoke certificates, blacklist vendors, waive service bonds, and delete training records and catalogue configuration. Approving a nomination is NOT this permission — that belongs to the workflow assignee, validated per request by the workflow engine.",
             CategoryTraining),
+
+        new(ViewRecruitment, "View Recruitment",
+            "View the recruitment surface: requisitions, vacancies, adverts and postings, the candidate register and applications with their documents, interview schedules and scores, offers, hires and pre-employment checks. A panelist does not need this for their own panel — panel access is a membership check on the endpoint.",
+            CategoryRecruitment),
+        new(MaintainRecruitment, "Maintain Recruitment",
+            "Run the recruitment desk: hold, cancel and fulfill requisitions, maintain vacancies, adverts and postings, register candidates, progress applications through the pipeline, extend and issue offers, record hires and start dates, run pre-employment checks, and maintain the question bank, presets, pipeline definitions and check templates. Raising a requisition and approving one are NOT this permission — any manager raises their own, and approval belongs to the workflow assignee.",
+            CategoryRecruitment),
+        new(AdministerRecruitment, "Administer Recruitment",
+            "Delete recruitment records — requisitions, vacancies, candidates and their documents, applications and test results, offers and their benefits, question-bank entries, pipeline stages and check templates — and reconcile the establishment vacancy register.",
+            CategoryRecruitment),
 
         new(ViewMedicalRecords, "View Medical Records",
             "View employee health profiles, conditions, allergies, exams, claims, and medical documents.",
@@ -349,6 +368,7 @@ public static class HrPermissions
         ViewAttendance, MaintainAttendance,
         ViewCompensation, MaintainCompensation,
         ViewTraining, MaintainTraining,
+        ViewRecruitment, MaintainRecruitment,
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,

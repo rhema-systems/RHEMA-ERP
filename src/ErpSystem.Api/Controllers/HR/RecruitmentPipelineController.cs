@@ -30,8 +30,6 @@ public record ClonePipelineRequest(string NewName);
 [RecruitmentBusinessRules]
 public class RecruitmentPipelineController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IRecruitmentPipelineService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -46,18 +44,22 @@ public class RecruitmentPipelineController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<RecruitmentPipelineDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<RecruitmentPipelineSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("default")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<RecruitmentPipelineDto?>> GetDefault()
         => Ok(await _service.GetDefaultPipelineAsync());
 
     [HttpGet("name/{name}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<RecruitmentPipelineDto?>> GetByName(string name)
         => Ok(await _service.GetByNameAsync(name));
 
@@ -66,7 +68,7 @@ public class RecruitmentPipelineController : ControllerBase
     // =========================================================================
 
     [HttpPost]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentPipelineDto>> Create([FromBody] CreateRecruitmentPipelineDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -85,7 +87,7 @@ public class RecruitmentPipelineController : ControllerBase
 
     /// <summary>Clones an existing pipeline (with its stages) into a new one for editing.</summary>
     [HttpPost("{id:guid}/clone")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentPipelineDto>> Clone(Guid id, [FromBody] ClonePipelineRequest request)
     {
         var tenantId = _currentUser.TenantId;
@@ -104,7 +106,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentPipelineDto>> Update(Guid id, [FromBody] UpdateRecruitmentPipelineDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -118,7 +120,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -130,18 +132,22 @@ public class RecruitmentPipelineController : ControllerBase
     // =========================================================================
 
     [HttpGet("{pipelineId:guid}/stages")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<RecruitmentPipelineStageDto>>> GetStages(Guid pipelineId)
         => Ok(await _service.GetStagesAsync(pipelineId));
 
     [HttpGet("{pipelineId:guid}/stages/final")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<RecruitmentPipelineStageDto?>> GetFinalStage(Guid pipelineId)
         => Ok(await _service.GetFinalStageAsync(pipelineId));
 
     [HttpGet("{pipelineId:guid}/stages/max-order")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<int>> GetMaxStageOrder(Guid pipelineId)
         => Ok(await _service.GetMaxStageOrderAsync(pipelineId));
 
     [HttpGet("stages/type/{stageType}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<RecruitmentPipelineStageDto>>> GetStagesByType(
         RecruitmentPipelineStageType stageType)
         => Ok(await _service.GetStagesByTypeAsync(stageType));
@@ -151,7 +157,7 @@ public class RecruitmentPipelineController : ControllerBase
     // =========================================================================
 
     [HttpPost("{pipelineId:guid}/stages")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentPipelineStageDto>> AddStage(
         Guid pipelineId, [FromBody] CreateRecruitmentPipelineStageDto dto)
     {
@@ -172,7 +178,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpPut("stages/{stageId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentPipelineStageDto>> UpdateStage(
         Guid stageId, [FromBody] UpdateRecruitmentPipelineStageDto dto)
     {
@@ -187,7 +193,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpDelete("stages/{stageId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteStage(Guid stageId)
     {
         await _service.DeleteStageAsync(stageId);
@@ -195,7 +201,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpPost("{pipelineId:guid}/stages/reorder")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> ReorderStages(
         Guid pipelineId, [FromBody] List<StageOrderItem> stageOrders)
     {

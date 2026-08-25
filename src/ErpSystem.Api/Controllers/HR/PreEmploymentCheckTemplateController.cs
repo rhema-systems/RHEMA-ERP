@@ -18,7 +18,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/pre-employment-check-templates")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class PreEmploymentCheckTemplateController : ControllerBase
 {
@@ -37,10 +37,12 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     // QUERIES
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckTemplateDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateDetailDto>> GetWithItems(Guid id)
         => Ok(await _service.GetWithItemsAsync(id));
 
@@ -48,6 +50,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     // CRUD
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateDetailDto>> Create(
         [FromBody] CreatePreEmploymentCheckTemplateDto dto)
     {
@@ -66,6 +69,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateDto>> Update(
         Guid id,
         [FromBody] UpdatePreEmploymentCheckTemplateDto dto)
@@ -82,6 +86,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -92,6 +97,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     // ITEMS
 
     [HttpPost("{id:guid}/items")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateItemDto>> AddItem(
         Guid id,
         [FromBody] CreatePreEmploymentCheckTemplateItemDto dto)
@@ -113,6 +119,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpPut("{id:guid}/items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateItemDto>> UpdateItem(
         Guid id,
         Guid itemId,
@@ -132,6 +139,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpDelete("{id:guid}/items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteItem(Guid id, Guid itemId)
     {
         // The route always carried the owning template id; the service simply ignored it and found

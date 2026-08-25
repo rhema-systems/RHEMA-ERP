@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/interview-question-bank")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class InterviewQuestionBankController : ControllerBase
 {
@@ -37,18 +37,22 @@ public class InterviewQuestionBankController : ControllerBase
     // =========================================================================
 
     [HttpGet("types")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobInterviewQuestionTypeSummaryDto>>> GetAllTypes()
         => Ok(await _service.GetAllQuestionTypesAsync());
 
     [HttpGet("types/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobInterviewQuestionTypeDto>> GetTypeById(Guid id)
         => Ok(await _service.GetQuestionTypeByIdAsync(id));
 
     [HttpGet("types/code/{code}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobInterviewQuestionTypeDto?>> GetTypeByCode(string code)
         => Ok(await _service.GetQuestionTypeByCodeAsync(code));
 
     [HttpGet("types/{id:guid}/with-questions")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobInterviewQuestionTypeDto?>> GetTypeWithQuestions(Guid id)
         => Ok(await _service.GetQuestionTypeWithQuestionsAsync(id));
 
@@ -57,6 +61,7 @@ public class InterviewQuestionBankController : ControllerBase
     // =========================================================================
 
     [HttpPost("types")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobInterviewQuestionTypeDto>> CreateType(
         [FromBody] CreateJobInterviewQuestionTypeDto dto)
     {
@@ -75,6 +80,7 @@ public class InterviewQuestionBankController : ControllerBase
     }
 
     [HttpPut("types/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobInterviewQuestionTypeDto>> UpdateType(
         Guid id, [FromBody] UpdateJobInterviewQuestionTypeDto dto)
     {
@@ -89,6 +95,7 @@ public class InterviewQuestionBankController : ControllerBase
     }
 
     [HttpDelete("types/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteType(Guid id)
     {
         await _service.DeleteQuestionTypeAsync(id);
@@ -100,19 +107,23 @@ public class InterviewQuestionBankController : ControllerBase
     // =========================================================================
 
     [HttpGet("questions")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobInterviewQuestionDetailDto>>> GetAllQuestions()
         => Ok(await _service.GetAllQuestionDetailsAsync());
 
     [HttpGet("questions/active")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobInterviewQuestionDetailDto>>> GetActiveQuestions(
         [FromQuery] Guid? questionTypeId = null)
         => Ok(await _service.GetActiveQuestionsAsync(questionTypeId));
 
     [HttpGet("questions/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobInterviewQuestionDetailDto>> GetQuestionById(Guid id)
         => Ok(await _service.GetQuestionDetailByIdAsync(id));
 
     [HttpGet("types/{questionTypeId:guid}/questions")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobInterviewQuestionDetailDto>>> GetQuestionsByType(Guid questionTypeId)
         => Ok(await _service.GetQuestionDetailsByTypeAsync(questionTypeId));
 
@@ -121,6 +132,7 @@ public class InterviewQuestionBankController : ControllerBase
     // =========================================================================
 
     [HttpPost("questions")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobInterviewQuestionDetailDto>> CreateQuestion(
         [FromBody] CreateJobInterviewQuestionDetailDto dto)
     {
@@ -139,6 +151,7 @@ public class InterviewQuestionBankController : ControllerBase
     }
 
     [HttpPut("questions/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobInterviewQuestionDetailDto>> UpdateQuestion(
         Guid id, [FromBody] UpdateJobInterviewQuestionDetailDto dto)
     {
@@ -153,6 +166,7 @@ public class InterviewQuestionBankController : ControllerBase
     }
 
     [HttpDelete("questions/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteQuestion(Guid id)
     {
         await _service.DeleteQuestionDetailAsync(id);

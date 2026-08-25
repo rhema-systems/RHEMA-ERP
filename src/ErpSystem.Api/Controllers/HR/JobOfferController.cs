@@ -32,7 +32,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/job-offers")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class JobOfferController : ControllerBase
 {
@@ -67,22 +67,27 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetAll()
         => Ok(await _service.GetAllSummaryAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{offerNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto?>> GetByOfferNumber(string offerNumber)
         => Ok(await _service.GetByOfferNumberAsync(offerNumber));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithFullDetailsAsync(id));
 
     [HttpGet("application/{applicationId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobOfferDto?>> GetByApplication(Guid applicationId)
         => Ok(await _service.GetByApplicationIdAsync(applicationId));
 
@@ -99,6 +104,7 @@ public class JobOfferController : ControllerBase
     /// different resources, so they get different routes rather than one being dropped.</para>
     /// </summary>
     [HttpGet("{id:guid}/letter-preview")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<OfferLetterDto>> GetOfferLetter(Guid id, CancellationToken ct)
     {
         try
@@ -112,15 +118,18 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetByStatus(JobOfferStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("expiring")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetExpiring(
         [FromQuery] int daysAhead = 7)
         => Ok(await _service.GetExpiringOffersAsync(daysAhead));
 
     [HttpGet("prepared-by/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetByPreparedBy(Guid employeeId)
         => Ok(await _service.GetByPreparedByAsync(employeeId));
 
@@ -129,6 +138,7 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Create([FromBody] CreateJobOfferDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -146,6 +156,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Update(Guid id, [FromBody] UpdateJobOfferDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -159,6 +170,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -170,6 +182,7 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/submit-for-approval")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> SubmitForApproval(Guid id)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -182,12 +195,17 @@ public class JobOfferController : ControllerBase
 
     /// <summary>Withdraws an offer that is out for approval, returning it to Draft.</summary>
     [HttpPost("{id:guid}/recall")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Recall(Guid id)
     {
         await _service.RecallApprovalAsync(id);
         return Ok(new { message = "Offer recalled." });
     }
 
+    // W3 slice 9: approve/reject-approval deliberately carry no permission attribute — the service
+    // validates the caller against the pending workflow step (CanUserApproveAsync, no legacy
+    // fallback), and a permission here would refuse non-HR approvers the definition names. The
+    // class gate was previously Roles=SuperAdmin,HR, which could refuse the true assignee.
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveJobOfferDto dto)
     {
@@ -218,6 +236,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/issue")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Issue(Guid id, [FromBody] IssueJobOfferDto dto)
     {
         dto.OfferId = id;
@@ -232,6 +251,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/record-response")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> RecordResponse(Guid id, [FromBody] RecordOfferResponseDto dto)
     {
         dto.OfferId = id;
@@ -246,6 +266,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/revoke")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Revoke(Guid id, [FromBody] RevokeJobOfferDto dto)
     {
         dto.OfferId = id;
@@ -260,6 +281,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/accept-conditionally")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> AcceptConditionally(Guid id, [FromBody] string? candidateResponseNotes = null)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -271,6 +293,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPost("{id:guid}/revise")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Revise(Guid id, [FromBody] ReviseJobOfferDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -304,10 +327,12 @@ public class JobOfferController : ControllerBase
     /// route to changing them after that.</para>
     /// </summary>
     [HttpGet("{id:guid}/benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> GetBenefits(Guid id)
         => Ok(await _service.GetBenefitsAsync(id));
 
     [HttpPost("{id:guid}/benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferBenefitDto>> AddBenefit(
         Guid id, [FromBody] CreateJobOfferBenefitDto dto)
     {
@@ -327,6 +352,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpPut("benefits/{benefitId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferBenefitDto>> UpdateBenefit(
         Guid benefitId, [FromBody] UpdateJobOfferBenefitDto dto)
     {
@@ -341,6 +367,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpDelete("benefits/{benefitId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteBenefit(Guid benefitId)
     {
         await _service.DeleteBenefitAsync(benefitId);
@@ -349,12 +376,14 @@ public class JobOfferController : ControllerBase
 
     /// <summary>Preview benefits from the position grade without persisting them.</summary>
     [HttpGet("{id:guid}/suggest-benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> SuggestBenefits(
         Guid id, CancellationToken ct)
         => Ok(await _service.SuggestBenefitsFromPositionAsync(id, ct));
 
     /// <summary>Import position-grade benefits into the offer (deduped, persists to DB).</summary>
     [HttpPost("{id:guid}/import-benefits")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> ImportBenefits(
         Guid id, CancellationToken ct)
     {
@@ -372,6 +401,7 @@ public class JobOfferController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/notes")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferNoteDto>> AddNote(Guid id, [FromBody] CreateJobOfferNoteDto dto)
     {
         dto.JobOfferId = id;
@@ -390,6 +420,7 @@ public class JobOfferController : ControllerBase
     }
 
     [HttpGet("{id:guid}/notes")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferNoteDto>>> GetNotes(Guid id)
         => Ok(await _service.GetNotesAsync(id));
 
@@ -399,12 +430,14 @@ public class JobOfferController : ControllerBase
 
     /// <summary>Upload or replace the offer letter PDF/DOCX.</summary>
     [HttpPost("{id:guid}/upload-letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [RequestSizeLimit(10 * 1024 * 1024)]
     public Task<IActionResult> UploadLetter(Guid id, IFormFile file, CancellationToken ct)
         => UploadLetterAsync(id, file, signed: false, ct);
 
     /// <summary>Upload the signed offer letter returned by the candidate.</summary>
     [HttpPost("{id:guid}/upload-signed-letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [RequestSizeLimit(10 * 1024 * 1024)]
     public Task<IActionResult> UploadSignedLetter(Guid id, IFormFile file, CancellationToken ct)
         => UploadLetterAsync(id, file, signed: true, ct);
@@ -478,11 +511,13 @@ public class JobOfferController : ControllerBase
 
     /// <summary>Streams the issued offer letter.</summary>
     [HttpGet("{id:guid}/letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public Task<IActionResult> DownloadLetter(Guid id, CancellationToken ct = default)
         => DownloadLetterAsync(id, signed: false, ct);
 
     /// <summary>Streams the countersigned offer letter.</summary>
     [HttpGet("{id:guid}/signed-letter")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public Task<IActionResult> DownloadSignedLetter(Guid id, CancellationToken ct = default)
         => DownloadLetterAsync(id, signed: true, ct);
 

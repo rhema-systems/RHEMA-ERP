@@ -26,7 +26,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/pre-employment-checks")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class PreEmploymentCheckController : ControllerBase
 {
@@ -61,18 +61,22 @@ public class PreEmploymentCheckController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PreEmploymentCheckDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("offer/{offerId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PreEmploymentCheckDto?>> GetByOffer(Guid offerId)
         => Ok(await _service.GetByOfferIdAsync(offerId));
 
     [HttpGet("{id:guid}/with-items")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PreEmploymentCheckDetailDto>> GetWithItems(Guid id)
         => Ok(await _service.GetWithItemsAsync(id));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckDto>>> GetByStatus(
         PreEmploymentCheckStatus status)
         => Ok(await _service.GetByStatusAsync(status));
@@ -82,6 +86,7 @@ public class PreEmploymentCheckController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckDto>> Create([FromBody] CreatePreEmploymentCheckDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -103,6 +108,7 @@ public class PreEmploymentCheckController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> CompleteCheck(Guid id)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -118,23 +124,28 @@ public class PreEmploymentCheckController : ControllerBase
     // =========================================================================
 
     [HttpGet("{checkId:guid}/items")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckItemDto>>> GetItems(Guid checkId)
         => Ok(await _service.GetItemsAsync(checkId));
 
     [HttpGet("{checkId:guid}/items/blocking-failures")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckItemDto>>> GetBlockingFailures(Guid checkId)
         => Ok(await _service.GetBlockingFailuresAsync(checkId));
 
     [HttpGet("{checkId:guid}/items/mandatory")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckItemDto>>> GetMandatoryItems(Guid checkId)
         => Ok(await _service.GetMandatoryItemsAsync(checkId));
 
     [HttpGet("items/status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckItemDto>>> GetItemsByStatus(
         CheckItemStatus status, [FromQuery] Guid? checkId = null)
         => Ok(await _service.GetItemsByStatusAsync(status, checkId));
 
     [HttpPost("{checkId:guid}/items")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckItemDto>> AddItem(
         Guid checkId, [FromBody] CreatePreEmploymentCheckItemDto dto)
     {
@@ -153,6 +164,7 @@ public class PreEmploymentCheckController : ControllerBase
     }
 
     [HttpPut("items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckItemDto>> UpdateItem(
         Guid itemId, [FromBody] UpdatePreEmploymentCheckItemDto dto)
     {
@@ -167,6 +179,7 @@ public class PreEmploymentCheckController : ControllerBase
     }
 
     [HttpDelete("items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteItem(Guid itemId)
     {
         await _service.DeleteItemAsync(itemId);
@@ -178,16 +191,19 @@ public class PreEmploymentCheckController : ControllerBase
     // =========================================================================
 
     [HttpGet("items/{checkItemId:guid}/reference-responses")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<ReferenceCheckResponseDto>>> GetReferenceResponses(
         Guid checkItemId)
         => Ok(await _service.GetReferenceResponsesAsync(checkItemId));
 
     [HttpGet("reference-responses/referee/{refereeId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<ReferenceCheckResponseDto>>> GetReferenceResponsesByReferee(
         Guid refereeId)
         => Ok(await _service.GetReferenceResponsesByRefereeAsync(refereeId));
 
     [HttpPost("items/{checkItemId:guid}/reference-responses")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<ReferenceCheckResponseDto>> AddReferenceResponse(
         Guid checkItemId, [FromBody] CreateReferenceCheckResponseDto dto)
     {
@@ -206,6 +222,7 @@ public class PreEmploymentCheckController : ControllerBase
     }
 
     [HttpPut("reference-responses/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<ReferenceCheckResponseDto>> UpdateReferenceResponse(
         Guid id, [FromBody] UpdateReferenceCheckResponseDto dto)
     {
@@ -220,6 +237,7 @@ public class PreEmploymentCheckController : ControllerBase
     }
 
     [HttpDelete("reference-responses/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteReferenceResponse(Guid id)
     {
         await _service.DeleteReferenceResponseAsync(id);
@@ -238,6 +256,7 @@ public class PreEmploymentCheckController : ControllerBase
 
     /// <summary>Uploads the evidence behind one check item — a clearance certificate, a report.</summary>
     [HttpPost("items/{itemId:guid}/document")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [RequestSizeLimit(20 * 1024 * 1024)]
     public Task<IActionResult> UploadItemDocument(Guid itemId, IFormFile file, CancellationToken ct)
         => HrAttachmentUpload.ExecuteAsync(
@@ -255,6 +274,7 @@ public class PreEmploymentCheckController : ControllerBase
 
     /// <summary>Streams the evidence behind a check item.</summary>
     [HttpGet("items/{itemId:guid}/document")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<IActionResult> DownloadItemDocument(Guid itemId, CancellationToken ct)
     {
         var handle = await _service.GetItemDocumentHandleAsync(itemId, ct);
@@ -263,6 +283,7 @@ public class PreEmploymentCheckController : ControllerBase
 
     /// <summary>Uploads a written reference returned by a referee.</summary>
     [HttpPost("reference-responses/{responseId:guid}/document")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [RequestSizeLimit(20 * 1024 * 1024)]
     public Task<IActionResult> UploadReferenceDocument(Guid responseId, IFormFile file, CancellationToken ct)
         => HrAttachmentUpload.ExecuteAsync(
@@ -280,6 +301,7 @@ public class PreEmploymentCheckController : ControllerBase
 
     /// <summary>Streams a written reference.</summary>
     [HttpGet("reference-responses/{responseId:guid}/document")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<IActionResult> DownloadReferenceDocument(Guid responseId, CancellationToken ct)
     {
         var handle = await _service.GetReferenceDocumentHandleAsync(responseId, ct);
@@ -317,6 +339,7 @@ public class PreEmploymentCheckController : ControllerBase
     /// skipped unless overwriteExisting is true.
     /// </summary>
     [HttpPost("{id:guid}/apply-template")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckDetailDto>> ApplyTemplate(
         Guid id,
         [FromBody] ApplyTemplateDto dto)

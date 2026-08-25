@@ -121,7 +121,7 @@ public sealed class DashboardDeadlineVacancyDto
 /// </summary>
 [ApiController]
 [Route("api/recruitment-dashboard")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
 public class RecruitmentDashboardController : ControllerBase
 {
     private readonly IJobVacancyService     _vacancyService;

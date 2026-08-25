@@ -26,7 +26,7 @@ public sealed record ConfirmStartRequest(DateTime ActualStartDate, Guid? LinkedE
 /// </summary>
 [ApiController]
 [Route("api/job-hires")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [RecruitmentBusinessRules]
 public class JobHireController : ControllerBase
 {
@@ -44,26 +44,32 @@ public class JobHireController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{hireNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto?>> GetByHireNumber(string hireNumber)
         => Ok(await _service.GetByHireNumberAsync(hireNumber));
 
     [HttpGet("application/{applicationId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto?>> GetByApplication(Guid applicationId)
         => Ok(await _service.GetByApplicationIdAsync(applicationId));
 
     [HttpGet("employee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobHireRecordDto?>> GetByEmployee(Guid employeeId)
         => Ok(await _service.GetByEmployeeIdAsync(employeeId));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobHireRecordSummaryDto>>> GetByStatus(JobHireStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("start-approaching")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobHireRecordSummaryDto>>> GetStartApproaching(
         [FromQuery] int daysAhead = 14)
         => Ok(await _service.GetWithStartDateApproachingAsync(daysAhead));
@@ -73,6 +79,7 @@ public class JobHireController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobHireRecordDto>> Create([FromBody] CreateJobHireRecordDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -90,6 +97,7 @@ public class JobHireController : ControllerBase
     }
 
     [HttpPut("{id:guid}/status")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobHireRecordDto>> UpdateStatus(
         Guid id, [FromBody] UpdateJobHireRecordStatusDto dto)
     {
@@ -109,6 +117,7 @@ public class JobHireController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/confirm-start")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> ConfirmStart(Guid id, [FromBody] ConfirmStartRequest request)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

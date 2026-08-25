@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -29,12 +30,14 @@ public class PositionVacanciesController : ControllerBase
 
     /// <summary>All active positions with filled vs vacant headcount and any open vacancy.</summary>
     [HttpGet("establishment")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PositionEstablishmentDto>>> GetEstablishment(
         [FromQuery] Guid? organizationUnitId, [FromQuery] bool onlyVacant = false, CancellationToken ct = default)
         => Ok(await _service.GetEstablishmentOverviewAsync(organizationUnitId, onlyVacant, ct));
 
     /// <summary>Logged position vacancies (open by default; pass includeClosed=true for history).</summary>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PositionVacancySummaryDto>>> GetVacancies(
         [FromQuery] PositionVacancyStatus? status,
         [FromQuery] Guid? organizationUnitId,
@@ -45,10 +48,12 @@ public class PositionVacanciesController : ControllerBase
         => Ok(await _service.GetVacanciesAsync(status, organizationUnitId, reason, classification, includeClosed, ct));
 
     [HttpGet("stats")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PositionVacancyStatsDto>> GetStats(CancellationToken ct)
         => Ok(await _service.GetStatsAsync(ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PositionVacancyDto>> GetById(Guid id, CancellationToken ct)
     {
         var result = await _service.GetByIdAsync(id, ct);
@@ -58,6 +63,7 @@ public class PositionVacanciesController : ControllerBase
     // ── Mutations ───────────────────────────────────────────────────────────
 
     [HttpPatch("{id:guid}/status")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PositionVacancyDto>> UpdateStatus(
         Guid id, [FromBody] UpdatePositionVacancyStatusDto dto, CancellationToken ct)
     {
@@ -74,6 +80,7 @@ public class PositionVacanciesController : ControllerBase
     }
 
     [HttpPut("{id:guid}/notes")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PositionVacancyDto>> UpdateNotes(
         Guid id, [FromBody] UpdateNotesRequest request, CancellationToken ct)
     {
@@ -86,6 +93,7 @@ public class PositionVacanciesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/close")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PositionVacancyDto>> Close(
         Guid id, [FromBody] ClosePositionVacancyDto dto, CancellationToken ct)
     {
@@ -124,6 +132,7 @@ public class PositionVacanciesController : ControllerBase
 
     /// <summary>Recomputes vacancies from live headcount (opens missing, closes filled). Admin action.</summary>
     [HttpPost("reconcile")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<ActionResult<ReconcileVacanciesResultDto>> Reconcile(CancellationToken ct)
     {
         var tenantId = _currentUser.TenantId;

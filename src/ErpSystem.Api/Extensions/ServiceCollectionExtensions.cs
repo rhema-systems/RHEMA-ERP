@@ -1363,6 +1363,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerTraining)));
 
+            // HR recruitment policies (W3 slice 9): requisitions, vacancies, adverts, candidates,
+            // applications, interviews, offers, hires and pre-employment checks. Same split as the
+            // earlier slices: org-wide surfaces authorize here, a panelist's own interview surface
+            // is a membership check on the endpoint, the anonymous surfaces (public job listings,
+            // email-token offer responses and panelist confirms) keep their deliberate
+            // AllowAnonymous + rate limits, and the candidate portal keeps its own scheme.
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.RecruitmentReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewRecruitment,
+                        HrPermissions.MaintainRecruitment,
+                        HrPermissions.AdministerRecruitment)))
+                .AddPolicy(HrPermissions.RecruitmentWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainRecruitment,
+                        HrPermissions.AdministerRecruitment)))
+                .AddPolicy(HrPermissions.RecruitmentAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerRecruitment)));
+
             // HR occupational-health policies. The medical controllers previously carried a bare
             // [Authorize], so every authenticated employee could read and delete medical records.
             // Administer implies Write implies Read, so an admin does not need all three granted.

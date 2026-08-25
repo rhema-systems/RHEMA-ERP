@@ -33,8 +33,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [RecruitmentBusinessRules]
 public class JobVacancyController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IJobVacancyService _service;
     private readonly ICurrentUserService _currentUser;
     private readonly IHrControlledDocumentService _hrDocuments;
@@ -66,32 +64,39 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PagedResult<JobVacancySummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobVacancyDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{vacancyNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobVacancyDto?>> GetByVacancyNumber(string vacancyNumber)
         => Ok(await _service.GetByVacancyNumberAsync(vacancyNumber));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobVacancyDetailDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithFullDetailsAsync(id));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetByStatus(JobVacancyStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetActive()
         => Ok(await _service.GetActiveVacanciesAsync());
 
@@ -104,22 +109,27 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpGet("position/{positionId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetByPosition(Guid positionId)
         => Ok(await _service.GetByPositionAsync(positionId));
 
     [HttpGet("hiring-manager/{hiringManagerId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetByHiringManager(Guid hiringManagerId)
         => Ok(await _service.GetByHiringManagerAsync(hiringManagerId));
 
     [HttpGet("recruiter/{recruiterId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetByRecruiter(Guid recruiterId)
         => Ok(await _service.GetByRecruiterAsync(recruiterId));
 
     [HttpGet("requisition/{requisitionId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetByRequisition(Guid requisitionId)
         => Ok(await _service.GetByRequisitionAsync(requisitionId));
 
     [HttpGet("deadline-approaching")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetDeadlineApproaching(
         [FromQuery] int daysAhead = 7)
         => Ok(await _service.GetWithDeadlineApproachingAsync(daysAhead));
@@ -129,7 +139,7 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
 
     [HttpPost]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobVacancyDto>> Create([FromBody] CreateJobVacancyDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -147,7 +157,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobVacancyDto>> Update(Guid id, [FromBody] UpdateJobVacancyDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -161,7 +171,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -178,7 +188,7 @@ public class JobVacancyController : ControllerBase
     /// + ChangeStatusAsync pair to avoid partial-failure risk.
     /// </summary>
     [HttpPost("{id:guid}/transition")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobVacancyDto>> Transition(Guid id, [FromBody] TransitionJobVacancyDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -194,7 +204,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPost("{id:guid}/change-status")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeJobVacancyStatusDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -208,7 +218,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPost("{id:guid}/close")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Close(Guid id, [FromBody] CloseJobVacancyDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -222,7 +232,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPost("{id:guid}/close-for-applications")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> CloseForApplications(Guid id, [FromBody] CloseForApplicationsDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -240,6 +250,7 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
 
     [HttpGet("{vacancyId:guid}/attachments")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancyAttachmentDto>>> GetAttachments(Guid vacancyId)
         => Ok(await _service.GetAttachmentsAsync(vacancyId));
 
@@ -254,7 +265,7 @@ public class JobVacancyController : ControllerBase
     /// tenant policy cannot turn that off.</para>
     /// </remarks>
     [HttpPost("{vacancyId:guid}/attachments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     [ProducesResponseType(typeof(JobVacancyAttachmentDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -277,6 +288,7 @@ public class JobVacancyController : ControllerBase
 
     /// <summary>Streams a vacancy attachment — the file lives outside the web root.</summary>
     [HttpGet("{vacancyId:guid}/attachments/{attachmentId:guid}/download")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadAttachment(Guid vacancyId, Guid attachmentId, CancellationToken ct)
@@ -302,7 +314,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("attachments/{attachmentId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
     {
         await _service.DeleteAttachmentAsync(attachmentId);
@@ -314,10 +326,12 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
 
     [HttpGet("{vacancyId:guid}/status-history")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobVacancyStatusHistoryDto>>> GetStatusHistory(Guid vacancyId)
         => Ok(await _service.GetStatusHistoryAsync(vacancyId));
 
     [HttpGet("{vacancyId:guid}/status-history/latest")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobVacancyStatusHistoryDto?>> GetLatestStatusHistory(Guid vacancyId)
         => Ok(await _service.GetLatestStatusHistoryAsync(vacancyId));
 
@@ -326,15 +340,17 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
 
     [HttpGet("{vacancyId:guid}/criteria")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobShortlistingCriteriaDto>>> GetCriteria(Guid vacancyId)
         => Ok(await _service.GetCriteriaAsync(vacancyId));
 
     [HttpGet("{vacancyId:guid}/criteria/mandatory")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobShortlistingCriteriaDto>>> GetMandatoryCriteria(Guid vacancyId)
         => Ok(await _service.GetMandatoryCriteriaAsync(vacancyId));
 
     [HttpPost("{vacancyId:guid}/criteria")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobShortlistingCriteriaDto>> AddCriteria(
         Guid vacancyId, [FromBody] CreateJobShortlistingCriteriaDto dto)
     {
@@ -352,7 +368,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPut("criteria/{criteriaId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobShortlistingCriteriaDto>> UpdateCriteria(
         Guid criteriaId, [FromBody] UpdateJobShortlistingCriteriaDto dto)
     {
@@ -367,7 +383,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("criteria/{criteriaId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteCriteria(Guid criteriaId)
     {
         await _service.DeleteCriteriaAsync(criteriaId);
@@ -377,11 +393,12 @@ public class JobVacancyController : ControllerBase
     // ── Pipeline stage assignments ────────────────────────────────────────────
 
     [HttpGet("{vacancyId:guid}/stage-assignments")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<VacancyPipelineStageAssignmentDto>>> GetStageAssignments(Guid vacancyId)
         => Ok(await _service.GetStageAssignmentsAsync(vacancyId));
 
     [HttpPost("{vacancyId:guid}/stage-assignments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<VacancyPipelineStageAssignmentDto>> UpsertStageAssignment(
         Guid vacancyId, [FromBody] CreateVacancyPipelineStageAssignmentDto dto)
     {
@@ -399,7 +416,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPut("stage-assignments/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<VacancyPipelineStageAssignmentDto>> UpdateStageAssignment(
         Guid id, [FromBody] UpdateVacancyPipelineStageAssignmentDto dto)
     {
@@ -439,7 +456,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("stage-assignments/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteStageAssignment(Guid id)
     {
         var deleted = await _service.DeleteStageAssignmentAsync(id);

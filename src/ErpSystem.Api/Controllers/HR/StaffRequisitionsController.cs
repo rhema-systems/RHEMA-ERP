@@ -35,8 +35,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [RecruitmentBusinessRules]
 public class StaffRequisitionsController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffRequisitionService _service;
     private readonly ICurrentUserService _currentUser;
     private readonly IHrControlledDocumentService _hrDocuments;
@@ -44,6 +42,7 @@ public class StaffRequisitionsController : ControllerBase
     private readonly IFileStorageService _fileStorageService;
     private readonly ApplicationDbContext _db;
     private readonly ILogger<StaffRequisitionsController> _logger;
+    private readonly IAuthorizationService _authorization;
 
     public StaffRequisitionsController(
         IStaffRequisitionService service,
@@ -52,7 +51,8 @@ public class StaffRequisitionsController : ControllerBase
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorageService,
         ApplicationDbContext db,
-        ILogger<StaffRequisitionsController> logger)
+        ILogger<StaffRequisitionsController> logger,
+        IAuthorizationService authorization)
     {
         _service = service;
         _currentUser = currentUser;
@@ -61,22 +61,35 @@ public class StaffRequisitionsController : ControllerBase
         _fileStorageService = fileStorageService;
         _db = db;
         _logger = logger;
+        _authorization = authorization;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>Self-or-permission (W3), as on LeavesController — see the remarks there.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUser.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+            return true;
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
-    /// HR, or the employee who raised the requisition. Used on the endpoints that belong to the
-    /// requester rather than to a role — editing a draft, sending it for approval, taking it back.
+    /// The desk, or the employee who raised the requisition. Used on the endpoints that belong to
+    /// the requester rather than to a role — editing a draft, sending it for approval, taking it
+    /// back. (W3 slice 9: the desk arm moved from the HR role to the Write permission.)
     /// </summary>
     private async Task<bool> CanActAsRequesterAsync(Guid requisitionId, CancellationToken ct)
     {
-        if (IsHr) return true;
-        if (_currentUser.EmployeeId is not Guid me) return false;
-
         var requisition = await _service.GetByIdAsync(requisitionId, ct);
-        return requisition.RequestedById == me;
+        if (requisition == null) return false;
+        return await SelfOrPolicyAsync(requisition.RequestedById, HrPermissions.RecruitmentWritePolicy);
+    }
+
+    /// <summary>The requester's read arm of the same rule — own requisition, or the desk read.</summary>
+    private async Task<bool> CanReadRequisitionAsync(Guid requisitionId, CancellationToken ct)
+    {
+        var requisition = await _service.GetByIdAsync(requisitionId, ct);
+        if (requisition == null) return false;
+        return await SelfOrPolicyAsync(requisition.RequestedById, HrPermissions.RecruitmentReadPolicy);
     }
 
     // =========================================================================
@@ -89,17 +102,25 @@ public class StaffRequisitionsController : ControllerBase
     public async Task<ActionResult<StaffRequisitionDto>> GetById(Guid id, CancellationToken ct)
     {
         var result = await _service.GetByIdAsync(id, ct);
-        return result == null ? NotFound() : Ok(result);
+        if (result == null) return NotFound();
+        // W3: the requester tracks their own requisition; anyone else needs the desk read.
+        if (!await SelfOrPolicyAsync(result.RequestedById, HrPermissions.RecruitmentReadPolicy))
+            return Forbid();
+        return Ok(result);
     }
 
     [HttpGet("{id:guid}/detail")]
     public async Task<ActionResult<StaffRequisitionDetailDto>> GetDetail(Guid id, CancellationToken ct)
     {
         var result = await _service.GetDetailAsync(id, ct);
-        return result == null ? NotFound(new { message = "Requisition not found." }) : Ok(result);
+        if (result == null) return NotFound(new { message = "Requisition not found." });
+        if (!await SelfOrPolicyAsync(result.RequestedById, HrPermissions.RecruitmentReadPolicy))
+            return Forbid();
+        return Ok(result);
     }
 
     [HttpGet("{id:guid}/budget-check")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<RequisitionBudgetCheckDto>> CheckBudget(Guid id, CancellationToken ct)
     {
         try
@@ -113,6 +134,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpGet("number/{requisitionNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<StaffRequisitionDto>> GetByRequisitionNumber(string requisitionNumber, CancellationToken ct)
     {
         var result = await _service.GetByRequisitionNumberAsync(requisitionNumber, ct);
@@ -120,14 +142,17 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetAll(CancellationToken ct)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("summary")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<StaffRequisitionStatusSummaryDto>> GetStatusSummary(CancellationToken ct)
         => Ok(await _service.GetStatusSummaryAsync(ct));
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PagedResult<StaffRequisitionSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -135,46 +160,61 @@ public class StaffRequisitionsController : ControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("organization-unit/{organizationUnitId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByOrganizationUnit(Guid organizationUnitId, CancellationToken ct)
         => Ok(await _service.GetByOrganizationUnitAsync(organizationUnitId, ct));
 
     [HttpGet("location/{locationId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByLocation(Guid locationId, CancellationToken ct)
         => Ok(await _service.GetByLocationAsync(locationId, ct));
 
     [HttpGet("position/{positionId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByPosition(Guid positionId, CancellationToken ct)
         => Ok(await _service.GetByPositionAsync(positionId, ct));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByStatus(StaffRequisitionStatus status, CancellationToken ct)
         => Ok(await _service.GetByStatusAsync(status, ct));
 
     [HttpGet("type/{type}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByType(StaffRequisitionType type, CancellationToken ct)
         => Ok(await _service.GetByTypeAsync(type, ct));
 
     [HttpGet("requested-by/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByRequestedBy(Guid employeeId, CancellationToken ct)
-        => Ok(await _service.GetByRequestedByAsync(employeeId, ct));
+    {
+        // W3: a manager lists their own requisitions; anyone else's need the desk read.
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.RecruitmentReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetByRequestedByAsync(employeeId, ct));
+    }
 
     [HttpGet("pending-review")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetPendingReview(CancellationToken ct)
         => Ok(await _service.GetPendingReviewAsync(ct));
 
     [HttpGet("open")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetOpen(CancellationToken ct)
         => Ok(await _service.GetOpenRequisitionsAsync(ct));
 
     [HttpGet("overdue")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetOverdue(CancellationToken ct)
         => Ok(await _service.GetOverdueAsync(ct));
 
     [HttpGet("vacancy/{jobVacancyId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetByJobVacancy(Guid jobVacancyId, CancellationToken ct)
         => Ok(await _service.GetByJobVacancyAsync(jobVacancyId, ct));
 
     [HttpGet("upcoming-start")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionSummaryDto>>> GetUpcomingStartDate(
         [FromQuery] int daysAhead = 30,
         CancellationToken ct = default)
@@ -219,7 +259,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -305,7 +345,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/hold")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> PutOnHold(Guid id, [FromBody] HoldStaffRequisitionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -319,7 +359,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/cancel")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelStaffRequisitionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -333,7 +373,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/fulfill")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Fulfill(Guid id, [FromBody] FulfillStaffRequisitionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -347,7 +387,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/link-vacancy")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> LinkToVacancy(Guid id, [FromBody] LinkStaffRequisitionToVacancyDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -369,7 +409,7 @@ public class StaffRequisitionsController : ControllerBase
     #region Costs
 
     [HttpPost("{id:guid}/costs")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<StaffRequisitionCostDto>> AddCost(Guid id, [FromBody] CreateStaffRequisitionCostDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -386,19 +426,22 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/costs")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionCostDto>>> GetCosts(Guid id, CancellationToken ct)
         => Ok(await _service.GetCostsAsync(id, ct));
 
     [HttpGet("{id:guid}/costs/total")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<decimal>> GetTotalCost(Guid id, CancellationToken ct)
         => Ok(await _service.GetTotalCostAsync(id, ct));
 
     [HttpGet("{id:guid}/costs/category/{category}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionCostDto>>> GetCostsByCategory(Guid id, StaffRequisitionCostCategory category, CancellationToken ct)
         => Ok(await _service.GetCostsByCategoryAsync(id, category, ct));
 
     [HttpPut("costs/{costId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<StaffRequisitionCostDto>> UpdateCost(Guid costId, [FromBody] UpdateStaffRequisitionCostDto dto, CancellationToken ct)
     {
         if (costId != dto.Id) return BadRequest("ID mismatch.");
@@ -411,7 +454,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpDelete("costs/{costId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteCost(Guid costId, CancellationToken ct)
     {
         await _service.DeleteCostAsync(costId, ct);
@@ -465,7 +508,11 @@ public class StaffRequisitionsController : ControllerBase
 
     [HttpGet("{id:guid}/attachments")]
     public async Task<ActionResult<IEnumerable<StaffRequisitionAttachmentDto>>> GetAttachments(Guid id, CancellationToken ct)
-        => Ok(await _service.GetAttachmentsAsync(id, ct));
+    {
+        // W3: the requester sees their own requisition's attachments; anyone else needs the desk read.
+        if (!await CanReadRequisitionAsync(id, ct)) return Forbid();
+        return Ok(await _service.GetAttachmentsAsync(id, ct));
+    }
 
     /// <summary>Streams a requisition attachment — the file lives outside the web root.</summary>
     [HttpGet("{id:guid}/attachments/{attachmentId:guid}/download")]
@@ -475,6 +522,9 @@ public class StaffRequisitionsController : ControllerBase
     {
         if (_currentUser.TenantId is not Guid tenantId)
             return Unauthorized("Tenant context could not be resolved");
+
+        // W3: previously tenant-scoped only — any internal user could pull any requisition's file.
+        if (!await CanReadRequisitionAsync(id, ct)) return Forbid();
 
         var attachment = await _db.Set<StaffRequisitionAttachment>()
             .AsNoTracking()
@@ -494,11 +544,12 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpGet("attachments/uploader/{uploadedByUserId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionAttachmentDto>>> GetAttachmentsByUploader(Guid uploadedByUserId, CancellationToken ct)
         => Ok(await _service.GetAttachmentsByUploaderAsync(uploadedByUserId, ct));
 
     [HttpDelete("attachments/{attachmentId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId, CancellationToken ct)
     {
         await _service.DeleteAttachmentAsync(attachmentId, ct);
@@ -514,6 +565,7 @@ public class StaffRequisitionsController : ControllerBase
     #region Comments
 
     [HttpPost("{id:guid}/comments")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<StaffRequisitionCommentDto>> AddComment(Guid id, [FromBody] CreateStaffRequisitionCommentDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -530,22 +582,27 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/comments")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionCommentDto>>> GetComments(Guid id, CancellationToken ct)
         => Ok(await _service.GetCommentsAsync(id, ct));
 
     [HttpGet("{id:guid}/comments/all")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionCommentDto>>> GetAllComments(Guid id, CancellationToken ct)
         => Ok(await _service.GetAllCommentsAsync(id, ct));
 
     [HttpGet("comments/author/{authorId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionCommentDto>>> GetCommentsByAuthor(Guid authorId, CancellationToken ct)
         => Ok(await _service.GetCommentsByAuthorAsync(authorId, ct));
 
     [HttpGet("comments/{parentCommentId:guid}/replies")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionCommentDto>>> GetCommentReplies(Guid parentCommentId, CancellationToken ct)
         => Ok(await _service.GetCommentRepliesAsync(parentCommentId, ct));
 
     [HttpPut("comments/{commentId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<StaffRequisitionCommentDto>> UpdateComment(Guid commentId, [FromBody] UpdateStaffRequisitionCommentDto dto, CancellationToken ct)
     {
         if (commentId != dto.Id) return BadRequest("ID mismatch.");
@@ -558,6 +615,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpDelete("comments/{commentId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteComment(Guid commentId, CancellationToken ct)
     {
         await _service.DeleteCommentAsync(commentId, ct);
@@ -573,10 +631,12 @@ public class StaffRequisitionsController : ControllerBase
     #region History
 
     [HttpGet("{id:guid}/history")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffRequisitionHistoryDto>>> GetHistory(Guid id, CancellationToken ct)
         => Ok(await _service.GetHistoryAsync(id, ct));
 
     [HttpGet("{id:guid}/history/latest")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<StaffRequisitionHistoryDto>> GetLatestHistory(Guid id, CancellationToken ct)
     {
         var result = await _service.GetLatestHistoryAsync(id, ct);

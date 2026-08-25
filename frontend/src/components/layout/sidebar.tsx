@@ -614,26 +614,31 @@ export const navigationItems: NavItem[] = [
         //
         // The pipeline board and the screening workspace are not listed: both belong to a single
         // vacancy and are reached from it, so a top-level link would have nowhere to go.
+        // W3 slice 9: desk registers gate on HR.Recruitment.Read (the leave-slice shape — the
+        // parent stays open so the self-service children remain reachable). Requisitions stays
+        // open as the manager's entry point (raising one is self-service; the register tab needs
+        // the desk read), and My Panel is the panelist's own surface, validated per record.
         title: 'Recruitment',
         href: '/hr/recruitment',
         icon: UserPlus,
         children: [
-          { title: 'Establishment', href: '/hr/recruitment/establishment', icon: Building2 },
+          { title: 'Establishment', href: '/hr/recruitment/establishment', icon: Building2, permissions: ['HR.Recruitment.Read'] },
           { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList },
-          { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase },
-          { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone },
-          { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users },
-          { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText },
-          { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock },
+          { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase, permissions: ['HR.Recruitment.Read'] },
+          { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone, permissions: ['HR.Recruitment.Read'] },
+          { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users, permissions: ['HR.Recruitment.Read'] },
+          { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText, permissions: ['HR.Recruitment.Read'] },
+          { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock, permissions: ['HR.Recruitment.Read'] },
           // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The
           // interview schedule above answers 403 for them, so without this they have no way in.
           { title: 'My Panel', href: '/hr/recruitment/my-panel', icon: UserCheck },
-          { title: 'Offers', href: '/hr/recruitment/offers', icon: HandCoins },
-          { title: 'Hires', href: '/hr/recruitment/hires', icon: UserCheck },
+          { title: 'Offers', href: '/hr/recruitment/offers', icon: HandCoins, permissions: ['HR.Recruitment.Read'] },
+          { title: 'Hires', href: '/hr/recruitment/hires', icon: UserCheck, permissions: ['HR.Recruitment.Read'] },
           {
             title: 'Pre-Employment Checks',
             href: '/hr/recruitment/pre-employment-checks',
             icon: ShieldCheck,
+            permissions: ['HR.Recruitment.Read'],
           },
         ],
       },

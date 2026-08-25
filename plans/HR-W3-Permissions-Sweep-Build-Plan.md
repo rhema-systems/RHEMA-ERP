@@ -222,7 +222,42 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    Service Bonds on HR.Training.Read, self-service children open; the Requests page's register
    tab now needs the desk read (self-service create still works; a mine-view fallback is a UI
    nicety left for the area's own backlog, as is a bond self-accept screen).
-5. **Recruitment** (147 bare; panelist confirms stay anonymous-tokened)
+5. **Recruitment** — ✅ **DONE 2026-08-25, harness `run-slice9-recruitment.mjs` 66/66 green
+   (+ 39/23/47/27/90 no-regression — 292 assertions total), `seed-db` run, grant rows verified
+   in DB (HR → Read+Write; SuperAdmin/TenantAdmin → all three).** `HR.Recruitment.{Read,Write,Admin}` over 15
+   controllers (the 14 carrying `[RecruitmentBusinessRules]` minus untouched JobInterview, plus
+   RecruitmentDashboard and the ungated outlier PositionVacancies). 304 scripted placements —
+   215 inserts on bare actions + 89 REPLACEMENTS of method-level `[Authorize(Roles=SuperAdmin,HR)]`
+   (exactly the 89 the survey counted); 9 class-level role gates swapped (8 → InternalOnly +
+   per-action tiers, RecruitmentDashboard → Read class-wide); dead HrRoles consts removed.
+   ⚠ Script trap recorded: the "already gated" guard must inspect only the method's OWN contiguous
+   attribute block — an N-line window above the declaration reads a neighbouring one-liner
+   action's freshly inserted attribute and silently skips alternating methods (caught because the
+   pass was re-run to convergence: 2nd pass +71, 3rd pass 0).
+   The split: registers/exports/downloads → Read; desk ops (requisition hold/cancel/fulfill,
+   vacancy lifecycle + postings publish/expire, candidate + application maintenance incl.
+   shortlist/reject/bulk/notifications/reviews, offer prepare/issue/revoke/benefits/letters,
+   hire create/status/confirm-start, check run + item pass/fail/waive, question bank/preset/
+   pipeline/template writes) → Write; deletes + establishment reconcile → Admin.
+   **Kept validated-in-service, endpoint open:** requisition approve/reject (workflow
+   `CanUserApproveAsync` + self-approval SoD + budget/establishment enforcement — FR-HR-136 bites
+   at the requisition), offer approve/reject-approval (workflow, no legacy fallback — the OLD
+   class role gate could refuse the true assignee; now InternalOnly + engine), requisition
+   create/update/submit/recall + raise-requisition (requester acts; `CanActAsRequesterAsync`'s
+   desk arm converted role→Write policy), vacancy stage-assignment complete/skip
+   (`RequireStageOwnership`), the internal job board (published vacancies, my-applications,
+   internal drafts), and the whole **JobInterviewController** — untouched by design: its service
+   carries a complete per-record model (`EnsureHr`/`EnsureCanReadInterviewAsync`/
+   `EnsureCanScoreAsAsync` — panelists score only as themselves), role-anchored like mentoring.
+   Self-or-permission hand edits: requisition GetById/GetDetail/requested-by/attachments
+   list+download (download was tenant-scoped only — any internal user could pull any requisition
+   file). Anonymous kept: public portal (tenant-header + 5/10min apply + 3/10min CV upload),
+   offer-response single-use token, panelist email-token confirms; candidate portal scheme
+   untouched. Frontend: sidebar-only — desk children + Establishment on HR.Recruitment.Read;
+   Requisitions (manager entry point) and My Panel stay open. Residuals: requisition comments
+   gated desk-side (no UI exists; requester thread access owed if comments ever surface),
+   hiring-manager/recruiter vacancy reads at Read (no my-vacancies surface), interview service
+   checks stay role-anchored (a permission holder without the HR role is refused there).
 6. **Performance** (350 bare — the largest and most actor-diverse: self, peer, manager, HR;
    do last of the big areas, with the area-5 actor matrix open)
 7. **Foundation/Employee core** (280 bare — pickers feed every module; follow medical's
