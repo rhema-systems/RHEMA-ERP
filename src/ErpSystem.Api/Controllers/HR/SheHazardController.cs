@@ -23,59 +23,57 @@ public class SheHazardController : SheApiControllerBase
 {
     // Gated per action rather than on the class: authorize attributes stack as AND, so a class-level
     // role requirement could not be relaxed for the one report action employees need.
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly ISheHazardService _service;
 
     public SheHazardController(ISheHazardService service, ICurrentUserService currentUser)
         : base(currentUser) => _service = service;
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetAll([FromQuery] bool activeOnly = false)
         => Ok(await _service.GetAllAsync(activeOnly));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<SheHazardDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("code/{code}")]
     public async Task<ActionResult<SheHazardDto?>> GetByCode(string code)
         => Ok(await _service.GetByCodeAsync(code));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("status/{status}")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetByStatus(SheHazardStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("category/{category}")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetByCategory(SheHazardCategory category)
         => Ok(await _service.GetByCategoryAsync(category));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("risk-level/{level}")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetByResidualRiskLevel(SheHazardRiskLevel level)
         => Ok(await _service.GetByResidualRiskLevelAsync(level));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("location/{locationId:guid}")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetByLocation(Guid locationId)
         => Ok(await _service.GetByLocationAsync(locationId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("owner/{ownerId:guid}")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetByOwner(Guid ownerId)
         => Ok(await _service.GetByOwnerAsync(ownerId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("high-risk")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetHighResidualRisk([FromQuery] int minimumScore = 12)
         => Ok(await _service.GetHighResidualRiskAsync(minimumScore));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("due-for-review")]
     public async Task<ActionResult<IEnumerable<SheHazardSummaryDto>>> GetDueForReview([FromQuery] int daysAhead = 30)
         => Ok(await _service.GetDueForReviewAsync(daysAhead));
@@ -88,7 +86,7 @@ public class SheHazardController : SheApiControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<SheHazardDto>> Update(Guid id, [FromBody] UpdateSheHazardDto dto)
     {
@@ -96,7 +94,7 @@ public class SheHazardController : SheApiControllerBase
         return Ok(await _service.UpdateAsync(dto, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -105,7 +103,7 @@ public class SheHazardController : SheApiControllerBase
     }
 
     // ── Controls ──
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("{id:guid}/controls")]
     public async Task<ActionResult<SheHazardControlDto>> AddControl(Guid id, [FromBody] CreateSheHazardControlDto dto)
     {
@@ -113,7 +111,7 @@ public class SheHazardController : SheApiControllerBase
         return Ok(await _service.AddControlAsync(dto, TenantId, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPut("controls/{controlId:guid}")]
     public async Task<ActionResult<SheHazardControlDto>> UpdateControl(Guid controlId, [FromBody] UpdateSheHazardControlDto dto)
     {
@@ -121,7 +119,7 @@ public class SheHazardController : SheApiControllerBase
         return Ok(await _service.UpdateControlAsync(dto, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpDelete("controls/{controlId:guid}")]
     public async Task<IActionResult> DeleteControl(Guid controlId)
     {
@@ -130,7 +128,7 @@ public class SheHazardController : SheApiControllerBase
     }
 
     // ── Corrective actions ──
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("{id:guid}/corrective-actions")]
     public async Task<ActionResult<SheHazardCorrectiveActionDto>> AddCorrectiveAction(Guid id, [FromBody] CreateSheHazardCorrectiveActionDto dto)
     {
@@ -138,7 +136,7 @@ public class SheHazardController : SheApiControllerBase
         return Ok(await _service.AddCorrectiveActionAsync(dto, TenantId, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpDelete("corrective-actions/{correctiveActionId:guid}")]
     public async Task<IActionResult> DeleteCorrectiveAction(Guid correctiveActionId)
     {

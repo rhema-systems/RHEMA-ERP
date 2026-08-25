@@ -25,8 +25,6 @@ public class SheEnvironmentalController : SheApiControllerBase
 {
     // Gated per action rather than on the class: authorize attributes stack as AND, so a class-level
     // role requirement could not be relaxed for the open report + mine actions.
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly ISheEnvironmentalService _service;
 
     public SheEnvironmentalController(ISheEnvironmentalService service, ICurrentUserService currentUser)
@@ -37,8 +35,9 @@ public class SheEnvironmentalController : SheApiControllerBase
     [HttpPost("incidents")]
     public async Task<ActionResult<SheEnvironmentalIncidentDto>> CreateIncident([FromBody] CreateSheEnvironmentalIncidentDto dto)
     {
-        var isHr = User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
-        dto.ReportedById = isHr && dto.ReportedById != Guid.Empty ? dto.ReportedById : UserId;
+        // W3 slice 12: the on-behalf arm is the desk tier, not the HR role.
+        var isDesk = await HoldsPolicyAsync(HrPermissions.SheWritePolicy);
+        dto.ReportedById = isDesk && dto.ReportedById != Guid.Empty ? dto.ReportedById : UserId;
         var created = await _service.CreateIncidentAsync(dto, TenantId, UserId);
         return CreatedAtAction(nameof(GetIncident), new { id = created.Id }, created);
     }
@@ -49,42 +48,42 @@ public class SheEnvironmentalController : SheApiControllerBase
         => Ok(await _service.GetMyIncidentsAsync(UserId));
 
     // ── Incidents (HR register) ──
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/{id:guid}")]
     public async Task<ActionResult<SheEnvironmentalIncidentDto>> GetIncident(Guid id)
         => Ok(await _service.GetIncidentAsync(id));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/number/{incidentNumber}")]
     public async Task<ActionResult<SheEnvironmentalIncidentDto?>> GetIncidentByNumber(string incidentNumber)
         => Ok(await _service.GetIncidentByNumberAsync(incidentNumber));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/status/{status}")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalIncidentSummaryDto>>> GetIncidentsByStatus(SheEnvironmentalIncidentStatus status)
         => Ok(await _service.GetIncidentsByStatusAsync(status));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/type/{type}")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalIncidentSummaryDto>>> GetIncidentsByType(SheEnvironmentalIncidentType type)
         => Ok(await _service.GetIncidentsByTypeAsync(type));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/date-range")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalIncidentSummaryDto>>> GetIncidentsByDateRange([FromQuery] DateTime from, [FromQuery] DateTime to)
         => Ok(await _service.GetIncidentsByDateRangeAsync(from, to));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/open")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalIncidentSummaryDto>>> GetOpenIncidents()
         => Ok(await _service.GetOpenIncidentsAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("incidents/reported-to-epa")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalIncidentSummaryDto>>> GetIncidentsReportedToEpa()
         => Ok(await _service.GetIncidentsReportedToEpaAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPut("incidents/{id:guid}")]
     public async Task<ActionResult<SheEnvironmentalIncidentDto>> UpdateIncident(Guid id, [FromBody] UpdateSheEnvironmentalIncidentDto dto)
     {
@@ -92,7 +91,7 @@ public class SheEnvironmentalController : SheApiControllerBase
         return Ok(await _service.UpdateIncidentAsync(dto, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("incidents/{id:guid}/close")]
     public async Task<IActionResult> CloseIncident(Guid id, [FromBody] CloseSheEnvironmentalIncidentDto dto)
     {
@@ -101,7 +100,7 @@ public class SheEnvironmentalController : SheApiControllerBase
         return Ok(new { message = "Environmental incident closed." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpDelete("incidents/{id:guid}")]
     public async Task<IActionResult> DeleteIncident(Guid id)
     {
@@ -110,32 +109,32 @@ public class SheEnvironmentalController : SheApiControllerBase
     }
 
     // ── Monitoring ──
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("monitoring/{id:guid}")]
     public async Task<ActionResult<SheEnvironmentalMonitoringRecordDto>> GetMonitoringRecord(Guid id)
         => Ok(await _service.GetMonitoringRecordAsync(id));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("monitoring/type/{type}")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalMonitoringRecordDto>>> GetMonitoringByType(SheEnvironmentalMonitoringType type)
         => Ok(await _service.GetMonitoringByTypeAsync(type));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("monitoring/date-range")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalMonitoringRecordDto>>> GetMonitoringByDateRange([FromQuery] DateTime from, [FromQuery] DateTime to)
         => Ok(await _service.GetMonitoringByDateRangeAsync(from, to));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("monitoring/location/{locationId:guid}")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalMonitoringRecordDto>>> GetMonitoringByLocation(Guid locationId)
         => Ok(await _service.GetMonitoringByLocationAsync(locationId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("monitoring/exceedances")]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalMonitoringRecordDto>>> GetExceedances()
         => Ok(await _service.GetExceedancesAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("monitoring")]
     public async Task<ActionResult<SheEnvironmentalMonitoringRecordDto>> CreateMonitoringRecord([FromBody] CreateSheEnvironmentalMonitoringRecordDto dto)
     {
@@ -143,7 +142,7 @@ public class SheEnvironmentalController : SheApiControllerBase
         return CreatedAtAction(nameof(GetMonitoringRecord), new { id = created.Id }, created);
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPut("monitoring/{id:guid}")]
     public async Task<ActionResult<SheEnvironmentalMonitoringRecordDto>> UpdateMonitoringRecord(Guid id, [FromBody] UpdateSheEnvironmentalMonitoringRecordDto dto)
     {
@@ -151,7 +150,7 @@ public class SheEnvironmentalController : SheApiControllerBase
         return Ok(await _service.UpdateMonitoringRecordAsync(dto, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     [HttpDelete("monitoring/{id:guid}")]
     public async Task<IActionResult> DeleteMonitoringRecord(Guid id)
     {

@@ -17,7 +17,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/audits")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SheAuditController : SheApiControllerBase
 {
     private readonly ISheAuditService _service;
@@ -27,23 +27,28 @@ public class SheAuditController : SheApiControllerBase
 
     // ── audits ──
     [HttpGet]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheAuditSummaryDto>>> GetAll(
         [FromQuery] SheAuditStatus? status, [FromQuery] int? year)
         => Ok(await _service.GetAllAsync(status, year));
 
     [HttpGet("upcoming")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheAuditSummaryDto>>> GetUpcoming([FromQuery] int daysAhead = 30)
         => Ok(await _service.GetUpcomingAsync(daysAhead));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheAuditDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{auditNumber}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheAuditDto?>> GetByNumber(string auditNumber)
         => Ok(await _service.GetByNumberAsync(auditNumber));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditDto>> Create([FromBody] CreateSheAuditDto dto)
     {
         var created = await _service.CreateAsync(dto, TenantId, UserId);
@@ -51,6 +56,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditDto>> Update(Guid id, [FromBody] UpdateSheAuditDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -58,6 +64,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpPost("{id:guid}/start")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditDto>> Start(Guid id, [FromBody] StartSheAuditDto dto)
     {
         dto.AuditId = id;
@@ -65,6 +72,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpPost("{id:guid}/issue-report")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditDto>> IssueReport(Guid id, [FromBody] IssueSheAuditReportDto dto)
     {
         dto.AuditId = id;
@@ -73,6 +81,7 @@ public class SheAuditController : SheApiControllerBase
 
     /// <summary>Refused (422) while any finding remains unclosed.</summary>
     [HttpPost("{id:guid}/close")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditDto>> Close(Guid id, [FromBody] CloseSheAuditDto dto)
     {
         dto.AuditId = id;
@@ -80,6 +89,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditDto>> Cancel(Guid id, [FromBody] CancelSheAuditDto dto)
     {
         dto.AuditId = id;
@@ -88,6 +98,7 @@ public class SheAuditController : SheApiControllerBase
 
     /// <summary>Planned/Cancelled audits only — executed audits are evidence and refuse deletion.</summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -96,6 +107,7 @@ public class SheAuditController : SheApiControllerBase
 
     // ── team ──
     [HttpPost("{id:guid}/team")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditTeamMemberDto>> AddTeamMember(Guid id, [FromBody] CreateSheAuditTeamMemberDto dto)
     {
         dto.AuditId = id;
@@ -103,6 +115,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpDelete("team/{teamMemberId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> RemoveTeamMember(Guid teamMemberId)
     {
         await _service.RemoveTeamMemberAsync(teamMemberId);
@@ -112,6 +125,7 @@ public class SheAuditController : SheApiControllerBase
     // ── findings ──
     /// <summary>Findings are recorded while the audit is InProgress; numbers are server-assigned per audit.</summary>
     [HttpPost("{id:guid}/findings")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditFindingDto>> AddFinding(Guid id, [FromBody] CreateSheAuditFindingDto dto)
     {
         dto.AuditId = id;
@@ -119,6 +133,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpPut("findings/{findingId:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditFindingDto>> UpdateFinding(Guid findingId, [FromBody] UpdateSheAuditFindingDto dto)
     {
         if (findingId != dto.Id) return BadRequest("ID mismatch.");
@@ -127,6 +142,7 @@ public class SheAuditController : SheApiControllerBase
 
     /// <summary>Effectiveness verification — only a Resolved finding verifies.</summary>
     [HttpPost("findings/{findingId:guid}/verify")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditFindingDto>> VerifyFinding(Guid findingId, [FromBody] VerifySheAuditFindingDto dto)
     {
         dto.FindingId = findingId;
@@ -135,11 +151,13 @@ public class SheAuditController : SheApiControllerBase
 
     /// <summary>Refused (422) until the finding is Verified and its corrective actions are complete.</summary>
     [HttpPost("findings/{findingId:guid}/close")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditFindingDto>> CloseFinding(Guid findingId)
         => Ok(await _service.CloseFindingAsync(findingId, UserId));
 
     // ── finding actions (the unified CA tracker's fifth source) ──
     [HttpPost("findings/{findingId:guid}/actions")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditFindingActionDto>> AddFindingAction(Guid findingId, [FromBody] CreateSheAuditFindingActionDto dto)
     {
         dto.FindingId = findingId;
@@ -147,6 +165,7 @@ public class SheAuditController : SheApiControllerBase
     }
 
     [HttpPut("finding-actions/{actionId:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheAuditFindingActionDto>> UpdateFindingAction(Guid actionId, [FromBody] UpdateSheAuditFindingActionDto dto)
     {
         if (actionId != dto.Id) return BadRequest("ID mismatch.");

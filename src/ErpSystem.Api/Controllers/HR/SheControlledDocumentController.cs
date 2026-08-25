@@ -21,7 +21,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/documents")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SheControlledDocumentController : SheApiControllerBase
 {
     private readonly ISheControlledDocumentService _service;
@@ -31,6 +31,7 @@ public class SheControlledDocumentController : SheApiControllerBase
 
     // ── register (FR-SHE-170 filing & retrieval) ──
     [HttpGet]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheControlledDocumentSummaryDto>>> GetAll(
         [FromQuery] SheControlledDocumentCategory? category,
         [FromQuery] SheControlledDocumentStatus? status,
@@ -39,10 +40,12 @@ public class SheControlledDocumentController : SheApiControllerBase
         => Ok(await _service.GetAllAsync(category, status, search, dueForReviewInDays));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> Create([FromBody] CreateSheControlledDocumentDto dto)
     {
         var created = await _service.CreateAsync(dto, TenantId, UserId);
@@ -50,6 +53,7 @@ public class SheControlledDocumentController : SheApiControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> Update(Guid id, [FromBody] UpdateSheControlledDocumentDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -58,6 +62,7 @@ public class SheControlledDocumentController : SheApiControllerBase
 
     /// <summary>Drafts without history only — a document with versions archives, never deletes.</summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -71,6 +76,7 @@ public class SheControlledDocumentController : SheApiControllerBase
     /// quota, scan), and 422 on an archived document.
     /// </summary>
     [HttpPost("{id:guid}/versions")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> UploadVersion(
         Guid id, IFormFile? file, [FromForm] string? changeSummary, CancellationToken cancellationToken)
     {
@@ -104,6 +110,7 @@ public class SheControlledDocumentController : SheApiControllerBase
 
     /// <summary>Streams a version's bytes; refuses anything without a clean scan verdict.</summary>
     [HttpGet("{id:guid}/versions/{versionId:guid}/download")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<IActionResult> DownloadVersion(
         Guid id, Guid versionId,
         [FromServices] ICentralDocumentRepositoryFileService centralDocuments,
@@ -131,6 +138,7 @@ public class SheControlledDocumentController : SheApiControllerBase
     // ── lifecycle (FR-SHE-246 approval workflow) ──
     /// <summary>The approval step — refused (422) while the document has no uploaded version.</summary>
     [HttpPost("{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> Activate(Guid id, [FromBody] ActivateSheControlledDocumentDto dto)
     {
         dto.DocumentId = id;
@@ -138,10 +146,12 @@ public class SheControlledDocumentController : SheApiControllerBase
     }
 
     [HttpPost("{id:guid}/start-review")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> StartReview(Guid id)
         => Ok(await _service.StartReviewAsync(id, UserId));
 
     [HttpPost("{id:guid}/archive")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheControlledDocumentDto>> Archive(Guid id, [FromBody] ArchiveSheControlledDocumentDto dto)
     {
         dto.DocumentId = id;

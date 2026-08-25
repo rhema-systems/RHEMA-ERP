@@ -22,7 +22,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/environmental")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SheEnvironmentalComplianceController : SheApiControllerBase
 {
     private readonly ISheEnvironmentalPermitService _permits;
@@ -40,6 +40,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     // ── Permit & licence register (FR-ENV-017–019) ──
     [HttpGet("permits")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalPermitSummaryDto>>> GetPermits(
         [FromQuery] SheEnvironmentalPermitStatus? status,
         [FromQuery] SheEnvironmentalPermitType? type,
@@ -48,10 +49,12 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
         => Ok(await _permits.GetAllAsync(status, type, search, expiringInDays));
 
     [HttpGet("permits/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> GetPermit(Guid id)
         => Ok(await _permits.GetByIdAsync(id));
 
     [HttpPost("permits")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> CreatePermit([FromBody] CreateSheEnvironmentalPermitDto dto)
     {
         var created = await _permits.CreateAsync(dto, TenantId, UserId);
@@ -59,6 +62,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     }
 
     [HttpPut("permits/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> UpdatePermit(Guid id, [FromBody] UpdateSheEnvironmentalPermitDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -67,6 +71,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     /// <summary>Rows without an uploaded document only — a documented permit archives, never deletes.</summary>
     [HttpDelete("permits/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeletePermit(Guid id)
     {
         await _permits.DeleteAsync(id);
@@ -74,18 +79,22 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     }
 
     [HttpPost("permits/{id:guid}/mark-renewal")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> MarkPermitRenewal(Guid id)
         => Ok(await _permits.MarkRenewalInProgressAsync(id, UserId));
 
     [HttpPost("permits/{id:guid}/renew")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> RenewPermit(Guid id, [FromBody] RenewSheEnvironmentalPermitDto dto)
         => Ok(await _permits.RenewAsync(id, dto, UserId));
 
     [HttpPost("permits/{id:guid}/suspend")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> SuspendPermit(Guid id)
         => Ok(await _permits.SuspendAsync(id, UserId));
 
     [HttpPost("permits/{id:guid}/archive")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> ArchivePermit(Guid id)
         => Ok(await _permits.ArchiveAsync(id, UserId));
 
@@ -95,6 +104,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     /// size, quota, scan), and 422 on an archived permit.
     /// </summary>
     [HttpPost("permits/{id:guid}/document")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> UploadPermitDocument(
         Guid id, IFormFile? file, [FromForm] string? changeSummary, CancellationToken cancellationToken)
     {
@@ -128,6 +138,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     /// <summary>Streams a permit document version's bytes; refuses anything without a clean scan verdict.</summary>
     [HttpGet("permits/{id:guid}/document/{versionId:guid}/download")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<IActionResult> DownloadPermitDocument(
         Guid id, Guid versionId,
         [FromServices] ICentralDocumentRepositoryFileService centralDocuments,
@@ -154,6 +165,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     // ── Monitoring schedules (FR-ENV-023–024) ──
     [HttpGet("monitoring/schedules")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalMonitoringScheduleDto>>> GetSchedules(
         [FromQuery] bool? activeOnly,
         [FromQuery] SheEnvironmentalMonitoringType? type,
@@ -161,10 +173,12 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
         => Ok(await _governance.GetSchedulesAsync(activeOnly, type, dueInDays));
 
     [HttpGet("monitoring/schedules/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheEnvironmentalMonitoringScheduleDto>> GetSchedule(Guid id)
         => Ok(await _governance.GetScheduleAsync(id));
 
     [HttpPost("monitoring/schedules")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalMonitoringScheduleDto>> CreateSchedule([FromBody] CreateSheEnvironmentalMonitoringScheduleDto dto)
     {
         var created = await _governance.CreateScheduleAsync(dto, TenantId, UserId);
@@ -172,6 +186,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     }
 
     [HttpPut("monitoring/schedules/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalMonitoringScheduleDto>> UpdateSchedule(Guid id, [FromBody] UpdateSheEnvironmentalMonitoringScheduleDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -180,6 +195,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     /// <summary>Schedules without linked records only — a schedule with history deactivates instead.</summary>
     [HttpDelete("monitoring/schedules/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteSchedule(Guid id)
     {
         await _governance.DeleteScheduleAsync(id);
@@ -188,11 +204,13 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     /// <summary>Records a completed cycle and advances the next due date by the schedule's interval.</summary>
     [HttpPost("monitoring/schedules/{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheEnvironmentalMonitoringScheduleDto>> CompleteScheduleCycle(Guid id, [FromBody] CompleteSheMonitoringScheduleDto dto)
         => Ok(await _governance.CompleteScheduleCycleAsync(id, dto, UserId));
 
     // ── Regulatory updates register (FR-ENV-030–032 / FR-SHE-182) ──
     [HttpGet("regulatory-updates")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheRegulatoryUpdateSummaryDto>>> GetRegulatoryUpdates(
         [FromQuery] SheRegulatoryUpdateStatus? status,
         [FromQuery] SheRegulatoryDomain? domain,
@@ -200,10 +218,12 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
         => Ok(await _governance.GetRegulatoryUpdatesAsync(status, domain, search));
 
     [HttpGet("regulatory-updates/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheRegulatoryUpdateDto>> GetRegulatoryUpdate(Guid id)
         => Ok(await _governance.GetRegulatoryUpdateAsync(id));
 
     [HttpPost("regulatory-updates")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheRegulatoryUpdateDto>> CreateRegulatoryUpdate([FromBody] CreateSheRegulatoryUpdateDto dto)
     {
         var created = await _governance.CreateRegulatoryUpdateAsync(dto, TenantId, UserId);
@@ -211,6 +231,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     }
 
     [HttpPut("regulatory-updates/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheRegulatoryUpdateDto>> UpdateRegulatoryUpdate(Guid id, [FromBody] UpdateSheRegulatoryUpdateDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -219,6 +240,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     /// <summary>Undecided rows only — a closed or management-communicated update is history.</summary>
     [HttpDelete("regulatory-updates/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteRegulatoryUpdate(Guid id)
     {
         await _governance.DeleteRegulatoryUpdateAsync(id);
@@ -227,29 +249,35 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
 
     /// <summary>FR-ENV-031 — one-shot management notification through the escalated topic.</summary>
     [HttpPost("regulatory-updates/{id:guid}/notify-management")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheRegulatoryUpdateDto>> NotifyManagement(Guid id)
         => Ok(await _governance.NotifyManagementAsync(id, UserId));
 
     [HttpPost("regulatory-updates/{id:guid}/close")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheRegulatoryUpdateDto>> CloseRegulatoryUpdate(Guid id, [FromBody] CloseSheRegulatoryUpdateDto dto)
         => Ok(await _governance.CloseRegulatoryUpdateAsync(id, dto, UserId));
 
     // ── Sustainability initiatives (FR-ENV-028–029) ──
     [HttpGet("sustainability")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheSustainabilityInitiativeDto>>> GetInitiatives(
         [FromQuery] SheSustainabilityCategory? category,
         [FromQuery] SheSustainabilityStatus? status)
         => Ok(await _governance.GetInitiativesAsync(category, status));
 
     [HttpGet("sustainability/kpis")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheSustainabilityKpiDto>> GetSustainabilityKpis([FromQuery] int? year)
         => Ok(await _governance.GetSustainabilityKpisAsync(year));
 
     [HttpGet("sustainability/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheSustainabilityInitiativeDto>> GetInitiative(Guid id)
         => Ok(await _governance.GetInitiativeAsync(id));
 
     [HttpPost("sustainability")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheSustainabilityInitiativeDto>> CreateInitiative([FromBody] CreateSheSustainabilityInitiativeDto dto)
     {
         var created = await _governance.CreateInitiativeAsync(dto, TenantId, UserId);
@@ -257,6 +285,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     }
 
     [HttpPut("sustainability/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheSustainabilityInitiativeDto>> UpdateInitiative(Guid id, [FromBody] UpdateSheSustainabilityInitiativeDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -264,6 +293,7 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
     }
 
     [HttpDelete("sustainability/{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteInitiative(Guid id)
     {
         await _governance.DeleteInitiativeAsync(id);

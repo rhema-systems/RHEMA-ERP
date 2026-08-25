@@ -357,7 +357,36 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    (works — self id on the self surface, desk holds Read — but is the warned-against
    pattern); the maintenance inspectors admin page calls a nonexistent
    `GET /api/hr/employees?department=` route (already broken before this slice).
-8. **SHE** (employee incident reporting is an any-internal-actor act by design)
+8. **SHE** — ✅ **DONE 2026-08-25 (slice 12), harness `run-slice12-she.mjs` 82/82 green + full
+   no-regression (142 + 39/23/47/27/90/66/167 = 683 assertions total), `seed-db` run, grant
+   rows verified in DB (HR → Read+Write; SuperAdmin/TenantAdmin → all three).
+   Defect found by the no-regression pass and fixed here: the count-based daily number
+   generators (overtime requests, regularizations, bulk-import references) regenerated a
+   soft-deleted row's number and 500'd on the unique index — any employee who filed and
+   withdrew a request blocked the tenant's next one that day; all three now derive the day's
+   max via `GetQueryableIncludingDeleted` (⚠ trap: this repo's soft delete is a MANUAL `Where`
+   in `GetQueryable()`, so `IgnoreQueryFilters()` is a silent no-op — the first fix attempt
+   used it and changed nothing).** `HR.She.{Read,Write,Admin}` (category
+   "HR - Safety, Health & Environment") over 26 controllers, 485 scripted ops (339 inserts +
+   126 method-gate replacements + 20 class-gate swaps to InternalOnly), verb-mechanical:
+   reads → Read, writes AND every desk decision (incident close, permit approve/suspend,
+   stop-work resolve/clear, audit close, the environmental review ladder incl.
+   management-approve/issue-clearance/approve-commencement) → Write, deletes → Admin — the
+   SHE desk keeps its exact reach; a future SHE-officer role (residual DR-10) can now be
+   granted the family without the HR role, and TenantAdmin (previously excluded by the
+   SuperAdmin/HR class gates) gains the area. The 6 reporting controllers' method-level
+   `HrRoles` gates converted the same way; their four in-code `isHr` on-behalf arms (incident/
+   env-incident report-as, stop-work raise-as, risk-assessment sign-as) converted to
+   `HoldsPolicyAsync(SheWrite)` on a new base-class helper. Open by design, unchanged:
+   incident/hazard/environmental-incident creates, stop-work raise + mine, PPE issuances/mine,
+   risk-assessment acknowledgements. SheOccupationalHealth + SheReturnToWork stay on
+   HR.Medical.* (the slice-9 boundary). **Defect fixed en route: the employee report-incident
+   form's type picker fed on the desk-gated `reference/incident-types` reads and silently
+   403'd — every employee-filed incident arrived unclassified; the two list reads are now
+   open (the leave-type precedent).** Frontend: the 31 SHE desk sidebar children gated on
+   HR.She.Read (occ-health/RTW on HR.Medical.Read); the 5 self-service items stay open.
+   Residuals: the frontend comments claiming `api/Location` is HR-gated are wrong (it is
+   open); the env-report screen's sentinel-id comment mis-describes the desk arm.
 9. Orientation, Assets, Movements, Discipline: mostly role-gated already — convert
    role → permission mechanically, per-area.
 10. HR settings/company + satellites + org extras + dashboards.

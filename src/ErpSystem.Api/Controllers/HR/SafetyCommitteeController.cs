@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/committees")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SafetyCommitteeController : SheApiControllerBase
 {
     private readonly ISafetyCommitteeService _service;
@@ -21,14 +21,17 @@ public class SafetyCommitteeController : SheApiControllerBase
 
     // ── Committees ──
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SafetyCommitteeDto>> GetCommittee(Guid id)
         => Ok(await _service.GetCommitteeAsync(id));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyCommitteeDto>>> GetActiveCommittees()
         => Ok(await _service.GetActiveCommitteesAsync());
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyCommitteeDto>> CreateCommittee([FromBody] CreateSafetyCommitteeDto dto)
     {
         var created = await _service.CreateCommitteeAsync(dto, TenantId, UserId);
@@ -36,6 +39,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyCommitteeDto>> UpdateCommittee(Guid id, [FromBody] UpdateSafetyCommitteeDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -43,6 +47,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteCommittee(Guid id)
     {
         await _service.DeleteCommitteeAsync(id);
@@ -51,10 +56,12 @@ public class SafetyCommitteeController : SheApiControllerBase
 
     // ── Members ──
     [HttpGet("{id:guid}/members")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyCommitteeMemberDto>>> GetMembers(Guid id)
         => Ok(await _service.GetMembersAsync(id));
 
     [HttpPost("{id:guid}/members")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyCommitteeMemberDto>> AddMember(Guid id, [FromBody] CreateSafetyCommitteeMemberDto dto)
     {
         dto.CommitteeId = id;
@@ -62,6 +69,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpPut("members/{memberId:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyCommitteeMemberDto>> UpdateMember(Guid memberId, [FromBody] UpdateSafetyCommitteeMemberDto dto)
     {
         if (memberId != dto.Id) return BadRequest("ID mismatch.");
@@ -69,6 +77,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpDelete("members/{memberId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> RemoveMember(Guid memberId)
     {
         await _service.RemoveMemberAsync(memberId);
@@ -77,18 +86,22 @@ public class SafetyCommitteeController : SheApiControllerBase
 
     // ── Meetings ──
     [HttpGet("meetings/{meetingId:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SafetyMeetingDto>> GetMeeting(Guid meetingId)
         => Ok(await _service.GetMeetingAsync(meetingId));
 
     [HttpGet("{id:guid}/meetings")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyMeetingSummaryDto>>> GetMeetingsByCommittee(Guid id)
         => Ok(await _service.GetMeetingsByCommitteeAsync(id));
 
     [HttpGet("meetings/date-range")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyMeetingSummaryDto>>> GetMeetingsByDateRange([FromQuery] DateTime from, [FromQuery] DateTime to)
         => Ok(await _service.GetMeetingsByDateRangeAsync(from, to));
 
     [HttpPost("meetings")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyMeetingDto>> CreateMeeting([FromBody] CreateSafetyMeetingDto dto)
     {
         var created = await _service.CreateMeetingAsync(dto, TenantId, UserId);
@@ -96,6 +109,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpPut("meetings/{meetingId:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyMeetingDto>> UpdateMeeting(Guid meetingId, [FromBody] UpdateSafetyMeetingDto dto)
     {
         if (meetingId != dto.Id) return BadRequest("ID mismatch.");
@@ -103,6 +117,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpDelete("meetings/{meetingId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteMeeting(Guid meetingId)
     {
         await _service.DeleteMeetingAsync(meetingId);
@@ -111,6 +126,7 @@ public class SafetyCommitteeController : SheApiControllerBase
 
     // ── Attendees ──
     [HttpPost("meetings/{meetingId:guid}/attendees")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyMeetingAttendeeDto>> AddAttendee(Guid meetingId, [FromBody] CreateSafetyMeetingAttendeeDto dto)
     {
         dto.MeetingId = meetingId;
@@ -118,6 +134,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpDelete("attendees/{attendeeId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> RemoveAttendee(Guid attendeeId)
     {
         await _service.RemoveAttendeeAsync(attendeeId);
@@ -126,18 +143,22 @@ public class SafetyCommitteeController : SheApiControllerBase
 
     // ── Action items ──
     [HttpGet("action-items/open")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyMeetingActionItemDto>>> GetOpenActionItems()
         => Ok(await _service.GetOpenActionItemsAsync());
 
     [HttpGet("action-items/overdue")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyMeetingActionItemDto>>> GetOverdueActionItems()
         => Ok(await _service.GetOverdueActionItemsAsync());
 
     [HttpGet("action-items/by-assignee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SafetyMeetingActionItemDto>>> GetActionItemsByAssignee(Guid employeeId)
         => Ok(await _service.GetActionItemsByAssigneeAsync(employeeId));
 
     [HttpPost("meetings/{meetingId:guid}/action-items")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyMeetingActionItemDto>> AddActionItem(Guid meetingId, [FromBody] CreateSafetyMeetingActionItemDto dto)
     {
         dto.MeetingId = meetingId;
@@ -145,6 +166,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpPut("action-items/{actionItemId:guid}")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyMeetingActionItemDto>> UpdateActionItem(Guid actionItemId, [FromBody] UpdateSafetyMeetingActionItemDto dto)
     {
         if (actionItemId != dto.Id) return BadRequest("ID mismatch.");
@@ -152,6 +174,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpDelete("action-items/{actionItemId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteActionItem(Guid actionItemId)
     {
         await _service.DeleteActionItemAsync(actionItemId);
@@ -160,6 +183,7 @@ public class SafetyCommitteeController : SheApiControllerBase
 
     // ── Documents ──
     [HttpPost("meetings/{meetingId:guid}/documents")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SafetyMeetingDocumentDto>> AddMeetingDocument(Guid meetingId, [FromBody] CreateSafetyMeetingDocumentDto dto)
     {
         dto.MeetingId = meetingId;
@@ -167,6 +191,7 @@ public class SafetyCommitteeController : SheApiControllerBase
     }
 
     [HttpDelete("documents/{documentId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<IActionResult> DeleteMeetingDocument(Guid documentId)
     {
         await _service.DeleteMeetingDocumentAsync(documentId);

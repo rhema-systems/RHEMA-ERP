@@ -18,7 +18,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/corrective-actions")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SheCorrectiveActionsController : SheApiControllerBase
 {
     private readonly ISheCorrectiveActionTrackerService _service;
@@ -27,6 +27,7 @@ public class SheCorrectiveActionsController : SheApiControllerBase
         : base(currentUser) => _service = service;
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheUnifiedCorrectiveActionDto>>> GetAll(
         [FromQuery] SheCorrectiveActionSource? source,
         [FromQuery] SheUnifiedActionStatus? status,
@@ -37,6 +38,7 @@ public class SheCorrectiveActionsController : SheApiControllerBase
         => Ok(await _service.GetAllAsync(source, status, assignedToId, overdueOnly, dueFrom, dueTo));
 
     [HttpGet("summary")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheUnifiedCorrectiveActionSummaryDto>> GetSummary()
         => Ok(await _service.GetSummaryAsync());
 }

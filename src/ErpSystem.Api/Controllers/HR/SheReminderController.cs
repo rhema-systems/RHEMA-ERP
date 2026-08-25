@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/reminders")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SheReminderController : SheApiControllerBase
 {
     private readonly ISheReminderService _service;
@@ -29,14 +29,17 @@ public class SheReminderController : SheApiControllerBase
 
     /// <summary>Runs a sweep for the authenticated tenant now. Safe to repeat — dispatch is deduped.</summary>
     [HttpPost("run")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     public async Task<ActionResult<SheReminderRunResultDto>> Run()
         => Ok(await _service.RunSweepForTenantAsync(TenantId, "Manual", UserId));
 
     [HttpGet("runs")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheReminderRunDto>>> GetRuns([FromQuery] int count = 20)
         => Ok(await _service.GetRecentRunsAsync(count));
 
     [HttpGet("log")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheReminderLogEntryDto>>> GetLog([FromQuery] int days = 14)
         => Ok(await _service.GetRecentLogAsync(days));
 }

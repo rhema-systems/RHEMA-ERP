@@ -1595,6 +1595,28 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerEmployees)));
 
+            // W3 slice 12 — SHE. Same ladder, converted from the area's SuperAdmin/HR role gates
+            // by verb (reads → Read, writes and every desk decision → Write, deletes → Admin), so
+            // the SHE desk keeps its exact reach and a future SHE-officer role can be granted the
+            // family without the HR role (residual DR-10). Deliberately NOT gated: incident,
+            // hazard and environmental-incident reporting, stop-work raise, PPE and stop-work
+            // "mine" reads, and risk-assessment acknowledgements — any-internal-actor by design.
+            // The two SHE health controllers stay on the HR.Medical.* policies (the slice-9
+            // ownership boundary), not this family.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.SheReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewShe,
+                        HrPermissions.MaintainShe,
+                        HrPermissions.AdministerShe)))
+                .AddPolicy(HrPermissions.SheWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainShe,
+                        HrPermissions.AdministerShe)))
+                .AddPolicy(HrPermissions.SheAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerShe)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

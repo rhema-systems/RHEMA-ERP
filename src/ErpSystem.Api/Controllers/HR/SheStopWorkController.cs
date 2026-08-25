@@ -24,8 +24,6 @@ public class SheStopWorkController : SheApiControllerBase
 {
     // Gated per action rather than on the class: authorize attributes stack as AND, so a class-level
     // role requirement could not be relaxed for the open raise + mine actions.
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly ISheStopWorkService _service;
 
     public SheStopWorkController(ISheStopWorkService service, ICurrentUserService currentUser)
@@ -36,8 +34,9 @@ public class SheStopWorkController : SheApiControllerBase
     [HttpPost]
     public async Task<ActionResult<SheStopWorkOrderDto>> Raise([FromBody] CreateSheStopWorkOrderDto dto)
     {
-        var isHr = User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
-        var raisedById = isHr && dto.RaisedById is { } id && id != Guid.Empty ? id : UserId;
+        // W3 slice 12: the on-behalf arm is the desk tier, not the HR role.
+        var isDesk = await HoldsPolicyAsync(HrPermissions.SheWritePolicy);
+        var raisedById = isDesk && dto.RaisedById is { } id && id != Guid.Empty ? id : UserId;
         var created = await _service.RaiseAsync(dto, raisedById, TenantId, UserId);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
@@ -48,22 +47,22 @@ public class SheStopWorkController : SheApiControllerBase
         => Ok(await _service.GetMineAsync(UserId));
 
     // ── HR register + lifecycle ──
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet]
     public async Task<ActionResult<IEnumerable<SheStopWorkOrderDto>>> GetAll([FromQuery] SheStopWorkStatus? status)
         => Ok(await _service.GetAllAsync(status));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<SheStopWorkOrderDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("number/{orderNumber}")]
     public async Task<ActionResult<SheStopWorkOrderDto?>> GetByNumber(string orderNumber)
         => Ok(await _service.GetByNumberAsync(orderNumber));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("{id:guid}/route")]
     public async Task<ActionResult<SheStopWorkOrderDto>> Route(Guid id, [FromBody] RouteSheStopWorkOrderDto dto)
     {
@@ -71,7 +70,7 @@ public class SheStopWorkController : SheApiControllerBase
         return Ok(await _service.RouteAsync(dto, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("{id:guid}/resolve")]
     public async Task<ActionResult<SheStopWorkOrderDto>> Resolve(Guid id, [FromBody] ResolveSheStopWorkOrderDto dto)
     {
@@ -80,7 +79,7 @@ public class SheStopWorkController : SheApiControllerBase
     }
 
     /// <summary>Authorises resumption. Refused (422) unless the order is Resolved.</summary>
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("{id:guid}/clear")]
     public async Task<ActionResult<SheStopWorkOrderDto>> Clear(Guid id, [FromBody] ClearSheStopWorkOrderDto dto)
     {
@@ -88,7 +87,7 @@ public class SheStopWorkController : SheApiControllerBase
         return Ok(await _service.ClearAsync(dto, UserId));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
     [HttpPost("{id:guid}/cancel")]
     public async Task<ActionResult<SheStopWorkOrderDto>> Cancel(Guid id, [FromBody] CancelSheStopWorkOrderDto dto)
     {

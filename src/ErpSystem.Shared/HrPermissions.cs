@@ -38,6 +38,7 @@ public static class HrPermissions
     public const string CategoryAwards = "HR - Staff Awards & Recognition";
     public const string CategoryPerformance = "HR - Performance";
     public const string CategoryEmployee = "HR - Employee Records & Foundation";
+    public const string CategoryShe = "HR - Safety, Health & Environment";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -161,6 +162,14 @@ public static class HrPermissions
     public const string EmployeeReadPolicy = "HR.Policy.EmployeeRead";
     public const string EmployeeWritePolicy = "HR.Policy.EmployeeWrite";
     public const string EmployeeAdminPolicy = "HR.Policy.EmployeeAdmin";
+
+    public const string ViewShe = "HR.She.Read";
+    public const string MaintainShe = "HR.She.Write";
+    public const string AdministerShe = "HR.She.Admin";
+
+    public const string SheReadPolicy = "HR.Policy.SheRead";
+    public const string SheWritePolicy = "HR.Policy.SheWrite";
+    public const string SheAdminPolicy = "HR.Policy.SheAdmin";
 
     public const string ViewAwards = "HR.Awards.Read";
     public const string MaintainAwards = "HR.Awards.Write";
@@ -322,6 +331,16 @@ public static class HrPermissions
             "Delete employees and their sub-records, decide the legacy lifecycle acts (activate, deactivate, terminate, reinstate — the separation module is the governed exit path), and delete foundation reference data — organization and location nodes, positions, teams, unions and lookup entries.",
             CategoryEmployee),
 
+        new(ViewShe, "View Safety, Health & Environment",
+            "View the SHE surface: incident, hazard, stop-work and risk-assessment registers, audits, inspections, committees, safety equipment and signage, PPE, permits to work, contractors, emergency preparedness, environmental compliance and reviews, waste, controlled documents, reference data and the dashboard. Reporting an incident or hazard, raising a stop-work order and reading one's own reports never need this — every internal employee may do those by design.",
+            CategoryShe),
+        new(MaintainShe, "Maintain Safety, Health & Environment",
+            "Run the SHE desk: maintain every SHE register, investigate and close incidents, decide permits to work, resolve and clear stop-work orders, run audits, inspections and environmental reviews (including clearance and commencement approvals), record statutory submissions, and maintain PPE, contractors, emergency plans, waste, controlled documents and reference data.",
+            CategoryShe),
+        new(AdministerShe, "Administer Safety, Health & Environment",
+            "Delete SHE records — incidents and their sub-records, hazards, assessments, audits, permits, contractors, equipment, documents and reference data. Deletion is the only act above the desk: every SHE decision (close, approve, clear) is desk work and stays with Maintain.",
+            CategoryShe),
+
         new(ViewPerformance, "View Performance",
             "View the org-wide performance surface: appraisal and appeal registers, cycle progress and coverage, the HR cycle dashboard, org-wide at-risk goals, development-plan and improvement-plan registers, review-event and check-in registers, rating analytics and goal-library usage. Employees, managers and peers do not need this for their own appraisal work — self access is an ownership check on the endpoint.",
             CategoryPerformance),
@@ -417,7 +436,8 @@ public static class HrPermissions
         ViewSeparation, MaintainSeparation,
         ViewAwards, MaintainAwards,
         ViewPerformance, MaintainPerformance,
-        ViewEmployees, MaintainEmployees
+        ViewEmployees, MaintainEmployees,
+        ViewShe, MaintainShe
     };
 
     /// <summary>

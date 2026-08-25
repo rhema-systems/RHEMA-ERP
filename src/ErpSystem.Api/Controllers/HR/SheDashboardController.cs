@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/safety/dashboard")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SheDashboardController : SheApiControllerBase
 {
     private readonly ISheDashboardService _service;
@@ -20,6 +20,7 @@ public class SheDashboardController : SheApiControllerBase
         : base(currentUser) => _service = service;
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheDashboardDto>> Get()
         => Ok(await _service.GetAsync());
 }
