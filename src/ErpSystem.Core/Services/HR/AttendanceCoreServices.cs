@@ -740,6 +740,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
                 TenantId = log.TenantId,
                 EmployeeId = log.EmployeeId,
                 AttendanceDate = logDate,
+                DayOfWeek = logDate.DayOfWeek,
                 ActualCheckInTime = log.LogType == AttendanceLogType.CheckIn ? (TimeSpan?)log.LogDateTime.TimeOfDay : null,
                 ActualCheckOutTime = log.LogType == AttendanceLogType.CheckOut ? (TimeSpan?)log.LogDateTime.TimeOfDay : null,
                 Status = StaffAttendanceStatus.Present,
@@ -756,10 +757,21 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
             else if (log.LogType == AttendanceLogType.CheckOut)
                 daily.ActualCheckOutTime = log.LogDateTime.TimeOfDay;
 
+            // Rows minted before this path stamped the day defaulted to Sunday — correct on touch.
+            daily.DayOfWeek = logDate.DayOfWeek;
             ApplyLocationToDaily(daily, log, verification);
             daily.UpdatedAt = DateTime.UtcNow;
             daily.UpdatedBy = userId.ToString();
             await _dailyRepository.UpdateAsync(daily);
+        }
+
+        // A same-day out-punch closes the day: derive the worked hours the punch pair implies.
+        // Overnight pairs (out before in) stay null rather than going negative.
+        if (daily.ActualCheckInTime is TimeSpan checkIn &&
+            daily.ActualCheckOutTime is TimeSpan checkOut &&
+            checkOut > checkIn)
+        {
+            daily.ActualWorkHours = Math.Round((decimal)(checkOut - checkIn).TotalHours, 2);
         }
 
         await WriteVerificationLogAsync(log, verification, userId);

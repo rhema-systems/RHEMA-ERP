@@ -64,6 +64,11 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Time & Leave',
     icon: Clock,
     links: [
+      // Slice 4: leave + attendance live in the portal.
+      { label: 'My Leave', href: '/me/leave' },
+      { label: 'Leave Planner', href: '/me/leave/planner' },
+      { label: 'My Encashments', href: '/me/leave/encashments' },
+      { label: 'My Attendance', href: '/me/attendance' },
       { label: 'My Travel', href: '/hr/travel/mine' },
     ],
   },

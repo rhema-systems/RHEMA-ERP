@@ -27,7 +27,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 1 | Identity & access: employee-number login, the AD link gap, the portal gate | **COMPLETE 2026-08-25** — 33 assertions ×2 + 111 no-regression |
 | 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | **COMPLETE 2026-08-25** — tsc/lint/route-resolution clean + 144 ladder |
 | 3 | The dashboard: one personal aggregate | **COMPLETE 2026-08-25** — 37+35 assertions + 144 ladder |
-| 4 | Move-in: leave + attendance | not started |
+| 4 | Move-in: leave + attendance | **COMPLETE 2026-08-25** — 68 assertions ×2 + 179 ladder; 2 backend fixes; 2 TDC data gaps recorded |
 | 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | not started |
 | 6 | Move-in: training & learning (+ the owed bond self-accept) | not started |
 | 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | not started |
@@ -397,3 +397,48 @@ branches) + the 144 ladder. No migration.
   all-caught-up line otherwise), four at-a-glance stat cards (leave / next holiday /
   assets / learning) each deep-linking, expiring-documents list, quick-link tiles kept; if
   the aggregate read fails the tiles still render (degrade, don't die).
+
+### Slice 4 — move-in: leave + attendance. CLOSED 2026-08-25.
+
+`run-slice4.mjs` 68 assertions ×2 green + the 179 ladder (111/33/35). No migration. Spec
+rows #2–#5 all carried verdict **E** — self-armed endpoints existed, zero self screens —
+so this slice FILLED the census's biggest frontend hole rather than moving anything:
+every `/hr/leave/*` and attendance screen is a desk register and stays (D3's "desk
+registers stay" clause; nothing deleted).
+
+- **The UI-payload probe ran first** (`probe-slice4.mjs`) and its findings shaped the
+  slice: **(1) the DEFAULT tenant has ZERO leave types** — TDC's questionnaire-documented
+  28d/15d entitlements were never seeded (the slice-3 holiday gap's sibling; harness seeds
+  its own, ops/seeding owes the real ones); **(2) no active workflow definitions** for
+  LeaveRequest/LeavePlan/LeaveEncashment — the harness publishes the 3-step bookend shape
+  and ALSO asserts the no-definition reality on purpose; **(3) `RequestEncashmentAsync`
+  was non-atomic** — a throwing workflow submit left an orphaned Submitted row behind a
+  400, and every retry then refused with "already been encashed" (measured live; FIXED:
+  create+submit now share one `ExecuteInTransactionAsync`, and the regression assertion
+  counts rows across a forced refusal); **(4) two dormant fields on the punch path** —
+  every punched day said `DayOfWeek=Sunday` and `ActualWorkHours` was never computed
+  (FIXED in `ProcessLogInternalAsync`: real weekday stamped, old rows self-heal on touch,
+  hours derived from a same-day punch pair; overnight pairs stay null honestly).
+- **Screens (6, all portal-shaped):** `/me/leave` (balances + year-filtered requests),
+  `/me/leave/new` + `[id]` + `[id]/edit` (create/detail/attachments/submit/cancel),
+  `/me/leave/planner` (submit → manager suggestion → accept-or-counter — the
+  respond-suggestion arm is the plan OWNER's act), `/me/leave/encashments` (anchored to an
+  owned cash-convertible request; the amount is server-derived and the screen says so),
+  `/me/attendance` (punch card + today + month table). Create-then-submit failures
+  surface as "saved, but not submitted" — never as a lie in either direction.
+- **The reliever picker is the roster, not a search.** The desk form's `EmployeePicker`
+  rides `POST hr/Employees/paged` (EmployeeReadPolicy) which a plain employee cannot
+  call — the portal form offers `employee-relievers/mine` + the server's auto-fill
+  (roster by priority, then manager), and the copy explains the empty case. D8's
+  no-new-grants rule held without exceptions.
+- **Harness shape worth copying:** the no-definition leg runs BEFORE definitions are
+  published (refusal + nothing-moves + the atomicity regression), then the engine leg
+  proves the pair from the workflow memory — the employee cannot approve their own
+  request/encashment, HR can — plus min-notice (draft exempt), overlap (a DRAFT does not
+  claim the calendar — only Approved/Pending conflict; asserted both ways), cross-actor
+  403s on all three writes, auto-approve for a `RequiresApproval=false` type (the
+  no-definitions tenant reality), cancel restoring the balance, and home-aggregate
+  equality re-checked after all the movement.
+- **Convention every attendance screen must encode:** the logs read's `from`/`to` are
+  DateTimes and `to` is midnight-EXCLUSIVE — same-day from/to returns nothing; send
+  tomorrow. Asserted in the harness so it cannot regress silently.

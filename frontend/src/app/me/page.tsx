@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   CheckSquare,
   ClipboardList,
+  Clock,
   Compass,
   FileWarning,
   GraduationCap,
@@ -50,6 +51,8 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
   {
     title: 'My work life',
     tiles: [
+      { label: 'My Leave', hint: 'Balances, requests and approvals', href: '/me/leave', icon: TreePalm },
+      { label: 'My Attendance', hint: 'Punch in and out, see your month', href: '/me/attendance', icon: Clock },
       { label: 'My Travel', hint: 'Raise and track travel requests', href: '/hr/travel/mine', icon: Plane },
       { label: 'My Appraisals', hint: 'Reviews and self-evaluations', href: '/hr/performance/appraisals', icon: Target },
       { label: 'My Check-Ins', hint: 'Conversations with your manager', href: '/hr/performance/check-ins', icon: MessageSquare },
@@ -241,7 +244,7 @@ export default function MeLandingPage() {
                   ? `${topBalance.leaveTypeName}${leaveTypesCount > 1 ? ` · +${leaveTypesCount - 1} more types` : ''}`
                   : 'No balance recorded yet'
               }
-              href="/hr/leave"
+              href="/me/leave"
             />
             <StatCard
               icon={CalendarDays}
@@ -255,7 +258,7 @@ export default function MeLandingPage() {
                   : '—'
               }
               detail={home?.nextHoliday?.name ?? 'None in the next 12 months'}
-              href="/hr/leave"
+              href="/me/leave"
             />
             <StatCard
               icon={Laptop}
