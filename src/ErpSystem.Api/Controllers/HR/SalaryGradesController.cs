@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -50,6 +51,7 @@ public class SalaryGradesController : ControllerBase
     /// Retrieves all salary grades for the current tenant.
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(IReadOnlyList<SalaryGradeDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<SalaryGradeDto>>> GetAll([FromQuery] bool includeInactive = true, CancellationToken cancellationToken = default)
@@ -75,6 +77,7 @@ public class SalaryGradesController : ControllerBase
     /// Retrieves salary grades with pagination for the current tenant.
     /// </summary>
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<SalaryGradeDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -110,6 +113,7 @@ public class SalaryGradesController : ControllerBase
     /// Retrieves a salary grade by ID including its levels and notches.
     /// </summary>
     [HttpGet("{gradeId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(SalaryGradeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -140,6 +144,7 @@ public class SalaryGradesController : ControllerBase
     /// Retrieves salary levels for a salary grade.
     /// </summary>
     [HttpGet("{gradeId:guid}/levels")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(IReadOnlyList<SalaryLevelDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -173,6 +178,7 @@ public class SalaryGradesController : ControllerBase
     /// and for backfilling a tenant whose mirror has never been built.
     /// </summary>
     [HttpPost("sync")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(SalaryStructureProjectionResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<SalaryStructureProjectionResult>> SyncFromPayroll(CancellationToken cancellationToken = default)
@@ -198,6 +204,7 @@ public class SalaryGradesController : ControllerBase
     /// Not supported — level order follows the payroll grade structure.
     /// </summary>
     [HttpPut("{gradeId:guid}/levels/resequence")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult ResequenceLevels(Guid gradeId, [FromBody] ResequenceSalaryLevelsDto dto) => MirrorIsReadOnly();
 
@@ -205,6 +212,7 @@ public class SalaryGradesController : ControllerBase
     /// Not supported — create the grade in Payroll instead.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult Create([FromBody] CreateSalaryGradeDto dto) => MirrorIsReadOnly();
 
@@ -212,6 +220,7 @@ public class SalaryGradesController : ControllerBase
     /// Not supported — edit the grade in Payroll instead.
     /// </summary>
     [HttpPut("{gradeId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult Update(Guid gradeId, [FromBody] UpdateSalaryGradeDto dto) => MirrorIsReadOnly();
 
@@ -219,6 +228,7 @@ public class SalaryGradesController : ControllerBase
     /// Not supported — a grade's active state follows its payroll definition.
     /// </summary>
     [HttpPut("{gradeId:guid}/active")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult SetActive(Guid gradeId, [FromQuery] bool isActive) => MirrorIsReadOnly();
 
@@ -226,6 +236,7 @@ public class SalaryGradesController : ControllerBase
     /// Not supported — remove the grade in Payroll; the mirror deactivates it on the next sync.
     /// </summary>
     [HttpDelete("{gradeId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult Delete(Guid gradeId) => MirrorIsReadOnly();
 

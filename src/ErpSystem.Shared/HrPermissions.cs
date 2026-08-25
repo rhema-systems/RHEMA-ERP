@@ -24,6 +24,7 @@ public static class HrPermissions
 {
     public const string CategoryLeave = "HR - Leave";
     public const string CategoryAttendance = "HR - Attendance & Time";
+    public const string CategoryCompensation = "HR - Compensation & Benefits";
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
@@ -52,6 +53,14 @@ public static class HrPermissions
     public const string AttendanceReadPolicy = "HR.Policy.AttendanceRead";
     public const string AttendanceWritePolicy = "HR.Policy.AttendanceWrite";
     public const string AttendanceAdminPolicy = "HR.Policy.AttendanceAdmin";
+
+    public const string ViewCompensation = "HR.Compensation.Read";
+    public const string MaintainCompensation = "HR.Compensation.Write";
+    public const string AdministerCompensation = "HR.Compensation.Admin";
+
+    public const string CompensationReadPolicy = "HR.Policy.CompensationRead";
+    public const string CompensationWritePolicy = "HR.Policy.CompensationWrite";
+    public const string CompensationAdminPolicy = "HR.Policy.CompensationAdmin";
 
     public const string ViewMedicalRecords = "HR.Medical.Read";
     public const string MaintainMedicalRecords = "HR.Medical.Write";
@@ -146,6 +155,16 @@ public static class HrPermissions
         new(AdministerAttendance, "Administer Attendance & Time",
             "Delete attendance data — records, logs, alerts, biometric enrolment, configuration rows, engagements and invoices. Approving a regularization, remote-work request or consultant timesheet is NOT this permission — approval belongs to the workflow assignee, validated per request by the workflow engine.",
             CategoryAttendance),
+
+        new(ViewCompensation, "View Compensation & Benefits",
+            "View position and employee emoluments, the pay-component master and its HR attributes, the salary grade/level/notch structure, benefit grade-values, enrollment registers and payroll lines. Employees do not need this for their own pay makeup, benefits or beneficiaries — self access is an ownership check on the endpoint.",
+            CategoryCompensation),
+        new(MaintainCompensation, "Maintain Compensation & Benefits",
+            "Assign and amend position/employee pay components, maintain the benefit-policy catalogue and its grade values, enroll employees and manage enrollment status, decide utilization claims, reconcile, sync the pay-component and salary-structure mirrors from payroll, and maintain HR pay attributes.",
+            CategoryCompensation),
+        new(AdministerCompensation, "Administer Compensation & Benefits",
+            "Delete emolument assignments, benefit policies and their grade values, and salary grades/levels/notches, and deactivate pay components and benefit policies.",
+            CategoryCompensation),
 
         new(ViewMedicalRecords, "View Medical Records",
             "View employee health profiles, conditions, allergies, exams, claims, and medical documents.",
@@ -309,6 +328,7 @@ public static class HrPermissions
     {
         ViewLeave, MaintainLeave,
         ViewAttendance, MaintainAttendance,
+        ViewCompensation, MaintainCompensation,
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,

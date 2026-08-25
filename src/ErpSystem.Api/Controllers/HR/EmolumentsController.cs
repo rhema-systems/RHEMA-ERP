@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,22 +17,40 @@ namespace ErpSystem.Api.Controllers.HR;
 public class EmolumentsController : ControllerBase
 {
     private readonly IEmolumentService _service;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IAuthorizationService _authorization;
     private readonly ILogger<EmolumentsController> _logger;
 
-    public EmolumentsController(IEmolumentService service, ILogger<EmolumentsController> logger)
+    public EmolumentsController(
+        IEmolumentService service,
+        ICurrentUserService currentUserService,
+        IAuthorizationService authorization,
+        ILogger<EmolumentsController> logger)
     {
         _service = service;
+        _currentUserService = currentUserService;
+        _authorization = authorization;
         _logger = logger;
+    }
+
+    /// <summary>Self-or-permission (W3), as on LeavesController — see the remarks there.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+            return true;
+        return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
     // ─── Position-level assignments ────────────────────────────────────────────
 
     [HttpGet("positions/{positionId:guid}/components")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<PositionPayComponentDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<PositionPayComponentDto>>> GetPositionComponents(Guid positionId)
         => Ok(await _service.GetPositionComponentsAsync(positionId));
 
     [HttpPost("positions/components")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(PositionPayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PositionPayComponentDto>> AssignPositionComponent([FromBody] CreatePositionPayComponentDto dto)
@@ -40,6 +60,7 @@ public class EmolumentsController : ControllerBase
     }
 
     [HttpPut("positions/components/{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(PositionPayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PositionPayComponentDto>> UpdatePositionComponent(
@@ -50,6 +71,7 @@ public class EmolumentsController : ControllerBase
     }
 
     [HttpDelete("positions/components/{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemovePositionComponent(Guid id)
@@ -60,12 +82,19 @@ public class EmolumentsController : ControllerBase
 
     // ─── Employee-level assignments ────────────────────────────────────────────
 
+    // W3: self-or-permission — an employee sees their OWN pay makeup (a payslip shows it
+    // anyway); a colleague's is the compensation read tier.
     [HttpGet("employees/{employeeId:guid}/components")]
     [ProducesResponseType(typeof(IEnumerable<EmployeePayComponentDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmployeePayComponentDto>>> GetEmployeeComponents(Guid employeeId)
-        => Ok(await _service.GetEmployeeComponentsAsync(employeeId));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.CompensationReadPolicy))
+            return Forbid();
+        return Ok(await _service.GetEmployeeComponentsAsync(employeeId));
+    }
 
     [HttpPost("employees/components")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(EmployeePayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeePayComponentDto>> AssignEmployeeComponent([FromBody] CreateEmployeePayComponentDto dto)
@@ -75,6 +104,7 @@ public class EmolumentsController : ControllerBase
     }
 
     [HttpPut("employees/components/{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(EmployeePayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeePayComponentDto>> UpdateEmployeeComponent(
@@ -85,6 +115,7 @@ public class EmolumentsController : ControllerBase
     }
 
     [HttpDelete("employees/components/{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveEmployeeComponent(Guid id)
@@ -95,12 +126,16 @@ public class EmolumentsController : ControllerBase
 
     // ─── Consolidated / derived ────────────────────────────────────────────────
 
+    // W3: self-or-permission, as the components read above.
     [HttpGet("employees/{employeeId:guid}/summary")]
     [ProducesResponseType(typeof(EmployeeEmolumentSummaryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeeEmolumentSummaryDto>> GetEmployeeSummary(
         Guid employeeId, [FromQuery] DateOnly? asOf = null)
     {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.CompensationReadPolicy))
+            return Forbid();
+
         try { return Ok(await _service.GetEmployeeEmolumentSummaryAsync(employeeId, asOf)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
     }
@@ -112,6 +147,10 @@ public class EmolumentsController : ControllerBase
         [FromQuery] Guid employeeId, [FromQuery] Guid leaveTypeId,
         [FromQuery] DateOnly? asOf = null, [FromQuery] decimal days = 0)
     {
+        // W3: self-or-permission — the encashment form quotes the caller their OWN daily rate.
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.CompensationReadPolicy))
+            return Forbid();
+
         try
         {
             var rate = await _service.GetEncashmentDailyRateAsync(

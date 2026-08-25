@@ -1,6 +1,7 @@
 ﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,11 +25,13 @@ public class PayComponentsController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<PayComponentDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<PayComponentDto>>> GetAll([FromQuery] bool activeOnly = true)
         => Ok(await _service.GetPayComponentsAsync(activeOnly));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(PayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PayComponentDto>> GetById(Guid id)
@@ -42,6 +45,7 @@ public class PayComponentsController : ControllerBase
     /// someone has just changed payroll and does not want to wait for the debounce.
     /// </summary>
     [HttpPost("sync")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(PayComponentProjectionResultDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<PayComponentProjectionResultDto>> Sync(CancellationToken ct)
     {
@@ -54,6 +58,7 @@ public class PayComponentsController : ControllerBase
     /// dating. Payroll models none of them, so they survive every projection pass.
     /// </summary>
     [HttpPatch("{id:guid}/hr-attributes")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(PayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -73,6 +78,7 @@ public class PayComponentsController : ControllerBase
 
     /// <summary>Not supported — create the component in Payroll, then sync.</summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<PayComponentDto>> Create([FromBody] CreatePayComponentDto dto)
     {
@@ -85,6 +91,7 @@ public class PayComponentsController : ControllerBase
     /// HR owns on those.
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(PayComponentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -99,6 +106,7 @@ public class PayComponentsController : ControllerBase
 
     /// <summary>Deactivates an HR-defined component. Returns 409 for a mirrored one.</summary>
     [HttpPatch("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

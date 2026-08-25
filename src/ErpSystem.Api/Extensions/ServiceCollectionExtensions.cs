@@ -1322,6 +1322,26 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerAttendance)));
 
+            // HR compensation & benefits policies (W3 slice 7): emoluments, pay components,
+            // salary structure, benefit policies and enrollments. Money data follows the medical
+            // shape — org-wide surfaces authorize here, an employee's own pay makeup, benefits,
+            // dependents and beneficiaries are ownership checks on the endpoint, and the benefit
+            // CATALOGUE reads stay open (an employee needs to see what benefits exist).
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.CompensationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewCompensation,
+                        HrPermissions.MaintainCompensation,
+                        HrPermissions.AdministerCompensation)))
+                .AddPolicy(HrPermissions.CompensationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainCompensation,
+                        HrPermissions.AdministerCompensation)))
+                .AddPolicy(HrPermissions.CompensationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerCompensation)));
+
             // HR occupational-health policies. The medical controllers previously carried a bare
             // [Authorize], so every authenticated employee could read and delete medical records.
             // Administer implies Write implies Read, so an admin does not need all three granted.

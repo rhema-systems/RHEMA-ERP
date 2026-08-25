@@ -466,11 +466,16 @@ export const navigationItems: NavItem[] = [
         title: 'Emoluments',
         href: '/hr/emoluments',
         icon: Coins,
+        // W3 slice 7: org-wide pay data — the compensation read tier. An employee's own pay
+        // makeup is an ownership check on the API and arrives as a screen with area 25.
+        permissions: ['HR.Compensation.Read'],
       },
       {
         title: 'Benefits',
         href: '/hr/benefits',
         icon: ShieldPlus,
+        // W3 slice 7: the enrollment desk — same tier. Own benefits/beneficiaries = area 25.
+        permissions: ['HR.Compensation.Read'],
       },
       {
         // W3 slice 6: every child here is a desk surface (org-wide search, monitoring, exports,

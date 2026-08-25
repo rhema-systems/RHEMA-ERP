@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -39,6 +40,7 @@ public class SalaryNotchesController : ControllerBase
     /// Retrieves a salary notch by ID.
     /// </summary>
     [HttpGet("{notchId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(SalaryNotchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -69,6 +71,7 @@ public class SalaryNotchesController : ControllerBase
     /// Not supported — add the notch in Payroll instead.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult Create([FromBody] CreateSalaryNotchDto dto) => MirrorIsReadOnly();
 
@@ -76,6 +79,7 @@ public class SalaryNotchesController : ControllerBase
     /// Not supported — change the notch amount in Payroll instead.
     /// </summary>
     [HttpPut("{notchId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult Update(Guid notchId, [FromBody] UpdateSalaryNotchDto dto) => MirrorIsReadOnly();
 
@@ -83,6 +87,7 @@ public class SalaryNotchesController : ControllerBase
     /// Not supported — a notch's active state follows its payroll definition.
     /// </summary>
     [HttpPut("{notchId:guid}/active")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult SetActive(Guid notchId, [FromQuery] bool isActive) => MirrorIsReadOnly();
 
@@ -90,6 +95,7 @@ public class SalaryNotchesController : ControllerBase
     /// Not supported — remove the notch in Payroll; the mirror deactivates it on the next sync.
     /// </summary>
     [HttpDelete("{notchId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public IActionResult Delete(Guid notchId) => MirrorIsReadOnly();
 

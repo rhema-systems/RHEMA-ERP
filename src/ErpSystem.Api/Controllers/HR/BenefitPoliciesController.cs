@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -121,6 +122,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Creates a new benefit policy.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(BenefitPolicyDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -155,6 +157,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Updates an existing benefit policy.
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(BenefitPolicyDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -212,6 +215,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Deactivates (soft deactivation) a benefit policy.
     /// </summary>
     [HttpPatch("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -246,6 +250,8 @@ public class BenefitPoliciesController : ControllerBase
     /// Gets the per-grade value rows for a policy.
     /// </summary>
     [HttpGet("{id:guid}/grade-values")]
+    // W3: per-grade money amounts - the compensation read tier; the catalogue reads above stay open.
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
     [ProducesResponseType(typeof(IReadOnlyList<BenefitGradeValueDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<BenefitGradeValueDto>>> GetGradeValuesAsync([FromRoute] Guid id)
     {
@@ -257,6 +263,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Adds a per-grade value row to a policy.
     /// </summary>
     [HttpPost("{id:guid}/grade-values")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(BenefitGradeValueDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -282,6 +289,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Updates a per-grade value row on a policy.
     /// </summary>
     [HttpPut("{id:guid}/grade-values/{gradeValueId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
     [ProducesResponseType(typeof(BenefitGradeValueDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BenefitGradeValueDto>> UpdateGradeValueAsync(
@@ -309,6 +317,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Deletes a per-grade value row from a policy.
     /// </summary>
     [HttpDelete("{id:guid}/grade-values/{gradeValueId:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteGradeValueAsync([FromRoute] Guid id, [FromRoute] Guid gradeValueId)
@@ -321,6 +330,7 @@ public class BenefitPoliciesController : ControllerBase
     /// Deletes (soft delete) a benefit policy.
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

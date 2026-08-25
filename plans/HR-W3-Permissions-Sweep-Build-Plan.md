@@ -161,7 +161,23 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    Sidebar: Attendance & Time and Consulting sections ride on HR.Attendance.Read.
    ⚠ ConsultantTimesheetDto.`ConsultantId` IS the employee FK (verified against the entity
    doc-comment) — self-checks key on it deliberately.
-3. **Comp & Benefits** (71 bare)
+3. **Comp & Benefits** — ✅ **DONE 2026-08-25, harness 27/27 green (+ 47/47, 23/23, 39/39
+   no-regression), grant rows verified in DB.** `HR.Compensation.{Read,Write,Admin}` over 7 controllers /
+   71 actions (SalaryReviewProposals already role-gated, converts with the area-24 batch).
+   The split: position pay, the pay-component master, salary grades/levels/notches, benefit
+   grade-values, enrollment-by-policy and payroll-lines → Read; assignments, catalogue writes,
+   enrollment/status/claim decisions, reconcile, the payroll syncs → Write; deletes AND
+   deactivations → Admin (deactivating a pay component or benefit policy switches off pay);
+   benefit CATALOGUE reads stay open (published policy — the grade-values money view does not);
+   an employee's OWN pay components/summary/encashment-rate quote and their enrollments,
+   balance, utilization claims, dependents and beneficiaries → self-or-permission (the
+   medical-area decision: employees file their own claims and maintain their own beneficiary
+   nominations). Guard-injection was scripted for the 9 enrollment record-scoped actions —
+   verify the injected guards on the multi-line signatures when reviewing.
+   ⚠ Script trap recorded: a Post|Put|Patch catch-all regex re-matched the deactivate line its
+   own earlier rule had just gated, stacking Write on top of Admin (ANDed, functionally
+   harmless, still wrong) — when rule N excludes rule M's lines, test the exclusion against the
+   INSERTED text, not the matched line.
 4. **Training** (266 bare; nominations/self-enrollment are employee acts)
 5. **Recruitment** (147 bare; panelist confirms stay anonymous-tokened)
 6. **Performance** (350 bare — the largest and most actor-diverse: self, peer, manager, HR;
