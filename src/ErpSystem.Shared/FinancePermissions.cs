@@ -28,6 +28,7 @@ public static class FinancePermissions
     public const string ManageFinanceAccessScopes = "Finance.AccessScopes.Manage";
 
     public const string ManageChartOfAccounts = "Finance.ChartOfAccounts.Manage";
+    public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
     public const string ConfigureTaxPolicy = "Finance.Policy.ConfigureTax";
     public const string ConfigureFixedAssetCategoriesPolicy = "Finance.Policy.ConfigureFixedAssetCategories";
@@ -169,6 +170,7 @@ public static class FinancePermissions
         new(ManageFinanceAccessScopes, "Manage Finance Access Scopes", "Assign effective-dated tenant and Finance-resource data scopes to users.", CategoryCore),
 
         new(ManageChartOfAccounts, "Manage Chart of Accounts", "Create, update, delete, and configure chart of accounts structures and account combinations.", CategoryGeneralLedger),
+        new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),
         new(EditJournalEntries, "Edit Journal Entries", "Edit draft journal entries.", CategoryGeneralLedger),
         new(DeleteJournalEntries, "Delete Journal Entries", "Delete draft journal entries.", CategoryGeneralLedger),

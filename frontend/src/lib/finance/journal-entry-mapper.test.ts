@@ -85,4 +85,22 @@ describe('journal entry mapper currency contract', () => {
       )
     ).toThrow('The original USD debit amount is required.');
   });
+
+  it('maps line coding dimensions as structured Finance values', () => {
+    const result = mapJournalEntryFormToCreateDto(
+      header,
+      [{
+        id: '1', accountId: 'expense', description: 'Department expense',
+        currencyCode: 'GHS', exchangeRate: 1, debit: 100, credit: 0,
+        dimensions: { DEPT: 'FIN', PROJECT: '', FUND: 'GOG' },
+      }],
+      undefined,
+      'GHS'
+    );
+
+    expect(result.transactions[0].dimensions).toEqual([
+      { dimensionCode: 'DEPT', valueCode: 'FIN' },
+      { dimensionCode: 'FUND', valueCode: 'GOG' },
+    ]);
+  });
 });

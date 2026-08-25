@@ -134,6 +134,19 @@ public sealed class FinanceDimensionAccountRule : TenantEntity
     [Required, MaxLength(20)]
     public string RuleType { get; set; } = "Optional";
 
+    /// <summary>
+    /// Optional posting-source scope. Non-optional controls must identify the producer they have
+    /// been certified for; null scope remains a harmless, descriptive Optional rule.
+    /// </summary>
+    [MaxLength(50)]
+    public string? SourceModule { get; set; }
+
+    [MaxLength(100)]
+    public string? SourceDocumentType { get; set; }
+
+    [MaxLength(50)]
+    public string? PostingAction { get; set; }
+
     public Guid? DefaultDimensionValueId { get; set; }
     public DateTime EffectiveDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
