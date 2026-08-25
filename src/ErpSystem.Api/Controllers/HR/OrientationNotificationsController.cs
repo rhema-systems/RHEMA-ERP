@@ -18,8 +18,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class OrientationNotificationsController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IOrientationNotificationService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -31,7 +29,7 @@ public class OrientationNotificationsController : ControllerBase
 
     /// <summary>Anyone else's inbox — HR only. Your own is <c>mine</c>.</summary>
     [HttpGet("recipient/{recipientEmployeeId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationNotificationDto>>> GetByRecipient(
         Guid recipientEmployeeId, [FromQuery] bool unreadOnly = false)
         => Ok(await _service.GetByRecipientAsync(recipientEmployeeId, unreadOnly));
@@ -54,13 +52,13 @@ public class OrientationNotificationsController : ControllerBase
     }
 
     [HttpGet("enrollment/{enrollmentId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationNotificationDto>>> GetByEnrollment(Guid enrollmentId)
         => Ok(await _service.GetByEnrollmentIdAsync(enrollmentId));
 
     /// <summary>Sending a notification to someone is an administrative act.</summary>
     [HttpPost]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationNotificationDto>> Create([FromBody] CreateOrientationNotificationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

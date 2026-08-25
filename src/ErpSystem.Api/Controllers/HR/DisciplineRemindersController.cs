@@ -20,7 +20,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/discipline/reminders")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [DisciplineBusinessRules]
 public class DisciplineRemindersController : ControllerBase
 {
@@ -37,6 +37,7 @@ public class DisciplineRemindersController : ControllerBase
 
     /// <summary>Runs a sweep for the authenticated tenant now. Safe to repeat.</summary>
     [HttpPost("run")]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     public async Task<ActionResult<DisciplineReminderRunResultDto>> Run()
     {
         if (_currentUser.TenantId is not Guid tenantId)
@@ -57,15 +58,18 @@ public class DisciplineRemindersController : ControllerBase
     /// date cannot rob the real sweep of a reminder.
     /// </remarks>
     [HttpGet("preview")]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     public async Task<ActionResult<IEnumerable<DisciplineReminderPreviewItemDto>>> Preview(
         [FromQuery] DateTime? asOf = null)
         => Ok(await _service.PreviewSweepAsync(asOf));
 
     [HttpGet("runs")]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     public async Task<ActionResult<IEnumerable<DisciplineReminderRunDto>>> GetRuns([FromQuery] int count = 20)
         => Ok(await _service.GetRecentRunsAsync(count));
 
     [HttpGet("log")]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     public async Task<ActionResult<IEnumerable<DisciplineReminderLogEntryDto>>> GetLog([FromQuery] int days = 14)
         => Ok(await _service.GetRecentLogAsync(days));
 }

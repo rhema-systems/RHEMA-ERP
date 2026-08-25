@@ -387,8 +387,35 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    HR.She.Read (occ-health/RTW on HR.Medical.Read); the 5 self-service items stay open.
    Residuals: the frontend comments claiming `api/Location` is HR-gated are wrong (it is
    open); the env-report screen's sentinel-id comment mis-describes the desk arm.
-9. Orientation, Assets, Movements, Discipline: mostly role-gated already — convert
-   role → permission mechanically, per-area.
+9. **Orientation, Assets, Movements, Discipline** — ✅ **DONE 2026-08-25 (slice 13), harness
+   `run-slice13-role-areas.mjs` 100/100 green + full no-regression (683 = 39/23/47/27/90/66/
+   167/142/82 — 783 assertions total), `seed-db` run, grant rows verified in DB (HR → 8 =
+   4×Read+Write; SuperAdmin/TenantAdmin → 12 each). Two probes falsified on first run were
+   deliberate opens, not defects: `Assets/types` (the AST-6 requisition form's type picker)
+   and `staff-movements/awaiting-my-approval` (a token-scoped approver worklist) — both open
+   before the slice too, now asserted as opens.** FOUR families in one slice — safe because every one of the 366 endpoint role
+   gates across the 25 controllers was HR-desk-shaped (SuperAdmin/HR variants; zero
+   decision-role attributes — approvals and natural justice live in the services where their
+   areas put them): `HR.Orientation.*` (6 orientation controllers + OnboardingPlan/
+   OnboardingPlanTemplate, whose SA/HR class gates the census initially missed),
+   `HR.Assets.*` (Assets' 110 method gates + AssetReminders), `HR.Movements.*` (movements +
+   promotions/transfers/secondments/acting/demotions/career-paths/reminders),
+   `HR.Discipline.*` (cases, sub-entities, support, the offenses/action-types lookups,
+   grievances, reminders). 530 scripted ops (165 inserts + 350 method replacements + 15 class
+   swaps), verb-mechanical; deliberate opens untouched (orientation mine, discipline
+   mine/confirmations, grievance raise+mine — HR still cannot file one — asset AST-6/AST-8
+   self-service, portal surfaces). Six in-code role arms converted to tiered `HoldsAsync`
+   checks (movements GetById/attachment-download/checklist-complete; discipline case
+   GetById/process-clock reads, report-as arms, appeal read, evidence-download privilege
+   redaction). Dead consts removed (16 HrRoles + DisciplineLookupRoles); PIP's AuthorRoles
+   and HrLegacyFileMigration's SuperAdmin gate deliberately kept. **Slice-11 census gap
+   closed: `OrganizationUnitHistoryController` (SA/TA/HR class gate) → class-wide
+   HR.Employee.Read.** Frontend: 20 desk sidebar items gated on the family Reads (orientation
+   5, assets 11, movements 2, discipline 2 + grievance register); My-* and Awaiting My
+   Confirmation stay open. Remaining role-gated surface after this slice: 85 actions = PIP
+   authoring (deliberate), separations MD/IA anchors (deliberate), company settings/profile +
+   EmploymentActionProposals + SalaryReviewProposals + ExternalAssociates (slice 14), and the
+   SuperAdmin-only legacy file migration tool.
 10. HR settings/company + satellites + org extras + dashboards.
 
 The recipe and the two closing greps (service methods ↔ screens, non-GET routes ↔ service) from

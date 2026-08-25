@@ -604,14 +604,14 @@ export const navigationItems: NavItem[] = [
         href: '/hr/orientation',
         icon: GraduationCap,
         children: [
-          { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard },
-          { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock },
-          { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users },
+          { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard, permissions: ['HR.Orientation.Read'] },
+          { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock, permissions: ['HR.Orientation.Read'] },
+          { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users, permissions: ['HR.Orientation.Read'] },
           // The one orientation screen a non-HR employee can use: their own enrollments. Everything
           // above answers 403 for them, so without this they have no way in.
           { title: 'My Orientation', href: '/hr/orientation/mine', icon: GraduationCap },
-          { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks },
-          { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck },
+          { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks, permissions: ['HR.Orientation.Read'] },
+          { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck, permissions: ['HR.Orientation.Read'] },
         ],
       },
       {
@@ -673,22 +673,22 @@ export const navigationItems: NavItem[] = [
         href: '/hr/assets',
         icon: Package,
         children: [
-          { title: 'Register', href: '/hr/assets/register', icon: Boxes },
-          { title: 'Assignments', href: '/hr/assets/assignments', icon: Package },
-          { title: 'Requisitions', href: '/hr/assets/requisitions', icon: ClipboardList },
-          { title: 'Transfers', href: '/hr/assets/transfers', icon: ArrowRightLeft },
-          { title: 'Surcharges', href: '/hr/assets/surcharges', icon: Receipt },
+          { title: 'Register', href: '/hr/assets/register', icon: Boxes, permissions: ['HR.Assets.Read'] },
+          { title: 'Assignments', href: '/hr/assets/assignments', icon: Package, permissions: ['HR.Assets.Read'] },
+          { title: 'Requisitions', href: '/hr/assets/requisitions', icon: ClipboardList, permissions: ['HR.Assets.Read'] },
+          { title: 'Transfers', href: '/hr/assets/transfers', icon: ArrowRightLeft, permissions: ['HR.Assets.Read'] },
+          { title: 'Surcharges', href: '/hr/assets/surcharges', icon: Receipt, permissions: ['HR.Assets.Read'] },
           // The payroll desk's view of both money surfaces. Its own entry because it is somebody
           // else's worklist entirely: HR declares here, payroll deducts elsewhere.
-          { title: 'Payroll Deductions', href: '/hr/assets/payroll', icon: Coins },
+          { title: 'Payroll Deductions', href: '/hr/assets/payroll', icon: Coins, permissions: ['HR.Assets.Read'] },
           // The three watchlist groups get their own entries rather than living behind the
           // register: each is somebody's worklist, and a list you have to go looking for is a list
           // nobody works.
-          { title: 'Maintenance', href: '/hr/assets/maintenance', icon: Wrench },
-          { title: 'Insurance', href: '/hr/assets/insurance', icon: ShieldCheck },
-          { title: 'Returns', href: '/hr/assets/returns', icon: Undo2 },
-          { title: 'Register Report', href: '/hr/assets/report', icon: FileText },
-          { title: 'Reminders', href: '/hr/assets/reminders', icon: BellRing },
+          { title: 'Maintenance', href: '/hr/assets/maintenance', icon: Wrench, permissions: ['HR.Assets.Read'] },
+          { title: 'Insurance', href: '/hr/assets/insurance', icon: ShieldCheck, permissions: ['HR.Assets.Read'] },
+          { title: 'Returns', href: '/hr/assets/returns', icon: Undo2, permissions: ['HR.Assets.Read'] },
+          { title: 'Register Report', href: '/hr/assets/report', icon: FileText, permissions: ['HR.Assets.Read'] },
+          { title: 'Reminders', href: '/hr/assets/reminders', icon: BellRing, permissions: ['HR.Assets.Read'] },
           // Open to every employee; the register above answers 403 without HR.
           { title: 'My Assets', href: '/hr/assets/me', icon: UserCheck },
         ],
@@ -701,9 +701,9 @@ export const navigationItems: NavItem[] = [
         href: '/hr/movements',
         icon: ArrowRightLeft,
         children: [
-          { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft },
+          { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft, permissions: ['HR.Movements.Read'] },
           // Standalone: most acting appointments never come from a movement at all.
-          { title: 'Acting Appointments', href: '/hr/movements/acting', icon: UserCheck },
+          { title: 'Acting Appointments', href: '/hr/movements/acting', icon: UserCheck, permissions: ['HR.Movements.Read'] },
           // Open to every employee: the movements raised about them, and the tasks they owe on
           // someone else's. The register above answers 403 for non-HR.
           { title: 'My Movements', href: '/hr/movements/mine', icon: UserCheck },
@@ -846,10 +846,10 @@ export const navigationItems: NavItem[] = [
         href: '/hr/discipline',
         icon: Gavel,
         children: [
-          { title: 'Cases', href: '/hr/discipline', icon: Gavel },
+          { title: 'Cases', href: '/hr/discipline', icon: Gavel, permissions: ['HR.Discipline.Read'] },
           // Sub-entity queues: which investigations have run past FR-HR-178's four weeks, and which
           // hearings are scheduled or have happened without their notes recorded.
-          { title: 'Investigations & Hearings', href: '/hr/discipline/queues', icon: Search },
+          { title: 'Investigations & Hearings', href: '/hr/discipline/queues', icon: Search, permissions: ['HR.Discipline.Read'] },
           // Open by design: the officer who confirms a sanction is a head of department or the MD,
           // and the register above answers 403 for them — this is where their work appears. The
           // engine decides its contents, per case and per step.
@@ -870,7 +870,7 @@ export const navigationItems: NavItem[] = [
           // The employee's own page first: it is the one most people will use, and the register
           // below answers 403 for anyone outside HR.
           { title: 'My Grievances', href: '/hr/grievances/mine', icon: MessagesSquare },
-          { title: 'Register', href: '/hr/grievances', icon: ClipboardList },
+          { title: 'Register', href: '/hr/grievances', icon: ClipboardList, permissions: ['HR.Discipline.Read'] },
         ],
       },
       {

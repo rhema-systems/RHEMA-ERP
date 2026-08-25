@@ -23,8 +23,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [DisciplineBusinessRules]
 public class StaffGrievancesController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffGrievanceService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -38,18 +36,18 @@ public class StaffGrievancesController : ControllerBase
     // HR's register
     // =========================================================================
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet]
     public async Task<ActionResult<IEnumerable<StaffGrievanceSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("status/{status}")]
     public async Task<ActionResult<IEnumerable<StaffGrievanceSummaryDto>>> GetByStatus(GrievanceStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     /// <summary>Where the ladder is stuck — grievances whose current rung has not answered.</summary>
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("awaiting-response")]
     public async Task<ActionResult<IEnumerable<StaffGrievanceSummaryDto>>> GetAwaitingResponse(
         [FromQuery] GrievanceEscalationLevel? level = null)
@@ -127,7 +125,7 @@ public class StaffGrievancesController : ControllerBase
     // =========================================================================
 
     /// <summary>Names who should answer at the current rung — how a supervisor or HOD is brought in.</summary>
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/assign")]
     public async Task<ActionResult<StaffGrievanceDto>> Assign(Guid id, [FromBody] AssignGrievanceStepDto dto)
     {

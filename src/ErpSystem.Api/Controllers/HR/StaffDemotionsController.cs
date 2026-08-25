@@ -26,8 +26,6 @@ public record DemotionResponseRequest(string Response);
 [MovementBusinessRules]
 public class StaffDemotionsController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffDemotionService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -41,27 +39,27 @@ public class StaffDemotionsController : ControllerBase
     // QUERIES
     // =========================================================================
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<StaffDemotionDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     [HttpGet("movement/{movementId:guid}")]
     public async Task<ActionResult<StaffDemotionDto?>> GetByMovement(Guid movementId)
         => Ok(await _service.GetByMovementIdAsync(movementId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     [HttpGet("disciplinary")]
     public async Task<ActionResult<IEnumerable<StaffDemotionDto>>> GetDisciplinary()
         => Ok(await _service.GetDisciplinaryDemotionsAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     [HttpGet("performance-related")]
     public async Task<ActionResult<IEnumerable<StaffDemotionDto>>> GetPerformanceRelated()
         => Ok(await _service.GetPerformanceRelatedDemotionsAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     [HttpGet("pending-appeals")]
     public async Task<ActionResult<IEnumerable<StaffDemotionDto>>> GetPendingAppeals()
         => Ok(await _service.GetWithPendingAppealsAsync());
@@ -70,7 +68,7 @@ public class StaffDemotionsController : ControllerBase
     // CRUD
     // =========================================================================
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffDemotionDto>> Create([FromBody] CreateStaffDemotionDto dto)
     {
@@ -86,7 +84,7 @@ public class StaffDemotionsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffDemotionDto>> Update(Guid id, [FromBody] UpdateStaffDemotionDto dto)
     {
@@ -99,7 +97,7 @@ public class StaffDemotionsController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.MovementsAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

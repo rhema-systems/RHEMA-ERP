@@ -17,7 +17,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/staff-movements/reminders")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class StaffMovementRemindersController : ControllerBase
 {
@@ -34,6 +34,7 @@ public class StaffMovementRemindersController : ControllerBase
 
     /// <summary>Runs a sweep for the authenticated tenant now. Safe to repeat.</summary>
     [HttpPost("run")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffMovementReminderRunResultDto>> Run()
     {
         if (_currentUser.TenantId is not Guid tenantId)
@@ -45,10 +46,12 @@ public class StaffMovementRemindersController : ControllerBase
     }
 
     [HttpGet("runs")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffMovementReminderRunDto>>> GetRuns([FromQuery] int count = 20)
         => Ok(await _service.GetRecentRunsAsync(count));
 
     [HttpGet("log")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffMovementReminderLogEntryDto>>> GetLog([FromQuery] int days = 14)
         => Ok(await _service.GetRecentLogAsync(days));
 }

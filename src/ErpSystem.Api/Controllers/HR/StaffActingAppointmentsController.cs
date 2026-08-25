@@ -12,12 +12,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-acting-appointments")]
-[Authorize(Roles = StaffActingAppointmentsController.HrRoles)]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class StaffActingAppointmentsController : ControllerBase
 {
-    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffActingAppointmentService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -33,49 +31,60 @@ public class StaffActingAppointmentsController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<PagedResult<StaffActingAppointmentSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffActingAppointmentDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffActingAppointmentDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithDetailsAsync(id));
 
     [HttpGet("number/{appointmentNumber}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffActingAppointmentDto?>> GetByAppointmentNumber(string appointmentNumber)
         => Ok(await _service.GetByAppointmentNumberAsync(appointmentNumber));
 
     [HttpGet("employee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetByEmployee(Guid employeeId)
         => Ok(await _service.GetByEmployeeIdAsync(employeeId));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetByStatus(StaffActingStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetActive()
         => Ok(await _service.GetActiveAppointmentsAsync());
 
     [HttpGet("position/{positionId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetByActingPosition(Guid positionId)
         => Ok(await _service.GetByActingPositionAsync(positionId));
 
     [HttpGet("expiring")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetExpiring(
         [FromQuery] int daysAhead = 14)
         => Ok(await _service.GetExpiringAppointmentsAsync(daysAhead));
 
     [HttpGet("converted-to-permanent")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffActingAppointmentSummaryDto>>> GetConvertedToPermanent()
         => Ok(await _service.GetConvertedToPermanentAsync());
 
@@ -84,6 +93,7 @@ public class StaffActingAppointmentsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffActingAppointmentDto>> Create([FromBody] CreateStaffActingAppointmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -99,6 +109,7 @@ public class StaffActingAppointmentsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffActingAppointmentDto>> Update(
         Guid id, [FromBody] UpdateStaffActingAppointmentDto dto)
     {
@@ -112,6 +123,7 @@ public class StaffActingAppointmentsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -124,6 +136,7 @@ public class StaffActingAppointmentsController : ControllerBase
 
     /// <summary>Marks the acting appointment as completed.</summary>
     [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<IActionResult> Complete(Guid id, [FromBody] CompleteStaffActingAppointmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -138,6 +151,7 @@ public class StaffActingAppointmentsController : ControllerBase
 
     /// <summary>Extends the acting appointment to a new end date.</summary>
     [HttpPost("{id:guid}/extend")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffActingAppointmentDto>> Extend(Guid id, [FromBody] ExtendStaffActingAppointmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -151,6 +165,7 @@ public class StaffActingAppointmentsController : ControllerBase
 
     /// <summary>Converts a completed acting appointment into a permanent promotion.</summary>
     [HttpPost("{id:guid}/convert")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<IActionResult> ConvertToPermanent(Guid id, [FromBody] ConvertActingToPermanentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

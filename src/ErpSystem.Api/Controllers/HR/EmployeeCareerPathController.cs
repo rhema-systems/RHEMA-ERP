@@ -10,12 +10,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/employee-career-paths")]
-[Authorize(Roles = EmployeeCareerPathController.HrRoles)]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class EmployeeCareerPathController : ControllerBase
 {
-    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IEmployeeCareerPathService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -31,34 +29,42 @@ public class EmployeeCareerPathController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<EmployeeCareerPathDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<EmployeeCareerPathDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithDetailsAsync(id));
 
     [HttpGet("employee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeCareerPathSummaryDto>>> GetByEmployee(Guid employeeId)
         => Ok(await _service.GetByEmployeeIdAsync(employeeId));
 
     [HttpGet("employee/{employeeId:guid}/current")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<EmployeeCareerPathDto?>> GetCurrentPosition(Guid employeeId)
         => Ok(await _service.GetCurrentPositionAsync(employeeId));
 
     [HttpGet("org-unit/{organizationUnitId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeCareerPathSummaryDto>>> GetByOrgUnit(Guid organizationUnitId)
         => Ok(await _service.GetByOrganizationUnitIdAsync(organizationUnitId));
 
     [HttpGet("org-unit/{organizationUnitId:guid}/current-occupants")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeCareerPathSummaryDto>>> GetCurrentOccupants(Guid organizationUnitId)
         => Ok(await _service.GetCurrentOccupantsForUnitAsync(organizationUnitId));
 
     [HttpGet("movement/{movementId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<EmployeeCareerPathDto?>> GetByMovement(Guid movementId)
         => Ok(await _service.GetByMovementIdAsync(movementId));
 
     [HttpGet("salary-grade/{salaryGradeId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeCareerPathSummaryDto>>> GetBySalaryGrade(Guid salaryGradeId)
         => Ok(await _service.GetBySalaryGradeIdAsync(salaryGradeId));
 
@@ -67,6 +73,7 @@ public class EmployeeCareerPathController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<EmployeeCareerPathDto>> Create([FromBody] CreateEmployeeCareerPathDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -82,6 +89,7 @@ public class EmployeeCareerPathController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<EmployeeCareerPathDto>> Update(Guid id, [FromBody] UpdateEmployeeCareerPathDto dto)
     {
         if (id != dto.Id)        return BadRequest("ID mismatch.");
@@ -94,6 +102,7 @@ public class EmployeeCareerPathController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);

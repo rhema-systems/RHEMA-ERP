@@ -1617,6 +1617,63 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerShe)));
 
+            // W3 slice 13 — the four mechanically converted areas (orientation, assets, movements,
+            // discipline & grievance). Every endpoint gate in these areas was HR-desk-shaped
+            // (SuperAdmin/HR variants, no decision roles at the attribute level), so the conversion
+            // is verb-mechanical per family: reads → Read, desk ops → Write, deletes → Admin. The
+            // areas' deliberate opens (self-service acknowledge/respond/mine surfaces, the employee
+            // portal) are untouched, and the record-level actor rules (movement workflow assignees,
+            // discipline natural justice) stay in the services where their areas put them.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.OrientationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewOrientation,
+                        HrPermissions.MaintainOrientation,
+                        HrPermissions.AdministerOrientation)))
+                .AddPolicy(HrPermissions.OrientationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainOrientation,
+                        HrPermissions.AdministerOrientation)))
+                .AddPolicy(HrPermissions.OrientationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerOrientation)))
+                .AddPolicy(HrPermissions.AssetsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewAssets,
+                        HrPermissions.MaintainAssets,
+                        HrPermissions.AdministerAssets)))
+                .AddPolicy(HrPermissions.AssetsWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainAssets,
+                        HrPermissions.AdministerAssets)))
+                .AddPolicy(HrPermissions.AssetsAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerAssets)))
+                .AddPolicy(HrPermissions.MovementsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewMovements,
+                        HrPermissions.MaintainMovements,
+                        HrPermissions.AdministerMovements)))
+                .AddPolicy(HrPermissions.MovementsWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainMovements,
+                        HrPermissions.AdministerMovements)))
+                .AddPolicy(HrPermissions.MovementsAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerMovements)))
+                .AddPolicy(HrPermissions.DisciplineReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewDiscipline,
+                        HrPermissions.MaintainDiscipline,
+                        HrPermissions.AdministerDiscipline)))
+                .AddPolicy(HrPermissions.DisciplineWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainDiscipline,
+                        HrPermissions.AdministerDiscipline)))
+                .AddPolicy(HrPermissions.DisciplineAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerDiscipline)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

@@ -11,12 +11,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-secondments")]
-[Authorize(Roles = StaffSecondmentsController.HrRoles)]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class StaffSecondmentsController : ControllerBase
 {
-    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffSecondmentService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -31,27 +29,33 @@ public class StaffSecondmentsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffSecondmentDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("movement/{movementId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffSecondmentDto?>> GetByMovement(Guid movementId)
         => Ok(await _service.GetByMovementIdAsync(movementId));
 
     [HttpGet("type/{type}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffSecondmentDto>>> GetByType(StaffSecondmentType type)
         => Ok(await _service.GetByTypeAsync(type));
 
     [HttpGet("external")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffSecondmentDto>>> GetExternal()
         => Ok(await _service.GetExternalSecondmentsAsync());
 
     [HttpGet("host-organization")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffSecondmentDto>>> GetByHostOrganization(
         [FromQuery] string hostOrganization)
         => Ok(await _service.GetByHostOrganizationAsync(hostOrganization));
 
     [HttpGet("ending-soon")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffSecondmentDto>>> GetEndingSoon(
         [FromQuery] int daysAhead = 30)
         => Ok(await _service.GetEndingSoonAsync(daysAhead));
@@ -61,6 +65,7 @@ public class StaffSecondmentsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffSecondmentDto>> Create([FromBody] CreateStaffSecondmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -76,6 +81,7 @@ public class StaffSecondmentsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffSecondmentDto>> Update(Guid id, [FromBody] UpdateStaffSecondmentDto dto)
     {
         if (id != dto.Id)        return BadRequest("ID mismatch.");
@@ -88,6 +94,7 @@ public class StaffSecondmentsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -100,6 +107,7 @@ public class StaffSecondmentsController : ControllerBase
 
     /// <summary>Extends the secondment end date by a specified number of months.</summary>
     [HttpPost("{id:guid}/extend")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffSecondmentDto>> Extend(Guid id, [FromBody] ExtendStaffSecondmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

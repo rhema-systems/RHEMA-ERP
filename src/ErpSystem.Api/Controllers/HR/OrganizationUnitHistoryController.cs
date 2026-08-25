@@ -16,17 +16,16 @@ namespace ErpSystem.Api.Controllers.HR;
 /// or a change of head — there is no endpoint that creates one directly, because an audit trail
 /// somebody can author by hand is not one.
 ///
-/// Gated on the HR/admin roles rather than the bare <c>[Authorize]</c> it carried: the log names the
-/// employees who have led each unit, which is org-structure information about identifiable people.
+/// Gated because the log names the employees who have led each unit, which is org-structure
+/// information about identifiable people. W3 slice 13 converted the role gate to
+/// HR.Employee.Read (the foundation family, same reach) — a census gap: slice 11 swept the
+/// org-structure registers and missed this one.
 /// </remarks>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = OrganizationUnitHistoryController.HrRoles)]
+[Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
 public class OrganizationUnitHistoryController : ControllerBase
 {
-    internal const string HrRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly IOrganizationUnitHistoryService _historyService;
     private readonly ILogger<OrganizationUnitHistoryController> _logger;
 

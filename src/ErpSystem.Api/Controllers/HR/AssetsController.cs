@@ -29,8 +29,10 @@ namespace ErpSystem.Api.Controllers.HR;
 /// screens need with them. Every route is now in exactly one of two groups:</para>
 ///
 /// <list type="bullet">
-///   <item><description><b><c>[Authorize(Roles = HrRoles)]</c></b> — the administrative surface.
-///   The role alone decides, and the answer does not depend on which record is being touched.</description></item>
+///   <item><description><b><c>[Authorize(Policy = HrPermissions.Assets…)]</c></b> — the
+///   administrative surface (W3 slice 13 converted the former HR-role gates to the HR.Assets
+///   family: reads Read, desk ops Write, deletes Admin). The tier alone decides, and the answer
+///   does not depend on which record is being touched.</description></item>
 ///   <item><description><b><c>[Authorize]</c> plus a check in the service</b> — the self-service
 ///   routes, where the answer <i>does</i> depend on whose record it is. An attribute cannot say
 ///   "this employee, on this record", so those are gated by <c>AssetActor</c> in
@@ -52,14 +54,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class AssetsController : ControllerBase
 {
-    /// <summary>Who may act on anyone's assets: HR, and the two admin roles above it.</summary>
-    /// <remarks>
-    /// Both HR spellings are absent here on purpose — the legacy "HR User" name is migrated to "HR"
-    /// on startup, and <c>AssetActor.IsHr</c> covers the un-migrated tenant on the service side.
-    /// </remarks>
-    internal const string HrRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly IAssetTypeService _assetTypeService;
     private readonly IAssetTypeAttributeService _assetTypeAttributeService;
     private readonly ICompanyAssetService _companyAssetService;
@@ -138,7 +132,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get asset types paged.</summary>
     [HttpGet("types/paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<AssetTypeSummaryDto>>> GetAssetTypesPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -150,7 +144,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get asset type by id.</summary>
     [HttpGet("types/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetTypeDto>> GetAssetType(Guid id)
     {
         var result = await _assetTypeService.GetByIdAsync(id);
@@ -159,7 +153,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get asset type with attributes.</summary>
     [HttpGet("types/{id:guid}/with-attributes")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetTypeDetailDto>> GetAssetTypeWithAttributes(Guid id)
     {
         var result = await _assetTypeService.GetWithAttributesAsync(id);
@@ -168,7 +162,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create asset type.</summary>
     [HttpPost("types")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTypeDto>> CreateAssetType([FromBody] CreateAssetTypeDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -178,7 +172,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update asset type.</summary>
     [HttpPut("types/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTypeDto>> UpdateAssetType(
         Guid id,
         [FromBody] UpdateAssetTypeDto dto)
@@ -192,7 +186,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete asset type.</summary>
     [HttpDelete("types/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteAssetType(Guid id)
     {
         await _assetTypeService.DeleteAsync(id);
@@ -205,7 +199,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List attributes for an asset type.</summary>
     [HttpGet("types/{assetTypeId:guid}/attributes")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetTypeAttributeDto>>> GetAssetTypeAttributes(Guid assetTypeId)
     {
         var result = await _assetTypeAttributeService.GetByAssetTypeIdAsync(assetTypeId);
@@ -214,7 +208,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get attribute by id.</summary>
     [HttpGet("attributes/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetTypeAttributeDto>> GetAssetTypeAttribute(Guid id)
     {
         var result = await _assetTypeAttributeService.GetByIdAsync(id);
@@ -223,7 +217,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create asset type attribute.</summary>
     [HttpPost("types/{assetTypeId:guid}/attributes")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTypeAttributeDto>> CreateAssetTypeAttribute(
         Guid assetTypeId,
         [FromBody] CreateAssetTypeAttributeDto dto)
@@ -236,7 +230,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update asset type attribute.</summary>
     [HttpPut("attributes/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTypeAttributeDto>> UpdateAssetTypeAttribute(
         Guid id,
         [FromBody] UpdateAssetTypeAttributeDto dto)
@@ -250,7 +244,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete asset type attribute.</summary>
     [HttpDelete("attributes/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteAssetTypeAttribute(Guid id)
     {
         await _assetTypeAttributeService.DeleteAsync(id);
@@ -263,7 +257,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List all assets for a tenant.</summary>
     [HttpGet]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<CompanyAssetSummaryDto>>> GetAssets()
     {
         var result = await _companyAssetService.GetAllAsync();
@@ -272,7 +266,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Paged assets.</summary>
     [HttpGet("paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<CompanyAssetSummaryDto>>> GetAssetsPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -286,7 +280,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get asset by id.</summary>
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<CompanyAssetDto>> GetAsset(Guid id)
     {
         var result = await _companyAssetService.GetByIdAsync(id);
@@ -295,7 +289,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get asset with details.</summary>
     [HttpGet("{id:guid}/details")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<CompanyAssetDetailDto>> GetAssetDetails(Guid id)
     {
         var result = await _companyAssetService.GetWithDetailsAsync(id);
@@ -304,7 +298,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Assets by status.</summary>
     [HttpGet("status/{status}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<CompanyAssetSummaryDto>>> GetAssetsByStatus(CompanyAssetStatus status)
     {
         var result = await _companyAssetService.GetByStatusAsync(status);
@@ -313,7 +307,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Assets by type.</summary>
     [HttpGet("types/{assetTypeId:guid}/assets")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<CompanyAssetSummaryDto>>> GetAssetsByType(Guid assetTypeId)
     {
         var result = await _companyAssetService.GetByAssetTypeAsync(assetTypeId);
@@ -322,7 +316,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Available assets for assignment.</summary>
     [HttpGet("available")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<CompanyAssetSummaryDto>>> GetAvailableAssets()
     {
         var result = await _companyAssetService.GetAvailableForAssignmentAsync();
@@ -351,7 +345,7 @@ public class AssetsController : ControllerBase
     /// today — the same seam the reminder preview offers, for the same reason.</para>
     /// </remarks>
     [HttpGet("due-maintenance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceDueDto>>> GetDueForMaintenance(
         [FromQuery] int daysAhead = 30,
         [FromQuery] DateOnly? asOf = null)
@@ -367,7 +361,7 @@ public class AssetsController : ControllerBase
     /// people, and eleven overdue rows inside a list of two hundred due ones are lost rows.
     /// </remarks>
     [HttpGet("overdue-maintenance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceDueDto>>> GetOverdueMaintenance(
         [FromQuery] DateOnly? asOf = null)
     {
@@ -383,7 +377,7 @@ public class AssetsController : ControllerBase
     /// monitoring feature must not lose, since nothing about it will ever become due.
     /// </remarks>
     [HttpGet("unscheduled-maintenance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceDueDto>>> GetUnscheduledMaintenance()
     {
         var result = await _companyAssetService.GetUnscheduledMaintenanceAsync();
@@ -403,7 +397,7 @@ public class AssetsController : ControllerBase
     /// rather than TDC's — flagged with the area's other assumed windows.
     /// </remarks>
     [HttpGet("insurance/expiring")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetInsuranceWatchItemDto>>> GetInsuranceExpiring(
         [FromQuery] int daysAhead = 60,
         [FromQuery] DateOnly? asOf = null)
@@ -420,7 +414,7 @@ public class AssetsController : ControllerBase
     /// lost rows.
     /// </remarks>
     [HttpGet("insurance/expired")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetInsuranceWatchItemDto>>> GetInsuranceExpired(
         [FromQuery] DateOnly? asOf = null)
     {
@@ -436,7 +430,7 @@ public class AssetsController : ControllerBase
     /// likely to be a claim nobody can actually make.
     /// </remarks>
     [HttpGet("insurance/undated")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetInsuranceWatchItemDto>>> GetInsuranceUndated()
     {
         var result = await _companyAssetService.GetInsuranceUndatedAsync();
@@ -451,7 +445,7 @@ public class AssetsController : ControllerBase
     /// that location's overdue count and not the organisation's.
     /// </remarks>
     [HttpGet("reports/register")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetRegisterReportDto>> GetRegisterReport(
         [FromQuery] Guid? assetTypeId = null,
         [FromQuery] Guid? unitId = null,
@@ -474,7 +468,7 @@ public class AssetsController : ControllerBase
     /// screen nowhere.
     /// </remarks>
     [HttpGet("maintenance-assets/linkable")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<MaintenanceAssetPickDto>>> GetLinkableMaintenanceAssets(
         [FromQuery] string? searchTerm = null)
     {
@@ -489,7 +483,7 @@ public class AssetsController : ControllerBase
     /// did not resend. Linking is one fact and gets one door.
     /// </remarks>
     [HttpPost("{id:guid}/maintenance-link")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<CompanyAssetDto>> LinkMaintenanceAsset(
         Guid id,
         [FromBody] LinkMaintenanceAssetDto dto)
@@ -501,7 +495,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Severs the link. Refused while the asset is at the workshop.</summary>
     [HttpDelete("{id:guid}/maintenance-link")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<ActionResult<CompanyAssetDto>> UnlinkMaintenanceAsset(Guid id)
     {
         var result = await _companyAssetService.UnlinkMaintenanceAssetAsync(id);
@@ -515,7 +509,7 @@ public class AssetsController : ControllerBase
     /// workshop, or if it is disposed or lost — each in words.
     /// </remarks>
     [HttpPost("{id:guid}/send-for-maintenance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetMaintenanceDto>> SendForMaintenance(
         Guid id,
         [FromBody] SendAssetForMaintenanceDto dto)
@@ -527,7 +521,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Every workshop admission raised for an asset, newest first.</summary>
     [HttpGet("{id:guid}/workshop-history")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceSummaryDto>>> GetWorkshopHistory(Guid id)
     {
         var result = await _maintenanceService.GetWorkshopHistoryAsync(id);
@@ -536,7 +530,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>AST-11 — the Finance fixed assets HR could register, already-linked ones flagged.</summary>
     [HttpGet("fixed-assets/linkable")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<FixedAssetPickDto>>> GetLinkableFixedAssets(
         [FromQuery] string? searchTerm = null)
     {
@@ -546,7 +540,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>AST-11 — register an HR asset that stands for an existing Finance fixed asset.</summary>
     [HttpPost("from-fixed-asset")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<CompanyAssetDto>> CreateAssetFromFixedAsset(
         [FromBody] CreateAssetFromFixedAssetDto dto)
     {
@@ -556,7 +550,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create asset.</summary>
     [HttpPost]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<CompanyAssetDto>> CreateAsset([FromBody] CreateCompanyAssetDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -566,7 +560,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update asset.</summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<CompanyAssetDto>> UpdateAsset(
         Guid id,
         [FromBody] UpdateCompanyAssetDto dto)
@@ -580,7 +574,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete asset.</summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteAsset(Guid id)
     {
         await _companyAssetService.DeleteAsync(id);
@@ -589,7 +583,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Dispose asset.</summary>
     [HttpPost("{id:guid}/dispose")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> DisposeAsset(
         Guid id,
         [FromBody] DisposeAssetDto dto)
@@ -605,7 +599,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get attribute values for asset.</summary>
     [HttpGet("{assetId:guid}/attribute-values")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetAttributeValueDto>>> GetAssetAttributeValues(Guid assetId)
     {
         var result = await _attributeValueService.GetByAssetIdAsync(assetId);
@@ -614,7 +608,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get attribute value by id.</summary>
     [HttpGet("attribute-values/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetAttributeValueDto>> GetAssetAttributeValue(Guid id)
     {
         var result = await _attributeValueService.GetByIdAsync(id);
@@ -623,7 +617,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create attribute value.</summary>
     [HttpPost("{assetId:guid}/attribute-values")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetAttributeValueDto>> CreateAttributeValue(
         Guid assetId,
         [FromBody] CreateAssetAttributeValueDto dto)
@@ -635,7 +629,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update attribute value.</summary>
     [HttpPut("attribute-values/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetAttributeValueDto>> UpdateAttributeValue(
         Guid id,
         [FromBody] UpdateAssetAttributeValueDto dto)
@@ -649,7 +643,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete attribute value.</summary>
     [HttpDelete("attribute-values/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteAttributeValue(Guid id)
     {
         await _attributeValueService.DeleteAsync(id);
@@ -672,7 +666,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List assignments for tenant.</summary>
     [HttpGet("assignments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetAssignments()
     {
         var result = await _assignmentService.GetAllAsync();
@@ -681,7 +675,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Paged assignments.</summary>
     [HttpGet("assignments/paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<AssetAssignmentSummaryDto>>> GetAssignmentsPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -694,7 +688,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Assignments by asset.</summary>
     [HttpGet("assignments/asset/{assetId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetAssignmentsByAsset(Guid assetId)
     {
         var result = await _assignmentService.GetByAssetIdAsync(assetId);
@@ -703,7 +697,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Current active assignment for asset.</summary>
     [HttpGet("assignments/asset/{assetId:guid}/current")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetAssignmentDto>> GetCurrentAssignmentByAsset(Guid assetId)
     {
         var result = await _assignmentService.GetActiveAssignmentForAssetAsync(assetId);
@@ -736,7 +730,7 @@ public class AssetsController : ControllerBase
     /// that cannot put its worst row at the top is a list somebody reads once.
     /// </remarks>
     [HttpGet("assignments/overdue")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetOverdueAssignments(
         [FromQuery] DateOnly? asOf = null)
     {
@@ -751,7 +745,7 @@ public class AssetsController : ControllerBase
     /// question somebody arranging a handover actually has — had no answer anywhere.
     /// </remarks>
     [HttpGet("assignments/due-for-return")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetAssignmentSummaryDto>>> GetAssignmentsDueForReturn(
         [FromQuery] int daysAhead = 14,
         [FromQuery] DateOnly? asOf = null)
@@ -762,7 +756,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create assignment.</summary>
     [HttpPost("assignments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetAssignmentDto>> CreateAssignment([FromBody] CreateAssetAssignmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -772,7 +766,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update assignment.</summary>
     [HttpPut("assignments/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetAssignmentDto>> UpdateAssignment(
         Guid id,
         [FromBody] UpdateAssetAssignmentDto dto)
@@ -786,7 +780,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete assignment.</summary>
     [HttpDelete("assignments/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteAssignment(Guid id)
     {
         await _assignmentService.DeleteAsync(id);
@@ -842,7 +836,7 @@ public class AssetsController : ControllerBase
     /// same reason the return is: it closes a custody and changes what the register says an asset is.
     /// </remarks>
     [HttpPost("assignments/{id:guid}/report-incident")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> ReportAssignmentIncident(
         Guid id,
         [FromBody] ReportAssetIncidentDto dto)
@@ -854,7 +848,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Return assigned asset.</summary>
     [HttpPost("assignments/{id:guid}/return")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> ReturnAsset(
         Guid id,
         [FromBody] ReturnAssetDto dto)
@@ -870,7 +864,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get maintenance by id.</summary>
     [HttpGet("maintenance/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetMaintenanceDto>> GetMaintenance(Guid id)
     {
         var result = await _maintenanceService.GetByIdAsync(id);
@@ -879,7 +873,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List maintenance records.</summary>
     [HttpGet("maintenance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceSummaryDto>>> GetMaintenanceList()
     {
         var result = await _maintenanceService.GetAllAsync();
@@ -888,7 +882,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Paged maintenance records.</summary>
     [HttpGet("maintenance/paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<AssetMaintenanceSummaryDto>>> GetMaintenancePaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -901,7 +895,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Maintenance by asset.</summary>
     [HttpGet("maintenance/asset/{assetId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceSummaryDto>>> GetMaintenanceByAsset(Guid assetId)
     {
         var result = await _maintenanceService.GetByAssetIdAsync(assetId);
@@ -910,7 +904,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Scheduled maintenance in range.</summary>
     [HttpGet("maintenance/schedule")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetMaintenanceSummaryDto>>> GetScheduledMaintenance(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to)
@@ -921,7 +915,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create maintenance.</summary>
     [HttpPost("maintenance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetMaintenanceDto>> CreateMaintenance([FromBody] CreateAssetMaintenanceDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -931,7 +925,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update maintenance.</summary>
     [HttpPut("maintenance/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetMaintenanceDto>> UpdateMaintenance(
         Guid id,
         [FromBody] UpdateAssetMaintenanceDto dto)
@@ -945,7 +939,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Complete maintenance.</summary>
     [HttpPost("maintenance/{id:guid}/complete")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> CompleteMaintenance(
         Guid id,
         [FromBody] string? completionNotes = null)
@@ -956,7 +950,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete maintenance.</summary>
     [HttpDelete("maintenance/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteMaintenance(Guid id)
     {
         await _maintenanceService.DeleteAsync(id);
@@ -969,7 +963,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get image by id.</summary>
     [HttpGet("images/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetImageDto>> GetImage(Guid id)
     {
         var result = await _assetImageService.GetByIdAsync(id);
@@ -978,7 +972,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List images for asset.</summary>
     [HttpGet("{assetId:guid}/images")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetImageDto>>> GetImages(Guid assetId)
     {
         var result = await _assetImageService.GetByAssetIdAsync(assetId);
@@ -1001,7 +995,7 @@ public class AssetsController : ControllerBase
     /// are evidence in a money claim against a named employee.</para>
     /// </remarks>
     [HttpPost("{assetId:guid}/images")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     [RequestSizeLimit(25 * 1024 * 1024)]
     public async Task<IActionResult> AddImage(
         Guid assetId,
@@ -1051,7 +1045,7 @@ public class AssetsController : ControllerBase
     /// to it — <c>filePath</c> on the DTO is a stored location, never a URL.
     /// </summary>
     [HttpGet("images/{id:guid}/download")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<IActionResult> DownloadImage(Guid id, CancellationToken cancellationToken = default)
     {
         if (_currentUser.TenantId is not Guid tenantId)
@@ -1072,7 +1066,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete image.</summary>
     [HttpDelete("images/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteImage(Guid id)
     {
         await _assetImageService.DeleteAsync(id);
@@ -1085,7 +1079,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get attachment by id.</summary>
     [HttpGet("attachments/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetAttachmentDto>> GetAttachment(Guid id)
     {
         var result = await _attachmentService.GetByIdAsync(id);
@@ -1094,7 +1088,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List attachments for asset.</summary>
     [HttpGet("{assetId:guid}/attachments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetAttachmentDto>>> GetAttachments(Guid assetId)
     {
         var result = await _attachmentService.GetByAssetIdAsync(assetId);
@@ -1107,7 +1101,7 @@ public class AssetsController : ControllerBase
     /// certificate, the manual. Multipart; see <see cref="AddImage"/> for what it replaced.
     /// </summary>
     [HttpPost("{assetId:guid}/attachments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     [RequestSizeLimit(25 * 1024 * 1024)]
     public async Task<IActionResult> AddAttachment(
         Guid assetId,
@@ -1154,7 +1148,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Streams an asset document. The only way to the bytes — see <see cref="DownloadImage"/>.</summary>
     [HttpGet("attachments/{id:guid}/download")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<IActionResult> DownloadAttachment(Guid id, CancellationToken cancellationToken = default)
     {
         if (_currentUser.TenantId is not Guid tenantId)
@@ -1172,7 +1166,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete attachment.</summary>
     [HttpDelete("attachments/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteAttachment(Guid id)
     {
         await _attachmentService.DeleteAsync(id);
@@ -1195,7 +1189,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List requisitions.</summary>
     [HttpGet("requisitions")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetRequisitionSummaryDto>>> GetRequisitions()
     {
         var result = await _requisitionService.GetAllAsync();
@@ -1204,7 +1198,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Paged requisitions.</summary>
     [HttpGet("requisitions/paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<AssetRequisitionSummaryDto>>> GetRequisitionsPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -1227,7 +1221,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Pending approvals.</summary>
     [HttpGet("requisitions/pending-approvals")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetRequisitionSummaryDto>>> GetPendingRequisitionApprovals()
     {
         var result = await _requisitionService.GetPendingApprovalsAsync();
@@ -1299,7 +1293,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Approve requisition.</summary>
     [HttpPost("requisitions/{id:guid}/approve")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> ApproveRequisition(
         Guid id,
         [FromBody] ApproveAssetRequisitionDto dto)
@@ -1310,7 +1304,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Reject requisition.</summary>
     [HttpPost("requisitions/{id:guid}/reject")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> RejectRequisition(
         Guid id,
         [FromBody] RejectAssetRequisitionDto dto)
@@ -1321,7 +1315,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Fulfill requisition.</summary>
     [HttpPost("requisitions/{id:guid}/fulfill")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> FulfillRequisition(
         Guid id,
         [FromBody] FulfillAssetRequisitionDto dto)
@@ -1336,7 +1330,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Get transfer by id.</summary>
     [HttpGet("transfers/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<AssetTransferDto>> GetTransfer(Guid id)
     {
         var result = await _transferService.GetByIdAsync(id);
@@ -1345,7 +1339,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>List transfers.</summary>
     [HttpGet("transfers")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetTransferSummaryDto>>> GetTransfers()
     {
         var result = await _transferService.GetAllAsync();
@@ -1354,7 +1348,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Paged transfers.</summary>
     [HttpGet("transfers/paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<AssetTransferSummaryDto>>> GetTransfersPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -1367,7 +1361,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Transfers by asset.</summary>
     [HttpGet("transfers/asset/{assetId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetTransferSummaryDto>>> GetTransfersByAsset(Guid assetId)
     {
         var result = await _transferService.GetByAssetIdAsync(assetId);
@@ -1376,7 +1370,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Pending transfers.</summary>
     [HttpGet("transfers/pending")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetTransferSummaryDto>>> GetPendingTransfers()
     {
         var result = await _transferService.GetPendingTransfersAsync();
@@ -1385,7 +1379,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Create transfer.</summary>
     [HttpPost("transfers")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTransferDto>> CreateTransfer([FromBody] CreateAssetTransferDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -1395,7 +1389,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Update transfer.</summary>
     [HttpPut("transfers/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTransferDto>> UpdateTransfer(
         Guid id,
         [FromBody] UpdateAssetTransferDto dto)
@@ -1409,7 +1403,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Delete transfer.</summary>
     [HttpDelete("transfers/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteTransfer(Guid id)
     {
         await _transferService.DeleteAsync(id);
@@ -1418,7 +1412,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Submit a draft transfer for approval.</summary>
     [HttpPost("transfers/{id:guid}/submit")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTransferDto>> SubmitTransfer(Guid id)
     {
         var result = await _transferService.SubmitAsync(id);
@@ -1427,7 +1421,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Recall a submitted transfer back to draft.</summary>
     [HttpPost("transfers/{id:guid}/recall")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetTransferDto>> RecallTransfer(
         Guid id,
         [FromBody] RecallAssetRequestDto? dto = null)
@@ -1438,7 +1432,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Approve transfer.</summary>
     [HttpPost("transfers/{id:guid}/approve")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> ApproveTransfer(Guid id)
     {
         await _transferService.ApproveAsync(id);
@@ -1447,7 +1441,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Complete transfer.</summary>
     [HttpPost("transfers/{id:guid}/complete")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> CompleteTransfer(Guid id)
     {
         await _transferService.CompleteAsync(id);
@@ -1456,7 +1450,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Reject transfer.</summary>
     [HttpPost("transfers/{id:guid}/reject")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> RejectTransfer(Guid id)
     {
         await _transferService.RejectAsync(id);
@@ -1482,12 +1476,12 @@ public class AssetsController : ControllerBase
 
     /// <summary>Every surcharge on the tenant.</summary>
     [HttpGet("surcharges")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetSurcharges()
         => Ok(await _surchargeService.GetAllAsync());
 
     [HttpGet("surcharges/paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<PagedResult<AssetSurchargeSummaryDto>>> GetSurchargesPaged(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
@@ -1502,13 +1496,13 @@ public class AssetsController : ControllerBase
         => Ok(await _surchargeService.GetByEmployeeIdAsync(employeeId));
 
     [HttpGet("assignments/{assignmentId:guid}/surcharges")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetSurchargesForAssignment(Guid assignmentId)
         => Ok(await _surchargeService.GetByAssignmentIdAsync(assignmentId));
 
     /// <summary>Decided charges that still carry a balance — what this module says is owed.</summary>
     [HttpGet("surcharges/outstanding")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetSurchargeSummaryDto>>> GetOutstandingSurcharges()
         => Ok(await _surchargeService.GetOutstandingAsync());
 
@@ -1520,12 +1514,12 @@ public class AssetsController : ControllerBase
     /// Nothing here computes a payslip. See the payroll ownership boundary and decision D2.
     /// </remarks>
     [HttpGet("surcharges/payroll-deductions")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetSurchargePayrollLineDto>>> GetSurchargePayrollLines()
         => Ok(await _surchargeService.GetPayrollDeductionLinesAsync());
 
     [HttpPost("surcharges")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> CreateSurcharge([FromBody] CreateAssetSurchargeDto dto)
     {
         var created = await _surchargeService.CreateAsync(dto);
@@ -1533,14 +1527,14 @@ public class AssetsController : ControllerBase
     }
 
     [HttpPut("surcharges/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> UpdateSurcharge(
         Guid id,
         [FromBody] UpdateAssetSurchargeDto dto)
         => Ok(await _surchargeService.UpdateAsync(id, dto));
 
     [HttpDelete("surcharges/{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<IActionResult> DeleteSurcharge(Guid id)
     {
         await _surchargeService.DeleteAsync(id);
@@ -1549,7 +1543,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Puts the charge to the employee. Until this, they cannot see it — decision D9.</summary>
     [HttpPost("surcharges/{id:guid}/notify-employee")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> NotifySurchargeEmployee(Guid id)
         => Ok(await _surchargeService.NotifyEmployeeAsync(id));
 
@@ -1569,21 +1563,21 @@ public class AssetsController : ControllerBase
 
     /// <summary>Sends the charge for approval — refused until the employee has been asked.</summary>
     [HttpPost("surcharges/{id:guid}/submit")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> SubmitSurcharge(
         Guid id,
         [FromBody] SubmitAssetSurchargeDto? dto = null)
         => Ok(await _surchargeService.SubmitAsync(id, dto ?? new SubmitAssetSurchargeDto()));
 
     [HttpPost("surcharges/{id:guid}/recall")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> RecallSurcharge(
         Guid id,
         [FromBody] RecallAssetRequestDto? dto = null)
         => Ok(await _surchargeService.RecallAsync(id, dto?.Reason));
 
     [HttpPost("surcharges/{id:guid}/approve")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> ApproveSurcharge(
         Guid id,
         [FromBody] ApproveAssetSurchargeDto dto)
@@ -1593,7 +1587,7 @@ public class AssetsController : ControllerBase
     }
 
     [HttpPost("surcharges/{id:guid}/reject")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<IActionResult> RejectSurcharge(
         Guid id,
         [FromBody] RejectAssetSurchargeDto dto)
@@ -1604,7 +1598,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>How the approved amount is to be recovered — declared, not deducted.</summary>
     [HttpPut("surcharges/{id:guid}/recovery-plan")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> SetSurchargeRecoveryPlan(
         Guid id,
         [FromBody] SetAssetSurchargeRecoveryPlanDto dto)
@@ -1612,7 +1606,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Records money actually collected. Cannot take more than is outstanding.</summary>
     [HttpPost("surcharges/{id:guid}/recoveries")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> RecordSurchargeRecovery(
         Guid id,
         [FromBody] RecordAssetSurchargeRecoveryDto dto)
@@ -1620,7 +1614,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Forgives what is still outstanding. What was collected stays collected.</summary>
     [HttpPost("surcharges/{id:guid}/waive")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> WaiveSurcharge(
         Guid id,
         [FromBody] WaiveAssetSurchargeDto dto)
@@ -1628,7 +1622,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Withdraws a charge raised in error, before anybody has ruled on it.</summary>
     [HttpPost("surcharges/{id:guid}/cancel")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetSurchargeDto>> CancelSurcharge(
         Guid id,
         [FromBody] CancelAssetSurchargeDto dto)
@@ -1646,7 +1640,7 @@ public class AssetsController : ControllerBase
     /// the projection below and runs its own deduction (decision D2).
     /// </remarks>
     [HttpPut("assignments/{id:guid}/rental-terms")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetAssignmentDto>> SetAssignmentRentalTerms(
         Guid id,
         [FromBody] SetAssetRentalTermsDto dto)
@@ -1654,7 +1648,7 @@ public class AssetsController : ControllerBase
 
     /// <summary>Remove rental terms declared in error — not the way to end a tenancy that ran.</summary>
     [HttpDelete("assignments/{id:guid}/rental-terms")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsAdminPolicy)]
     public async Task<ActionResult<AssetAssignmentDto>> ClearAssignmentRentalTerms(Guid id)
         => Ok(await _assignmentService.ClearRentalTermsAsync(id));
 
@@ -1671,7 +1665,7 @@ public class AssetsController : ControllerBase
     /// module's period boundaries in the one place a mistake reaches somebody's take-home pay.</para>
     /// </remarks>
     [HttpGet("payroll/rental-deductions")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetRentalPayrollLineDto>>> GetRentalPayrollLines(
         [FromQuery] string? period = null,
         [FromQuery] DateOnly? from = null,

@@ -31,8 +31,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [DisciplineBusinessRules]
 public class StaffDisciplineCasesController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffDisciplinaryCaseService _caseService;
     private readonly ICurrentUserService _currentUser;
 
@@ -49,23 +47,24 @@ public class StaffDisciplineCasesController : ControllerBase
     /// "Admin" is included because the seeded administrator account is not in the HR role but is
     /// expected to be able to administer the module.
     /// </summary>
-    private bool IsHr =>
-        _currentUser.IsInRole(Constants.Roles.Hr) ||
-        _currentUser.IsInRole(Constants.Roles.SuperAdmin) ||
-        _currentUser.IsInRole("Admin");
+    private async Task<bool> HoldsAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     // =========================================================================
     // QUERIES
     // =========================================================================
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet]
     public async Task<ActionResult<PagedResult<StaffDisciplinaryActionSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20)
         => Ok(await _caseService.GetPagedAsync(pageNumber, pageSize));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("open")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetAllOpen()
         => Ok(await _caseService.GetAllOpenAsync());
@@ -93,43 +92,44 @@ public class StaffDisciplineCasesController : ControllerBase
     {
         var disciplinaryCase = await _caseService.GetByIdAsync(id);
 
-        if (!IsHr && disciplinaryCase.EmployeeId != _currentUser.EmployeeId)
+        if (disciplinaryCase.EmployeeId != _currentUser.EmployeeId &&
+            !await HoldsAsync(HrPermissions.DisciplineReadPolicy))
             return Forbid();
 
         return Ok(disciplinaryCase);
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("number/{caseNumber}")]
     public async Task<ActionResult<StaffDisciplinaryActionDto?>> GetByCaseNumber(string caseNumber)
         => Ok(await _caseService.GetByCaseNumberAsync(caseNumber));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetByEmployee(Guid employeeId)
         => Ok(await _caseService.GetByEmployeeAsync(employeeId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("employee/{employeeId:guid}/open-count")]
     public async Task<ActionResult<int>> GetOpenCountForEmployee(Guid employeeId)
         => Ok(await _caseService.GetOpenCaseCountForEmployeeAsync(employeeId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("status/{status}")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetByStatus(DisciplinaryStatus status)
         => Ok(await _caseService.GetByStatusAsync(status));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("offense/{offenseId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetByOffense(Guid offenseId)
         => Ok(await _caseService.GetByOffenseAsync(offenseId));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("severity/{severity}")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetBySeverity(StaffOffenseSeverity severity)
         => Ok(await _caseService.GetBySeverityAsync(severity));
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("date-range")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetByDateRange(
         [FromQuery] DateTime from,
@@ -142,52 +142,52 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(await _caseService.GetByIncidentDateRangeAsync(from, to));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("pending/investigation")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetPendingInvestigation()
         => Ok(await _caseService.GetPendingInvestigationAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("pending/hearing")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetPendingHearing()
         => Ok(await _caseService.GetPendingHearingAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("pending/closure")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetPendingClosure()
         => Ok(await _caseService.GetPendingClosureAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("with/active-warning")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetWithActiveWarning()
         => Ok(await _caseService.GetWithActiveWarningAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("with/active-suspension")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetWithActiveSuspension()
         => Ok(await _caseService.GetWithActiveSuspensionAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("with/outstanding-fine")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetWithOutstandingFine()
         => Ok(await _caseService.GetWithOutstandingFineAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("with/pending-termination")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetWithPendingTermination()
         => Ok(await _caseService.GetWithPendingTerminationAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("with/active-appeal")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetWithActiveAppeal()
         => Ok(await _caseService.GetWithActiveAppealAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("with/active-legal-review")]
     public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetWithActiveLegalReview()
         => Ok(await _caseService.GetWithActiveLegalReviewAsync());
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("number/{caseNumber}/exists")]
     public async Task<ActionResult<bool>> CaseNumberExists(string caseNumber)
     {
@@ -196,7 +196,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(await _caseService.CaseNumberExistsAsync(caseNumber, tenantId.Value));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("dashboard")]
     public async Task<ActionResult<StaffDisciplineDashboardDto>> GetDashboard()
         => Ok(await _caseService.GetDashboardAsync());
@@ -210,7 +210,7 @@ public class StaffDisciplineCasesController : ControllerBase
     /// HR routinely records an allegation on behalf of the person who made it, but nobody else may
     /// attribute a report to another employee.
     /// </summary>
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffDisciplinaryActionDto>> Create([FromBody] CreateStaffDisciplinaryActionDto dto)
     {
@@ -222,14 +222,14 @@ public class StaffDisciplineCasesController : ControllerBase
         if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        if (!IsHr || dto.ReportedById == Guid.Empty)
+        if (!await HoldsAsync(HrPermissions.DisciplineWritePolicy) || dto.ReportedById == Guid.Empty)
             dto.ReportedById = employeeId.Value;
 
         var created = await _caseService.CreateAsync(dto, tenantId.Value, employeeId.Value);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffDisciplinaryActionDto>> Update(Guid id, [FromBody] UpdateStaffDisciplinaryActionDto dto)
     {
@@ -239,13 +239,13 @@ public class StaffDisciplineCasesController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        if (!IsHr || dto.ReportedById == Guid.Empty)
+        if (!await HoldsAsync(HrPermissions.DisciplineWritePolicy) || dto.ReportedById == Guid.Empty)
             dto.ReportedById = employeeId.Value;
 
         return Ok(await _caseService.UpdateAsync(dto, employeeId.Value));
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -257,7 +257,7 @@ public class StaffDisciplineCasesController : ControllerBase
     // WORKFLOW TRANSITIONS
     // =========================================================================
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/submit")]
     public async Task<IActionResult> Submit(Guid id)
     {
@@ -268,7 +268,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Case submitted." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/start-review")]
     public async Task<IActionResult> StartReview(Guid id)
     {
@@ -279,7 +279,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Case moved to Under Review." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/decision")]
     public async Task<IActionResult> RecordDecision(Guid id, [FromBody] RecordDisciplinaryDecisionDto dto)
     {
@@ -307,7 +307,8 @@ public class StaffDisciplineCasesController : ControllerBase
     {
         var disciplinaryCase = await _caseService.GetByIdAsync(id);
 
-        if (!IsHr && disciplinaryCase.EmployeeId != _currentUser.EmployeeId)
+        if (disciplinaryCase.EmployeeId != _currentUser.EmployeeId &&
+            !await HoldsAsync(HrPermissions.DisciplineReadPolicy))
             return Forbid();
 
         return Ok(await _caseService.GetProcessClockAsync(id));
@@ -322,7 +323,7 @@ public class StaffDisciplineCasesController : ControllerBase
     /// that nobody is sanctioned unheard. It requires a reason, it is written onto the case, and it
     /// is logged at warning level.
     /// </remarks>
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/waive-query-opportunity")]
     public async Task<IActionResult> WaiveQueryOpportunity(Guid id, [FromBody] WaiveQueryOpportunityDto dto)
     {
@@ -370,7 +371,7 @@ public class StaffDisciplineCasesController : ControllerBase
     }
 
     /// <summary>Recall is the proposing officer's, so this one stays HR-gated with the rest of the decision path.</summary>
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/recall-decision")]
     public async Task<IActionResult> RecallDecision(Guid id, [FromBody] DisciplinaryDecisionActionDto? dto = null)
     {
@@ -381,7 +382,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Decision recalled." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/close")]
     public async Task<IActionResult> CloseCase(Guid id, [FromBody] CloseDisciplinaryCaseDto dto)
     {
@@ -395,7 +396,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Case closed." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/hold")]
     public async Task<IActionResult> PutOnHold(Guid id)
     {
@@ -406,7 +407,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Case put on hold." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/reactivate")]
     public async Task<IActionResult> Reactivate(Guid id)
     {
@@ -417,7 +418,7 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Case reactivated." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
     [HttpPost("{id:guid}/dismiss")]
     public async Task<IActionResult> Dismiss(Guid id)
     {

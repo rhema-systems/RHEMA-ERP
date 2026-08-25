@@ -23,7 +23,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/assets/reminders")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class AssetRemindersController : ControllerBase
 {
     private readonly IAssetReminderService _service;
@@ -39,6 +39,7 @@ public class AssetRemindersController : ControllerBase
 
     /// <summary>Runs a sweep for the authenticated tenant now. Safe to repeat.</summary>
     [HttpPost("run")]
+    [Authorize(Policy = HrPermissions.AssetsWritePolicy)]
     public async Task<ActionResult<AssetReminderRunResultDto>> Run()
     {
         if (_currentUser.TenantId is not Guid tenantId)
@@ -59,15 +60,18 @@ public class AssetRemindersController : ControllerBase
     /// a future date cannot rob the real sweep of a reminder.
     /// </remarks>
     [HttpGet("preview")]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetReminderPreviewItemDto>>> Preview(
         [FromQuery] DateTime? asOf = null)
         => Ok(await _service.PreviewSweepAsync(asOf));
 
     [HttpGet("runs")]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetReminderRunDto>>> GetRuns([FromQuery] int count = 20)
         => Ok(await _service.GetRecentRunsAsync(count));
 
     [HttpGet("log")]
+    [Authorize(Policy = HrPermissions.AssetsReadPolicy)]
     public async Task<ActionResult<IEnumerable<AssetReminderLogEntryDto>>> GetLog([FromQuery] int days = 14)
         => Ok(await _service.GetRecentLogAsync(days));
 }

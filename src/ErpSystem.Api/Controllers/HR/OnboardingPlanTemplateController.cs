@@ -12,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [OrientationBusinessRules]
 [Route("api/onboarding-plan-templates")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class OnboardingPlanTemplateController : ControllerBase
 {
     private readonly IOnboardingPlanTemplateService _service;
@@ -30,14 +30,17 @@ public class OnboardingPlanTemplateController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingPlanTemplateSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}/with-tasks")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDetailDto>> GetWithTaskTemplates(Guid id)
         => Ok(await _service.GetWithTaskTemplatesAsync(id));
 
@@ -52,6 +55,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     // Callers pick a template from `all`, or fall back to `default`.
 
     [HttpGet("default")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto?>> GetDefault()
         => Ok(await _service.GetDefaultAsync());
 
@@ -60,6 +64,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> Create(
         [FromBody] CreateOnboardingPlanTemplateDto dto)
     {
@@ -78,6 +83,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> Update(
         Guid id, [FromBody] UpdateOnboardingPlanTemplateDto dto)
     {
@@ -92,6 +98,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -103,10 +110,12 @@ public class OnboardingPlanTemplateController : ControllerBase
     // =========================================================================
 
     [HttpGet("{planTemplateId:guid}/task-templates")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskTemplateDto>>> GetTaskTemplates(Guid planTemplateId)
         => Ok(await _service.GetTaskTemplatesAsync(planTemplateId));
 
     [HttpPost("{planTemplateId:guid}/task-templates")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskTemplateDto>> AddTaskTemplate(
         Guid planTemplateId, [FromBody] CreateOnboardingTaskTemplateDto dto)
     {
@@ -124,6 +133,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpPut("task-templates/{taskTemplateId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskTemplateDto>> UpdateTaskTemplate(
         Guid taskTemplateId, [FromBody] UpdateOnboardingTaskTemplateDto dto)
     {
@@ -138,6 +148,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpDelete("task-templates/{taskTemplateId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeleteTaskTemplate(Guid taskTemplateId)
     {
         await _service.DeleteTaskTemplateAsync(taskTemplateId);

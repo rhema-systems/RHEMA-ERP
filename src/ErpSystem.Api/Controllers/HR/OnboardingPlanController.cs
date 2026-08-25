@@ -21,7 +21,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [OrientationBusinessRules]
 [Route("api/onboarding-plans")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class OnboardingPlanController : ControllerBase
 {
     private readonly IOnboardingPlanService _service;
@@ -38,22 +38,27 @@ public class OnboardingPlanController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("employee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanDto?>> GetByEmployee(Guid employeeId)
         => Ok(await _service.GetByEmployeeIdAsync(employeeId));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanDetailDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithFullDetailsAsync(id));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingPlanSummaryDto>>> GetByStatus(OnboardingStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
     [HttpGet("{planId:guid}/overdue-tasks/count")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<int>> GetOverdueTasksCount(Guid planId)
         => Ok(await _service.GetOverdueTasksCountAsync(planId));
 
@@ -62,6 +67,7 @@ public class OnboardingPlanController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanDto>> Create([FromBody] CreateOnboardingPlanDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -79,6 +85,7 @@ public class OnboardingPlanController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanDto>> Update(Guid id, [FromBody] UpdateOnboardingPlanDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -96,6 +103,7 @@ public class OnboardingPlanController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/start")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<IActionResult> Start(Guid id)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -107,6 +115,7 @@ public class OnboardingPlanController : ControllerBase
     }
 
     [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<IActionResult> Complete(Guid id)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -122,28 +131,34 @@ public class OnboardingPlanController : ControllerBase
     // =========================================================================
 
     [HttpGet("{planId:guid}/tasks")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskDto>>> GetTasks(Guid planId)
         => Ok(await _service.GetTasksAsync(planId));
 
     [HttpGet("{planId:guid}/tasks/status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskDto>>> GetTasksByStatus(
         Guid planId, OnboardingTaskStatus status)
         => Ok(await _service.GetTasksByStatusAsync(status, planId));
 
     [HttpGet("tasks/status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskDto>>> GetAllTasksByStatus(
         OnboardingTaskStatus status)
         => Ok(await _service.GetTasksByStatusAsync(status, null));
 
     [HttpGet("tasks/overdue")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskDto>>> GetOverdueTasks()
         => Ok(await _service.GetOverdueTasksAsync());
 
     [HttpGet("tasks/assignee/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskDto>>> GetTasksByAssignee(Guid employeeId)
         => Ok(await _service.GetTasksByAssigneeAsync(employeeId));
 
     [HttpPost("{planId:guid}/tasks")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskDto>> AddTask(
         Guid planId, [FromBody] CreateOnboardingTaskDto dto)
     {
@@ -161,6 +176,7 @@ public class OnboardingPlanController : ControllerBase
     }
 
     [HttpPut("tasks/{taskId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskDto>> UpdateTask(
         Guid taskId, [FromBody] UpdateOnboardingTaskDto dto)
     {
@@ -175,6 +191,7 @@ public class OnboardingPlanController : ControllerBase
     }
 
     [HttpPost("tasks/{taskId:guid}/complete")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskDto>> CompleteTask(
         Guid taskId, [FromBody] CompleteOnboardingTaskDto dto)
     {
@@ -190,6 +207,7 @@ public class OnboardingPlanController : ControllerBase
 
     /// <summary>Second-party sign-off for a task flagged as requiring verification.</summary>
     [HttpPost("tasks/{taskId:guid}/verify")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskDto>> VerifyTask(
         Guid taskId, [FromBody] VerifyOnboardingTaskDto dto)
     {
@@ -208,10 +226,12 @@ public class OnboardingPlanController : ControllerBase
     // =========================================================================
 
     [HttpGet("tasks/{taskId:guid}/comments")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskCommentDto>>> GetTaskComments(Guid taskId)
         => Ok(await _service.GetTaskCommentsAsync(taskId));
 
     [HttpPost("tasks/{taskId:guid}/comments")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskCommentDto>> AddTaskComment(
         Guid taskId, [FromBody] CreateOnboardingTaskCommentDto dto)
     {
@@ -233,20 +253,24 @@ public class OnboardingPlanController : ControllerBase
     // =========================================================================
 
     [HttpGet("{planId:guid}/assets")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingAssetDto>>> GetAssetItems(Guid planId)
         => Ok(await _service.GetAssetItemsAsync(planId));
 
     [HttpGet("{planId:guid}/assets/status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingAssetDto>>> GetAssetsByStatus(
         Guid planId, OnboardingAssetProvisionStatus status)
         => Ok(await _service.GetAssetsByStatusAsync(status, planId));
 
     [HttpGet("assets/status/{status}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingAssetDto>>> GetAllAssetsByStatus(
         OnboardingAssetProvisionStatus status)
         => Ok(await _service.GetAssetsByStatusAsync(status, null));
 
     [HttpPost("{planId:guid}/assets")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingAssetDto>> AddAssetItem(
         Guid planId, [FromBody] CreateOnboardingAssetDto dto)
     {
@@ -264,6 +288,7 @@ public class OnboardingPlanController : ControllerBase
     }
 
     [HttpPut("assets/{assetItemId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingAssetDto>> UpdateAssetItem(
         Guid assetItemId, [FromBody] UpdateOnboardingAssetDto dto)
     {

@@ -39,6 +39,10 @@ public static class HrPermissions
     public const string CategoryPerformance = "HR - Performance";
     public const string CategoryEmployee = "HR - Employee Records & Foundation";
     public const string CategoryShe = "HR - Safety, Health & Environment";
+    public const string CategoryOrientation = "HR - Orientation & Onboarding";
+    public const string CategoryAssets = "HR - Staff Assets";
+    public const string CategoryMovements = "HR - Staff Movements";
+    public const string CategoryDiscipline = "HR - Discipline & Grievance";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -170,6 +174,38 @@ public static class HrPermissions
     public const string SheReadPolicy = "HR.Policy.SheRead";
     public const string SheWritePolicy = "HR.Policy.SheWrite";
     public const string SheAdminPolicy = "HR.Policy.SheAdmin";
+
+    public const string ViewOrientation = "HR.Orientation.Read";
+    public const string MaintainOrientation = "HR.Orientation.Write";
+    public const string AdministerOrientation = "HR.Orientation.Admin";
+
+    public const string OrientationReadPolicy = "HR.Policy.OrientationRead";
+    public const string OrientationWritePolicy = "HR.Policy.OrientationWrite";
+    public const string OrientationAdminPolicy = "HR.Policy.OrientationAdmin";
+
+    public const string ViewAssets = "HR.Assets.Read";
+    public const string MaintainAssets = "HR.Assets.Write";
+    public const string AdministerAssets = "HR.Assets.Admin";
+
+    public const string AssetsReadPolicy = "HR.Policy.AssetsRead";
+    public const string AssetsWritePolicy = "HR.Policy.AssetsWrite";
+    public const string AssetsAdminPolicy = "HR.Policy.AssetsAdmin";
+
+    public const string ViewMovements = "HR.Movements.Read";
+    public const string MaintainMovements = "HR.Movements.Write";
+    public const string AdministerMovements = "HR.Movements.Admin";
+
+    public const string MovementsReadPolicy = "HR.Policy.MovementsRead";
+    public const string MovementsWritePolicy = "HR.Policy.MovementsWrite";
+    public const string MovementsAdminPolicy = "HR.Policy.MovementsAdmin";
+
+    public const string ViewDiscipline = "HR.Discipline.Read";
+    public const string MaintainDiscipline = "HR.Discipline.Write";
+    public const string AdministerDiscipline = "HR.Discipline.Admin";
+
+    public const string DisciplineReadPolicy = "HR.Policy.DisciplineRead";
+    public const string DisciplineWritePolicy = "HR.Policy.DisciplineWrite";
+    public const string DisciplineAdminPolicy = "HR.Policy.DisciplineAdmin";
 
     public const string ViewAwards = "HR.Awards.Read";
     public const string MaintainAwards = "HR.Awards.Write";
@@ -331,6 +367,46 @@ public static class HrPermissions
             "Delete employees and their sub-records, decide the legacy lifecycle acts (activate, deactivate, terminate, reinstate — the separation module is the governed exit path), and delete foundation reference data — organization and location nodes, positions, teams, unions and lookup entries.",
             CategoryEmployee),
 
+        new(ViewOrientation, "View Orientation & Onboarding",
+            "View the orientation surface: programs and their content, categories, session schedules and attendance, employee orientation records and progress, notifications and the dashboard. A new joiner does not need this for their own orientation — self access is an ownership check on the endpoint.",
+            CategoryOrientation),
+        new(MaintainOrientation, "Maintain Orientation & Onboarding",
+            "Run the orientation desk: maintain programs, categories and sessions, enroll and progress employees through orientation, record attendance and completion, and send notifications.",
+            CategoryOrientation),
+        new(AdministerOrientation, "Administer Orientation & Onboarding",
+            "Delete orientation records, programs, categories and sessions.",
+            CategoryOrientation),
+
+        new(ViewAssets, "View Staff Assets",
+            "View the staff asset surface: the asset register and assignments, requisitions, returns, surcharges, maintenance and disposal records, asset types and the reminders queue. Employees do not need this for their own assets — the employee portal is token-scoped.",
+            CategoryAssets),
+        new(MaintainAssets, "Maintain Staff Assets",
+            "Run the asset desk: register and assign assets, process requisitions, returns, transfers, maintenance, surcharges and disposals, and maintain asset types and configuration.",
+            CategoryAssets),
+        new(AdministerAssets, "Administer Staff Assets",
+            "Delete asset records, assignments, requisitions and configuration.",
+            CategoryAssets),
+
+        new(ViewMovements, "View Staff Movements",
+            "View the staff movement surface: movements of every type, promotions, transfers, secondments, acting appointments, demotions, career paths and the reminders queue. An employee does not need this for their own movements — the employee portal is token-scoped.",
+            CategoryMovements),
+        new(MaintainMovements, "Maintain Staff Movements",
+            "Run the movements desk: raise and progress movements of every type, implement approved movements, maintain career paths, and process promotions, transfers, secondments, acting appointments and demotions.",
+            CategoryMovements),
+        new(AdministerMovements, "Administer Staff Movements",
+            "Delete movement records and career paths. Approving a movement is NOT this permission — approval belongs to the workflow assignee, validated per movement by the workflow engine.",
+            CategoryMovements),
+
+        new(ViewDiscipline, "View Discipline & Grievance",
+            "View the discipline surface: cases and their charges, hearings, evidence and outcomes, appeals, suspensions, the grievance register, the offense and action-type catalogues and the reminders queue. An accused or aggrieved employee does not need this for their own case — self access is an ownership check on the endpoint.",
+            CategoryDiscipline),
+        new(MaintainDiscipline, "Maintain Discipline & Grievance",
+            "Run the discipline desk: open and progress cases, record charges, hearings, evidence and outcomes, process appeals and suspensions, handle grievances, and maintain the offense and disciplinary-action catalogues.",
+            CategoryDiscipline),
+        new(AdministerDiscipline, "Administer Discipline & Grievance",
+            "Delete discipline and grievance records and catalogue entries. The natural-justice rules (who may decide a case) are enforced on the record by the service, not granted here.",
+            CategoryDiscipline),
+
         new(ViewShe, "View Safety, Health & Environment",
             "View the SHE surface: incident, hazard, stop-work and risk-assessment registers, audits, inspections, committees, safety equipment and signage, PPE, permits to work, contractors, emergency preparedness, environmental compliance and reviews, waste, controlled documents, reference data and the dashboard. Reporting an incident or hazard, raising a stop-work order and reading one's own reports never need this — every internal employee may do those by design.",
             CategoryShe),
@@ -437,7 +513,11 @@ public static class HrPermissions
         ViewAwards, MaintainAwards,
         ViewPerformance, MaintainPerformance,
         ViewEmployees, MaintainEmployees,
-        ViewShe, MaintainShe
+        ViewShe, MaintainShe,
+        ViewOrientation, MaintainOrientation,
+        ViewAssets, MaintainAssets,
+        ViewMovements, MaintainMovements,
+        ViewDiscipline, MaintainDiscipline
     };
 
     /// <summary>

@@ -11,12 +11,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-promotions")]
-[Authorize(Roles = StaffPromotionsController.HrRoles)]
+[Authorize(Policy = "InternalOnly")]
 [MovementBusinessRules]
 public class StaffPromotionsController : ControllerBase
 {
-    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IStaffPromotionService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -31,18 +29,22 @@ public class StaffPromotionsController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffPromotionDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("movement/{movementId:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<StaffPromotionDto?>> GetByMovement(Guid movementId)
         => Ok(await _service.GetByMovementIdAsync(movementId));
 
     [HttpGet("type/{type}")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffPromotionDto>>> GetByType(StaffPromotionType type)
         => Ok(await _service.GetByTypeAsync(type));
 
     [HttpGet("active-acting")]
+    [Authorize(Policy = HrPermissions.MovementsReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffPromotionDto>>> GetActiveActingPromotions()
         => Ok(await _service.GetActiveActingPromotionsAsync());
 
@@ -51,6 +53,7 @@ public class StaffPromotionsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffPromotionDto>> Create([FromBody] CreateStaffPromotionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -66,6 +69,7 @@ public class StaffPromotionsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
     public async Task<ActionResult<StaffPromotionDto>> Update(Guid id, [FromBody] UpdateStaffPromotionDto dto)
     {
         if (id != dto.Id)        return BadRequest("ID mismatch.");
@@ -78,6 +82,7 @@ public class StaffPromotionsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MovementsAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);

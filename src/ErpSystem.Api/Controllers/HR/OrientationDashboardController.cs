@@ -14,7 +14,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [OrientationBusinessRules]
 [Route("api/orientation-dashboard")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class OrientationDashboardController : ControllerBase
 {
     private readonly IOrientationDashboardService _service;
@@ -25,6 +25,7 @@ public class OrientationDashboardController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OrientationDashboardDto>> GetDashboard()
         => Ok(await _service.GetDashboardAsync());
 }
