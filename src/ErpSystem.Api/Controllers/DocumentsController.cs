@@ -31,6 +31,12 @@ public sealed class DocumentsController : ControllerBase
         // Supplier statements disclose counterparty balances and payment/WHT history. Require the
         // explicit Finance export permission for both PDF and native spreadsheet renderings.
         [DocumentTypes.FinanceApSupplierStatement] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApAgingReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApCashRequirements] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApMatchExceptionReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApProcurementReconciliation] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceArAgingReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceArCustomerStatement] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceTrialBalance] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceIncomeStatement] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceBalanceSheet] = FinancePermissions.ExportFinanceReports,

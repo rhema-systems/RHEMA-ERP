@@ -3,6 +3,7 @@
  */
 
 import { apiService } from '@/services/api.service';
+import { documentOutputService } from '@/services/document-output.service';
 import type {
   FixedAsset,
   FixedAssetCategory,
@@ -330,6 +331,14 @@ class FixedAssetsDataService {
     const blob = await response.blob();
     const fileName = `${reportType}_${new Date().toISOString().split('T')[0]}.pdf`;
     return { fileName, blob };
+  }
+
+  async printPdf(reportType: string, query: FixedAssetReportQuery): Promise<void> {
+    const file = await this.downloadPdf(reportType, query);
+    await documentOutputService.printRenderedFile({
+      ...file,
+      contentType: file.blob.type || 'application/pdf',
+    });
   }
 
   // Bulk Import

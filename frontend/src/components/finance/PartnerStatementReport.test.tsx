@@ -41,4 +41,31 @@ describe('PartnerStatementReport currency totals', () => {
         expect(screen.getAllByText('$70,000.00')).toHaveLength(2);
         expect(screen.queryByText('370,000.00')).not.toBeInTheDocument();
     });
+
+    it('prints the same controlled PDF used by the statement download action', async () => {
+        const printPdf = vi.fn().mockResolvedValue(undefined);
+
+        render(
+            <PartnerStatementReport
+                title="Customer Statements"
+                description="Statement test"
+                partnerLabel="Customer"
+                partnerPluralLabel="Customers"
+                currencyToggleLabel="Show customer currency"
+                exportFilePrefix="customer-statement"
+                partners={[]}
+                loadReport={vi.fn()}
+                downloadCsv={vi.fn()}
+                downloadPdf={vi.fn()}
+                printPdf={printPdf}
+            />
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Print Customer Statements' }));
+
+        await waitFor(() => expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({
+            partnerIds: [],
+            showPartnerCurrency: false,
+        })));
+    });
 });

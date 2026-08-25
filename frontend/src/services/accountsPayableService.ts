@@ -456,6 +456,104 @@ class AccountsPayableService {
         );
     }
 
+    public async printSupplierStatementDocument(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+    }): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeApSupplierStatement,
+            {
+                fromDate: query.fromDate,
+                toDate: query.toDate,
+                supplierIds: query.supplierIds ?? [],
+                showSupplierCurrency: query.showSupplierCurrency === true,
+            },
+            { format: 'pdf' }
+        );
+    }
+
+    public async downloadAgingReportPdf(asOfDate: string): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeApAgingReport,
+            { asOfDate },
+            { format: 'pdf' }
+        );
+    }
+
+    public async printAgingReport(asOfDate: string): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeApAgingReport,
+            { asOfDate },
+            { format: 'pdf' }
+        );
+    }
+
+    public async downloadCashRequirementsPdf(asOfDate: string): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeApCashRequirements,
+            { asOfDate },
+            { format: 'pdf' }
+        );
+    }
+
+    public async printCashRequirements(asOfDate: string): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeApCashRequirements,
+            { asOfDate },
+            { format: 'pdf' }
+        );
+    }
+
+    public async downloadMatchExceptionReportPdf(query: {
+        fromDate: string;
+        toDate: string;
+        status?: VendorInvoiceMatchExceptionStatus;
+        supplierId?: string;
+    }): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeApMatchExceptionReport,
+            query,
+            { format: 'pdf' }
+        );
+    }
+
+    public async printMatchExceptionReport(query: {
+        fromDate: string;
+        toDate: string;
+        status?: VendorInvoiceMatchExceptionStatus;
+        supplierId?: string;
+    }): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeApMatchExceptionReport,
+            query,
+            { format: 'pdf' }
+        );
+    }
+
+    public async downloadProcurementFinanceReconciliationPdf(query: {
+        asOfDate?: string;
+        purchaseOrderId?: string;
+    } = {}): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeApProcurementReconciliation,
+            query,
+            { format: 'pdf' }
+        );
+    }
+
+    public async printProcurementFinanceReconciliation(query: {
+        asOfDate?: string;
+        purchaseOrderId?: string;
+    } = {}): Promise<void> {
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeApProcurementReconciliation,
+            query,
+            { format: 'pdf' }
+        );
+    }
+
     public async getApSummary(): Promise<ApSummaryStats> {
         return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/summary`);
     }

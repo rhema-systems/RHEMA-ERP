@@ -93,6 +93,18 @@ public static class DocumentTypes
     /// report. EntityId is not used; period, supplier IDs and presentation currency are options.
     /// </summary>
     public const string FinanceApSupplierStatement = "Finance.AP.SupplierStatement";
+    /// <summary>Parameterized AP aging report rendered from the canonical settlement read model.</summary>
+    public const string FinanceApAgingReport = "Finance.AP.AgingReport";
+    /// <summary>Parameterized AP cash-requirements forecast rendered from the canonical AP report service.</summary>
+    public const string FinanceApCashRequirements = "Finance.AP.CashRequirements";
+    /// <summary>Parameterized AP three-way-match exception register.</summary>
+    public const string FinanceApMatchExceptionReport = "Finance.AP.MatchExceptionReport";
+    /// <summary>Parameterized Procurement-to-Finance reconciliation report.</summary>
+    public const string FinanceApProcurementReconciliation = "Finance.AP.ProcurementReconciliation";
+    /// <summary>Parameterized AR aging report rendered from the canonical settlement read model.</summary>
+    public const string FinanceArAgingReport = "Finance.AR.AgingReport";
+    /// <summary>Parameterized customer statements rendered from the canonical AR detailed ledger.</summary>
+    public const string FinanceArCustomerStatement = "Finance.AR.CustomerStatement";
     public const string FinanceTrialBalance = "Finance.TrialBalance";
     public const string FinanceIncomeStatement = "Finance.IncomeStatement";
     public const string FinanceBalanceSheet = "Finance.BalanceSheet";

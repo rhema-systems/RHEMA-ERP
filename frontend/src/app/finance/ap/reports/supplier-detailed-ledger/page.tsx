@@ -13,8 +13,10 @@ import {
   toApLedgerSupplierOptions,
 } from '@/lib/finance/ap-supplier-detailed-ledger';
 import { accountsPayableService } from '@/services/accountsPayableService';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function SupplierDetailedLedgerPage() {
+  const { hasPermission } = useAuth();
   const { currentTenantCode, isLoadingTenants } = useTenant();
   const {
     data: suppliers = [],
@@ -73,6 +75,7 @@ export default function SupplierDetailedLedgerPage() {
         partnersLoading={
           isLoadingTenants || suppliersLoading || !currentTenantCode
         }
+        canExport={hasPermission('Finance.Reports.Export')}
         loadReport={async (params): Promise<DetailedLedgerReport> => {
           const report = await accountsPayableService.getSupplierDetailedLedger(
             {
@@ -105,6 +108,19 @@ export default function SupplierDetailedLedgerPage() {
             })),
           };
         }}
+        downloadPdf={(params) => accountsPayableService.downloadSupplierStatementDocument({
+          fromDate: params.fromDate,
+          toDate: params.toDate,
+          supplierIds: params.partnerIds,
+          showSupplierCurrency: params.showPartnerCurrency,
+          format: 'pdf',
+        })}
+        printPdf={(params) => accountsPayableService.printSupplierStatementDocument({
+          fromDate: params.fromDate,
+          toDate: params.toDate,
+          supplierIds: params.partnerIds,
+          showSupplierCurrency: params.showPartnerCurrency,
+        })}
       />
     </>
   );
