@@ -174,6 +174,7 @@
     <Compile Include="Services\Finance\ApPaymentVoucherDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
