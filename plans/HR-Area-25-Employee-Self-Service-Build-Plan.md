@@ -23,7 +23,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 
 | Slice | Title | Status |
 |---|---|---|
-| 0 | Survey, fixtures, and the link census | not started |
+| 0 | Survey, fixtures, and the link census | **COMPLETE 2026-08-25** — 111 assertions ×2 green; census in `HR-Area-25-Slice0-Census.md` |
 | 1 | Identity & access: employee-number login, the AD link gap, the portal gate | not started |
 | 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | not started |
 | 3 | The dashboard: one personal aggregate | not started |
@@ -278,3 +278,35 @@ area-12 lessons).
 ## 8. Log
 
 *(one entry per slice as it closes)*
+
+### Slice 0 — survey, fixtures, link census. CLOSED 2026-08-25.
+
+Diagnostic only; no product code touched. Full detail in **`HR-Area-25-Slice0-Census.md`**;
+harness `dev-harness/hr-portal/run-slice0.mjs` (111 assertions, green twice from different
+DB states) + `census-slice0.sql`.
+
+- **The link census came back far cleaner than feared**: 7,329/7,349 users linked (99.7%),
+  exactly **1** unlinked Employee-role user, 0 LDAP users, 0 duplicate/blank emails or
+  employee numbers (live or incl. soft-deleted), 0 employee-number↔username collisions,
+  0 integrity defects. **D1 and D5 are safe as designed; no ambiguity case exists live.**
+  ManagerId: 213/7,438 (2.9%) — my-team stays honestly-empty.
+- **Spec census: 19 SCREEN-EXISTS / 14 ENDPOINT-ONLY / 7 MISSING** of the 40. The MISSING
+  seven (need backend work, not just screens): medical coverage self-read (#27), medical
+  appointments self-read (#29), safety self hub (#33), my-risk-assessments self read (#34),
+  occ-health my-surveillance (#35), the self employee-profile (#39), and my-tasks has an
+  endpoint but no screen (#38 counted under E). **Leave is the biggest frontend hole** —
+  zero self screens; its endpoints are id-bearing self-arm routes (no `/mine`).
+- **Every existing self endpoint answers live** (~80 probed as a plain linked employee) and
+  the **self-arm is two-sided** (own id 200 / other's id 403) on all six id-bearing routes.
+- **D9 verdicts: punch MOVES IN** (token-actor, CheckIn+CheckOut proven live, geofence
+  optional) and **oaths MOVE IN** (`mine` + `affirm` work; affirm is create-own,
+  server-stamped, IP-recorded, deliberately id-less).
+- **The D8 gate has its evidence**: an unlinked user gets a clean 403/400 wall (no 500s, no
+  leaks) and `Auth/me` still answers — the friendly landing page is buildable. **But
+  `Auth/me` carries no employeeId** (measured), so slice 1 must expose the link for the
+  route gate; the harness asserts the gap so the assertion flips when slice 1 closes it.
+- Fixture set minted per run: `hr` / `manager` / `employee` (reports to manager) /
+  `unlinked` — prefix `a25v_`. The manager fixture proved `manager/me/direct-reports`.
+- FRD sweep: no un-built Mandatory requirement lands uniquely here; parity target stays the
+  Blazor PortalTopNav 40. Portal-bearing IDs AST-5/6/8, AWD-03/04/11 already have their
+  backend surfaces.
