@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance.Reporting;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -341,6 +342,100 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
         result.Reconciliation.AccountCoveragePercent.Should().Be(100m);
     }
 
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task ExecutePublished_ShouldApplyImmutableTransactionDimensionFilters()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        var layout = SeedLayout(
+            context,
+            tenantId,
+            book,
+            FinancialStatementType.BalanceSheet,
+            FinancialStatementLayoutVersionStatus.Published);
+        AddRow(
+            layout.Versions.Single(),
+            tenantId,
+            "CASH",
+            "Cash",
+            FinancialStatementRowType.Account,
+            10,
+            mapping: ExactMapping(tenantId, cash.Id));
+
+        var department = new FinanceDimensionDefinition
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "DEPT",
+            Name = "Department",
+            Classification = "Analytical",
+            ValueSourceType = "Lookup",
+            IsActive = true
+        };
+        var finance = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinanceDimensionDefinitionId = department.Id,
+            Code = "FIN",
+            Name = "Finance",
+            EffectiveDate = new DateTime(2025, 1, 1),
+            IsActive = true
+        };
+        var operations = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinanceDimensionDefinitionId = department.Id,
+            Code = "OPS",
+            Name = "Operations",
+            EffectiveDate = new DateTime(2025, 1, 1),
+            IsActive = true
+        };
+        var financeSet = SeedDimensionSet(context, tenantId, department, finance);
+        var operationsSet = SeedDimensionSet(context, tenantId, department, operations);
+        context.FinanceDimensionDefinitions.Add(department);
+        context.FinanceDimensionValues.AddRange(finance, operations);
+        SeedPostedTransaction(
+            context,
+            tenantId,
+            cash.Id,
+            new DateTime(2026, 7, 10),
+            100m,
+            0m,
+            financeSet.Id);
+        SeedPostedTransaction(
+            context,
+            tenantId,
+            cash.Id,
+            new DateTime(2026, 7, 11),
+            50m,
+            0m,
+            operationsSet.Id);
+        await context.SaveChangesAsync();
+
+        var result = await CreateService(context, tenantId).ExecutePublishedAsync(
+            new FinancialStatementLayoutExecutionRequestDto
+            {
+                StatementType = FinancialStatementType.BalanceSheet,
+                AccountingBookId = book.Id,
+                PeriodEnd = new DateTime(2026, 7, 31),
+                DimensionFilters =
+                {
+                    new FinanceDimensionFilterDto
+                    {
+                        FinanceDimensionDefinitionId = department.Id,
+                        ValueCodes = { "FIN" }
+                    }
+                }
+            });
+
+        result.Rows.Single().Amount.Should().Be(100m);
+    }
+
     private static FinancialStatementLayoutExecutionService CreateService(
         ApplicationDbContext context,
         Guid tenantId)
@@ -364,7 +459,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             context,
             currentUser.Object,
             settings.Object,
-            layoutService.Object);
+            layoutService.Object,
+            new FinanceDimensionReportingFilterService(context, currentUser.Object));
     }
 
     private static ApplicationDbContext CreateContext()
@@ -559,7 +655,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
         Guid accountId,
         DateTime date,
         decimal debit,
-        decimal credit)
+        decimal credit,
+        Guid? financeDimensionSetId = null)
     {
         var journalId = Guid.NewGuid();
         context.JournalEntries.Add(new JournalEntry
@@ -588,7 +685,36 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             PostingStatus = "Posted",
             BookClassification = "IFRS",
             FiscalPeriodId = Guid.NewGuid(),
-            FunctionalCurrencyCode = "GHS"
+            FunctionalCurrencyCode = "GHS",
+            FinanceDimensionSetId = financeDimensionSetId
         });
+    }
+
+    private static FinanceDimensionSet SeedDimensionSet(
+        ApplicationDbContext context,
+        Guid tenantId,
+        FinanceDimensionDefinition definition,
+        FinanceDimensionValue value)
+    {
+        var set = new FinanceDimensionSet
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CombinationHash = Guid.NewGuid().ToString("N"),
+            DisplayValue = $"{definition.Code}={value.Code}"
+        };
+        set.Items.Add(new FinanceDimensionSetItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinanceDimensionSetId = set.Id,
+            FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionValueId = value.Id,
+            DimensionCodeSnapshot = definition.Code,
+            DimensionValueCodeSnapshot = value.Code,
+            DimensionValueNameSnapshot = value.Name
+        });
+        context.FinanceDimensionSets.Add(set);
+        return set;
     }
 }

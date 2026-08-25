@@ -1550,11 +1550,18 @@ export interface FinanceSegmentFilterDto {
     segmentValue: string;
 }
 
+export interface FinanceDimensionFilterDto {
+    financeDimensionDefinitionId?: string;
+    dimensionCode?: string;
+    valueCodes: string[];
+}
+
 export interface TrialBalanceRequestDto {
     asAtDate?: string;
     bookClassification?: string;
     includeZeroBalances?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    dimensionFilters?: FinanceDimensionFilterDto[];
 }
 
 export interface TrialBalanceReportDto {
@@ -1587,6 +1594,7 @@ export interface DetailedLedgerRequestDto {
     bookClassification?: string;
     includeReversed?: boolean;
     includeOpeningBalances?: boolean;
+    dimensionFilters?: FinanceDimensionFilterDto[];
 }
 
 export interface DetailedLedgerReportDto {
@@ -1634,6 +1642,10 @@ export interface DetailedLedgerLineDto {
     foreignAmount?: number;
     exchangeRate?: number;
     isReversed: boolean;
+    segmentString?: string;
+    financeDimensionSetId?: string;
+    financeDimensionDisplay?: string;
+    dimensions: FinanceDimensionAssignment[];
 }
 
 export interface IncomeStatementRequestDto {
@@ -1642,6 +1654,7 @@ export interface IncomeStatementRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    dimensionFilters?: FinanceDimensionFilterDto[];
     layoutId?: string;
     useDefaultLayout?: boolean;
 }
@@ -1651,6 +1664,7 @@ export interface BalanceSheetRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    dimensionFilters?: FinanceDimensionFilterDto[];
     layoutId?: string;
     useDefaultLayout?: boolean;
 }
