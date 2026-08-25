@@ -12,9 +12,20 @@ namespace ErpSystem.Api.Controllers.HR;
 /// contract renewal, termination or recognition type raises one of these; HR then actions it in
 /// the module that owns the change (staff movements, awards, contracts) and marks it Actioned.
 /// </summary>
+/// <remarks>
+/// <para><b>W3 slice 14</b>, on <c>HR.Performance.*</c> — the register is the downstream half of
+/// the appraisal outcome-recommendation flow the performance desk already runs, and like the
+/// recommendation itself it is desk-only: a proposed termination is not its subject's to read.
+/// Reads → Read, submit and mark-actioned (status-checked only in the service) → Write.
+/// Approve/reject/recall carry <b>no</b> permission — the service validates the workflow assignee
+/// (approve/reject) or the initiator (recall) per instance, and the old SuperAdmin/HR class gate
+/// this replaces would have refused a non-HR assignee the published definition named (the
+/// slice-9 offer lesson). A non-HR approver can act but cannot read the register — recorded as a
+/// slice-14 residual with the MD-reader precedent (<c>ApprovalReaderGrants</c>) as the fix shape.</para>
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class EmploymentActionProposalsController : ControllerBase
 {
     private readonly IEmploymentActionProposalService _service;
@@ -34,6 +45,7 @@ public class EmploymentActionProposalsController : ControllerBase
 
     /// <summary>List employment action proposals (optionally filtered by status)</summary>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<EmploymentActionProposalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll([FromQuery] EmploymentActionProposalStatus? status = null, CancellationToken cancellationToken = default)
     {
@@ -47,6 +59,7 @@ public class EmploymentActionProposalsController : ControllerBase
 
     /// <summary>Get one employment action proposal</summary>
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(EmploymentActionProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
@@ -63,12 +76,15 @@ public class EmploymentActionProposalsController : ControllerBase
     // ── Approval, on the generic workflow engine ────────────────────────────
     //
     // ⚠ Approval authority comes from the published EmploymentActionProposal workflow
-    // definition, not from the role attribute on this controller: submit/approve/reject are
+    // definition, not from any attribute on this controller: submit/approve/reject are
     // inoperable until one is published, and `POST api/Workflow/entity-types/seed` has been
-    // re-run after the build.
+    // re-run after the build. Approve/reject/recall deliberately carry no permission — the
+    // service refuses anyone but the workflow assignee (approve/reject) or the initiator
+    // (recall), and a permission gate here would refuse the true assignee.
 
     /// <summary>Send the proposal for approval.</summary>
     [HttpPost("{id:guid}/submit")]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(EmploymentActionProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken = default)
@@ -94,6 +110,7 @@ public class EmploymentActionProposalsController : ControllerBase
 
     /// <summary>Record that the owning module has created the real record. Only from Approved.</summary>
     [HttpPost("{id:guid}/mark-actioned")]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(EmploymentActionProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public Task<IActionResult> MarkActioned(Guid id, [FromBody] UpdateEmploymentActionProposalDto? dto, CancellationToken cancellationToken = default)

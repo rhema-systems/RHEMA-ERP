@@ -13,10 +13,12 @@ namespace ErpSystem.Api.Controllers.HR;
 /// act for the organisation without holding an ERP login.
 /// </summary>
 /// <remarks>
-/// <para><b>The whole surface is SuperAdmin / TenantAdmin / HR — reads included.</b> That is a
-/// tighter gate than the union register next door, and deliberately so: a union is a noticeboard,
-/// while this is a directory of named third parties' personal email addresses and phone numbers. The
-/// gate costs nothing in reach, because the one endpoint anything consumes — <c>search</c>, behind
+/// <para><b>The whole surface is gated — reads included</b> (W3 slice 14: <c>HR.Company.Read</c>
+/// on reads and search, Write on create/amend/activate/deactivate, Admin on delete — replacing
+/// the SA/TenantAdmin/HR role gate with the same reach for HR). That is a tighter gate than the
+/// union register next door, and deliberately so: a union is a noticeboard, while this is a
+/// directory of named third parties' personal email addresses and phone numbers. The gate costs
+/// nothing in reach, because the one endpoint anything consumes — <c>search</c>, behind
 /// <c>PanelMemberPicker</c> — is only ever rendered inside an action that
 /// <c>JobInterviewService</c> already restricts to HR (<c>EnsureHr("change an interview panel")</c>).
 /// Checked before gating rather than assumed.</para>
@@ -32,12 +34,9 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/external-associates")]
-[Authorize(Roles = ExternalAssociatesController.AccessRoles)]
+[Authorize(Policy = "InternalOnly")]
 public class ExternalAssociatesController : ControllerBase
 {
-    internal const string AccessRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly IExternalAssociateService _service;
     private readonly ICurrentUserService       _currentUser;
     private readonly ILogger<ExternalAssociatesController> _logger;
@@ -92,6 +91,7 @@ public class ExternalAssociatesController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public Task<IActionResult> GetAll(CancellationToken ct) =>
         RunAsync(() => _service.GetAllAsync(ct), "list the external associates");
 
@@ -100,6 +100,7 @@ public class ExternalAssociatesController : ControllerBase
     /// inactive half; the parameter did not exist, so the screen could only ever show everyone.
     /// </param>
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public Task<IActionResult> GetPaged(
         [FromQuery] int     pageNumber  = 1,
         [FromQuery] int     pageSize    = 20,
@@ -110,6 +111,7 @@ public class ExternalAssociatesController : ControllerBase
             "page the external associates");
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public Task<IActionResult> GetActive(CancellationToken ct) =>
         RunAsync(() => _service.GetActiveAsync(ct), "list the active external associates");
 
@@ -118,6 +120,7 @@ public class ExternalAssociatesController : ControllerBase
     /// Requires at least 2 characters; returns up to <paramref name="limit"/> results.
     /// </summary>
     [HttpGet("search")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public async Task<ActionResult<IEnumerable<ExternalAssociateSearchResultDto>>> Search(
         [FromQuery] string? q,
         [FromQuery] int limit = 20,
@@ -130,6 +133,7 @@ public class ExternalAssociatesController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public Task<IActionResult> GetById(Guid id, CancellationToken ct) =>
         RunAsync(() => _service.GetByIdAsync(id, ct), "read the external associate");
 
@@ -138,6 +142,7 @@ public class ExternalAssociatesController : ControllerBase
     /// a "not found" the caller had to detect by inspecting the payload.
     /// </remarks>
     [HttpGet("number/{associateNumber}")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public Task<IActionResult> GetByNumber(string associateNumber, CancellationToken ct) =>
         RunAsync(() => _service.GetByAssociateNumberAsync(associateNumber, ct),
             "read the external associate by number");
@@ -147,6 +152,7 @@ public class ExternalAssociatesController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> Create(
         [FromBody] CreateExternalAssociateDto dto, CancellationToken ct)
     {
@@ -168,6 +174,7 @@ public class ExternalAssociatesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> Update(
         Guid id, [FromBody] UpdateExternalAssociateDto dto, CancellationToken ct)
     {
@@ -192,6 +199,7 @@ public class ExternalAssociatesController : ControllerBase
     /// fires; before this slice the associate simply vanished from every panel that carried them.
     /// </remarks>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         try
@@ -208,6 +216,7 @@ public class ExternalAssociatesController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> Activate(Guid id, CancellationToken ct)
     {
         var empId = _currentUser.EmployeeId;
@@ -222,6 +231,7 @@ public class ExternalAssociatesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var empId = _currentUser.EmployeeId;

@@ -416,7 +416,53 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    authoring (deliberate), separations MD/IA anchors (deliberate), company settings/profile +
    EmploymentActionProposals + SalaryReviewProposals + ExternalAssociates (slice 14), and the
    SuperAdmin-only legacy file migration tool.
-10. HR settings/company + satellites + org extras + dashboards.
+10. **Company/administration tail (slice 14, FINAL)** — ✅ **DONE 2026-08-25, harness
+    `run-slice14-company.mjs` 85/85 green + the full no-regression ladder
+    (39/23/47/27/90/66/167/142/82/100 = 783 — 868 assertions total), `seed-db` run first and the
+    grant rows verified in DB before the run (HR → Read+Write; SuperAdmin/TenantAdmin → all
+    three), so the green proves the seeded rows, not just the role fallback — and HR's Admin-tier
+    403s prove the fallback stays verb-aware. W3 IS COMPLETE: area 26 unblocks (subject to
+    cross-module #11).** ONE new family `HR.Company.{Read,Write,Admin}` (category
+    "HR - Company & Administration"; HR → Read+Write like everywhere) over four controllers:
+    **CompanyProfile** (GET → Read, PUT → Write — HR keeps the letterhead write; the record
+    carries TIN/VAT/SSNIT so reads stay gated), **CompanyHrPolicySettings** (GET → Read; PUT →
+    **Admin, the one deliberate Admin-tier write** — the knobs move trust boundaries, the
+    FR-HR-092 procedural-absence threshold and the FR-HR-136 enforcement modes, and the old
+    role gate held the write to SuperAdmin/TenantAdmin; granting HR `HR.Company.Admin` is TDC's
+    one-line change if it ever wants HR to hold them), **ExternalAssociates** (reads incl. the
+    panel-picker search → Read, create/amend/activate/deactivate → Write, delete → Admin —
+    same HR reach as the old SA/TA/HR gate minus delete, the standard trade), and the
+    **dormant CompanySchedule** (90 bare actions, NO screen has ever called any — events/
+    participants/attendance/attachments/tasks, meeting rooms, bookings, milestones, closures,
+    fiscal years+periods; 50 reads → Read, 30 writes/decisions → Write, 10 deletes → Admin,
+    scripted). **Nothing self-service is drawn there on purpose**: every actor id (organizerId,
+    bookedById, approvedById, markedById, announcedById) is client-supplied, so an open
+    "book a room"/"respond to invitation" surface would be act-as-anyone — residual: if a
+    calendar/room-booking UI is ever built, move those paths to token actors first, then open
+    with self-or-permission arms.
+    **The proposals ride `HR.Performance.*`** (they are the downstream half of the appraisal
+    outcome-recommendation flow, and the UI puts them under /hr/performance/proposals):
+    EmploymentActionProposals + SalaryReviewProposals reads → Read (desk-only, per the slice-10
+    rule that a proposed outcome is not its subject's to see); submit, the salary figure PUT,
+    mark-actioned/mark-applied (status-checked only in the services) → Write;
+    **approve/reject/recall carry NO permission** — both services validate
+    `CanUserApproveAsync` (approve/reject, no legacy fallback) or the engine's initiator check
+    (recall), and the old SuperAdmin/HR class gate would have refused a non-HR assignee a
+    published definition names (the slice-9 offer shape). Residual: a non-HR workflow assignee
+    (e.g. an MD) can act but cannot read the register — the `ApprovalReaderGrants` MD-reader
+    precedent is the fix shape when TDC publishes such a definition.
+    **Slice-9 census gap closed: `TalentPoolController`** (`api/talent-pool`, recruitment's
+    candidate CRM — pooled candidates, segments, engagement events, analytics, vacancy
+    matching; NOT succession's `api/talent-pools`). Bare since the port, no screen calls it,
+    zero in-code gates: any internal user could read pooled candidates' profiles and run desk
+    writes. Onto `HR.Recruitment.*` verb-mechanically (10 reads → Read, 9 desk ops → Write,
+    segment-catalogue + engagement-event deletes → Admin; the candidate-segment unassign stays
+    Write per the slice-10 same-object rule).
+    Frontend: NO changes — the proposals sidebar item was already on HR.Performance.Read
+    (slice 10), external-associates + the settings pages ride the admin.hr section gate, and
+    CompanySchedule has no UI. Deliberate keeps re-confirmed by the closing census: PIP
+    AuthorRoles, Separations MD/IA anchors, the SuperAdmin migration tool — and the un-policied
+    remainder is all service-gated/self/portal surfaces plus payroll (#11).
 
 The recipe and the two closing greps (service methods ↔ screens, non-GET routes ↔ service) from
 area 16 apply to every slice.

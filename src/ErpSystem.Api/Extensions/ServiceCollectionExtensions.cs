@@ -1674,6 +1674,29 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerDiscipline)));
 
+            // W3 slice 14 — the company/administration tail: the company profile, the HR policy
+            // settings, the external-associate register and the (dormant, UI-less) company
+            // schedule. Verb-mechanical as everywhere — reads → Read, desk work → Write,
+            // deletes → Admin — with one deliberate exception: writing the HR policy settings is
+            // Admin, not Write, because its knobs move trust boundaries (the procedural-absence
+            // threshold of FR-HR-092, the enforcement modes of FR-HR-136) and the previous role
+            // gate held that write to SuperAdmin/TenantAdmin. HR's Read+Write grant preserves the
+            // desk's exact reach; granting HR the Admin permission is TDC's one-line change if it
+            // ever wants HR to hold those knobs.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.CompanyReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewCompany,
+                        HrPermissions.MaintainCompany,
+                        HrPermissions.AdministerCompany)))
+                .AddPolicy(HrPermissions.CompanyWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainCompany,
+                        HrPermissions.AdministerCompany)))
+                .AddPolicy(HrPermissions.CompanyAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerCompany)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

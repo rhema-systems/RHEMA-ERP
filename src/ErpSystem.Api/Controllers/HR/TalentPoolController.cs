@@ -2,11 +2,25 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Recruitment's candidate talent pool (CRM): pooled candidates, talent segments, engagement
+/// events, analytics and vacancy matching. ⚠ Not the succession module's employee talent pools —
+/// those are <c>api/talent-pools</c> on <c>TalentPoolsController</c>.
+/// </summary>
+/// <remarks>
+/// <b>W3 slice 14, closing a slice-9 census gap.</b> The recruitment conversion swept the 15
+/// controllers its census found; this one — bare since the port, no screen calling it — was not
+/// among them, so any internal user could read pooled candidates' profiles and engagement
+/// history and run desk writes. Gated verb-mechanically on <c>HR.Recruitment.*</c> like the rest
+/// of the area: reads → Read, desk ops → Write, deletes → Admin (segment unassign stays Write —
+/// the same-object-authoring rule).
+/// </remarks>
 [ApiController]
 [Route("api/talent-pool")]
 [Authorize(Policy = "InternalOnly")]
@@ -34,6 +48,7 @@ public class TalentPoolController : ControllerBase
     // =========================================================================
 
     [HttpGet("candidates")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<TalentPoolPagedResultDto>> GetFiltered([FromQuery] TalentPoolFilterDto filter)
     {
         var tenantId = _currentUser.TenantId;
@@ -46,10 +61,12 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpGet("candidates/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<TalentPoolCandidateDto>> GetCandidate(Guid id)
         => Ok(await _candidateService.GetTalentPoolCandidateAsync(id));
 
     [HttpPost("candidates/{id:guid}/add")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<bool>> AddToPool(Guid id, [FromBody] AddToTalentPoolDto dto)
     {
         var tenantId   = _currentUser.TenantId;
@@ -61,6 +78,7 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpPost("candidates/{id:guid}/remove")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<bool>> RemoveFromPool(Guid id, [FromBody] RemoveFromTalentPoolDto dto)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -71,6 +89,7 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpPatch("candidates/{id:guid}/status")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<bool>> UpdateStatus(Guid id, [FromBody] TalentPoolCandidateStatus status)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -81,6 +100,7 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpPatch("candidates/{id:guid}/review-date")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<bool>> UpdateReviewDate(Guid id, [FromBody] DateTime reviewDate)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -95,6 +115,7 @@ public class TalentPoolController : ControllerBase
     // =========================================================================
 
     [HttpGet("analytics")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<TalentPoolAnalyticsDto>> GetAnalytics()
     {
         var tenantId = _currentUser.TenantId;
@@ -109,6 +130,7 @@ public class TalentPoolController : ControllerBase
     // =========================================================================
 
     [HttpPost("bulk")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> BulkOperation([FromBody] BulkTalentPoolOperationDto dto)
     {
         var tenantId   = _currentUser.TenantId;
@@ -124,12 +146,14 @@ public class TalentPoolController : ControllerBase
     // =========================================================================
 
     [HttpGet("match/{vacancyId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<List<TalentPoolVacancyMatchResultDto>>> MatchToVacancy(
         Guid vacancyId,
         [FromQuery] int topN = 20)
         => Ok(await _candidateService.MatchToVacancyAsync(vacancyId, topN));
 
     [HttpGet("candidates/{candidateId:guid}/match-vacancies")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<List<CandidateVacancyMatchResultDto>>> MatchCandidateToVacancies(
         Guid candidateId,
         [FromQuery] int topN = 10)
@@ -140,6 +164,7 @@ public class TalentPoolController : ControllerBase
     // =========================================================================
 
     [HttpGet("segments")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<CandidateTalentSegmentDto>>> GetSegments()
     {
         var tenantId = _currentUser.TenantId;
@@ -150,6 +175,7 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpGet("segments/all")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<CandidateTalentSegmentDto>>> GetAllSegments()
     {
         var tenantId = _currentUser.TenantId;
@@ -160,10 +186,12 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpGet("segments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<CandidateTalentSegmentDto>> GetSegment(Guid id)
         => Ok(await _segmentService.GetByIdAsync(id));
 
     [HttpPost("segments")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<CandidateTalentSegmentDto>> CreateSegment([FromBody] CreateCandidateTalentSegmentDto dto)
     {
         var tenantId   = _currentUser.TenantId;
@@ -175,6 +203,7 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpPut("segments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<CandidateTalentSegmentDto>> UpdateSegment(Guid id, [FromBody] UpdateCandidateTalentSegmentDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -186,10 +215,12 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpDelete("segments/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<ActionResult<bool>> DeleteSegment(Guid id)
         => Ok(await _segmentService.DeleteAsync(id));
 
     [HttpPost("candidates/{candidateId:guid}/segments")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<CandidateSegmentMembershipDto>> AddToSegment(
         Guid candidateId,
         [FromBody] AddCandidateToSegmentDto dto)
@@ -202,11 +233,15 @@ public class TalentPoolController : ControllerBase
         return Ok(await _segmentService.AddCandidateAsync(candidateId, dto, tenantId.Value, employeeId.Value));
     }
 
+    // Unassigning a candidate from a segment is the same desk act as assigning them — the
+    // slice-10 unassign precedent — not data destruction; deleting the segment itself is Admin.
     [HttpDelete("candidates/{candidateId:guid}/segments/{segmentId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<bool>> RemoveFromSegment(Guid candidateId, Guid segmentId)
         => Ok(await _segmentService.RemoveCandidateAsync(candidateId, segmentId));
 
     [HttpGet("candidates/{candidateId:guid}/segments")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<CandidateSegmentMembershipDto>>> GetCandidateSegments(Guid candidateId)
         => Ok(await _segmentService.GetCandidateSegmentsAsync(candidateId));
 
@@ -215,10 +250,12 @@ public class TalentPoolController : ControllerBase
     // =========================================================================
 
     [HttpGet("candidates/{candidateId:guid}/events")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<CandidateEngagementEventDto>>> GetEvents(Guid candidateId)
         => Ok(await _engagementService.GetByCandidateIdAsync(candidateId));
 
     [HttpPost("candidates/{candidateId:guid}/events")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<CandidateEngagementEventDto>> LogEvent(
         Guid candidateId,
         [FromBody] CreateCandidateEngagementEventDto dto)
@@ -233,6 +270,7 @@ public class TalentPoolController : ControllerBase
     }
 
     [HttpDelete("events/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<ActionResult<bool>> DeleteEvent(Guid id)
         => Ok(await _engagementService.DeleteAsync(id));
 }

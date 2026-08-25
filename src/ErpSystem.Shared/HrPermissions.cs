@@ -43,6 +43,7 @@ public static class HrPermissions
     public const string CategoryAssets = "HR - Staff Assets";
     public const string CategoryMovements = "HR - Staff Movements";
     public const string CategoryDiscipline = "HR - Discipline & Grievance";
+    public const string CategoryCompany = "HR - Company & Administration";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -214,6 +215,14 @@ public static class HrPermissions
     public const string AwardsReadPolicy = "HR.Policy.AwardsRead";
     public const string AwardsWritePolicy = "HR.Policy.AwardsWrite";
     public const string AwardsAdminPolicy = "HR.Policy.AwardsAdmin";
+
+    public const string ViewCompany = "HR.Company.Read";
+    public const string MaintainCompany = "HR.Company.Write";
+    public const string AdministerCompany = "HR.Company.Admin";
+
+    public const string CompanyReadPolicy = "HR.Policy.CompanyRead";
+    public const string CompanyWritePolicy = "HR.Policy.CompanyWrite";
+    public const string CompanyAdminPolicy = "HR.Policy.CompanyAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
@@ -425,7 +434,17 @@ public static class HrPermissions
             CategoryPerformance),
         new(AdministerPerformance, "Administer Performance",
             "Delete performance records — appraisals, cycles, templates, grade and KPI definitions, goal-library items, calibration sessions, review events and improvement plans — and reset goal-risk thresholds. Approving a goal is NOT this permission — that belongs to the goal's direct manager, validated per goal by the goal workflow.",
-            CategoryPerformance)
+            CategoryPerformance),
+
+        new(ViewCompany, "View Company & Administration",
+            "View the company-level administration surface: the company profile with its statutory numbers, the HR policy settings, the external-associate register with its contact details, and the company schedule — events, meeting rooms and bookings, milestones, business closures and fiscal years.",
+            CategoryCompany),
+        new(MaintainCompany, "Maintain Company & Administration",
+            "Maintain the company profile, keep the external-associate register, and run the company schedule — events with their participants, attendance and tasks, meeting rooms and bookings, milestones, business closures, and fiscal years with their periods. Changing the HR policy settings is NOT this permission — those knobs move trust boundaries (FR-HR-092, FR-HR-136) and sit with Administer.",
+            CategoryCompany),
+        new(AdministerCompany, "Administer Company & Administration",
+            "Change the HR policy settings — the procedural-absence threshold (FR-HR-092) and the budget and establishment enforcement modes (FR-HR-136) among them — and delete company-schedule records, meeting rooms, milestones, closures, fiscal years and external associates.",
+            CategoryCompany)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -517,7 +536,8 @@ public static class HrPermissions
         ViewOrientation, MaintainOrientation,
         ViewAssets, MaintainAssets,
         ViewMovements, MaintainMovements,
-        ViewDiscipline, MaintainDiscipline
+        ViewDiscipline, MaintainDiscipline,
+        ViewCompany, MaintainCompany
     };
 
     /// <summary>

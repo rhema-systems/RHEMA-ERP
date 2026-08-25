@@ -11,22 +11,20 @@ namespace ErpSystem.Api.Controllers.HR;
 /// contacts and document-presentation details. One record per tenant, GET + PUT.
 /// </summary>
 /// <remarks>
-/// Gated on the HR/admin roles, read as well as write. The letterhead itself is not secret — every
-/// employee sees it on their own offer or confirmation letter — but the same record carries the
-/// tenant's TIN, VAT number and SSNIT employer number, and slice 0 measured a plain `Employee`
-/// rewriting the whole thing through the bare `[Authorize]` this replaces.
+/// Gated on <c>HR.Company.*</c> (W3 slice 14), read as well as write — previously an
+/// SA/TenantAdmin/HR role gate, and before that a bare <c>[Authorize]</c> that slice 0 measured a
+/// plain `Employee` rewriting the whole record through. The letterhead itself is not secret —
+/// every employee sees it on their own offer or confirmation letter — but the same record carries
+/// the tenant's TIN, VAT number and SSNIT employer number.
 ///
 /// Gating the controller does not affect any document: the letter and email services read the
 /// profile through <c>ICompanyProfileProvider</c> directly, never through this route.
 /// </remarks>
 [ApiController]
 [Route("api/hr/company-profile")]
-[Authorize(Roles = CompanyProfileController.HrSettingsRoles)]
+[Authorize(Policy = "InternalOnly")]
 public class CompanyProfileController : ControllerBase
 {
-    internal const string HrSettingsRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
     private readonly ICompanyProfileService _service;
     private readonly ILogger<CompanyProfileController> _logger;
 
@@ -40,6 +38,7 @@ public class CompanyProfileController : ControllerBase
 
     /// <summary>Get the current tenant's company profile (Tenant/config-resolved defaults if none saved yet).</summary>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     [ProducesResponseType(typeof(CompanyProfileDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
@@ -56,6 +55,7 @@ public class CompanyProfileController : ControllerBase
 
     /// <summary>Update (upsert) the current tenant's company profile.</summary>
     [HttpPut]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     [ProducesResponseType(typeof(CompanyProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Update([FromBody] UpdateCompanyProfileDto dto, CancellationToken cancellationToken)

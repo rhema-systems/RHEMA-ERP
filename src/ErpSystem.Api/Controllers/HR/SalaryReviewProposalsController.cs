@@ -12,9 +12,16 @@ namespace ErpSystem.Api.Controllers.HR;
 /// raises one of these; HR puts the figure on it and walks it to Applied, at which point payroll
 /// owns the change. Nothing here touches actual pay.
 /// </summary>
+/// <remarks>
+/// <para><b>W3 slice 14</b>, on <c>HR.Performance.*</c> — the same tiering, for the same reasons,
+/// as <see cref="EmploymentActionProposalsController"/>: reads → Read; setting the figure,
+/// submit and mark-applied (status-checked only in the service) → Write; approve/reject/recall
+/// carry no permission because the service validates the workflow assignee or initiator per
+/// instance, and the old SuperAdmin/HR class gate would have refused a non-HR assignee.</para>
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = "InternalOnly")]
 public class SalaryReviewProposalsController : ControllerBase
 {
     private readonly ISalaryReviewProposalService _service;
@@ -34,6 +41,7 @@ public class SalaryReviewProposalsController : ControllerBase
 
     /// <summary>List salary review proposals (optionally filtered by status)</summary>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<SalaryReviewProposalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll([FromQuery] SalaryReviewProposalStatus? status = null, CancellationToken cancellationToken = default)
     {
@@ -47,6 +55,7 @@ public class SalaryReviewProposalsController : ControllerBase
 
     /// <summary>Get one salary review proposal</summary>
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
@@ -68,6 +77,7 @@ public class SalaryReviewProposalsController : ControllerBase
     /// is actually decided.</para>
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -88,11 +98,14 @@ public class SalaryReviewProposalsController : ControllerBase
     // ── Approval, on the generic workflow engine ────────────────────────────
     //
     // ⚠ Approval authority comes from the published SalaryReviewProposal workflow definition,
-    // not from the role attribute on this controller: submit/approve/reject are inoperable
+    // not from any attribute on this controller: submit/approve/reject are inoperable
     // until one is published, and `POST api/Workflow/entity-types/seed` has been re-run.
+    // Approve/reject/recall deliberately carry no permission — the service refuses anyone but
+    // the workflow assignee (approve/reject) or the initiator (recall).
 
     /// <summary>Send the proposal for approval. Refused until a figure has been set.</summary>
     [HttpPost("{id:guid}/submit")]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken = default)
@@ -118,6 +131,7 @@ public class SalaryReviewProposalsController : ControllerBase
 
     /// <summary>Record that payroll has made the change. Only from Approved.</summary>
     [HttpPost("{id:guid}/mark-applied")]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public Task<IActionResult> MarkApplied(Guid id, [FromBody] UpdateEmploymentActionProposalDto? dto, CancellationToken cancellationToken = default)

@@ -20,21 +20,17 @@ namespace ErpSystem.Api.Controllers.HR;
 /// a hire or merely warns (FR-HR-136). Those are the trust boundaries the settings exist to hold,
 /// and moving them is administration's, not the function the boundary constrains.</para>
 ///
-/// <para>So: <b>read</b> = SuperAdmin, TenantAdmin, HR; <b>write</b> = SuperAdmin, TenantAdmin.
-/// Slice 0 measured a plain <c>Employee</c> doing both. If TDC would rather HR held the write as
-/// well, adding <c>Constants.Roles.Hr</c> to <see cref="WriteRoles"/> is the whole change.</para>
+/// <para>So (W3 slice 14, preserving the prior role gate's line exactly): <b>read</b> =
+/// <c>HR.Company.Read</c>, which HR's Read+Write grant satisfies; <b>write</b> =
+/// <c>HR.Company.Admin</c>, which it does not — the write stays with administrators. Slice 0
+/// measured a plain <c>Employee</c> doing both. If TDC would rather HR held the write as well,
+/// granting the HR role <c>HR.Company.Admin</c> is the whole change.</para>
 /// </remarks>
 [ApiController]
 [Route("api/hr/policy-settings")]
-[Authorize(Roles = CompanyHrPolicySettingsController.ReadRoles)]
+[Authorize(Policy = "InternalOnly")]
 public class CompanyHrPolicySettingsController : ControllerBase
 {
-    internal const string ReadRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin + "," + Constants.Roles.Hr;
-
-    internal const string WriteRoles =
-        Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin;
-
     private readonly ICompanyHrPolicySettingsService _service;
     private readonly ILogger<CompanyHrPolicySettingsController> _logger;
 
@@ -48,6 +44,7 @@ public class CompanyHrPolicySettingsController : ControllerBase
 
     /// <summary>Get the current tenant's HR policy settings (coded defaults if none saved yet).</summary>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     [ProducesResponseType(typeof(CompanyHrPolicySettingsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
@@ -65,7 +62,7 @@ public class CompanyHrPolicySettingsController : ControllerBase
 
     /// <summary>Update (upsert) the current tenant's HR policy settings.</summary>
     [HttpPut]
-    [Authorize(Roles = WriteRoles)]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     [ProducesResponseType(typeof(CompanyHrPolicySettingsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
