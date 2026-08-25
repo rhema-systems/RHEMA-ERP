@@ -2058,7 +2058,11 @@ public static class AppraisalMappingExtensions
         entity.RelatedGoalId = dto.RelatedGoalId;
         entity.Title = dto.Title;
         entity.Body = dto.Body;
-        entity.EntryDate = dto.EntryDate;
+        // The client's update payload has never carried EntryDate, so an unguarded copy
+        // stamped default(DateTime) over the real date on every edit — sinking the entry to
+        // year 0001 in the date-ordered lists and outside every date-range filter.
+        if (dto.EntryDate != default)
+            entity.EntryDate = dto.EntryDate;
         entity.IsPrivate = dto.IsPrivate;
     }
 

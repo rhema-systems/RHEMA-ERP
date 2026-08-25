@@ -35,14 +35,14 @@ export default function PeerReviewsPage() {
   const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Peer Reviews"
         description="Colleagues who have nominated you for feedback, and the forms still waiting on you."
-        backHref="/hr/performance"
+        backHref="/me"
         actions={
           <Button variant="outline" asChild>
-            <Link href="/hr/performance/appraisals">My own appraisals</Link>
+            <Link href="/me/performance/appraisals">My own appraisals</Link>
           </Button>
         }
       />
@@ -126,7 +126,7 @@ export default function PeerReviewsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/hr/performance/peer-reviews/${row.evaluationId}`}>
+                          <Link href={`/me/performance/peer-reviews/${row.evaluationId}`}>
                             {row.status === 'Submitted' ? 'View' : 'Give feedback'}
                           </Link>
                         </Button>

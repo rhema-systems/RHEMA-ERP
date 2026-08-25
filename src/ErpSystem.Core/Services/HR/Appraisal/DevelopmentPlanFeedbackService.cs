@@ -98,7 +98,7 @@ public class DevelopmentPlanFeedbackService : IDevelopmentPlanFeedbackService
                         string.IsNullOrWhiteSpace(plan.Title)
                             ? "Your manager has added feedback to your development plan."
                             : $"Your manager has added feedback to \"{plan.Title}\".",
-                        NavigationUrl: $"/hr/performance/development-plans/{plan.Id}")
+                        NavigationUrl: $"/me/performance/development-plans/{plan.Id}")
                 }, cancellationToken);
             }
             catch (Exception ex)

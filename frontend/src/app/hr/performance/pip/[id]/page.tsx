@@ -317,7 +317,8 @@ export default function PipDetailPage() {
         </span>
         {data.appraisalId && (
           <Button variant="link" size="sm" className="h-auto p-0" asChild>
-            <Link href={`/hr/performance/appraisals/${data.appraisalId}`}>Open the appraisal</Link>
+            {/* The subject's own view moved to the portal; this desk screen opens the manager's. */}
+            <Link href={`/hr/performance/team-appraisals/${data.appraisalId}`}>Open the appraisal</Link>
           </Button>
         )}
         {isLive && (

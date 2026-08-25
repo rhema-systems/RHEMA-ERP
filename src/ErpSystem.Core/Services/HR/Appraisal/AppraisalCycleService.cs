@@ -488,7 +488,7 @@ public class AppraisalCycleService : IAppraisalCycleService
                 Title: $"{cycle.CycleName} is open",
                 Message: $"The {cycle.AppraisalType} appraisal cycle {cycle.CycleCode} is now open.{due}",
                 CycleName: cycle.CycleName,
-                NavigationUrl: "/hr/performance/employee-goals",
+                NavigationUrl: "/me/performance/goals",
                 Urgency: NotificationUrgency.Normal));
 
             var raised = await _notificationService.RaiseAsync(requests, cancellationToken);
@@ -519,13 +519,14 @@ public class AppraisalCycleService : IAppraisalCycleService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var phases = new (DateOnly? Deadline, string Phase, string NavigationUrl)[]
         {
-            (cycle.GoalSettingDeadline,           "Goal setting",         "/hr/performance/employee-goals"),
-            (cycle.SelfEvaluationDeadline,        "Self-evaluation",      "/hr/performance"),
-            (cycle.PeerNominationDeadline,        "Peer nomination",      "/hr/performance"),
-            (cycle.PeerEvaluationDeadline,        "Peer evaluation",      "/hr/performance"),
+            // Area 25 slice 5: employee-directed nudges land in the portal; the manager one stays desk.
+            (cycle.GoalSettingDeadline,           "Goal setting",         "/me/performance/goals"),
+            (cycle.SelfEvaluationDeadline,        "Self-evaluation",      "/me/performance/appraisals"),
+            (cycle.PeerNominationDeadline,        "Peer nomination",      "/me/performance/appraisals"),
+            (cycle.PeerEvaluationDeadline,        "Peer evaluation",      "/me/performance/peer-reviews"),
             (cycle.ManagerEvaluationDeadline,     "Manager evaluation",   "/hr/performance/team-goals"),
-            (cycle.EmployeeAcknowledgeDeadline,   "Acknowledgment",       "/hr/performance"),
-            (cycle.FinalConversationDeadline,     "Final conversation",   "/hr/performance"),
+            (cycle.EmployeeAcknowledgeDeadline,   "Acknowledgment",       "/me/performance/appraisals"),
+            (cycle.FinalConversationDeadline,     "Final conversation",   "/me/performance/appraisals"),
         };
 
         // Only phases that are live now: already past, or close enough to be worth a nudge.

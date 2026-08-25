@@ -28,7 +28,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 2 | The shell: `/me` layout, top-nav, landing, routing, the switcher | **COMPLETE 2026-08-25** — tsc/lint/route-resolution clean + 144 ladder |
 | 3 | The dashboard: one personal aggregate | **COMPLETE 2026-08-25** — 37+35 assertions + 144 ladder |
 | 4 | Move-in: leave + attendance | **COMPLETE 2026-08-25** — 68 assertions ×2 + 179 ladder; 2 backend fixes; 2 TDC data gaps recorded |
-| 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | not started |
+| 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | **COMPLETE 2026-08-25** — 47 assertions ×2 + 247 ladder; 12 pages re-homed + my-goals built; 3 backend fixes; 16 deep-links re-pointed |
 | 6 | Move-in: training & learning (+ the owed bond self-accept) | not started |
 | 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | not started |
 | 8 | Move-in: medical + safety | not started |
@@ -442,3 +442,46 @@ registers stay" clause; nothing deleted).
 - **Convention every attendance screen must encode:** the logs read's `from`/`to` are
   DateTimes and `to` is midnight-EXCLUSIVE — same-day from/to returns nothing; send
   tomorrow. Asserted in the harness so it cannot regress silently.
+
+### Slice 5 — move-in: performance. CLOSED 2026-08-25.
+
+`run-slice5.mjs` 47 assertions ×2 green + the 247 ladder (111/33/35/68). No migration.
+Unlike leave, this domain's screens mostly EXISTED and re-homed: spec rows #7/#9–#12 were
+verdict-S, #8 (my goals) the one verdict-E hole built from nothing.
+
+- **The move (D3, atomic):** 12 pages re-homed to `/me/performance/*` via `git mv` + adapt
+  (hrefs, backHrefs, the portal's padding) — appraisals (list, [id], self-evaluation,
+  appeal, appeal-status, appeal-outcome), peer-reviews (list, [id]), check-ins (list,
+  [id]), journal, and the development-plan DETAIL. Deleted from the desk in the same
+  change, with the sidebar, the performance hub, PIP/conversation "open the appraisal"
+  deep-links (→ `team-appraisals/{id}`, the manager's view of the same record) and
+  team-appraisals' check-ins button all re-pointed. **Built fresh:**
+  `/me/performance/goals` (draft → submit → manager feedback → progress, the bespoke
+  lifecycle deliberately OFF the workflow engine) and the portal development-plans list
+  (mine/team). **Split:** the desk development-plans page is now the HR register only, and
+  its rows deliberately open the PORTAL detail — one 700-line working surface, not one per
+  world; the subject updating progress is its primary user.
+- **16 backend deep-links re-pointed** across 6 services (appraisal/peer notifications,
+  the HR cycle dashboard's nudges, cycle-open + deadline reminders, dev-plan activation and
+  feedback): every URL whose RECIPIENT is the employee or a peer now lands in the portal;
+  manager-directed ones stay desk. Recipient-by-recipient, read from each call site.
+- **Three defects found by the probe, fixed and asserted by name:** (1) a journal EDIT
+  wiped `EntryDate` to year 0001 — the update DTO's non-nullable DateTime was copied
+  unguarded and no client ever sends it (`AppraisalMappingExtensions.UpdateEntity` now
+  guards the default; the mine list orders by that date, so edited entries sank); (2) a
+  goal PROGRESS ENTRY with no status stored 0 — outside the enum, which starts at 1 — and
+  serialized as a bare number (`AddProgressEntryAsync` now derives Completed/InProgress
+  from the percent); (3) the same shape on development-objective progress
+  (`UpdateObjectiveProgressAsync`). The enum-starts-at-1 + optional-DTO-field combination
+  is a repeatable trap: an "enum as string" convention silently emits numbers for any
+  value without a name.
+- **D8 held without new grants:** the two desk pickers that would have 403'd a plain
+  actor (check-ins scheduling, dev-plan create) now pick from
+  `employees/manager/me/direct-reports`; a check-in you run is with your own report anyway.
+- Harness legs worth keeping: nomination-BEFORE-self-eval ordering (the cycle's peer
+  minimum gates the submit); the peer's whole leg as the nominated manager (approve →
+  `PeerEvaluations/me` → draft-with-evaluationId-in-body → submit); conductor-from-token
+  proven on BOTH check-in lists; the dev-plan Draft-when-asked/Active-when-own contract;
+  journal privacy proven two-sided against the manager's team view; and the unlinked
+  wall, noting the module's own convention that /me READS answer honestly-empty for an
+  unlinked account while writes refuse.

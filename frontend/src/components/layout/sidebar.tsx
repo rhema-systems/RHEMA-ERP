@@ -537,19 +537,19 @@ export const navigationItems: NavItem[] = [
         // on Write; everything an employee, peer or manager does as themselves stays open — the
         // API holds those to the token actor, not to a permission.
         children: [
+          // Area 25 slice 5: the my-shaped screens (My Appraisals, Peer Reviews, Check-ins,
+          // Journal, my/team development plans, my goals) moved to the self-service portal —
+          // desk users reach them via "My Self-Service". What stays here is the desk's work.
           { title: 'Analytics', href: '/hr/performance/analytics', icon: BarChart3, permissions: ['HR.Performance.Read'] },
           { title: 'Appraisal Cycles', href: '/hr/performance/cycles', icon: CalendarRange, permissions: ['HR.Performance.Read'] },
-          { title: 'My Appraisals', href: '/hr/performance/appraisals', icon: ClipboardCheck },
-          { title: 'Peer Reviews', href: '/hr/performance/peer-reviews', icon: MessagesSquare },
           { title: 'Team Appraisals', href: '/hr/performance/team-appraisals', icon: UserCheck },
           { title: 'Interim Reviews', href: '/hr/performance/interim-reviews', icon: CalendarCheck },
-          { title: 'Check-ins', href: '/hr/performance/check-ins', icon: CalendarCheck },
           { title: 'Conversations', href: '/hr/performance/conversations', icon: MessagesSquare },
-          { title: 'Journal', href: '/hr/performance/journal', icon: NotebookPen },
           {
             title: 'Development Plans',
             href: '/hr/performance/development-plans',
             icon: GraduationCap,
+            permissions: ['HR.Performance.Read'],
           },
           { title: 'Improvement Plans', href: '/hr/performance/pip', icon: ClipboardPen },
           { title: 'HR Review', href: '/hr/performance/hr-review', icon: ClipboardList, permissions: ['HR.Performance.Read'] },

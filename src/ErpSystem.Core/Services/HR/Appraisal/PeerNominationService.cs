@@ -577,7 +577,7 @@ public class PeerNominationService : IPeerNominationService
                 ? $"Your peer feedback form is open.{dueText}"
                 : $"Your peer feedback form opens once they submit their self-evaluation.{dueText}",
             appraisal.AppraisalCycle?.CycleName,
-            "/hr/performance/peer-reviews",
+            "/me/performance/peer-reviews",
             appraisal.Id,
             appraiseeName)), cancellationToken);
 
@@ -638,7 +638,7 @@ public class PeerNominationService : IPeerNominationService
                     $"{nominations.Count} of your peer nomination(s) were not approved",
                     $"Reason: {rejectionDto.RejectionReason}. Nominate a replacement if you are now below the minimum.",
                     appraisal.AppraisalCycle?.CycleName,
-                    $"/hr/performance/appraisals/{appraisal.Id}",
+                    $"/me/performance/appraisals/{appraisal.Id}",
                     appraisal.Id,
                     appraisal.Employee?.FullName,
                     NotificationUrgency.Warning),

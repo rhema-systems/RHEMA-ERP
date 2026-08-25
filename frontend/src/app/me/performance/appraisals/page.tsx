@@ -21,8 +21,10 @@ import { performanceAppraisalService } from '@/services/hr/appraisal-run.service
  * My appraisals — every appraisal the signed-in employee is the subject of.
  *
  * Scoped to *your own* appraisals on purpose. Peer feedback you owe on other people's
- * appraisals is a separate screen (`/hr/performance/peer-reviews`), because those rows carry
+ * appraisals is a separate screen (`/me/performance/peer-reviews`), because those rows carry
  * a colleague's scores and do not belong in a list titled "mine".
+ *
+ * Area 25 slice 5: re-homed from /hr/performance/appraisals into the portal shell.
  *
  * `actionText` and `dueDate` come from the server, which reads them off the appraisal's status
  * and the cycle's deadlines — so what the row asks you to do is always the current step, not a
@@ -40,14 +42,14 @@ export default function MyAppraisalsPage() {
   const actionable = rows.filter((r) => r.actionRequired);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My Appraisals"
         description="Your own appraisals, what each one needs from you next, and the outcome once it is signed off."
-        backHref="/hr/performance"
+        backHref="/me"
         actions={
           <Button variant="outline" asChild>
-            <Link href="/hr/performance/peer-reviews">Peer reviews I owe</Link>
+            <Link href="/me/performance/peer-reviews">Peer reviews I owe</Link>
           </Button>
         }
       />
@@ -159,7 +161,7 @@ export default function MyAppraisalsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/hr/performance/appraisals/${row.appraisalId}`}>Open</Link>
+                        <Link href={`/me/performance/appraisals/${row.appraisalId}`}>Open</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

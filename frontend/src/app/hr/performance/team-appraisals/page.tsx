@@ -63,7 +63,8 @@ export default function TeamAppraisalsPage() {
         backHref="/hr/performance"
         actions={
           <Button variant="outline" asChild>
-            <Link href="/hr/performance/check-ins">Check-ins</Link>
+            {/* Check-ins are the manager's own self-service — they live in the portal now. */}
+            <Link href="/me/performance/check-ins">Check-ins</Link>
           </Button>
         }
       />

@@ -3,10 +3,8 @@
 import {
   BellRing,
   Building2,
-  CalendarCheck,
   CalendarRange,
   ChartColumn,
-  ClipboardCheck,
   ClipboardList,
   ClipboardPen,
   FastForward,
@@ -16,7 +14,6 @@ import {
   Layers,
   Lightbulb,
   MessagesSquare,
-  NotebookPen,
   Scale,
   Target,
   TriangleAlert,
@@ -58,33 +55,15 @@ const items: NavCardItem[] = [
     href: '/hr/performance/cycles',
     icon: CalendarRange,
   },
-  {
-    title: 'My Appraisals',
-    description:
-      'Your own appraisals: the self-evaluation, where each one has got to, and the result once HR signs it off.',
-    href: '/hr/performance/appraisals',
-    icon: ClipboardCheck,
-  },
-  {
-    title: 'Peer Reviews',
-    description:
-      'Feedback colleagues have asked you for, and the forms still waiting on you.',
-    href: '/hr/performance/peer-reviews',
-    icon: MessagesSquare,
-  },
+  // Area 25 slice 5: My Appraisals, Peer Reviews, Check-ins and the Journal moved to the
+  // self-service portal (`/me/performance/*`) — they are the person's own surfaces, not the
+  // desk's. The cards below are the desk's remaining work.
   {
     title: 'Team Appraisals',
     description:
       'For managers: your reports in a cycle, what they have submitted, and your evaluation of each.',
     href: '/hr/performance/team-appraisals',
     icon: UserCheck,
-  },
-  {
-    title: 'Check-ins',
-    description:
-      'One-to-ones held during a cycle, and the goal updates that come out of them.',
-    href: '/hr/performance/check-ins',
-    icon: CalendarCheck,
   },
   {
     title: 'Conversations',
@@ -94,16 +73,9 @@ const items: NavCardItem[] = [
     icon: MessagesSquare,
   },
   {
-    title: 'Journal',
-    description:
-      'Evidence noted as it happens. Private to you unless you share it — a private entry is readable by nobody else, not your manager and not HR.',
-    href: '/hr/performance/journal',
-    icon: NotebookPen,
-  },
-  {
     title: 'Development Plans',
     description:
-      'What people are working on becoming good at: objectives, progress against them, and the manager feedback recorded alongside.',
+      'The organisation-wide register. Your own and your team’s plans live in My Self-Service.',
     href: '/hr/performance/development-plans',
     icon: GraduationCap,
   },

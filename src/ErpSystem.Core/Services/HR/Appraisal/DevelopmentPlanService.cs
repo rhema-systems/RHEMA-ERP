@@ -217,7 +217,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
                     string.IsNullOrWhiteSpace(entity.Title)
                         ? "Your development plan is now active."
                         : $"\"{entity.Title}\" is now active.",
-                    NavigationUrl: $"/hr/performance/development-plans/{entity.Id}")
+                    NavigationUrl: $"/me/performance/development-plans/{entity.Id}")
             }, cancellationToken);
         }
 
@@ -302,6 +302,15 @@ public class DevelopmentPlanService : IDevelopmentPlanService
         if (!string.IsNullOrWhiteSpace(notes))
             entity.ProgressNotes = notes;
 
+        // An omitted status binds as 0 — not a member of the enum (it starts at 1) — and an
+        // unguarded copy stored that unnameable value, which then serialized as a bare number.
+        // Derive from the progress instead; an explicit status is respected as before.
+        if (status == default)
+        {
+            status = clampedProgress >= 100 ? DevelopmentObjectiveStatus.Completed
+                : clampedProgress > 0 ? DevelopmentObjectiveStatus.InProgress
+                : entity.ObjectiveStatus;
+        }
         entity.ObjectiveStatus = status;
 
         await _objectiveRepository.UpdateAsync(entity);

@@ -29,12 +29,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { CycleSelect } from '@/components/hr/performance/CycleSelect';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { checkInService } from '@/services/hr/appraisal-run.service';
+import { employeeService } from '@/services/hr/employee.service';
 import { CHECK_IN_TYPE_OPTIONS, type CheckInType } from '@/types/hr/appraisal-run';
 
 /**
@@ -43,6 +43,11 @@ import { CHECK_IN_TYPE_OPTIONS, type CheckInType } from '@/types/hr/appraisal-ru
  * Two lists rather than one, because "check-ins about me" and "check-ins I run" are different
  * jobs: the first is a record of conversations I have had, the second is a queue of ones I
  * still need to hold. Both come from `/me` routes, so neither needs an employee id.
+ *
+ * Area 25 slice 5: re-homed into the portal. The schedule dialog picks from the caller's
+ * OWN direct reports (`manager/me/direct-reports`, self-armed) — the desk-wide employee
+ * search needs a permission a plain manager may not hold, and a check-in you run is with
+ * one of your own people anyway.
  *
  * ⚠ Creating one is refused with 422 when the cycle's settings profile has check-ins switched
  * off — that is a policy decision on the cycle, not a permission problem.
@@ -72,6 +77,13 @@ export default function CheckInsPage() {
       scope === 'mine'
         ? checkInService.getMine(cycleId || undefined)
         : checkInService.getMineAsConductor(cycleId || undefined),
+  });
+
+  // Only while scheduling: the people a check-in of mine can be with.
+  const { data: reports } = useQuery({
+    queryKey: ['me', 'direct-reports'],
+    queryFn: () => employeeService.getMyDirectReports(),
+    enabled: createOpen,
   });
 
   const create = useMutation({
@@ -107,11 +119,11 @@ export default function CheckInsPage() {
   const canCreate = Boolean(cycleId && form.employeeId && form.title.trim() && form.scheduledDate);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Check-ins"
         description="One-to-ones and interim conversations held during a cycle, and the goal updates that come out of them."
-        backHref="/hr/performance"
+        backHref="/me"
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <CalendarPlus className="mr-2 h-4 w-4" />
@@ -192,7 +204,7 @@ export default function CheckInsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/hr/performance/check-ins/${row.id}`}>Open</Link>
+                        <Link href={`/me/performance/check-ins/${row.id}`}>Open</Link>
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -220,10 +232,30 @@ export default function CheckInsPage() {
             )}
             <div className="space-y-2">
               <Label>Employee</Label>
-              <EmployeePicker
-                value={form.employeeId}
-                onChange={(id) => setForm((p) => ({ ...p, employeeId: id }))}
-              />
+              <Select
+                value={form.employeeId ?? ''}
+                onValueChange={(id) => setForm((p) => ({ ...p, employeeId: id || null }))}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      reports?.length ? 'Choose one of your reports' : 'No direct reports found'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {(reports ?? []).map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.firstName} {r.lastName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {reports && reports.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Nobody reports to you on the HR record, so there is nobody to schedule with.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="ci-title">Title</Label>

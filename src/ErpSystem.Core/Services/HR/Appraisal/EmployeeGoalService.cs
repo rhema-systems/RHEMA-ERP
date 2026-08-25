@@ -405,6 +405,15 @@ public class EmployeeGoalService : IEmployeeGoalService
         entity.TenantId = tenantId;
         entity.EmployeeGoalId = goalId;
         entity.EntryDate = DateTime.UtcNow;
+        // An omitted status binds as 0 — not a member of GoalProgressStatus (it starts at 1) —
+        // and was stored as-is, then serialized as a bare number and fed to ApplyProgressToGoal.
+        // Derive from the reported progress instead; an explicit status is respected.
+        if (entity.Status == default)
+        {
+            entity.Status = entity.ProgressPercent >= 100 ? GoalProgressStatus.Completed
+                : entity.ProgressPercent > 0 ? GoalProgressStatus.InProgress
+                : GoalProgressStatus.NotStarted;
+        }
         // Attribution comes from the token, not the payload: a progress entry is a claim about what
         // someone did, and the body used to be free to name anyone.
         entity.RecordedById = recordedById;

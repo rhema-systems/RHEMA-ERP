@@ -33,7 +33,7 @@ export default function AppealOutcomePage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -42,8 +42,8 @@ export default function AppealOutcomePage() {
 
   if (isError || !data) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Appeal outcome" backHref={`/hr/performance/appraisals/${appraisalId}`} />
+      <div className="space-y-6">
+        <PageHeader title="Appeal outcome" backHref={`/me/performance/appraisals/${appraisalId}`} />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -61,11 +61,11 @@ export default function AppealOutcomePage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Appeal outcome"
         description={`${data.appraisalNumber} · ${data.cycleName} (${formatDate(data.cycleStartDate)} – ${formatDate(data.cycleEndDate)})`}
-        backHref={`/hr/performance/appraisals/${appraisalId}`}
+        backHref={`/me/performance/appraisals/${appraisalId}`}
       />
 
       <div className="flex flex-wrap items-center gap-3">

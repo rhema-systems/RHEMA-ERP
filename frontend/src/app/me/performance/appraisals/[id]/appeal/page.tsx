@@ -75,7 +75,7 @@ export default function FileAppealPage() {
         description: 'HR and your manager have been notified. You can follow it from here.',
       });
       queryClient.invalidateQueries({ queryKey: ['hr', 'appeal-page-data', appraisalId] });
-      router.push(`/hr/performance/appraisals/${appraisalId}/appeal-status`);
+      router.push(`/me/performance/appraisals/${appraisalId}/appeal-status`);
     },
     onError: (e: Error) =>
       toast({ title: 'Could not submit the appeal', description: e.message, variant: 'destructive' }),
@@ -83,7 +83,7 @@ export default function FileAppealPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -92,8 +92,8 @@ export default function FileAppealPage() {
 
   if (isError || !data) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Appeal" backHref={`/hr/performance/appraisals/${appraisalId}`} />
+      <div className="space-y-6">
+        <PageHeader title="Appeal" backHref={`/me/performance/appraisals/${appraisalId}`} />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -108,11 +108,11 @@ export default function FileAppealPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Appeal your appraisal"
         description={`${data.appraisalNumber} · ${data.cycleName}`}
-        backHref={`/hr/performance/appraisals/${appraisalId}`}
+        backHref={`/me/performance/appraisals/${appraisalId}`}
       />
 
       <MetricTiles

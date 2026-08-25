@@ -146,7 +146,7 @@ export default function SelfEvaluationPage() {
       queryClient.invalidateQueries({ queryKey: ['hr', 'self-evaluation-context', appraisalId] });
       queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-phase', appraisalId] });
       queryClient.invalidateQueries({ queryKey: ['hr', 'my-appraisals'] });
-      if (!isDraft) router.push(`/hr/performance/appraisals/${appraisalId}`);
+      if (!isDraft) router.push(`/me/performance/appraisals/${appraisalId}`);
     },
     onError: (e: Error) =>
       toast({ title: 'Could not save', description: e.message, variant: 'destructive' }),
@@ -154,7 +154,7 @@ export default function SelfEvaluationPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -163,8 +163,8 @@ export default function SelfEvaluationPage() {
 
   if (!context) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Self-evaluation" backHref="/hr/performance/appraisals" />
+      <div className="space-y-6">
+        <PageHeader title="Self-evaluation" backHref="/me/performance/appraisals" />
         <Card>
           <CardContent className="p-0">
             <EmptyState icon={TriangleAlert} title="Appraisal not found" />
@@ -177,11 +177,11 @@ export default function SelfEvaluationPage() {
   const readOnly = context.isSelfEvaluationSubmitted || !context.isEditable;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My self-evaluation"
         description={`${context.appraisalCycleName} · ${formatDate(context.periodStart)} – ${formatDate(context.periodEnd)}`}
-        backHref={`/hr/performance/appraisals/${appraisalId}`}
+        backHref={`/me/performance/appraisals/${appraisalId}`}
         actions={
           !readOnly ? (
             <div className="flex items-center gap-2">

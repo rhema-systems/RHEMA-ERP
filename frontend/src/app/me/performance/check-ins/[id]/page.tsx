@@ -175,7 +175,7 @@ export default function CheckInDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -184,8 +184,8 @@ export default function CheckInDetailPage() {
 
   if (isError || !checkIn) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Check-in" backHref="/hr/performance/check-ins" />
+      <div className="space-y-6">
+        <PageHeader title="Check-in" backHref="/me/performance/check-ins" />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -204,11 +204,11 @@ export default function CheckInDetailPage() {
   const availableGoals = goals ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={checkIn.title}
         description={`${humanizeEnum(checkIn.checkInType)} with ${checkIn.employeeName} · held by ${checkIn.conductedByName}`}
-        backHref="/hr/performance/check-ins"
+        backHref="/me/performance/check-ins"
         actions={
           <div className="flex items-center gap-2">
             {held ? (

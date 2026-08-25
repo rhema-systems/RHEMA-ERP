@@ -1720,7 +1720,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                     $"Peer feedback open for {employeeName}",
                     "Self-evaluation is in, so the peer feedback form for this appraisal is now open.",
                     cycleName,
-                    "/hr/performance/peer-reviews",
+                    "/me/performance/peer-reviews",
                     appraisal.Id,
                     employeeName));
             }
@@ -2598,7 +2598,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 "Your manager has completed your evaluation",
                 "Your appraisal has moved on for review. You will be notified when the outcome is confirmed.",
                 appraisal.AppraisalCycle?.CycleName,
-                $"/hr/performance/appraisals/{appraisal.Id}",
+                $"/me/performance/appraisals/{appraisal.Id}",
                 appraisal.Id,
                 appraisal.Employee?.FullName ?? "An employee"),
         }, cancellationToken);
@@ -3000,7 +3000,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                     "Your appeal has been sent back for re-evaluation",
                     "HR found merit in your appeal and has asked your manager to look at the scores again. You will be told the final outcome once they have.",
                     context?.CycleName,
-                    $"/hr/performance/appraisals/{appraisal.Id}/appeal-status",
+                    $"/me/performance/appraisals/{appraisal.Id}/appeal-status",
                     appraisal.Id,
                     subject));
 
@@ -3032,7 +3032,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                         ? "HR agreed with your appeal. Open the outcome to see the final scores and HR's reasoning."
                         : "HR has confirmed the original scores. Open the outcome to see their reasoning.",
                     context?.CycleName,
-                    $"/hr/performance/appraisals/{appraisal.Id}/appeal-outcome",
+                    $"/me/performance/appraisals/{appraisal.Id}/appeal-outcome",
                     appraisal.Id,
                     subject));
             }
@@ -4403,7 +4403,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                     ? $"HR has signed off your appraisal.{scoreText} Open it to review the outcome and acknowledge it."
                     : $"HR has signed off your appraisal.{scoreText}",
                 appraisal.AppraisalCycle?.CycleName,
-                $"/hr/performance/appraisals/{appraisal.Id}",
+                $"/me/performance/appraisals/{appraisal.Id}",
                 appraisal.Id,
                 appraisal.Employee?.FullName,
                 awaitingAck ? NotificationUrgency.Warning : NotificationUrgency.Normal),

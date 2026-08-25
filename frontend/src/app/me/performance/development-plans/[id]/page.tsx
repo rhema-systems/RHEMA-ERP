@@ -241,7 +241,7 @@ export default function DevelopmentPlanDetailPage() {
 
   if (plan.isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -250,8 +250,8 @@ export default function DevelopmentPlanDetailPage() {
 
   if (plan.isError || !plan.data) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Development plan" backHref="/hr/performance/development-plans" />
+      <div className="space-y-6">
+        <PageHeader title="Development plan" backHref="/me/performance/development-plans" />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -273,11 +273,11 @@ export default function DevelopmentPlanDetailPage() {
   const isClosed = data.planStatus === 'Completed' || data.planStatus === 'Cancelled';
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={data.title || 'Development plan'}
         description={`${data.employeeName}${data.cycleName ? ` · ${data.cycleName}` : ''}`}
-        backHref="/hr/performance/development-plans"
+        backHref="/me/performance/development-plans"
         actions={
           <div className="flex items-center gap-2">
             <Select

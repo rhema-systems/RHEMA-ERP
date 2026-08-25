@@ -125,7 +125,7 @@ export default function PeerEvaluationPage() {
       setConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ['hr', 'peer-evaluation', evaluationId] });
       queryClient.invalidateQueries({ queryKey: ['hr', 'peer-evaluation-assignments'] });
-      router.push('/hr/performance/peer-reviews');
+      router.push('/me/performance/peer-reviews');
     },
     onError: (e: Error) =>
       toast({ title: 'Could not submit', description: e.message, variant: 'destructive' }),
@@ -133,7 +133,7 @@ export default function PeerEvaluationPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -142,8 +142,8 @@ export default function PeerEvaluationPage() {
 
   if (isError || !data) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Peer feedback" backHref="/hr/performance/peer-reviews" />
+      <div className="space-y-6">
+        <PageHeader title="Peer feedback" backHref="/me/performance/peer-reviews" />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -161,11 +161,11 @@ export default function PeerEvaluationPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={`Feedback on ${data.appraiseeName}`}
         description={`${data.appraiseePosition} · ${data.appraiseeOrganizationUnit} · ${data.appraisalCycleName}`}
-        backHref="/hr/performance/peer-reviews"
+        backHref="/me/performance/peer-reviews"
         actions={
           !data.isSubmitted ? (
             <div className="flex items-center gap-2">

@@ -272,17 +272,18 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         {
             case AppraisalSubStatus.GoalSetting:
                 AddAppraisee();
-                navigationUrl = "/hr/performance/employee-goals";
+                // Area 25 slice 5: the appraisee's surfaces live in the self-service portal.
+                navigationUrl = "/me/performance/goals";
                 break;
 
             case AppraisalSubStatus.PeerNomination:
                 AddAppraisee();
-                navigationUrl = $"/hr/performance/appraisals/{appraisal.Id}";
+                navigationUrl = $"/me/performance/appraisals/{appraisal.Id}";
                 break;
 
             case AppraisalSubStatus.SelfEvaluation:
                 AddAppraisee();
-                navigationUrl = $"/hr/performance/appraisals/{appraisal.Id}/self-evaluation";
+                navigationUrl = $"/me/performance/appraisals/{appraisal.Id}/self-evaluation";
                 break;
 
             case AppraisalSubStatus.PeerEvaluation:
@@ -302,7 +303,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 }
 
                 recipients.AddRange(outstanding);
-                navigationUrl = "/hr/performance/peer-reviews";
+                navigationUrl = "/me/performance/peer-reviews";
                 break;
 
             case AppraisalSubStatus.ManagerEvaluation:
@@ -328,7 +329,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
             case AppraisalSubStatus.PendingAcknowledgment:
                 AddAppraisee();
-                navigationUrl = $"/hr/performance/appraisals/{appraisal.Id}";
+                navigationUrl = $"/me/performance/appraisals/{appraisal.Id}";
                 break;
 
             default:

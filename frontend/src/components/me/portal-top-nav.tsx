@@ -76,11 +76,13 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Performance',
     icon: TrendingUp,
     links: [
-      { label: 'My Appraisals', href: '/hr/performance/appraisals' },
-      { label: 'My Development Plan', href: '/hr/performance/development-plans' },
-      { label: 'Peer Evaluations', href: '/hr/performance/peer-reviews' },
-      { label: 'My Check-Ins', href: '/hr/performance/check-ins' },
-      { label: 'My Journal', href: '/hr/performance/journal' },
+      // Slice 5: the performance my-screens live in the portal.
+      { label: 'My Appraisals', href: '/me/performance/appraisals' },
+      { label: 'My Goals', href: '/me/performance/goals' },
+      { label: 'My Development Plans', href: '/me/performance/development-plans' },
+      { label: 'Peer Reviews', href: '/me/performance/peer-reviews' },
+      { label: 'My Check-Ins', href: '/me/performance/check-ins' },
+      { label: 'My Journal', href: '/me/performance/journal' },
     ],
   },
   {

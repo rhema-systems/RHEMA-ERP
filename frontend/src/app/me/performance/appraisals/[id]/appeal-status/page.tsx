@@ -38,7 +38,7 @@ export default function AppealStatusPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -47,8 +47,8 @@ export default function AppealStatusPage() {
 
   if (isError || !data) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Your appeal" backHref={`/hr/performance/appraisals/${appraisalId}`} />
+      <div className="space-y-6">
+        <PageHeader title="Your appeal" backHref={`/me/performance/appraisals/${appraisalId}`} />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -71,15 +71,15 @@ export default function AppealStatusPage() {
     data.originalScore !== data.adjustedScore;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Your appeal"
         description={`${data.appraisalNumber} · ${data.cycleName}`}
-        backHref={`/hr/performance/appraisals/${appraisalId}`}
+        backHref={`/me/performance/appraisals/${appraisalId}`}
         actions={
           isFinal ? (
             <Button asChild>
-              <Link href={`/hr/performance/appraisals/${appraisalId}/appeal-outcome`}>
+              <Link href={`/me/performance/appraisals/${appraisalId}/appeal-outcome`}>
                 See the full outcome
               </Link>
             </Button>

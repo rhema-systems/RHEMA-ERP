@@ -138,7 +138,7 @@ export default function MyAppraisalDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Skeleton className="h-10 w-1/3" />
         <Skeleton className="h-32 w-full" />
       </div>
@@ -147,8 +147,8 @@ export default function MyAppraisalDetailPage() {
 
   if (!context) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Appraisal" backHref="/hr/performance/appraisals" />
+      <div className="space-y-6">
+        <PageHeader title="Appraisal" backHref="/me/performance/appraisals" />
         <Card>
           <CardContent className="p-0">
             <EmptyState
@@ -163,17 +163,17 @@ export default function MyAppraisalDetailPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={context.appraisalCycleName}
         description={`${context.appraisalNumber} · ${formatDate(context.periodStart)} – ${formatDate(context.periodEnd)}`}
-        backHref="/hr/performance/appraisals"
+        backHref="/me/performance/appraisals"
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge status={humanizeEnum(context.status)} />
             {context.isEditable && !context.isSelfEvaluationSubmitted && (
               <Button asChild>
-                <Link href={`/hr/performance/appraisals/${appraisalId}/self-evaluation`}>
+                <Link href={`/me/performance/appraisals/${appraisalId}/self-evaluation`}>
                   <Send className="mr-2 h-4 w-4" />
                   Self-evaluation
                 </Link>
@@ -224,10 +224,10 @@ export default function MyAppraisalDetailPage() {
               You can appeal a finalised appraisal once. If you already have, follow it here.
             </span>
             <Button size="sm" variant="outline" asChild>
-              <Link href={`/hr/performance/appraisals/${appraisalId}/appeal`}>File an appeal</Link>
+              <Link href={`/me/performance/appraisals/${appraisalId}/appeal`}>File an appeal</Link>
             </Button>
             <Button size="sm" variant="ghost" asChild>
-              <Link href={`/hr/performance/appraisals/${appraisalId}/appeal-status`}>
+              <Link href={`/me/performance/appraisals/${appraisalId}/appeal-status`}>
                 My appeal
               </Link>
             </Button>
@@ -307,7 +307,7 @@ export default function MyAppraisalDetailPage() {
                   action={
                     context.isEditable ? (
                       <Button asChild>
-                        <Link href={`/hr/performance/appraisals/${appraisalId}/self-evaluation`}>
+                        <Link href={`/me/performance/appraisals/${appraisalId}/self-evaluation`}>
                           Start self-evaluation
                         </Link>
                       </Button>
