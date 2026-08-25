@@ -99,6 +99,7 @@ public class CompanyGoalsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(CompanyGoalDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateCompanyGoalDto createDto, CancellationToken cancellationToken = default)
     {
         try
@@ -122,6 +123,7 @@ public class CompanyGoalsController : ControllerBase
     [ProducesResponseType(typeof(CompanyGoalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCompanyGoalDto updateDto, CancellationToken cancellationToken = default)
     {
         // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
@@ -148,6 +150,7 @@ public class CompanyGoalsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -171,6 +174,7 @@ public class CompanyGoalsController : ControllerBase
     [HttpPatch("{id:guid}/visibility")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SetVisibility(Guid id, [FromBody] bool isVisible, CancellationToken cancellationToken = default)
     {
         try
@@ -217,7 +221,7 @@ public class CompanyGoalsController : ControllerBase
     /// Requires cycleId. Supports search, priority, visibility and due-date filters.
     /// </summary>
     [HttpGet("dashboard/paged")]
-    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<CompanyGoalListItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDashboardPaged(
         [FromQuery] Guid cycleId,
@@ -248,7 +252,7 @@ public class CompanyGoalsController : ControllerBase
     /// Single projection query — does not load navigation collections.
     /// </summary>
     [HttpGet("dashboard/metrics")]
-    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(CompanyGoalDashboardMetricsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDashboardMetrics(
         [FromQuery] Guid cycleId,

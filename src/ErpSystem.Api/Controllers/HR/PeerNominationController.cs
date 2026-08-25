@@ -1,7 +1,12 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -11,12 +16,70 @@ namespace ErpSystem.Api.Controllers.HR;
 public class PeerNominationController : ControllerBase
 {
     private readonly IPeerNominationService _nominationService;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<PeerNominationController> _logger;
 
-    public PeerNominationController(IPeerNominationService nominationService, ILogger<PeerNominationController> logger)
+    public PeerNominationController(
+        IPeerNominationService nominationService,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
+        ILogger<PeerNominationController> logger)
     {
         _nominationService = nominationService;
+        _db = db;
+        _currentUserService = currentUserService;
         _logger = logger;
+    }
+
+    // ── W3 entitlement ────────────────────────────────────────────────────
+    //
+    // A nomination names who will score whom. The parties — the peer, the appraisee and the
+    // appraisee's line manager — may see and (pre-approval) act on it; everyone else needs the
+    // performance permission. The service validates the nomination rules but never asked who
+    // was calling, so any authenticated user could nominate, reassign or withdraw anyone's peers.
+
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>The nomination's peer, its appraisee, the appraisee's manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessNominationAsync(Guid nominationId, string policy)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PeerNomination>()
+            .AsNoTracking()
+            .Where(n => n.Id == nominationId && n.TenantId == tenantId)
+            .AnyAsync(n => n.PeerEmployeeId == me
+                        || n.Appraisal.EmployeeId == me
+                        || n.Appraisal.Employee.ManagerId == me,
+                HttpContext.RequestAborted);
+    }
+
+    /// <summary>The appraisal's subject, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, string policy)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .AnyAsync(a => a.EmployeeId == me || a.Employee.ManagerId == me,
+                HttpContext.RequestAborted);
+    }
+
+    /// <summary>The named employee is the caller, or the caller holds the policy.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId) return true;
+        return await HoldsPolicyAsync(policy);
     }
 
     /// <summary>
@@ -39,6 +102,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id)
     {
+        if (!await CanAccessNominationAsync(id, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _nominationService.GetByIdAsync(id);
@@ -62,6 +127,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByAppraisalId(Guid appraisalId)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _nominationService.GetByAppraisalIdAsync(appraisalId);
@@ -81,6 +148,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByPeerEmployeeId(Guid peerEmployeeId)
     {
+        if (!await SelfOrPolicyAsync(peerEmployeeId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _nominationService.GetByPeerEmployeeIdAsync(peerEmployeeId);
@@ -100,6 +169,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPendingNominations(Guid employeeId)
     {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _nominationService.GetPendingNominationsAsync(employeeId);
@@ -120,6 +191,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreatePeerNominationDto createDto)
     {
+        if (!await CanAccessAppraisalAsync(createDto.AppraisalId, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             if (!ModelState.IsValid)
@@ -151,6 +224,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdatePeerNominationDto updateDto)
     {
+        if (!await CanAccessNominationAsync(id, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             if (id != updateDto.Id)
@@ -188,6 +263,8 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SendInvitation(Guid id)
     {
+        if (!await CanAccessNominationAsync(id, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var invitationDto = new SendPeerEvaluationInvitationDto { PeerNominationId = id };
@@ -217,6 +294,9 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id)
     {
+        // Withdrawing a nomination pre-approval is the parties' act; the service guards status.
+        if (!await CanAccessNominationAsync(id, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var response = await _nominationService.DeleteAsync(id);

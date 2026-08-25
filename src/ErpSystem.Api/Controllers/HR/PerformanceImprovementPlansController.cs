@@ -69,8 +69,8 @@ public class PerformanceImprovementPlansController : ControllerBase
         _logger = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private Task<bool> HoldsPolicyAsync(string policy) => PipAccess.HoldsPolicyAsync(this, policy);
 
     /// <summary>
     /// Business rules ("this employee is already on a plan", "recall it before editing") are the
@@ -103,7 +103,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Get all performance improvement plans
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<PerformanceImprovementPlanDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll()
     {
@@ -123,7 +123,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Get PIPs with pagination
     /// </summary>
     [HttpGet("paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<PerformanceImprovementPlanDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
     {
@@ -174,7 +174,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByEmployeeId(Guid employeeId, CancellationToken ct = default)
     {
-        if (!IsHr)
+        if (!await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy))
         {
             if (_currentUserService.EmployeeId is not Guid me) return Forbid();
             if (me != employeeId)
@@ -245,7 +245,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Get PIPs by status
     /// </summary>
     [HttpGet("status/{status}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<PerformanceImprovementPlanDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByStatus(PipStatus status)
     {
@@ -265,7 +265,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Get all active PIPs
     /// </summary>
     [HttpGet("active")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<PerformanceImprovementPlanDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetActive()
     {
@@ -558,7 +558,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Complete a PIP
     /// </summary>
     [HttpPost("{id:guid}/complete")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -597,7 +597,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Delete a PIP
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -1090,7 +1090,7 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// <c>newEndDate</c> (required for that outcome) and leaves the plan running.
     /// </summary>
     [HttpPost("{pipId:guid}/outcome")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]

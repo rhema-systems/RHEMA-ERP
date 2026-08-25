@@ -258,8 +258,51 @@ role-based `PermissionGate` to permissions. Order (risk-ascending, self-service-
    gated desk-side (no UI exists; requester thread access owed if comments ever surface),
    hiring-manager/recruiter vacancy reads at Read (no my-vacancies surface), interview service
    checks stay role-anchored (a permission holder without the HR role is refused there).
-6. **Performance** (350 bare — the largest and most actor-diverse: self, peer, manager, HR;
-   do last of the big areas, with the area-5 actor matrix open)
+6. **Performance** — ✅ **DONE 2026-08-25, harness `run-slice10-performance.mjs` 167/167 green
+   (+ 39/23/47/27/90/66 no-regression — 459 assertions total), `seed-db` run, grant rows verified
+   in DB (HR → Read+Write; SuperAdmin/TenantAdmin → all three), re-verified green on the seeded
+   rows.** Two harness-side fixture lessons: an actor-guarded desk op (cycle open) answers 401
+   for the unlinked HR fixture AFTER the Write gate admits it — assert not-403, not "answers";
+   and a refusal probe's body must satisfy every ModelState rule incl. `[MinLength(1)]` on
+   collections, or the 400 answers before the code guard. `HR.Performance.{Read,Write,Admin}` over
+   all 36 controllers of the area (427 actions): 143 scripted policy placements (4 class + 43
+   method-level role-gate REPLACEMENTS + 96 inserts, placement script keyed by (file, method) with
+   own-contiguous-block gating and one-pass bottom-up splicing — ⚠ new script trap: per-method
+   splicing shifts every later declaration index; collect ALL insertion points first, then splice
+   once, or alternating methods land off-by-N) plus hand edits in 18 controllers.
+   The split: org-wide registers (appraisal/appeal/check-in/development-plan/PIP registers,
+   review-events by cycle, recommendation worklist, rating distribution, org-wide at-risk, HR
+   cycle dashboard, cycle progress/coverage, goal-library usage, company-goal dashboard,
+   goal-risk thresholds) → Read; desk ops (cycle lifecycle incl. open/close/generate/reminders,
+   template/criteria/grade/settings/target authoring incl. template approve, appraisal
+   create/update/raw-status/score, HR review approve-and-finalize/return-to-manager/progress,
+   appeals begin/resolve/finalize, evaluator+criterion-score maintenance, calibration end to end,
+   recommendation decide, deadline enforcement, company/strategic/library/KPI writes, goal
+   unlock) → Write; deletes of records and catalogue + goal-risk reset → Admin (cycle-target and
+   cycle-template unassign stay Write: same-object authoring, not data destruction).
+   **The actor-diverse arms** (the reason this slice went last): every prior per-record helper's
+   HR-role arm converted to a tiered policy check via `IAuthorizationService` (PipAccess shared
+   helper, check-ins, conversations, review events, development plans + feedback, journal
+   shared-arm, links, analytics trend), and NEW ownership guards added where the service never
+   asked who was calling — appraisal GetById/self-eval-context/hr-review/evaluations/responses,
+   peer-nomination CRUD (parties = peer/appraisee/manager), nomination batch (appraisee) vs
+   approve/reject (manager-only), manager-peer-evaluations (manager-only, anonymity),
+   employee-goal CRUD/progress (subject+manager), by-employee-id notification routes and
+   single-notification read (recipient), recommendation by-appraisal (manager-only — a proposed
+   termination is not its subject's to see before HR decides), check-in create-in-another's-name.
+   **Kept open, validated elsewhere:** every token-actor self surface (self/manager/peer
+   evaluation, acknowledge, appeals, /me and /mine routes), goal submit/approve/reject/lock (the
+   bespoke goal workflow holds the direct manager), PIP approve/reject (workflow engine
+   assignee), TeamGoals + GoalDetail (token-manager-scoped in the service), UnitGoals and
+   CompanyGoals reads (the cascade is meant to be seen), calibration READS (area-5 decision:
+   panellists need the grid — harness carries a canary), reference catalogues (cycles, templates,
+   grades, KPIs, library selector, strategic goals). **Residuals recorded:** PIP authoring stays
+   on `AuthorRoles` (SuperAdmin/HR/Manager — a permission would lock line managers out; a
+   seeded-permission-only author is refused there), CheckIns `Redact` keeps the sync role check
+   (a Read-holder without the role sees private notes redacted — safe direction), journal private
+   entries exclude even permission holders (deliberate, matches the HR exclusion), calibration
+   reads tenant-open per area-5. Frontend: sidebar-only — nine desk children on
+   HR.Performance.Read, Deadline Enforcement on Write, all self/manager surfaces open.
 7. **Foundation/Employee core** (280 bare — pickers feed every module; follow medical's
    precedent of leaving name-lookup reads open to internal users)
 8. **SHE** (employee incident reporting is an any-internal-actor act by design)

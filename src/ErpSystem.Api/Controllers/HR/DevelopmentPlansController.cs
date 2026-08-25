@@ -34,8 +34,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class DevelopmentPlansController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IDevelopmentPlanService _developmentPlanService;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
@@ -53,8 +51,12 @@ public class DevelopmentPlansController : ControllerBase
         _logger = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
     /// Business rules — "a completed plan cannot be edited" and the like — come back as 422 with
@@ -67,10 +69,10 @@ public class DevelopmentPlansController : ControllerBase
         return UnprocessableEntity(new { message = ex.Message });
     }
 
-    /// <summary>HR, the employee whose plan it is, or that employee's line manager.</summary>
-    private async Task<bool> CanAccessPlanAsync(Guid planId, CancellationToken ct = default)
+    /// <summary>The employee whose plan it is, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessPlanAsync(Guid planId, string policy, CancellationToken ct = default)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -81,9 +83,9 @@ public class DevelopmentPlansController : ControllerBase
     }
 
     /// <summary>Same rule for a plan that does not exist yet, keyed on who it is for.</summary>
-    private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, CancellationToken ct = default)
+    private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, string policy, CancellationToken ct = default)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me) return false;
         if (me == employeeId) return true;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
@@ -95,7 +97,7 @@ public class DevelopmentPlansController : ControllerBase
 
     /// <summary>Get development plans with pagination. HR's org-wide view.</summary>
     [HttpGet("paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<EmployeeDevelopmentPlanDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
@@ -118,7 +120,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(id, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -183,7 +185,7 @@ public class DevelopmentPlansController : ControllerBase
     public async Task<IActionResult> GetByManager(Guid managerId, CancellationToken cancellationToken = default)
     {
         // Another manager's team is not this caller's to read; use /my-team for your own.
-        if (!IsHr && _currentUserService.EmployeeId != managerId) return Forbid();
+        if (_currentUserService.EmployeeId != managerId && !await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return Forbid();
 
         try
         {
@@ -203,7 +205,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByEmployee(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+        if (!await CanAccessEmployeeAsync(employeeId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -224,7 +226,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetActivePlan(Guid employeeId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+        if (!await CanAccessEmployeeAsync(employeeId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -246,7 +248,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateEmployeeDevelopmentPlanDto createDto, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessEmployeeAsync(createDto.EmployeeId, cancellationToken)) return Forbid();
+        if (!await CanAccessEmployeeAsync(createDto.EmployeeId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -279,7 +281,7 @@ public class DevelopmentPlansController : ControllerBase
         // The service keys off the body's Id, so a mismatch would silently edit a different plan.
         if (id != updateDto.Id)
             return BadRequest(new { message = "The id in the route does not match the id in the body." });
-        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -308,7 +310,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -339,7 +341,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateDevelopmentPlanStatusRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -371,7 +373,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddObjective(Guid planId, [FromBody] CreateEmployeeDevelopmentObjectiveDto dto, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -399,7 +401,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetObjectives(Guid planId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -429,7 +431,7 @@ public class DevelopmentPlansController : ControllerBase
         // without this guard a mismatched pair silently edited a different objective.
         if (objectiveId != dto.Id)
             return BadRequest(new { message = "The objective id in the route does not match the id in the body." });
-        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -458,7 +460,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteObjective(Guid planId, Guid objectiveId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -484,7 +486,7 @@ public class DevelopmentPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateObjectiveProgress(Guid planId, Guid objectiveId, [FromBody] UpdateObjectiveProgressRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {

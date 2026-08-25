@@ -23,8 +23,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class CheckInsController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly ICheckInService _checkInService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IHrControlledDocumentService _hrDocuments;
@@ -122,10 +120,17 @@ public class CheckInsController : ControllerBase
     private bool IsHr =>
         User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
 
-    /// <summary>HR, or the employee the check-in is about, or their line manager.</summary>
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>The employee the check-in is about, their line manager, or a policy holder.</summary>
     private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (me == employeeId) return true;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
@@ -142,7 +147,7 @@ public class CheckInsController : ControllerBase
     /// </summary>
     private async Task<bool> CanManageCheckInAsync(Guid checkInId, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -172,7 +177,7 @@ public class CheckInsController : ControllerBase
 
     /// <summary>Every check-in in the tenant — HR's view.</summary>
     [HttpGet("paged")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<CheckInDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
@@ -195,7 +200,7 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(id, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -290,6 +295,12 @@ public class CheckInsController : ControllerBase
         {
             if (!TryGetEmployeeId(out var conductorId, out var problem)) return problem!;
             createDto.ConductedById = conductorId;
+        }
+        else if (_currentUserService.EmployeeId != createDto.ConductedById
+                 && !await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
+        {
+            // Booking a meeting in someone ELSE's name is the desk's act, not any colleague's.
+            return Forbid();
         }
 
         try
@@ -403,7 +414,7 @@ public class CheckInsController : ControllerBase
     public async Task<IActionResult> AddGoalUpdate(Guid checkInId, [FromBody] CreateCheckInGoalUpdateDto dto, CancellationToken cancellationToken = default)
     {
         // Either side of the conversation may record what it changed about a goal.
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -426,7 +437,7 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<CheckInGoalUpdateDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetGoalUpdates(Guid checkInId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -453,7 +464,7 @@ public class CheckInsController : ControllerBase
         if (updateId != dto.Id)
             return BadRequest(new { message = "ID mismatch" });
 
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -477,7 +488,7 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteGoalUpdate(Guid checkInId, Guid updateId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -508,9 +519,9 @@ public class CheckInsController : ControllerBase
     /// acceptable is adding a *new* file-download surface with no gate, so these four endpoints
     /// carry the rule the whole controller ought to. Widening it to the rest is its own change.
     /// </remarks>
-    private async Task<bool> CanAccessCheckInAsync(Guid checkInId, CancellationToken ct)
+    private async Task<bool> CanAccessCheckInAsync(Guid checkInId, string policy, CancellationToken ct)
     {
-        if (User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr)) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -536,7 +547,7 @@ public class CheckInsController : ControllerBase
     public async Task<IActionResult> AddAttachment(
         Guid checkInId, IFormFile file, [FromForm] string? description, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         return await HrAttachmentUpload.ExecuteAsync(
             this, _hrDocuments, _currentUserService, _logger, file,
@@ -562,7 +573,7 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadAttachment(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         if (_currentUserService.TenantId is not Guid tenantId)
             return Unauthorized("Tenant context could not be resolved");
@@ -591,7 +602,7 @@ public class CheckInsController : ControllerBase
     public async Task<IActionResult> GetAttachments(Guid checkInId, CancellationToken cancellationToken = default)
     {
         // Entitled the same as the file itself — a listing still leaks filenames and uploaders.
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -616,7 +627,7 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAttachment(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {

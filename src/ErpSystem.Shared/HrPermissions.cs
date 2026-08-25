@@ -36,6 +36,7 @@ public static class HrPermissions
     public const string CategoryManpowerBudget = "HR - Manpower Budget & Establishment";
     public const string CategorySeparation = "HR - Separation, Clearance & Exit";
     public const string CategoryAwards = "HR - Staff Awards & Recognition";
+    public const string CategoryPerformance = "HR - Performance";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -143,6 +144,14 @@ public static class HrPermissions
     public const string SeparationReadPolicy = "HR.Policy.SeparationRead";
     public const string SeparationWritePolicy = "HR.Policy.SeparationWrite";
     public const string SeparationAdminPolicy = "HR.Policy.SeparationAdmin";
+
+    public const string ViewPerformance = "HR.Performance.Read";
+    public const string MaintainPerformance = "HR.Performance.Write";
+    public const string AdministerPerformance = "HR.Performance.Admin";
+
+    public const string PerformanceReadPolicy = "HR.Policy.PerformanceRead";
+    public const string PerformanceWritePolicy = "HR.Policy.PerformanceWrite";
+    public const string PerformanceAdminPolicy = "HR.Policy.PerformanceAdmin";
 
     public const string ViewAwards = "HR.Awards.Read";
     public const string MaintainAwards = "HR.Awards.Write";
@@ -292,7 +301,17 @@ public static class HrPermissions
             CategoryAwards),
         new(AdministerAwards, "Administer Staff Awards & Recognition",
             "Administer the award-type catalogue, levels, eligibility targets, budgets and committees, and delete award records. Nominating and voting are NOT this permission — every employee may do both from their own self-service surface.",
-            CategoryAwards)
+            CategoryAwards),
+
+        new(ViewPerformance, "View Performance",
+            "View the org-wide performance surface: appraisal and appeal registers, cycle progress and coverage, the HR cycle dashboard, org-wide at-risk goals, development-plan and improvement-plan registers, review-event and check-in registers, rating analytics and goal-library usage. Employees, managers and peers do not need this for their own appraisal work — self access is an ownership check on the endpoint.",
+            CategoryPerformance),
+        new(MaintainPerformance, "Maintain Performance",
+            "Run the performance desk: maintain cycles, templates, criteria, grades, settings and targets, generate appraisals, run HR review and appeals, run calibration sessions, decide outcome recommendations, enforce deadlines, and maintain goals, check-ins, development plans and improvement plans on behalf of staff. Employee, manager and peer self-acts stay ownership checks on the endpoint, not this permission.",
+            CategoryPerformance),
+        new(AdministerPerformance, "Administer Performance",
+            "Delete performance records — appraisals, cycles, templates, grade and KPI definitions, goal-library items, calibration sessions, review events and improvement plans — and reset goal-risk thresholds. Approving a goal is NOT this permission — that belongs to the goal's direct manager, validated per goal by the goal workflow.",
+            CategoryPerformance)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -377,7 +396,8 @@ public static class HrPermissions
         ViewCompetency, MaintainCompetency,
         ViewManpowerBudget, MaintainManpowerBudget,
         ViewSeparation, MaintainSeparation,
-        ViewAwards, MaintainAwards
+        ViewAwards, MaintainAwards,
+        ViewPerformance, MaintainPerformance
     };
 
     /// <summary>

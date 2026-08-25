@@ -15,8 +15,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class HRCycleDashboardController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IHRCycleDashboardQueryService _dashboardService;
     private readonly ILogger<HRCycleDashboardController> _logger;
 
@@ -62,7 +60,7 @@ public class HRCycleDashboardController : ControllerBase
     /// Returns the fully-aggregated HR Cycle Dashboard for the specified cycle.
     /// </summary>
     [HttpGet("{cycleId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(HRCycleDashboardDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetDashboard(Guid cycleId, CancellationToken ct)
@@ -91,7 +89,7 @@ public class HRCycleDashboardController : ControllerBase
     /// row on the dashboard's attention list.</para>
     /// </summary>
     [HttpPost("{cycleId:guid}/appraisals/{appraisalId:guid}/nudge")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(HRCycleNudgeResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]

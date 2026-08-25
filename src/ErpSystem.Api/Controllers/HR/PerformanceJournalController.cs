@@ -55,8 +55,16 @@ public class PerformanceJournalController : ControllerBase
         _logger             = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>
+    /// W3: whether the caller holds the given performance policy. Stands in for the old HR-role
+    /// arm on SHARED entries only — a private entry stays owner-only, permission holders included,
+    /// for the same reason it excludes HR: a private note readable by the desk is not private.
+    /// </summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
     /// Business rules — "private journaling is not enabled for this cycle" — come back as 422 with
@@ -88,9 +96,9 @@ public class PerformanceJournalController : ControllerBase
     /// <summary>True when the caller is <paramref name="ownerId"/> or that employee's line manager.</summary>
     private async Task<bool> CanSeeSharedOf(Guid ownerId, CancellationToken ct)
     {
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
         if (!TryGetEmployeeId(out var me)) return false;
         if (me == ownerId) return true;
-        if (IsHr) return true;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
         return await _db.Set<Employee>()
@@ -115,9 +123,9 @@ public class PerformanceJournalController : ControllerBase
 
         if (entry is null) return null;
         if (entry.OwnerId == me) return true;
-        // Private is owner-only, HR included — see the type comment.
+        // Private is owner-only, desk and HR included — see the type comment.
         if (entry.IsPrivate) return false;
-        return IsHr || entry.OwnerManagerId == me;
+        return entry.OwnerManagerId == me || await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy);
     }
 
     /// <summary>Editing, deleting and re-classifying an entry belong to its author alone.</summary>
@@ -289,7 +297,8 @@ public class PerformanceJournalController : ControllerBase
 
         // A note *about* someone is only yours to write if they report to you. Without this an
         // employee could file entries against a colleague they have no relationship with.
-        if (createDto.SubjectEmployeeId is Guid subject && subject != me && !IsHr)
+        if (createDto.SubjectEmployeeId is Guid subject && subject != me
+            && !await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
         {
             if (_currentUserService.TenantId is not Guid tenantId) return Forbid();
             var isMyReport = await _db.Set<Employee>()

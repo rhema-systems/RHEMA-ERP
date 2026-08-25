@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -171,6 +172,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalTemplateDto createDto, CancellationToken cancellationToken = default)
     {
         try
@@ -193,6 +195,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalTemplateDto updateDto, CancellationToken cancellationToken = default)
     {
         try
@@ -219,6 +222,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -242,6 +246,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPatch("{id:guid}/active-status")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SetActiveStatus(Guid id, [FromBody] bool isActive, CancellationToken cancellationToken = default)
     {
         try
@@ -265,6 +270,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPost("{sourceTemplateId:guid}/clone")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Clone(Guid sourceTemplateId, [FromBody] CopyAppraisalTemplateDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -298,6 +304,7 @@ public class AppraisalTemplatesController : ControllerBase
     /// <summary>Submit a template for approval, starting its workflow</summary>
     [HttpPost("{id:guid}/submit-for-approval")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SubmitForApproval(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -318,6 +325,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Approve(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -339,6 +347,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPost("{id:guid}/reject")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectAppraisalTemplateDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -359,6 +368,7 @@ public class AppraisalTemplatesController : ControllerBase
     /// <summary>Recall a still-pending template back to Draft</summary>
     [HttpPost("{id:guid}/recall")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Recall(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -382,6 +392,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPost("{templateId:guid}/sections")]
     [ProducesResponseType(typeof(AppraisalTemplateSectionDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddSection(Guid templateId, [FromBody] CreateAppraisalTemplateSectionDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -425,6 +436,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPut("{templateId:guid}/sections/{sectionId:guid}")]
     [ProducesResponseType(typeof(AppraisalTemplateSectionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateSection(Guid templateId, Guid sectionId, [FromBody] UpdateAppraisalTemplateSectionDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -450,6 +462,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpDelete("{templateId:guid}/sections/{sectionId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> DeleteSection(Guid templateId, Guid sectionId, CancellationToken cancellationToken = default)
     {
         try
@@ -473,6 +486,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPatch("{templateId:guid}/sections/reorder")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> ReorderSections(Guid templateId, [FromBody] IEnumerable<Guid> orderedSectionIds, CancellationToken cancellationToken = default)
     {
         try
@@ -498,6 +512,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPost("sections/{sectionId:guid}/items")]
     [ProducesResponseType(typeof(AppraisalTemplateItemDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddItem(Guid sectionId, [FromBody] CreateAppraisalTemplateItemDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -545,6 +560,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPut("sections/{sectionId:guid}/items/{itemId:guid}")]
     [ProducesResponseType(typeof(AppraisalTemplateItemDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateItem(Guid sectionId, Guid itemId, [FromBody] UpdateAppraisalTemplateItemDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -574,6 +590,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpDelete("sections/{sectionId:guid}/items/{itemId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> DeleteItem(Guid sectionId, Guid itemId, CancellationToken cancellationToken = default)
     {
         try
@@ -597,6 +614,7 @@ public class AppraisalTemplatesController : ControllerBase
     [HttpPatch("sections/{sectionId:guid}/items/reorder")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> ReorderItems(Guid sectionId, [FromBody] IEnumerable<Guid> orderedItemIds, CancellationToken cancellationToken = default)
     {
         try
@@ -645,6 +663,7 @@ public class AppraisalTemplatesController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<TemplateItemGradeRangeDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateItemGradeRanges(Guid itemId, [FromBody] UpsertTemplateItemGradeRangesDto dto, CancellationToken cancellationToken = default)
     {
         try

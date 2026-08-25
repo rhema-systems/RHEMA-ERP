@@ -36,8 +36,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class AppraisalReviewEventsController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IAppraisalReviewEventService _reviewEventService;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
@@ -64,8 +62,12 @@ public class AppraisalReviewEventsController : ControllerBase
         _logger             = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
     /// Business rules — "the employee must submit their self-assessment first", "a goal progress
@@ -106,33 +108,33 @@ public class AppraisalReviewEventsController : ControllerBase
         return parties is null ? null : (parties.EmployeeId, parties.ManagerId);
     }
 
-    /// <summary>HR, the appraisee, or the appraisee's line manager.</summary>
+    /// <summary>The appraisee, the appraisee's line manager, or a performance-Read holder.</summary>
     private async Task<bool?> CanAccessEventAsync(Guid eventId, CancellationToken ct)
     {
         var parties = await GetEventPartiesAsync(eventId, ct);
         if (parties is null) return null;
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
         if (CurrentEmployeeId is not Guid me) return false;
         return parties.Value.EmployeeId == me || parties.Value.ManagerId == me;
     }
 
     /// <summary>As <see cref="CanAccessEventAsync"/> minus the appraisee — closing a review and
-    /// scoring a period are the manager's side of it.</summary>
+    /// scoring a period are the manager's side of it (or the desk's, on performance Write).</summary>
     private async Task<bool?> CanManageEventAsync(Guid eventId, CancellationToken ct)
     {
         var parties = await GetEventPartiesAsync(eventId, ct);
         if (parties is null) return null;
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return true;
         if (CurrentEmployeeId is not Guid me) return false;
         return parties.Value.ManagerId == me;
     }
 
-    /// <summary>Only the appraisee submits their own self-assessment; HR may do it on their behalf.</summary>
+    /// <summary>Only the appraisee submits their own self-assessment; the desk may do it on their behalf.</summary>
     private async Task<bool?> CanSubmitEventAsync(Guid eventId, CancellationToken ct)
     {
         var parties = await GetEventPartiesAsync(eventId, ct);
         if (parties is null) return null;
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return true;
         if (CurrentEmployeeId is not Guid me) return false;
         return parties.Value.EmployeeId == me;
     }
@@ -238,7 +240,7 @@ public class AppraisalReviewEventsController : ControllerBase
     /// <summary>Same rule as a single event, keyed on the appraisal instead.</summary>
     private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
         if (CurrentEmployeeId is not Guid me) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -253,7 +255,7 @@ public class AppraisalReviewEventsController : ControllerBase
     /// <c>by-appraisal</c> per report; this one spans the whole tenant.
     /// </summary>
     [HttpGet("by-cycle/{cycleId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<AppraisalReviewEventDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByCycle(Guid cycleId, CancellationToken cancellationToken = default)
     {
@@ -294,7 +296,7 @@ public class AppraisalReviewEventsController : ControllerBase
     /// from the cycle's own <c>ReviewFrequency</c>.
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalReviewEventDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -357,7 +359,7 @@ public class AppraisalReviewEventsController : ControllerBase
 
     /// <summary>Delete an appraisal review event</summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)

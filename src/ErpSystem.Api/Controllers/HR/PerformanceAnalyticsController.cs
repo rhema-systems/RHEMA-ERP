@@ -19,8 +19,6 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize(Policy = "InternalOnly")]
 public class PerformanceAnalyticsController : ControllerBase
 {
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private readonly IPerformanceAnalyticsService _service;
     private readonly ICurrentUserService _currentUserService;
     private readonly ApplicationDbContext _db;
@@ -38,19 +36,23 @@ public class PerformanceAnalyticsController : ControllerBase
         _logger = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
-    /// True when the caller may see this employee's score history: HR, the employee themselves,
-    /// or their line manager.
+    /// True when the caller may see this employee's score history: the desk, the employee
+    /// themselves, or their line manager.
     ///
     /// <para>Without this, any authenticated user could read anyone's multi-year appraisal scores
     /// by passing their id — the same "actor from the URL" hole found across the appraisal run.</para>
     /// </summary>
     private async Task<bool> CanViewTrendAsync(Guid employeeId, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
         if (_currentUserService.EmployeeId is not Guid me) return false;
         if (me == employeeId) return true;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
@@ -62,7 +64,7 @@ public class PerformanceAnalyticsController : ControllerBase
 
     /// <summary>Rating distribution for a cycle (calibration leniency/skew)</summary>
     [HttpGet("cycle/{cycleId:guid}/rating-distribution")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(CalibrationDistributionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCycleRatingDistribution(Guid cycleId, CancellationToken cancellationToken = default)

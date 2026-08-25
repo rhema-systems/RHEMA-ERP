@@ -1550,6 +1550,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerAwards)));
 
+            // W3 slice 10 — Performance. Same ladder: Administer implies Write implies Read.
+            // Deliberately NOT gated on this family: every token-actor self surface (self/manager/
+            // peer evaluation, acknowledge, appeals, own goals and journal), goal approve/reject
+            // (the goal workflow validates the direct manager per goal), PIP approve/reject (the
+            // workflow engine validates the assignee per instance), and the PIP authoring role gate
+            // (managers author PIPs for their reports — a permission would lock every line manager
+            // out of the corrective surface).
+            authorizationBuilder
+                .AddPolicy(HrPermissions.PerformanceReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewPerformance,
+                        HrPermissions.MaintainPerformance,
+                        HrPermissions.AdministerPerformance)))
+                .AddPolicy(HrPermissions.PerformanceWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainPerformance,
+                        HrPermissions.AdministerPerformance)))
+                .AddPolicy(HrPermissions.PerformanceAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerPerformance)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -79,6 +80,7 @@ public class StrategicGoalsController : ControllerBase
     /// <summary>Create a strategic goal</summary>
     [HttpPost]
     [ProducesResponseType(typeof(StrategicGoalDto), StatusCodes.Status201Created)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateStrategicGoalDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -101,6 +103,7 @@ public class StrategicGoalsController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(StrategicGoalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateStrategicGoalDto dto, CancellationToken cancellationToken = default)
     {
         if (id != dto.Id)
@@ -126,6 +129,7 @@ public class StrategicGoalsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -152,6 +156,7 @@ public class StrategicGoalsController : ControllerBase
     [HttpPatch("{id:guid}/active-status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SetActiveStatus(Guid id, [FromBody] bool isActive, CancellationToken cancellationToken = default)
     {
         try

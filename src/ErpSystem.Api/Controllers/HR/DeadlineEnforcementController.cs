@@ -16,7 +16,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/DeadlineEnforcement")]
-[Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
+[Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
 public class DeadlineEnforcementController : ControllerBase
 {
     private readonly IAppraisalWorkflowService _workflowService;

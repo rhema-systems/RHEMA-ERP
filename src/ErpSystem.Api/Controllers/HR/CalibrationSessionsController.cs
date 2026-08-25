@@ -57,8 +57,6 @@ public class CalibrationSessionsController : ControllerBase
         _logger = logger;
     }
 
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private bool TryGetEmployeeId(out Guid employeeId, out IActionResult? problem)
     {
         var id = _currentUserService.EmployeeId;
@@ -143,7 +141,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Create a new calibration session</summary>
     [HttpPost]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateCalibrationSessionDto createDto, CancellationToken cancellationToken = default)
@@ -166,7 +164,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Update an existing calibration session</summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCalibrationSessionDto updateDto, CancellationToken cancellationToken = default)
@@ -197,7 +195,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Delete a calibration session</summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
@@ -234,7 +232,7 @@ public class CalibrationSessionsController : ControllerBase
     /// scope to the session, so their computed phase reads "calibration in progress".
     /// </summary>
     [HttpPost("{sessionId:guid}/open")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> OpenSession(Guid sessionId, CancellationToken cancellationToken = default)
@@ -263,7 +261,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Stamps the session as having actually convened.</summary>
     [HttpPost("{sessionId:guid}/start")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> StartSession(Guid sessionId, CancellationToken cancellationToken = default)
@@ -290,7 +288,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Closes the session and notifies the panel that the ratings can be committed.</summary>
     [HttpPost("{sessionId:guid}/complete")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CompleteSession(
@@ -322,7 +320,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Add a participant to a calibration session</summary>
     [HttpPost("{sessionId:guid}/participants")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationParticipantDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddParticipant(Guid sessionId, [FromBody] CreateCalibrationParticipantDto dto, CancellationToken cancellationToken = default)
@@ -370,7 +368,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Remove a participant from a calibration session</summary>
     [HttpDelete("{sessionId:guid}/participants/{participantId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveParticipant(Guid sessionId, Guid participantId, CancellationToken cancellationToken = default)
@@ -394,7 +392,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Record attendance for a participant</summary>
     [HttpPatch("{sessionId:guid}/participants/{participantId:guid}/attendance")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RecordAttendance(
@@ -424,7 +422,7 @@ public class CalibrationSessionsController : ControllerBase
     /// one to move a single criterion. The adjuster is the caller.
     /// </summary>
     [HttpPost("{sessionId:guid}/adjustments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationRatingAdjustmentDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddRatingAdjustment(Guid sessionId, [FromBody] CreateCalibrationRatingAdjustmentDto dto, CancellationToken cancellationToken = default)
@@ -495,7 +493,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Update a rating adjustment</summary>
     [HttpPut("{sessionId:guid}/adjustments/{adjustmentId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationRatingAdjustmentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateRatingAdjustment(Guid sessionId, Guid adjustmentId, [FromBody] UpdateCalibrationRatingAdjustmentDto dto, CancellationToken cancellationToken = default)
@@ -528,7 +526,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Delete a rating adjustment</summary>
     [HttpDelete("{sessionId:guid}/adjustments/{adjustmentId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteRatingAdjustment(Guid sessionId, Guid adjustmentId, CancellationToken cancellationToken = default)
@@ -555,7 +553,7 @@ public class CalibrationSessionsController : ControllerBase
     /// gate on everyone in scope, adjusted or not.
     /// </summary>
     [HttpPost("{sessionId:guid}/apply-adjustments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationApplyResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ApplyAllAdjustments(Guid sessionId, CancellationToken cancellationToken = default)
@@ -617,7 +615,7 @@ public class CalibrationSessionsController : ControllerBase
     /// worked in any case — see <c>CalibrationSessionService.AddAttachmentAsync</c>.
     /// </remarks>
     [HttpPost("{sessionId:guid}/attachments")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalAttachmentDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -718,7 +716,7 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>Delete an attachment from a calibration session</summary>
     [HttpDelete("{sessionId:guid}/attachments/{attachmentId:guid}")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAttachment(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default)

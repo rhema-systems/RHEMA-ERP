@@ -15,7 +15,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/PipDashboard")]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
 public class PipDashboardController : ControllerBase
 {
     private readonly IPerformanceImprovementPlanService _pipService;

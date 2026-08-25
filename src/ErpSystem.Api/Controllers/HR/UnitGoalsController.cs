@@ -213,12 +213,16 @@ public class UnitGoalsController : ControllerBase
         }
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
-    /// Who may change a unit goal: HR, the manager who raised it, or the head of the org unit it
-    /// belongs to.
+    /// Who may change a unit goal: the desk (performance Write), the manager who raised it, or
+    /// the head of the org unit it belongs to.
     /// </summary>
     /// <remarks>
     /// <para><b>Reads stay open to the tenant deliberately.</b> A unit goal is a departmental
@@ -231,7 +235,7 @@ public class UnitGoalsController : ControllerBase
     /// </remarks>
     private async Task<bool> CanManageGoalAsync(Guid goalId, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -249,9 +253,9 @@ public class UnitGoalsController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateUnitGoalDto createDto, CancellationToken cancellationToken = default)
     {
         // The author is the caller. CreatedByManagerId arrives on the payload, so without this
-        // anyone could raise a goal in someone else's name. HR may still name a manager explicitly
-        // when raising one on their behalf.
-        if (!IsHr)
+        // anyone could raise a goal in someone else's name. The desk may still name a manager
+        // explicitly when raising one on their behalf.
+        if (!await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
         {
             if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
                 return Forbid();

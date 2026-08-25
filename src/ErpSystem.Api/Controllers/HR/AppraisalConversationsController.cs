@@ -45,8 +45,12 @@ public class AppraisalConversationsController : ControllerBase
         _logger = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
     {
@@ -54,10 +58,10 @@ public class AppraisalConversationsController : ControllerBase
         return UnprocessableEntity(new { message = ex.Message });
     }
 
-    /// <summary>HR, the appraisee, or the appraisee's line manager.</summary>
-    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, CancellationToken ct = default)
+    /// <summary>The appraisee, the appraisee's line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, string policy, CancellationToken ct = default)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -68,9 +72,9 @@ public class AppraisalConversationsController : ControllerBase
     }
 
     /// <summary>As above, plus whoever scheduled or is holding this particular conversation.</summary>
-    private async Task<bool> CanAccessConversationAsync(Guid conversationId, CancellationToken ct = default)
+    private async Task<bool> CanAccessConversationAsync(Guid conversationId, string policy, CancellationToken ct = default)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -90,7 +94,7 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessConversationAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessConversationAsync(id, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -114,7 +118,7 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByAppraisal(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -134,7 +138,7 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByType(Guid appraisalId, ConversationType type, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -196,7 +200,7 @@ public class AppraisalConversationsController : ControllerBase
     public async Task<IActionResult> GetScheduledByManager(Guid managerId, CancellationToken cancellationToken = default)
     {
         // Another manager's diary is not this caller's to read; use /my-diary for your own.
-        if (!IsHr && _currentUserService.EmployeeId != managerId) return Forbid();
+        if (_currentUserService.EmployeeId != managerId && !await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return Forbid();
 
         try
         {
@@ -217,7 +221,7 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalConversationDto createDto, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(createDto.AppraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(createDto.AppraisalId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         // Whoever books the conversation is the one holding it unless they say otherwise, and the
         // client has no employee id of its own to send.
@@ -260,7 +264,7 @@ public class AppraisalConversationsController : ControllerBase
         // The service keys off the body's Id, so a mismatch would silently edit another meeting.
         if (id != updateDto.Id)
             return BadRequest(new { message = "The id in the route does not match the id in the body." });
-        if (!await CanAccessConversationAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessConversationAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -289,7 +293,7 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessConversationAsync(id, cancellationToken)) return Forbid();
+        if (!await CanAccessConversationAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -319,7 +323,7 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Complete(Guid conversationId, [FromBody] CompleteConversationRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessConversationAsync(conversationId, cancellationToken)) return Forbid();
+        if (!await CanAccessConversationAsync(conversationId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {

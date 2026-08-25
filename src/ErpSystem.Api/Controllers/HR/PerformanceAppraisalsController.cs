@@ -55,9 +55,6 @@ public class PerformanceAppraisalsController : ControllerBase
     // from the request body: the services validate the id they are given against the appraisal,
     // which stops a caller acting on the wrong appraisal but not on the wrong person's behalf.
 
-    /// <summary>Who may adjudicate an appeal, and see the cross-organisation appeal queue.</summary>
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
-
     private bool TryGetEmployeeId(out Guid employeeId, out IActionResult? problem)
     {
         var id = _currentUserService.EmployeeId;
@@ -89,6 +86,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<PerformanceAppraisalDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetAll()
     {
         try
@@ -108,6 +106,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet("paged")]
     [ProducesResponseType(typeof(PagedResult<PerformanceAppraisalDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
     {
         try
@@ -130,6 +129,9 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id)
     {
+        // The appraisee, their manager, or the desk — a raw id must not read anyone's appraisal.
+        if (!await CanAccessAppraisalAsync(id, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetByIdAsync(id);
@@ -153,6 +155,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<PerformanceAppraisalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByEmployeeId(Guid employeeId)
     {
+        if (!await CanAccessEmployeeRecordsAsync(employeeId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetByEmployeeIdAsync(employeeId);
@@ -170,6 +174,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet("year/{year}")]
     [ProducesResponseType(typeof(IEnumerable<PerformanceAppraisalDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetByYear(int year)
     {
         try
@@ -189,6 +194,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet("status/{status}")]
     [ProducesResponseType(typeof(IEnumerable<PerformanceAppraisalDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetByStatus(AppraisalStatus status)
     {
         try
@@ -209,6 +215,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(PerformanceAppraisalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreatePerformanceAppraisalDto createDto)
     {
         try
@@ -236,6 +243,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(PerformanceAppraisalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdatePerformanceAppraisalDto updateDto)
     {
         try
@@ -268,6 +276,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpPatch("{id:guid}/status")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateAppraisalStatusDto statusDto)
     {
         try
@@ -300,6 +309,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpPost("{id:guid}/calculate-score")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> CalculateOverallScore(Guid id)
     {
         try
@@ -325,6 +335,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> FileAppeal(Guid id, [FromBody] CreateAppraisalAppealDto appealDto)
     {
         try
@@ -358,6 +369,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> ResolveAppeal(Guid appealId, [FromBody] ResolveAppraisalAppealDto resolveDto)
     {
         try
@@ -394,6 +406,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         try
@@ -421,6 +434,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(EvaluatorEvaluationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddEvaluatorEvaluation(Guid appraisalId, [FromBody] CreateEvaluatorEvaluationDto createDto)
     {
         try
@@ -453,6 +467,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<EvaluatorEvaluationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetEvaluatorEvaluations(Guid appraisalId)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetEvaluatorEvaluationsAsync(appraisalId);
@@ -472,6 +488,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(EvaluatorEvaluationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateEvaluatorEvaluation(Guid appraisalId, Guid evaluationId, [FromBody] UpdateEvaluatorEvaluationDto updateDto)
     {
         try
@@ -508,6 +525,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpDelete("{appraisalId}/evaluations/{evaluationId}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> DeleteEvaluatorEvaluation(Guid appraisalId, Guid evaluationId)
     {
         try
@@ -537,6 +555,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(CriterionScoreDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddCriterionScore(Guid evaluationId, [FromBody] CreateCriterionScoreDto createDto)
     {
         try
@@ -567,6 +586,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet("evaluations/{evaluationId}/scores")]
     [ProducesResponseType(typeof(IEnumerable<CriterionScoreDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetCriterionScores(Guid evaluationId)
     {
         try
@@ -588,6 +608,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(CriterionScoreDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateCriterionScore(Guid evaluationId, Guid scoreId, [FromBody] UpdateCriterionScoreDto updateDto)
     {
         try
@@ -620,6 +641,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [HttpDelete("evaluations/{evaluationId}/scores/{scoreId}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> DeleteCriterionScore(Guid evaluationId, Guid scoreId)
     {
         try
@@ -649,6 +671,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(AppraisalEmployeeResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddEmployeeResponse(Guid appraisalId, [FromBody] CreateAppraisalEmployeeResponseDto createDto)
     {
         try
@@ -677,6 +700,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<AppraisalEmployeeResponseDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetEmployeeResponses(Guid appraisalId)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetEmployeeResponsesAsync(appraisalId);
@@ -693,13 +718,21 @@ public class PerformanceAppraisalsController : ControllerBase
 
     #region Attachment Operations
 
-    /// <summary>
-    /// True when the caller may see this appraisal's evidence: HR, the appraisee, or their line
-    /// manager. Mirrors the rule on <see cref="AppraisalReviewEventsController"/>.
-    /// </summary>
-    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, CancellationToken ct)
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
     {
-        if (User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr)) return true;
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>
+    /// True when the caller may touch this appraisal: the appraisee, their line manager, or a
+    /// holder of <paramref name="policy"/> (Read for reads, Write for writes — the W3 tiering of
+    /// the old HR-role arm). Mirrors the rule on <see cref="AppraisalReviewEventsController"/>.
+    /// </summary>
+    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, string policy, CancellationToken ct)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -707,6 +740,45 @@ public class PerformanceAppraisalsController : ControllerBase
             .AsNoTracking()
             .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
             .AnyAsync(a => a.EmployeeId == me || a.Employee.ManagerId == me, ct);
+    }
+
+    /// <summary>
+    /// As <see cref="CanAccessAppraisalAsync"/> minus the appraisee — the manager's side of the
+    /// run (peer detail under anonymity, nomination decisions) is not the appraisee's to reach.
+    /// </summary>
+    private async Task<bool> CanManageAppraisalAsync(Guid appraisalId, string policy, CancellationToken ct)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .AnyAsync(a => a.Employee.ManagerId == me, ct);
+    }
+
+    /// <summary>The employee themselves, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessEmployeeRecordsAsync(Guid employeeId, string policy, CancellationToken ct)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+        {
+            if (me == employeeId) return true;
+            if (_currentUserService.TenantId is Guid tenantId &&
+                await _db.Set<Core.Entities.HR.Employee>()
+                    .AsNoTracking()
+                    .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == me, ct))
+                return true;
+        }
+
+        return await HoldsPolicyAsync(policy);
+    }
+
+    /// <summary>The named actor from the route is the caller, or the caller holds the policy.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId) return true;
+        return await HoldsPolicyAsync(policy);
     }
 
     /// <summary>
@@ -725,7 +797,7 @@ public class PerformanceAppraisalsController : ControllerBase
     public async Task<IActionResult> AddAttachment(
         Guid appraisalId, IFormFile file, [FromForm] string? description, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         return await HrAttachmentUpload.ExecuteAsync(
             this, _hrDocuments, _currentUserService, _logger, file,
@@ -748,7 +820,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadAttachment(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         if (_currentUserService.TenantId is not Guid tenantId)
             return Unauthorized("Tenant context could not be resolved");
@@ -777,7 +849,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAttachment(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -805,7 +877,7 @@ public class PerformanceAppraisalsController : ControllerBase
     {
         // The list is entitled the same as the file. Gating the download but not the listing still
         // hands an outsider every filename, description and uploader on someone's appraisal.
-        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -826,6 +898,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<MyAppraisalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyAppraisals(Guid employeeId, [FromQuery] string? cycleFilter = null)
     {
+        if (!await CanAccessEmployeeRecordsAsync(employeeId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetMyAppraisalsAsync(employeeId, cycleFilter);
@@ -869,6 +943,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetSelfEvaluationContext(Guid appraisalId)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetSelfEvaluationContextAsync(appraisalId);
@@ -938,6 +1014,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetViewSubmittedEvaluation(Guid appraisalId)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetViewSubmittedEvaluationAsync(appraisalId);
@@ -965,6 +1043,9 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<TeamAppraisalCycleSummaryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetTeamAppraisalCycles(Guid managerId)
     {
+        // Another manager's team view is not this caller's to read; the /me twin needs no id.
+        if (!await SelfOrPolicyAsync(managerId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetTeamAppraisalCyclesAsync(managerId);
@@ -1027,6 +1108,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<TeamMemberAppraisalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetTeamMemberAppraisals(Guid cycleId, Guid managerId)
     {
+        if (!await SelfOrPolicyAsync(managerId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetTeamMemberAppraisalsAsync(cycleId, managerId);
@@ -1082,6 +1165,10 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetManagerEvaluationContext(Guid appraisalId, Guid managerId)
     {
+        // The service checks managerId against the appraisal, not against the caller — without
+        // this, passing the true manager's id read out their evaluation context.
+        if (!await SelfOrPolicyAsync(managerId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetManagerEvaluationContextAsync(appraisalId, managerId);
@@ -1168,6 +1255,9 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetManagerPeerEvaluationReview(Guid appraisalId)
     {
+        // Manager-or-desk only: this view names the peers, which anonymity hides from the appraisee.
+        if (!await CanManageAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetManagerPeerEvaluationReviewAsync(appraisalId);
@@ -1196,6 +1286,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetPeerNominationSummary(Guid appraisalId)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _peerNominationService.GetNominationSummaryAsync(appraisalId);
@@ -1221,6 +1313,10 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CreatePeerNominationsBatch(Guid appraisalId, [FromBody] BatchCreatePeerNominationsDto batchDto)
     {
+        // Nominating is the appraisee's (or their manager's / the desk's) act on THIS appraisal —
+        // the service validates the list but never asked who was posting it.
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceWritePolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             // Ensure route parameter matches DTO
@@ -1256,6 +1352,9 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ApprovePeerNominations(Guid appraisalId, [FromBody] ApprovePeerNominationsDto approveDto)
     {
+        // Signing the peer list off is the manager's decision, not the appraisee's.
+        if (!await CanManageAppraisalAsync(appraisalId, HrPermissions.PerformanceWritePolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             // Ensure route parameter matches DTO
@@ -1291,6 +1390,8 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RejectPeerNominations(Guid appraisalId, [FromBody] RejectPeerNominationsDto rejectDto)
     {
+        if (!await CanManageAppraisalAsync(appraisalId, HrPermissions.PerformanceWritePolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             // Ensure route parameter matches DTO
@@ -1333,6 +1434,10 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetHRReview(Guid id)
     {
+        // The appraisee sees their own review (the service handles peer anonymity off the token);
+        // beyond the parties it is a desk read.
+        if (!await CanAccessAppraisalAsync(id, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
+
         try
         {
             var response = await _appraisalService.GetHRReviewAsync(id, _currentUserService.EmployeeId);
@@ -1354,6 +1459,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet("hr-review-list")]
     [ProducesResponseType(typeof(IEnumerable<HRReviewListItemDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetHRReviewList([FromQuery] Guid? cycleId = null, [FromQuery] string? status = null)
     {
         try
@@ -1380,6 +1486,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> ProgressToHRReview(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -1410,6 +1517,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(HRReviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> ApproveAndFinalize(Guid id, [FromBody] ApproveAppraisalDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -1443,6 +1551,7 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> ReturnToManager(Guid id, [FromBody] ReturnAppraisalDto dto, CancellationToken cancellationToken = default)
     {
         try
@@ -1624,7 +1733,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// employee number. It was open to any authenticated caller.
     /// </summary>
     [HttpGet("appeals")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<ActionResult<List<AppealListItemDto>>> GetAppealsList(
         [FromQuery] Guid? cycleId = null, 
         [FromQuery] AppraisalAppealStatus? status = null,
@@ -1646,7 +1755,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// Get comprehensive appeal review data for HR resolution
     /// </summary>
     [HttpGet("{id:guid}/appeal-review")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<ActionResult<AppealReviewDto>> GetAppealReview(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -1674,7 +1783,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// queue of untouched appeals is distinguishable from ones already being worked through.
     /// </summary>
     [HttpPost("{id:guid}/begin-appeal-review")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -1705,7 +1814,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// Resolve an appraisal appeal
     /// </summary>
     [HttpPost("{id:guid}/resolve-appeal")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<ActionResult> ResolveAppeal(Guid id, [FromBody] ResolveAppealDto resolveDto, CancellationToken cancellationToken = default)
     {
         try
@@ -1735,7 +1844,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// Get post-remand review data including score comparisons for HR final decision
     /// </summary>
     [HttpGet("{id:guid}/post-remand-review")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<ActionResult<PostRemandReviewDto>> GetPostRemandReview(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -1762,7 +1871,7 @@ public class PerformanceAppraisalsController : ControllerBase
     /// Finalize a post-remand appeal with HR's final decision (Uphold or Reject)
     /// </summary>
     [HttpPost("{id:guid}/finalize-post-remand-appeal")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<ActionResult> FinalizePostRemandAppeal(Guid id, [FromBody] PostRemandFinalDecisionDto decisionDto, CancellationToken cancellationToken = default)
     {
         try

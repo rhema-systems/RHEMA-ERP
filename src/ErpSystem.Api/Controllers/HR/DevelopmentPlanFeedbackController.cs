@@ -37,13 +37,17 @@ public class DevelopmentPlanFeedbackController : ControllerBase
         _logger          = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
-
-    /// <summary>HR, the employee whose plan it is, or that employee's line manager.</summary>
-    private async Task<bool> CanAccessPlanAsync(Guid planId, CancellationToken ct = default)
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
     {
-        if (IsHr) return true;
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>The employee whose plan it is, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessPlanAsync(Guid planId, string policy, CancellationToken ct = default)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -59,7 +63,7 @@ public class DevelopmentPlanFeedbackController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByPlan(Guid planId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -85,7 +89,7 @@ public class DevelopmentPlanFeedbackController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        if (!await CanAccessPlanAsync(dto.DevelopmentPlanId, cancellationToken)) return Forbid();
+        if (!await CanAccessPlanAsync(dto.DevelopmentPlanId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         // The author is whoever is signed in. Taking it from the body let any caller post feedback
         // under someone else's name — and the client has no employee id of its own to send.
@@ -116,7 +120,7 @@ public class DevelopmentPlanFeedbackController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!IsHr)
+        if (!await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
         {
             // Feedback is a record of what was said. Its author can withdraw it; nobody else can
             // edit someone else's out of the timeline.

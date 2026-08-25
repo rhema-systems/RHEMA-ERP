@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/performance/goal-risk-settings")]
-[Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
+[Authorize(Policy = "InternalOnly")]
 public class GoalRiskSettingsController : ControllerBase
 {
     private readonly IGoalRiskSettingsService _service;
@@ -36,6 +36,7 @@ public class GoalRiskSettingsController : ControllerBase
     /// <summary>Get the thresholds in force, falling back to the defaults when none are stored.</summary>
     [HttpGet]
     [ProducesResponseType(typeof(GoalRiskSettingsDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> Get(CancellationToken cancellationToken = default)
     {
         try
@@ -53,6 +54,7 @@ public class GoalRiskSettingsController : ControllerBase
     [HttpPut]
     [ProducesResponseType(typeof(GoalRiskSettingsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Save(
         [FromBody] UpdateGoalRiskSettingsDto dto,
         CancellationToken cancellationToken = default)
@@ -78,6 +80,7 @@ public class GoalRiskSettingsController : ControllerBase
     /// <summary>Discard the tenant's thresholds and go back to the defaults.</summary>
     [HttpPost("reset")]
     [ProducesResponseType(typeof(GoalRiskSettingsDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Reset(CancellationToken cancellationToken = default)
     {
         try

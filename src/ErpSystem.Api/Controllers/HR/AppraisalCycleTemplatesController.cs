@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -80,6 +81,7 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [ProducesResponseType(typeof(AppraisalCycleTemplateDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalCycleTemplateDto createDto, CancellationToken cancellationToken = default)
     {
         try
@@ -123,6 +125,7 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleTemplateDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalCycleTemplateDto updateDto, CancellationToken cancellationToken = default)
     {
         try
@@ -153,6 +156,7 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -176,6 +180,7 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [HttpPost("bulk-assign/{cycleId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<AppraisalCycleTemplateDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> BulkAssign(Guid cycleId, [FromBody] IEnumerable<CreateAppraisalCycleTemplateDto> assignments, CancellationToken cancellationToken = default)
     {
         try

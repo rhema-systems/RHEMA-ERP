@@ -1,10 +1,13 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -24,19 +27,27 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 {
     private readonly IAppraisalOutcomeService _service;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<AppraisalOutcomeRecommendationsController> _logger;
 
     public AppraisalOutcomeRecommendationsController(
         IAppraisalOutcomeService service,
         ICurrentUserService currentUserService,
+        ApplicationDbContext db,
         ILogger<AppraisalOutcomeRecommendationsController> logger)
     {
         _service = service;
         _currentUserService = currentUserService;
+        _db = db;
         _logger = logger;
     }
 
-    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
 
     /// <summary>
     /// The acting employee, from the token.
@@ -60,8 +71,14 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
         return true;
     }
 
-    private bool IsPrivilegedActor =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+    /// <summary>
+    /// Whether the caller may propose for any appraisal (rather than only their own reports').
+    /// The roles keep working through the fallback; a seeded performance-Write holder counts too.
+    /// </summary>
+    private async Task<bool> IsPrivilegedActorAsync()
+        => User.IsInRole(Constants.Roles.SuperAdmin)
+        || User.IsInRole(Constants.Roles.Hr)
+        || await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
 
     private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
     {
@@ -69,11 +86,31 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
         return UnprocessableEntity(new { message = ex.Message });
     }
 
+    /// <summary>
+    /// The appraisee's line manager, or a performance-Read holder — deliberately NOT the
+    /// appraisee: a proposed-but-undecided outcome ("PIP", "termination") is not theirs to see
+    /// until HR decides it and it reaches them through its own module.
+    /// </summary>
+    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, CancellationToken ct)
+    {
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .AnyAsync(a => a.Employee.ManagerId == me, ct);
+    }
+
     /// <summary>Get recommendations for an appraisal</summary>
     [HttpGet("by-appraisal/{appraisalId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<AppraisalOutcomeRecommendationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByAppraisal(Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        // "Recommend a PIP / a termination" is not something a colleague with the id may read.
+        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
         try { return Ok(await _service.GetByAppraisalAsync(appraisalId, cancellationToken)); }
         catch (Exception ex)
         {
@@ -84,7 +121,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
     /// <summary>HR worklist of recommendations, optionally filtered by status</summary>
     [HttpGet("worklist")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<AppraisalOutcomeRecommendationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetWorklist([FromQuery] RecommendationStatus? status = null, CancellationToken cancellationToken = default)
     {
@@ -106,7 +143,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
         try
         {
-            var result = await _service.ProposeAsync(dto, employeeId, IsPrivilegedActor, cancellationToken);
+            var result = await _service.ProposeAsync(dto, employeeId, await IsPrivilegedActorAsync(), cancellationToken);
             return CreatedAtAction(nameof(GetByAppraisal), new { appraisalId = result.PerformanceAppraisalId }, result);
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
@@ -126,7 +163,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
     /// the dispatch failed; retry it, or action the outcome in its own module.</para>
     /// </summary>
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalOutcomeRecommendationDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Approve(Guid id, CancellationToken cancellationToken = default)
     {
@@ -144,7 +181,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
     /// <summary>Re-run the dispatch for an approved recommendation whose handler failed (HR)</summary>
     [HttpPost("{id:guid}/retry-dispatch")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalOutcomeRecommendationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> RetryDispatch(Guid id, CancellationToken cancellationToken = default)
@@ -161,7 +198,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
     /// <summary>Reject a recommendation (HR)</summary>
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalOutcomeRecommendationDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Reject(Guid id, [FromBody] ResolveRecommendationDto? dto, CancellationToken cancellationToken = default)
     {
@@ -179,7 +216,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
     /// <summary>Dismiss a recommendation (HR)</summary>
     [HttpPost("{id:guid}/dismiss")]
-    [Authorize(Roles = HrRoles)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(AppraisalOutcomeRecommendationDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Dismiss(Guid id, [FromBody] ResolveRecommendationDto? dto, CancellationToken cancellationToken = default)
     {

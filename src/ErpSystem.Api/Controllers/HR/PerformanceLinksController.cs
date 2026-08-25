@@ -42,13 +42,17 @@ public class PerformanceLinksController : ControllerBase
         _logger = logger;
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
-
-    /// <summary>HR, the goal's owner, or that employee's line manager.</summary>
-    private async Task<bool> CanAccessGoalAsync(Guid goalId, CancellationToken ct)
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
     {
-        if (IsHr) return true;
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>The goal's owner, that employee's line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessGoalAsync(Guid goalId, string policy, CancellationToken ct)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -58,10 +62,10 @@ public class PerformanceLinksController : ControllerBase
             .AnyAsync(g => g.EmployeeId == me || g.Employee.ManagerId == me, ct);
     }
 
-    /// <summary>HR, the employee the check-in is about, or whoever is conducting it.</summary>
-    private async Task<bool> CanAccessCheckInAsync(Guid checkInId, CancellationToken ct)
+    /// <summary>The employee the check-in is about, whoever is conducting it, or a policy holder.</summary>
+    private async Task<bool> CanAccessCheckInAsync(Guid checkInId, string policy, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
@@ -71,10 +75,10 @@ public class PerformanceLinksController : ControllerBase
             .AnyAsync(c => c.EmployeeId == me || c.ConductedById == me, ct);
     }
 
-    /// <summary>HR, the employee, or their line manager.</summary>
-    private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, CancellationToken ct)
+    /// <summary>The employee, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, string policy, CancellationToken ct)
     {
-        if (IsHr) return true;
+        if (await HoldsPolicyAsync(policy)) return true;
         if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (me == employeeId) return true;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
@@ -90,7 +94,7 @@ public class PerformanceLinksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetGoalRequiredSkills(Guid goalId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessGoalAsync(goalId, cancellationToken)) return Forbid();
+        if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -120,7 +124,7 @@ public class PerformanceLinksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetGoalRequiredSkills(Guid goalId, [FromBody] List<SetGoalRequiredSkillDto> skills, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessGoalAsync(goalId, cancellationToken)) return Forbid();
+        if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -143,7 +147,7 @@ public class PerformanceLinksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetDevelopmentSkillSuggestions(Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+        if (!await CanAccessEmployeeAsync(employeeId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -183,7 +187,7 @@ public class PerformanceLinksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetCheckInObjectives(Guid checkInId, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
 
         try
         {
@@ -210,7 +214,7 @@ public class PerformanceLinksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetCheckInObjectives(Guid checkInId, [FromBody] List<Guid> companyGoalIds, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+        if (!await CanAccessCheckInAsync(checkInId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
 
         try
         {
