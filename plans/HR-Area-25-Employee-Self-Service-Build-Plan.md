@@ -35,7 +35,8 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | **COMPLETE 2026-08-26** — 80 assertions ×2 + 526 ladder; 4 fixes (ack repeat, withdraw dead route, committee-result leak, notice text); 10 screens moved + 1 built |
 | 10 | My payslips: the read-only payroll adapter | **COMPLETE 2026-08-26** — 35 assertions ×3 + 606 ladder; latest-by-PERIOD; payroll FYI #12 + defect #13 (profile create never worked) recorded |
 | 11 | Approvals & tasks inbox, notifications | **COMPLETE 2026-08-26** — 98 assertions ×2 + 641 ladder; 3 platform defects found (#14/#15/#17), the notification-forgery hole closed |
-| 12 | New capabilities: change requests, HR letters, announcements & acknowledgements | not started |
+| 12a | New capabilities: my profile + personal-data change requests (D6) | **COMPLETE 2026-08-26** — 88 assertions ×2 + 739 ladder; census row #39 closed; 2 defects found by the probe |
+| 12b | New capabilities: HR letters, announcements & policy acknowledgements | not started |
 | 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
 | 14 | Closing audit: content audit, the two greps, route resolution, polish pass | not started |
 
@@ -268,6 +269,11 @@ area-12 lessons).
   browse, lean DTO only); my-team for managers (direct reports via `ManagerId`,
   honestly-empty state); internal job board + my-applications + my-panel move-ins
   (the internal job board's service-side visibility model stays as W3 left it).
+- **HR-owned gap found in the slice-12 survey, to fix in slice 14 (ours, not another team's):**
+  `ShiftAssignmentsController`'s GET actions carry only `InternalOnly` — no attendance policy —
+  so any internal user can read any employee's shift assignments. Writes are correctly
+  `AttendanceWritePolicy` and delete `AttendanceAdminPolicy`; only the reads were missed. W3
+  swept permissions area by area and this controller fell between attendance and scheduling.
 - **Slice 14 — closing audit.** The content audit run twice; **the two greps** (portal
   service methods ↔ screens; non-GET portal routes ↔ services); route resolution over
   every portal page + every deleted route confirmed gone from all link sources; tsc +
@@ -830,3 +836,67 @@ admin console. Probes kept: `probe-slice11.mjs`/`11b`/`11c`/`11d`/`11e` with the
   no consumers (its screen moved into the unified feed) — a candidate for the slice-14
   polish sweep; and the SignalR live-push wiring that the desk `HeaderNotificationBell` uses
   is not wired into the portal (the portal reads on navigation and after every mutation).
+
+### Slice 12a — my profile + personal-data change requests (D6). CLOSED 2026-08-26.
+
+`run-slice12a.mjs` 88 assertions ×2 green + the 739 ladder. **Migration**
+`20260826225636_AddEmployeeProfileChangeRequests` (guarded SQL, registered in
+`FastBuildMigrationMetadata`). This closes census row **#39 ("my profile", verdict M since
+slice 0)** — the last of the seven M verdicts.
+
+- **The split is the feature.** Contact numbers (mobile / telephone / business / extension,
+  plus religion and marital status) are written directly by the employee, because they are the
+  only authority on them and routing them through an approval queue would teach people that HR
+  approval is noise. Everything identity-, address-, statutory- or payment-bearing arrives as an
+  `EmployeeProfileChangeRequest` a named HR officer approves — a wrong bank account is a
+  payroll fraud vector and a wrong date of birth moves a retirement date. Employment placement
+  (position, org unit, manager, salary, the payroll switches, employee number, lifecycle dates)
+  is a **third** category with no affordance at all: shown read-only, because asking HR to
+  change your own salary is not a workflow anybody wants.
+- **The requestable set is an ENUM, not free strings** (`EmployeeProfileField`), so the applier
+  switches on it and a field not named there cannot be written by this path at all — the
+  harness proves a `PositionId` request cannot even bind.
+- **Approval APPLIES**, in one transaction, re-running the same tenant-uniqueness checks
+  `EmployeeService.UpdateEmployeeAsync` enforces (email / SSNIT / TIN / tax), so this cannot
+  become a way around the desk's own rules. There is deliberately no separate apply step
+  (unlike procurement's master-data change requests, which revalidate against a drifting
+  supplier): an officer approving a name correction expects the name corrected, and "approved
+  but not applied" is a promise with no visible effect. Approving a bank change also stamps
+  that account **verified** — leaving a stale verified flag on a changed account number would
+  be a lie.
+- **The item rows are the audit trail.** `OldValue` is snapshotted at FILING time and
+  `AppliedValue` stamped by the applier, so months later the record still says what the value
+  was, what was asked for, and what landed. HR has no audit-service usage anywhere, so this
+  follows the module's own append-only-child pattern (`StaffMovementStatusHistory`) rather than
+  the platform `AuditLogService` no HR code touches.
+- **Two defects the payload probe caught, both fixed before the harness was written:**
+  (1) **a redaction defeated by reusing a redacted DTO** — the desk masks bank account numbers
+  in `EmployeeBankDetail.ToDto()`, but the first draft hand-rolled the projection and served
+  the full number through the portal, the more exposed of the two surfaces. All three child
+  collections now use the module's own mappers, with the Bank/Branch navs included so the
+  catalogue names and codes are not silently null. The before/after values INSIDE a request are
+  deliberately unmasked and say so: HR must read the new number against the bank letter to
+  approve at all.
+  (2) **a bogus 400 that was also an enumeration oracle** — `Forbid(ex.Message)` treats its
+  argument as an authentication *scheme*, so a cross-actor cancel threw instead of refusing;
+  and the intended 403 would have confirmed the id exists while the read arm 404s. Cancel and
+  attach-evidence are now scoped to the caller in the QUERY, so a foreign request does not
+  resolve — the 404-on-foreign-id law slices 8–10 established.
+- **Screens:** `/me/profile` (five tabs — personal, contact, bank & statutory, employment, my
+  people; each gated field carries either a "Request change" button or an "Awaiting HR" badge,
+  never both), `/me/profile/change-requests` (before → after per field, HR's reason read back,
+  evidence upload through the controlled gate, withdraw), and the desk queue at
+  `/hr/employees/change-requests` — beside the employee register, because approving is what
+  edits that register, carrying the same `HR.Employee.Read/Write` permissions (no new
+  permission family, D8). The portal avatar menu now distinguishes "My profile" (the employee
+  record) from "Account & password" (the sign-in account).
+- **New upload category** `hr-profile-change-evidence`, added to BOTH the constant list and
+  `SystemCleanScanRequired` — omitting the second is the trap the file-upload guide warns
+  about: the file passes the gate, fails DMS registration, and surfaces as a 500. Identity
+  documents are the last category that should be scan-optional.
+- Harness facts worth keeping: null-means-leave-alone vs empty-string-clears asserted both ways
+  on the direct-edit arm; an empty field snapshots as `null`, not `""`; a withdrawn field is
+  immediately requestable again; a refused change provably never touched the record; and the
+  foreign-evidence leg posts REAL multipart so the ownership check actually runs (it misses at
+  the lookup before reaching the scanner, which is why it needs no clamd — a JSON post would
+  have 415'd at model binding and proved nothing).

@@ -97,6 +97,13 @@ public static class ControlledFileUploadCategories
     public const string HrSheControlledDocuments = "hr-she-controlled-documents";
 
     /// <summary>
+    /// Evidence an employee attaches to a personal-data change request — a marriage
+    /// certificate behind a name change, a bank letter behind an account change, a Ghana Card
+    /// behind a date-of-birth correction (area 25 slice 12).
+    /// </summary>
+    public const string HrProfileChangeEvidence = "hr-profile-change-evidence";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -139,7 +146,10 @@ public static class ControlledFileUploadCategories
                 // unscanned just because most of its neighbours are receipts.
                 HrAssetDocuments,
                 HrPreEmploymentDocuments,
-                HrSheControlledDocuments
+                HrSheControlledDocuments,
+                // Identity documents by definition — this is the category whose whole purpose is
+                // proving who someone is and where their money goes.
+                HrProfileChangeEvidence
             ],
             StringComparer.OrdinalIgnoreCase);
 }

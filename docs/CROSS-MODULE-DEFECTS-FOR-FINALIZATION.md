@@ -1068,6 +1068,64 @@ read-only detail view is wanted.
 
 ---
 
+## 18. Payroll — loan and salary-advance records are readable by any authenticated user
+
+**Found 2026-08-26** while surveying which employee-self-service features have a backend
+(HR area 25 slice 12).
+
+### What is broken
+
+`PayrollController` carries a bare `[Authorize]` at the class level (`:12`) with **no
+per-action policy**, and its loan/advance reads take an employee identifier as a query
+parameter with no self-scoping: `GET loans` (`:245`), `GET loans/repayments`, and
+`GET salary-advances` (`:260`). Any authenticated user in the tenant — including a plain
+Employee-role account — can therefore read any colleague's loan balances and salary advances
+by supplying their employee number.
+
+### What it blocks / why it matters
+
+Nothing functionally; it is a disclosure. Loan and advance balances are among the most
+sensitive rows in an HR system, and the self-service portal puts an authenticated session in
+every employee's hands, which raises the practical exposure considerably.
+
+### What a fix needs
+
+Per-action policies on `PayrollController` matching the rest of the module's surfaces, plus
+self-scoping (or a `/me` arm) for the reads an employee legitimately needs. HR deliberately
+did **not** build a "my loans" portal surface for this reason — there is no self-scoped read
+to ride, and `PayrollSalaryAdvance` has no requester/status/approval columns, so there is no
+request lifecycle to expose either.
+
+---
+
+## 19. Helpdesk (Ehc) — the Employee role can read every internal ticket in the tenant
+
+**Found 2026-08-26**, same survey.
+
+### What is broken
+
+`EhcInternalTicketsController` (`:13-20`) is `[Authorize(Policy = "InternalOnly")]` **plus a
+role list that includes `Constants.Roles.Employee`**. Its `GET` (`:34-69`) is the desk queue —
+it filters by status, priority and department, and carries **no requester filter**. So an
+Employee-role caller can enumerate every internal ticket in the tenant, including tickets
+raised about other people.
+
+### What was proven
+
+Read from the source; the requester-scoped path exists and is simply not used by this action:
+`EhcTicketRepository` (`:62-67`, `:89-92`) filters on `RequesterUserId`, and
+`EhcTicketService.GetMyTicketsAsync` (`:729`) is the self read — but it is only reachable
+through `EhcExternalTicketsController` (`ExternalOnly`), which employees are excluded from.
+
+### What a fix needs
+
+Drop `Employee` from the role list on the list action (keep it on create), and add a
+self-scoped `api/ehc/me/tickets` arm reusing `GetMyTicketsAsync` / `CreateInternalTicketAsync`.
+That is also the cheapest route to an "Ask HR" surface in the employee portal — recorded here
+rather than built, because the controller belongs to the helpdesk team.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

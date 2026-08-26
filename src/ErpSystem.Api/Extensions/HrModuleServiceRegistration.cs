@@ -642,6 +642,11 @@ public static class HrModuleServiceRegistration
         // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.
         services.AddScoped<IStaffGrievanceService, StaffGrievanceService>();
 
+        // Area 25 slice 12 (D6) — the employee's own profile, and the approval path for the parts
+        // of it that carry identity or payment consequences. Registered beside the grievance
+        // service because it is the other surface an employee raises ABOUT their own record.
+        services.AddScoped<IEmployeeProfileChangeService, EmployeeProfileChangeService>();
+
         // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();

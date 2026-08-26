@@ -38,6 +38,7 @@ import {
   ShieldAlert,
   Target,
   TreePalm,
+  UserRound,
   Users,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
@@ -71,6 +72,7 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
   {
     title: 'Benefits, kit & safety',
     tiles: [
+      { label: 'My Profile', hint: 'Your details, and requests to correct them', href: '/me/profile', icon: UserRound },
       { label: 'My Medical', hint: 'Coverage, claims, appointments, health record', href: '/me/medical', icon: HeartPulse },
       { label: 'My Awards', hint: 'Nominate, vote, celebrate', href: '/me/awards', icon: Award },
       { label: 'My Assets', hint: 'What you hold, and requests', href: '/me/assets', icon: Laptop },

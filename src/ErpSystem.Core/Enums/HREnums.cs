@@ -9212,3 +9212,83 @@ public enum EncashmentRateBasis
 }
 
 #endregion
+
+#region Employee Profile Change Requests (area 25 slice 12 — decision D6)
+
+/// <summary>
+/// Where a personal-data change request stands.
+/// </summary>
+/// <remarks>
+/// There is no separate "Applied" state: approving a request APPLIES it in the same
+/// transaction, because a request approved but not applied is a promise the employee cannot
+/// see the result of. <see cref="EmployeeProfileChangeRequest.AppliedAt"/> records when that
+/// happened, and the items keep what actually landed.
+/// </remarks>
+public enum ProfileChangeRequestStatus
+{
+    /// <summary>Filed by the employee and waiting on HR.</summary>
+    Pending = 1,
+
+    /// <summary>HR agreed; the values were written onto the employee record.</summary>
+    Approved = 2,
+
+    /// <summary>HR refused, with a reason the employee reads back.</summary>
+    Rejected = 3,
+
+    /// <summary>The employee withdrew it before HR answered.</summary>
+    Cancelled = 4
+}
+
+/// <summary>
+/// The fields an employee may ask to have changed. Deliberately an ENUM, not a free string:
+/// the applier switches on it, so a field that is not named here cannot be written by this
+/// path at all.
+/// </summary>
+/// <remarks>
+/// <para>What is absent matters as much as what is present. Employment placement
+/// (<c>PositionId</c>, org unit, <c>ManagerId</c>), money (<c>Salary</c>, the payroll
+/// switches), identity assigned by the employer (<c>EmployeeNumber</c>, <c>BadgeNumber</c>)
+/// and lifecycle dates are **not** requestable — they are HR/payroll decisions, not personal
+/// data corrections, and an employee asking to change their own salary is not a workflow
+/// anybody wants.</para>
+/// <para>The low-risk contact fields (mobile, telephone, business number, extension) are
+/// absent too, for the opposite reason: the employee edits those directly, so routing them
+/// through an approval queue would only teach people that HR approval is noise.</para>
+/// </remarks>
+public enum EmployeeProfileField
+{
+    // ── Identity ──────────────────────────────────────────────────────────
+    FirstName = 1,
+    MiddleName = 2,
+    LastName = 3,
+    Title = 4,
+    DateOfBirth = 5,
+    Gender = 6,
+    MaritalStatus = 7,
+
+    /// <summary>Login-adjacent and tenant-unique — never a direct edit.</summary>
+    EmailAddress = 8,
+
+    // ── Address ───────────────────────────────────────────────────────────
+    Address = 20,
+    City = 21,
+    State = 22,
+    PostalCode = 23,
+    DigitalAddress = 24,
+    CountryId = 25,
+
+    // ── Statutory ─────────────────────────────────────────────────────────
+    SocialSecurityNumber = 40,
+    TINNumber = 41,
+    TaxNumber = 42,
+
+    // ── Bank account (targets the request's BankDetailId) ─────────────────
+    BankName = 60,
+    BankBranchName = 61,
+    BankAccountNumber = 62,
+    BankAccountName = 63,
+    BankAccountType = 64,
+    MobileMoneyNumber = 65
+}
+
+#endregion

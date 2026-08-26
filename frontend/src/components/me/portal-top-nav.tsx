@@ -43,6 +43,7 @@ import {
   Rocket,
   Sparkles,
   TrendingUp,
+  UserRound,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { hasDeskAccess } from '@/lib/auth-routing';
@@ -283,9 +284,16 @@ export function PortalTopNav() {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              {/* Two different things, deliberately both here: /me/profile is the EMPLOYEE
+                  record the organisation holds; /profile is the sign-in account. */}
+              <DropdownMenuItem asChild>
+                <Link href="/me/profile" className="cursor-pointer">
+                  <UserRound className="mr-2 h-4 w-4" /> My profile
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/profile" className="cursor-pointer">
-                  Account settings
+                  Account &amp; password
                 </Link>
               </DropdownMenuItem>
               {deskUser && (

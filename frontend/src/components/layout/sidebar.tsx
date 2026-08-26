@@ -427,6 +427,14 @@ export const navigationItems: NavItem[] = [
       // API now (they carry salary, identifiers and bank data), so the desk entry follows. The
       // shared employee picker rides the open paged read and does not need this.
       { title: 'Employees', href: '/hr/employees', icon: Users, permissions: ['HR.Employee.Read'] },
+      // Area 25 slice 12a — approving one of these WRITES onto the employee record, which is
+      // why it sits with the register and carries the same permission.
+      {
+        title: 'Change Requests',
+        href: '/hr/employees/change-requests',
+        icon: UserCheck,
+        permissions: ['HR.Employee.Read'],
+      },
       // Read-only view of the org's own records. Lives here rather than under Administration
       // because it is looked at daily, not configured — and the administration tree is gated to
       // admin roles, which would hide it from the HR officers the API gate lets in.

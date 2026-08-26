@@ -27,6 +27,7 @@ using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.ProfileChanges;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
@@ -373,6 +374,12 @@ public partial class ApplicationDbContext
     // conflating them would put the two under one set of read rules.
     public DbSet<StaffGrievance> StaffGrievances { get; set; } = null!;
     public DbSet<StaffGrievanceStep> StaffGrievanceSteps { get; set; } = null!;
+
+    // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
+    // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
+    // an HR officer to approve, and approval applies them.
+    public DbSet<EmployeeProfileChangeRequest> EmployeeProfileChangeRequests { get; set; } = null!;
+    public DbSet<EmployeeProfileChangeItem> EmployeeProfileChangeItems { get; set; } = null!;
 
     // Area 9 slice 8 — the discipline reminder sweep. Covers both halves of the area, which is why
     // it sits with the grievance sets rather than the disciplinary ones.
@@ -9034,6 +9041,48 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.ExternalCounselId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeProfileChangeRequest (area 25 slice 12, D6) ----
+        builder.Entity<EmployeeProfileChangeRequest>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.RequestNumber }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ReviewedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The targeted account may be replaced or retired later; the request must survive
+            // it, because the audit question is what was asked for at the time.
+            entity.HasOne(x => x.BankDetail)
+                .WithMany()
+                .HasForeignKey(x => x.BankDetailId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeProfileChangeItem ----
+        builder.Entity<EmployeeProfileChangeItem>(entity =>
+        {
+            entity.HasIndex(x => x.RequestId);
+            entity.HasIndex(x => x.Field);
+
+            entity.Property(x => x.Field).HasConversion<int>();
+
+            // Cascade: an item has no meaning apart from its request (the grievance-step rule).
+            entity.HasOne(x => x.Request)
+                .WithMany(x => x.Items)
+                .HasForeignKey(x => x.RequestId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ---- StaffGrievance (FR-HR-181) ----
