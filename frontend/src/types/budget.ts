@@ -5,6 +5,25 @@
 export type BudgetStatus = 'Draft' | 'Collecting' | 'InReview' | 'Approved' | 'Superseded' | 'Archived';
 export type BudgetReturnStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
 
+export interface BudgetControlDimension {
+    financeDimensionDefinitionId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    displayOrder: number;
+}
+
+export interface BudgetDimensionAssignmentInput {
+    financeDimensionDefinitionId: string;
+    financeDimensionValueId: string;
+}
+
+export interface BudgetDimensionAssignment extends BudgetDimensionAssignmentInput {
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+}
+
 export interface BudgetScenario {
     id: string;
     name: string;
@@ -34,6 +53,7 @@ export interface BudgetScenario {
     updatedBy?: string;
     tenantId: string;
     rowVersion: string;
+    controlDimensions: BudgetControlDimension[];
 }
 
 export interface BudgetReturn {
@@ -82,6 +102,9 @@ export interface BudgetEntry {
     updatedAt?: string;
     tenantId: string;
     rowVersion: string;
+    financeDimensionSetId?: string;
+    dimensionCombinationHash?: string;
+    dimensionAssignments: BudgetDimensionAssignment[];
 
     // Virtual/Display properties
     accountCode?: string;
@@ -96,6 +119,7 @@ export interface CreateBudgetScenarioDto {
     description?: string;
     fiscalYearId: string;
     baseCurrencyCode: string;
+    controlDimensionDefinitionIds: string[];
 }
 
 export interface UpdateBudgetScenarioDto {
@@ -103,6 +127,7 @@ export interface UpdateBudgetScenarioDto {
     description?: string;
     isActive?: boolean;
     rowVersion: string;
+    controlDimensionDefinitionIds?: string[];
 }
 
 export interface CreateBudgetReturnDto {
@@ -131,6 +156,9 @@ export interface BudgetEntryDto {
     exchangeRate: number;
     amount: number;
     rowVersion?: string;
+    financeDimensionSetId?: string;
+    dimensionCombinationHash?: string;
+    dimensionAssignments: BudgetDimensionAssignmentInput[];
 }
 
 export interface SubmitBudgetReturnDto {

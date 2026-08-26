@@ -58,6 +58,16 @@ Control declarations cannot change after worksheet entries exist; a changed grai
 scenario version. Budget revisions copy the grain and existing entry assignments and fail closed
 when an old revision line cannot identify one unique dimension-grained cell.
 
+### Budget operator workflow
+
+Finance selects the controlling dimensions when the scenario is created. A scenario with no
+selection retains the original account-by-period worksheet. A controlled scenario requires the
+preparer to add a complete dimension-value combination before entering amounts; the UI then keeps
+an independent account-by-period grid for each combination. It sends canonical definition/value
+IDs rather than free text, retains existing entry IDs and row versions on edits, and disables cells
+when a selected value is not effective for the entire fiscal period. The server remains authoritative
+and repeats tenant, completeness, effective-date, duplicate-cell, and immutable-set validation.
+
 ## Override evidence
 
 A budget override is a separate `FinanceBudgetOverride` workflow entity. It records:
