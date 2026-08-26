@@ -44,19 +44,30 @@ validated dimension set.
 ## Implementation status (25 August 2026)
 
 The data model, optional posting-engine contract, immutable set persistence, exact reversal reuse,
-tenant administration API/UI, and manual-journal capture/read display are implemented. Manual
-journals are the first certified producer and may use source-scoped Required, Optional, Fixed and
-Prohibited rules (`GL` / `ManualJournalEntry` / `Post`).
+tenant administration API/UI, manual-journal capture/read display, and transaction-dimension report
+filters are implemented. Manual journals are the first certified producer and may use source-scoped
+Required, Optional, Fixed and Prohibited rules (`GL` / `ManualJournalEntry` / `Post`).
+
+Trial Balance, Income Statement, Balance Sheet and Detailed Ledger now resolve tenant-owned
+dimension values and filter immutable posted ledger-line sets. The same criteria flow through the
+screen, drill-down, CSV export, PDF/print output and published financial-statement layouts. Historical
+inactive values remain selectable for historical reporting; cross-tenant or unknown values fail
+closed. Detailed Ledger exposes the frozen dimension display and assignments carried by each line.
 
 Operational adapters remain deliberately uncertified. AP, AR, Cash, Fixed Assets, Payroll,
 Procurement and Inventory continue posting without mandatory transaction dimensions until their
 owner-specific source evidence and consumer tests land. This is a compatibility gate, not permission
 to encode those facts as free-text or arbitrary stored dimension-set IDs.
 
-Dimension-aware report filtering/breakdown and dimension-grained budget cells are the next two
-Finance-owned phases. Until those phases land, ordinary unfiltered reports and the existing
-account/period budget-control grain remain authoritative; the UI must not imply that a dimension
-selection has constrained budget availability when it has not.
+Filtered report totals include only ledger lines that carry the selected immutable coding. Because
+operational adapters remain uncertified, a filtered view is not yet a complete module-wide view of
+all AP, AR, Cash, Fixed Asset, Payroll, Procurement or Inventory activity. The report UI labels that
+coverage boundary; it must not imply that untagged legacy or operational lines belong to the selected
+dimension.
+
+Dimension breakdown/pivot remains deferred. Dimension-grained budget cells and actual matching are
+implemented in the Finance budget provider; worksheet presentation and producer certification remain
+separate phases. Legacy scenarios retain their account/period grain and must not be reinterpreted.
 
 Producers submit structured dimension facts on `FinancePostingLineDto.Dimensions`. They do not
 select a stored Finance dimension-set ID. Finance resolves the tenant-owned value, effective date,
@@ -106,6 +117,11 @@ posted AccountTransactions
 Different dimensions combine with AND semantics. Multiple selected values in one dimension use OR
 semantics. Filtering and breakdown are distinct report operations.
 
+Cash Flow is deliberately outside the first filter slice. Its operating/investing/financing
+classification is derived from cash and counterpart lines, so naively filtering individual ledger
+lines could misclassify or double count an activity. Dimension-aware Cash Flow requires an explicit
+counterpart-attribution contract and dedicated reconciliation tests before it is exposed.
+
 An Analytical dimension does not guarantee that a filtered Trial Balance or Balance Sheet balances.
 A Balancing dimension requires all journal lines to balance by value or requires Finance-generated
 inter-dimension balancing entries. That policy must be configured explicitly; reports must not imply
@@ -151,7 +167,9 @@ unchanged.
 3. Preserve exact sets on existing-journal posting and reversal.
 4. Add Finance administration and journal-line UX, defaults and warning diagnostics. **Implemented
    for manual journals.**
-5. Move financial-report filters to transaction-line semantics and add optional breakdowns.
+5. Move financial-report filters to transaction-line semantics. **Implemented for Trial Balance,
+   Income Statement, Balance Sheet and Detailed Ledger; Cash Flow and breakdown/pivot remain
+   deferred.**
 6. Extend budget cells and actual matching to the configured control dimensions. **Implemented
    in the Finance budget provider; producer certification remains adapter-specific.**
 7. Certify Finance and operational adapters individually.

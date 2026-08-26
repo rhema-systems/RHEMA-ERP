@@ -41,10 +41,18 @@ functional-currency conversion is part of the canonical report.
 | AR aging | Yes | Yes | CSV | Finance report-output phase 1 |
 | AR customer statements / detailed ledger | Yes | Yes | CSV | Finance report-output phase 1 |
 | Fixed-asset register, disposals, and transfers | Yes | Yes | XLSX | Finance report-output phase 1 |
-| Cash-position and cash/bank operational reports | Required | Required | Existing where applicable | Phase 2 |
-| Tax registers, VAT reconciliation, and WHT summaries/registers | Required | Required | Existing where applicable | Phase 2; replace legacy stub actions with canonical builders |
-| Budget consolidated and scenario reports | Required | Required | CSV | Phase 2; preserve scenario/dimension filters |
+| Cash position | Yes | Yes | Existing where applicable | Finance report-output phase 2; monetary totals are explicitly functional/base-currency equivalents |
+| Input/output VAT registers, VAT reconciliation, and WHT payable summary | Yes | Yes | Existing where applicable | Finance report-output phase 2; canonical Tax reporting services replace legacy stub actions |
+| Budget consolidated and scenario comparison reports | Yes | Yes | CSV where applicable | Finance report-output phase 2; scenario scope and approved/working selection are preserved |
+| WHT statutory certificate | Existing controlled print | Existing controlled print | N/A | Document-specific issuance/version lifecycle; retained-PDF delivery is tracked separately |
+| WHT statutory certificate register | Yes | Yes | CSV | Finance report-output phase 3; certificate, payment, status, and remittance lineage are preserved |
+| WHT remittance register | Yes | Yes | Existing where applicable | Finance report-output phase 3; batch lifecycle and underlying liability evidence are preserved |
 
-The Phase 2 rows are release-tracked gaps, not exceptions to the standard. A button labelled Export
-that has no handler, a whole-page `window.print()`, or a CSV-only report does not satisfy this
-contract.
+Rows marked **Required** are release-tracked gaps, not exceptions to the standard. A button labelled
+Export that has no handler, a whole-page `window.print()`, or a CSV-only report does not satisfy
+this contract.
+
+The Cash Reports hub currently exposes Cash Position as its report surface, and that report is
+covered above. Cash-account, deposit, till, reconciliation, and transaction pages are operational
+workflows rather than report-only gaps; any future report added to those workflows must satisfy this
+standard when it is introduced.

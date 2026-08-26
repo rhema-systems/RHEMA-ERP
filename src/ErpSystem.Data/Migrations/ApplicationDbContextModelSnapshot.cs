@@ -13147,6 +13147,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<long?>("FileSize")
+                        .HasColumnType("bigint");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -13171,11 +13174,22 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<DateTime?>("RetainUntilUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid>("SourceDocumentId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SourceDocumentType")
                         .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("StoragePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("StorageProvider")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -13211,6 +13225,8 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_FinanceControlledDocumentIssues_CopyType", "[CopyType] IN ('Original', 'Replacement')");
 
                             t.HasCheckConstraint("CK_FinanceControlledDocumentIssues_ReplacementReason", "([CopyType] = 'Original' AND [ReplacementReason] IS NULL) OR ([CopyType] = 'Replacement' AND LEN([ReplacementReason]) >= 20)");
+
+                            t.HasCheckConstraint("CK_FinanceControlledDocumentIssues_RetainedArtifact", "([StoragePath] IS NULL AND [StorageProvider] IS NULL AND [FileSize] IS NULL AND [RetainUntilUtc] IS NULL) OR ([StoragePath] IS NOT NULL AND [StorageProvider] IS NOT NULL AND [FileSize] > 0 AND [RetainUntilUtc] IS NOT NULL)");
                         });
                 });
 

@@ -21,6 +21,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { budgetDataService } from '@/services/finance/budget-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 import type {
     BudgetReportContribution,
     BudgetScenario,
@@ -49,6 +52,8 @@ const comparableStatuses = new Set(['Approved', 'Superseded']);
 export default function ConsolidatedBudgetPage({ params }: PageProps) {
     const { id } = use(params);
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
     const [view, setView] = useState<ConsolidatedBudgetView | null>(null);
     const [candidates, setCandidates] = useState<BudgetScenario[]>([]);
@@ -188,6 +193,22 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
         }
     };
 
+    const downloadComparisonPdf = async () => {
+        if (!comparison) return;
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeBudgetScenarioComparison,
+            { baseScenarioId: id, comparisonScenarioId: comparison.comparisonScenarioId },
+        );
+    };
+
+    const printComparison = async () => {
+        if (!comparison) return;
+        await documentOutputService.printReportDocument(
+            DOCUMENT_TYPES.financeBudgetScenarioComparison,
+            { baseScenarioId: id, comparisonScenarioId: comparison.comparisonScenarioId },
+        );
+    };
+
     const exportCsv = () => {
         if (!view) return;
         const quote = (value: string | number) =>
@@ -268,10 +289,24 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                     >
                         Approved returns only
                     </Button>
-                    <Button variant="outline" onClick={exportCsv}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Export CSV
-                    </Button>
+                    {canExport && (
+                        <>
+                            <Button variant="outline" onClick={exportCsv}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Export CSV
+                            </Button>
+                            <ReportPdfActions
+                                reportName="consolidated budget"
+                                onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                    DOCUMENT_TYPES.financeBudgetConsolidated,
+                                    { scenarioId: id, approvedOnly })}
+                                onPrint={() => documentOutputService.printReportDocument(
+                                    DOCUMENT_TYPES.financeBudgetConsolidated,
+                                    { scenarioId: id, approvedOnly })}
+                                disabled={isLoading || !view}
+                            />
+                        </>
+                    )}
                     <Button variant="outline" size="icon" onClick={() => void load(approvedOnly)}>
                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                     </Button>
@@ -526,6 +561,13 @@ export default function ConsolidatedBudgetPage({ params }: PageProps) {
                                     {isComparing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Compare
                                 </Button>
+                                {canExport && comparison && (
+                                    <ReportPdfActions
+                                        reportName="budget scenario comparison"
+                                        onDownloadPdf={downloadComparisonPdf}
+                                        onPrint={printComparison}
+                                    />
+                                )}
                             </div>
 
                             {candidates.length === 0 && (

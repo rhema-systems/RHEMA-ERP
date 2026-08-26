@@ -128,6 +128,7 @@
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionAdministrationServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionReportingFilterTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceAccessScopeServiceTests.cs" />
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
@@ -167,6 +168,7 @@
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
     <Compile Include="Services\Finance\CashierTillControlTests.cs" />
     <Compile Include="Services\Finance\CashBankControlledDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\WhtCertificateDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\BankReconciliationPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingPeriodClosePostingDateTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseAlertServiceTests.cs" />
@@ -175,6 +177,7 @@
     <Compile Include="Services\Finance\ApPaymentVoucherDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />

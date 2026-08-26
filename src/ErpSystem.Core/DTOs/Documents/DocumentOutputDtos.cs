@@ -40,6 +40,32 @@ public sealed class ControlledDocumentIssueSummaryDto
     public int TotalIssued { get; set; }
     public DateTime? LastIssuedAtUtc { get; set; }
     public string? LastIssuedByName { get; set; }
+    public List<ControlledDocumentIssueItemDto> Issues { get; set; } = [];
+}
+
+public sealed class ControlledDocumentIssueItemDto
+{
+    public Guid Id { get; set; }
+    public string DocumentType { get; set; } = string.Empty;
+    public int CopyNumber { get; set; }
+    public string CopyType { get; set; } = string.Empty;
+    public string? ReplacementReason { get; set; }
+    public DateTime IssuedAtUtc { get; set; }
+    public string IssuedByName { get; set; } = string.Empty;
+    public string ContentSha256 { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public bool Retained { get; set; }
+    public DateTime? RetainUntilUtc { get; set; }
+}
+
+public sealed class RetainedControlledDocumentDto
+{
+    public Guid IssueId { get; set; }
+    public string DocumentType { get; set; } = string.Empty;
+    public string CopyType { get; set; } = string.Empty;
+    public byte[] Content { get; set; } = [];
+    public string ContentType { get; set; } = "application/pdf";
+    public string FileName { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -88,6 +114,8 @@ public static class DocumentTypes
     /// Controlled customer receipt rendered from the canonical posted CustomerPayment record.
     /// </summary>
     public const string FinanceArCustomerReceipt = "Finance.AR.CustomerReceipt";
+    /// <summary>Controlled retained PDF for one immutable WHT certificate version.</summary>
+    public const string FinanceTaxWhtCertificate = "Finance.Tax.WhtCertificate";
     /// <summary>
     /// Parameterized AP supplier statement rendered from the existing supplier detailed-ledger
     /// report. EntityId is not used; period, supplier IDs and presentation currency are options.
@@ -105,6 +133,23 @@ public static class DocumentTypes
     public const string FinanceArAgingReport = "Finance.AR.AgingReport";
     /// <summary>Parameterized customer statements rendered from the canonical AR detailed ledger.</summary>
     public const string FinanceArCustomerStatement = "Finance.AR.CustomerStatement";
+    /// <summary>Current treasury position rendered from the posted cash/bank ledger.</summary>
+    public const string FinanceCashPositionReport = "Finance.Cash.PositionReport";
+    /// <summary>Posted input-tax snapshot register.</summary>
+    public const string FinanceTaxInputRegister = "Finance.Tax.InputRegister";
+    /// <summary>Posted output-tax snapshot register.</summary>
+    public const string FinanceTaxOutputRegister = "Finance.Tax.OutputRegister";
+    /// <summary>Net VAT summary rendered from posted tax snapshots reconciled to GL.</summary>
+    public const string FinanceTaxVatReconciliation = "Finance.Tax.VatReconciliation";
+    /// <summary>WHT payable register rendered from posted withholding records.</summary>
+    public const string FinanceTaxWhtPayable = "Finance.Tax.WhtPayable";
+    /// <summary>Statutory WHT certificate register across eligible posted AP payments.</summary>
+    public const string FinanceTaxWhtCertificateRegister = "Finance.Tax.WhtCertificateRegister";
+    /// <summary>WHT remittance lifecycle register with underlying liability evidence.</summary>
+    public const string FinanceTaxWhtRemittanceRegister = "Finance.Tax.WhtRemittanceRegister";
+    /// <summary>Consolidated budget-versus-actual scenario report.</summary>
+    public const string FinanceBudgetConsolidated = "Finance.Budget.Consolidated";
+    public const string FinanceBudgetScenarioComparison = "Finance.Budget.ScenarioComparison";
     public const string FinanceTrialBalance = "Finance.TrialBalance";
     public const string FinanceIncomeStatement = "Finance.IncomeStatement";
     public const string FinanceBalanceSheet = "Finance.BalanceSheet";

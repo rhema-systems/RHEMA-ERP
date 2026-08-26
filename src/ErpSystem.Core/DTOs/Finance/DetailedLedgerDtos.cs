@@ -21,6 +21,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IncludeReversed { get; set; } = true;
         public bool IncludeOpeningBalances { get; set; } = true;
         public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+        public List<FinanceDimensionFilterDto> DimensionFilters { get; set; } = new();
     }
 
     public class DetailedLedgerReportDto
@@ -72,5 +73,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ExchangeRate { get; set; }
         public bool IsReversed { get; set; }
         public string? SegmentString { get; set; }
+        public Guid? FinanceDimensionSetId { get; set; }
+        public string? FinanceDimensionDisplay { get; set; }
+        public List<FinanceDimensionAssignmentDto> Dimensions { get; set; } = new();
     }
 }
