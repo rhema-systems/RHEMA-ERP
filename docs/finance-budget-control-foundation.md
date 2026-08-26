@@ -43,6 +43,21 @@ reporting while the original consumed reservation remains historical evidence.
 Missing adoption, missing budget lines, dimensional mismatches, and ambiguous budget cells fail
 closed and cannot be overridden. Only an insufficient available amount can request an override.
 
+## Transaction-dimension budget grain
+
+An additive scenario-level control declares which Finance transaction dimensions define its
+budget cells. Every entry in such a scenario carries one immutable Finance dimension-set value
+for each declaration. A posted line consumes the cell only when its immutable transaction set
+contains all of those controlling assignments; extra analytical values such as a project are
+allowed. Actuals are no longer swept from unrelated dimension values on the same account.
+
+Reservations retain the canonical set ID and combination-hash snapshot, and those assignments
+participate in request/evaluation idempotency evidence. Scenarios with no declarations remain on
+the legacy account/period/return-segment grain so existing adopted budgets are not reinterpreted.
+Control declarations cannot change after worksheet entries exist; a changed grain requires a new
+scenario version. Budget revisions copy the grain and existing entry assignments and fail closed
+when an old revision line cannot identify one unique dimension-grained cell.
+
 ## Override evidence
 
 A budget override is a separate `FinanceBudgetOverride` workflow entity. It records:

@@ -16,6 +16,11 @@ public sealed class FinanceBudgetReservation : TenantEntity
     public Guid AccountId { get; set; }
     public Guid FiscalPeriodId { get; set; }
     public Guid? SegmentValueId { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    [MaxLength(64)]
+    public string? DimensionCombinationHashSnapshot { get; set; }
+    [ForeignKey(nameof(FinanceDimensionSetId))]
+    public FinanceDimensionSet? FinanceDimensionSet { get; set; }
     [Required, MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 

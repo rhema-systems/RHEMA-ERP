@@ -333,6 +333,7 @@ public partial class BudgetService
     {
         var scenario = await _context.BudgetScenarios
             .Include(item => item.FiscalYear)
+            .Include(item => item.ControlDimensions.Where(control => !control.IsDeleted))
             .Include(item => item.BudgetReturns.Where(budgetReturn => !budgetReturn.IsDeleted))
                 .ThenInclude(budgetReturn => budgetReturn.BudgetEntries.Where(entry => !entry.IsDeleted))
             .AsSplitQuery()
@@ -465,6 +466,19 @@ public partial class BudgetService
             CreatedById = userId
         };
 
+        foreach (var control in source.ControlDimensions.Where(item => !item.IsDeleted))
+        {
+            successor.ControlDimensions.Add(new BudgetScenarioControlDimension
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId,
+                BudgetScenarioId = successor.Id,
+                FinanceDimensionDefinitionId = control.FinanceDimensionDefinitionId,
+                DisplayOrder = control.DisplayOrder,
+                CreatedAt = now, CreatedBy = _currentUserService.UserName,
+                CreatedById = userId
+            });
+        }
+
         foreach (var sourceReturn in source.BudgetReturns.Where(item => !item.IsDeleted))
         {
             var clonedReturn = new BudgetReturn
@@ -492,6 +506,7 @@ public partial class BudgetService
                     BudgetReturnId = clonedReturn.Id,
                     AccountId = sourceEntry.AccountId,
                     FiscalPeriodId = sourceEntry.FiscalPeriodId,
+                    FinanceDimensionSetId = sourceEntry.FinanceDimensionSetId,
                     CurrencyCode = sourceEntry.CurrencyCode,
                     ExchangeRate = sourceEntry.ExchangeRate,
                     Amount = sourceEntry.Amount,
@@ -539,10 +554,17 @@ public partial class BudgetService
                 successor.BudgetReturns.Add(budgetReturn);
             }
 
-            var entry = budgetReturn.BudgetEntries.SingleOrDefault(item =>
-                item.AccountId == adjustment.AccountId && item.FiscalPeriodId == adjustment.FiscalPeriodId);
+            var matchingEntries = budgetReturn.BudgetEntries.Where(item =>
+                item.AccountId == adjustment.AccountId && item.FiscalPeriodId == adjustment.FiscalPeriodId).ToList();
+            if (matchingEntries.Count > 1)
+                throw new InvalidOperationException(
+                    "This revision line is ambiguous because the account and period contain multiple dimension-grained budget cells.");
+            var entry = matchingEntries.SingleOrDefault();
             if (entry == null)
             {
+                if (successor.ControlDimensions.Any(item => !item.IsDeleted))
+                    throw new InvalidOperationException(
+                        "A revision cannot introduce a new dimension-grained cell without explicit controlling assignments.");
                 entry = new BudgetEntry
                 {
                     Id = Guid.NewGuid(),

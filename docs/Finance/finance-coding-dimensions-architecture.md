@@ -152,7 +152,8 @@ unchanged.
 4. Add Finance administration and journal-line UX, defaults and warning diagnostics. **Implemented
    for manual journals.**
 5. Move financial-report filters to transaction-line semantics and add optional breakdowns.
-6. Extend budget cells and actual matching to the configured control dimensions.
+6. Extend budget cells and actual matching to the configured control dimensions. **Implemented
+   in the Finance budget provider; producer certification remains adapter-specific.**
 7. Certify Finance and operational adapters individually.
 8. Enable mandatory enforcement by account/source only after certification.
 

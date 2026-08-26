@@ -38,6 +38,88 @@ public sealed class FinanceBudgetCommitmentServiceTests
     }
 
     [Fact]
+    public async Task Dimensioned_position_counts_only_posted_sets_containing_the_budget_assignments()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedBudget(db, 1_000m);
+        var department = Dimension(db, "DEPT", "FIN");
+        var project = Dimension(db, "PROJECT", "P-01");
+        var otherDepartment = Dimension(db, "DEPT-OTHER", "OPS");
+        var budgetSet = DimensionSet(department);
+        var matchingSet = DimensionSet(department, project);
+        var wrongSet = DimensionSet(otherDepartment);
+        fixture.Scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            TenantId = TenantId,
+            BudgetScenarioId = fixture.Scenario.Id,
+            FinanceDimensionDefinitionId = department.Definition.Id
+        });
+        fixture.Entry.FinanceDimensionSetId = budgetSet.Id;
+        db.AddRange(budgetSet, matchingSet, wrongSet);
+        var matching = PostedJournal(fixture, 125m);
+        matching.Transactions.Single().FinanceDimensionSetId = matchingSet.Id;
+        var wrong = PostedJournal(fixture, 400m);
+        wrong.Transactions.Single().FinanceDimensionSetId = wrongSet.Id;
+        var unclassified = PostedJournal(fixture, 500m);
+        db.AddRange(matching, wrong, unclassified);
+        await db.SaveChangesAsync();
+
+        var position = await CreateService(db).GetBudgetPositionAsync(
+            fixture.Entry.Id, fixture.BudgetDate);
+
+        position.PostedActualAmount.Should().Be(125m);
+        position.AvailableAmount.Should().Be(875m);
+        position.DimensionAssignments.Should().ContainSingle(x =>
+            x.DimensionCode == "DEPT" && x.ValueCode == "FIN");
+    }
+
+    [Fact]
+    public async Task Commitment_requires_controlling_assignment_and_snapshots_the_canonical_set()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedBudget(db, 1_000m);
+        var department = Dimension(db, "DEPT", "FIN");
+        var project = Dimension(db, "PROJECT", "P-01");
+        var budgetSet = DimensionSet(department);
+        fixture.Scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            TenantId = TenantId,
+            BudgetScenarioId = fixture.Scenario.Id,
+            FinanceDimensionDefinitionId = department.Definition.Id
+        });
+        fixture.Entry.FinanceDimensionSetId = budgetSet.Id;
+        db.Add(budgetSet);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+        var missing = Request(fixture, "dimension-missing", 100m);
+
+        var missingAct = () => service.EvaluateAsync(missing);
+
+        var error = await missingAct.Should().ThrowAsync<FinanceBudgetCommitmentValidationException>();
+        error.Which.Code.Should().Be("BUDGET_CELL_MISMATCH");
+
+        var request = Request(fixture, "dimension-exact", 100m);
+        request.Lines[0].DimensionAssignments = new[]
+        {
+            new BudgetDimensionAssignmentInputDto
+            {
+                FinanceDimensionDefinitionId = department.Definition.Id,
+                FinanceDimensionValueId = department.Value.Id
+            },
+            new BudgetDimensionAssignmentInputDto
+            {
+                FinanceDimensionDefinitionId = project.Definition.Id,
+                FinanceDimensionValueId = project.Value.Id
+            }
+        };
+        var reserved = await service.ReserveAsync(request);
+
+        reserved.Reservations.Should().ContainSingle();
+        reserved.Reservations.Single().FinanceDimensionSetId.Should().Be(budgetSet.Id);
+        reserved.Reservations.Single().DimensionCombinationHash.Should().Be(budgetSet.CombinationHash);
+    }
+
+    [Fact]
     public async Task Reserve_aggregates_source_lines_and_replays_without_duplicate_exposure()
     {
         await using var db = CreateContext();
@@ -224,6 +306,32 @@ public sealed class FinanceBudgetCommitmentServiceTests
         down.Operations.OfType<DropCheckConstraintOperation>().Should().HaveCount(4);
     }
 
+    [Fact]
+    public void Dimension_budget_migration_is_narrow_and_reversible()
+    {
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestableDimensionBudgetMigration().ApplyUp(up);
+
+        up.Operations.OfType<CreateTableOperation>().Should().ContainSingle(x =>
+            x.Name == "BudgetScenarioControlDimensions");
+        up.Operations.OfType<AddColumnOperation>()
+            .Select(x => $"{x.Table}.{x.Name}")
+            .Should().BeEquivalentTo(new[]
+            {
+                "BudgetEntries.FinanceDimensionSetId",
+                "FinanceBudgetReservations.FinanceDimensionSetId",
+                "FinanceBudgetReservations.DimensionCombinationHashSnapshot"
+            });
+        up.Operations.OfType<CreateTableOperation>().Should().OnlyContain(create =>
+            create.Name == "BudgetScenarioControlDimensions");
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestableDimensionBudgetMigration().ApplyDown(down);
+        down.Operations.OfType<DropTableOperation>().Should().ContainSingle(x =>
+            x.Name == "BudgetScenarioControlDimensions");
+        down.Operations.OfType<DropColumnOperation>().Should().HaveCount(3);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<BudgetCommitmentTestDbContext>()
@@ -367,6 +475,50 @@ public sealed class FinanceBudgetCommitmentServiceTests
         ReservedAt = DateTime.UtcNow
     };
 
+    private static (FinanceDimensionDefinition Definition, FinanceDimensionValue Value) Dimension(
+        ApplicationDbContext db,
+        string code,
+        string valueCode)
+    {
+        var definition = new FinanceDimensionDefinition
+        {
+            TenantId = TenantId, Code = code, Name = code,
+            Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true
+        };
+        var value = new FinanceDimensionValue
+        {
+            TenantId = TenantId, FinanceDimensionDefinitionId = definition.Id,
+            Code = valueCode, Name = valueCode, EffectiveDate = new DateTime(2025, 1, 1),
+            IsActive = true
+        };
+        db.AddRange(definition, value);
+        return (definition, value);
+    }
+
+    private static FinanceDimensionSet DimensionSet(
+        params (FinanceDimensionDefinition Definition, FinanceDimensionValue Value)[] assignments)
+    {
+        var set = new FinanceDimensionSet
+        {
+            TenantId = TenantId,
+            CombinationHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).PadRight(64, '0'),
+            DisplayValue = string.Join(" · ", assignments.Select(x => $"{x.Definition.Code}={x.Value.Code}"))
+        };
+        foreach (var assignment in assignments)
+        {
+            set.Items.Add(new FinanceDimensionSetItem
+            {
+                TenantId = TenantId, FinanceDimensionSetId = set.Id,
+                FinanceDimensionDefinitionId = assignment.Definition.Id,
+                FinanceDimensionValueId = assignment.Value.Id,
+                DimensionCodeSnapshot = assignment.Definition.Code,
+                DimensionValueCodeSnapshot = assignment.Value.Code,
+                DimensionValueNameSnapshot = assignment.Value.Name
+            });
+        }
+        return set;
+    }
+
     private static void SeedPostedActual(ApplicationDbContext db, BudgetFixture fixture, decimal amount)
     {
         db.JournalEntries.Add(PostedJournal(fixture, amount));
@@ -446,6 +598,12 @@ public sealed class FinanceBudgetCommitmentServiceTests
         DateTime BudgetDate);
 
     private sealed class TestableCommitmentMigration : AddGenericFinanceBudgetCommitmentContract
+    {
+        public void ApplyUp(MigrationBuilder builder) => Up(builder);
+        public void ApplyDown(MigrationBuilder builder) => Down(builder);
+    }
+
+    private sealed class TestableDimensionBudgetMigration : AddFinanceBudgetControlDimensions
     {
         public void ApplyUp(MigrationBuilder builder) => Up(builder);
         public void ApplyDown(MigrationBuilder builder) => Down(builder);

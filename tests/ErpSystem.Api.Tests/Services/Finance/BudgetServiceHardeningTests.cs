@@ -17,6 +17,98 @@ public class BudgetServiceHardeningTests
     private static readonly Guid CurrentUserId = Guid.NewGuid();
 
     [Fact]
+    public async Task UpdateScenarioAsync_OmittedDimensionPolicyPreservesExistingControls()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var definition = CreateDimensionDefinition();
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.FiscalYears.Add(new FiscalYear
+        {
+            Id = scenario.FiscalYearId, TenantId = TenantId, FiscalYearName = "FY Test"
+        });
+        db.FinanceDimensionDefinitions.Add(definition);
+        db.BudgetScenarios.Add(scenario);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).UpdateScenarioAsync(new UpdateBudgetScenarioDto
+        {
+            Id = scenario.Id,
+            Name = "FY Budget renamed",
+            RowVersion = Convert.ToBase64String(scenario.RowVersion)
+        });
+
+        result.ControlDimensions.Should().ContainSingle(item => item.DimensionCode == "DEPT");
+        (await db.BudgetScenarioControlDimensions.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task BulkSaveEntriesAsync_PersistsCanonicalDimensionCell()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var scenario = CreateScenario();
+        scenario.FiscalYearId = fiscalYear.Id;
+        var budgetReturn = CreateReturn(scenario.Id, CurrentUserId);
+        var account = CreateAccount(AccountType.Expense);
+        account.Status = AccountStatus.Active;
+        account.AllowDirectPosting = true;
+        var definition = CreateDimensionDefinition();
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "FIN", Name = "Finance",
+            EffectiveDate = fiscalYear.StartDate, IsActive = true
+        };
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.AddRange(fiscalYear, period, scenario, budgetReturn, account, definition, value);
+        await db.SaveChangesAsync();
+
+        await CreateService(db).BulkSaveEntriesAsync(new BulkSaveBudgetEntriesDto
+        {
+            BudgetReturnId = budgetReturn.Id,
+            ReturnRowVersion = Convert.ToBase64String(budgetReturn.RowVersion),
+            Entries =
+            {
+                new BudgetEntrySaveDto
+                {
+                    BudgetReturnId = budgetReturn.Id,
+                    AccountId = account.Id,
+                    FiscalPeriodId = period.Id,
+                    CurrencyCode = "GHS",
+                    Amount = 125_000m,
+                    DimensionAssignments =
+                    {
+                        new BudgetDimensionAssignmentInputDto
+                        {
+                            FinanceDimensionDefinitionId = definition.Id,
+                            FinanceDimensionValueId = value.Id
+                        }
+                    }
+                }
+            }
+        });
+
+        var entry = await db.BudgetEntries.Include(item => item.FinanceDimensionSet)
+            .ThenInclude(set => set!.Items).SingleAsync();
+        entry.AmountBase.Should().Be(125_000m);
+        entry.FinanceDimensionSet.Should().NotBeNull();
+        entry.FinanceDimensionSet!.Items.Should().ContainSingle(item =>
+            item.FinanceDimensionDefinitionId == definition.Id
+            && item.FinanceDimensionValueId == value.Id);
+    }
+
+    [Fact]
     public async Task GetMyReturnsAsync_ReturnsOnlyAssignmentsForCurrentUser()
     {
         await using var db = CreateContext();
@@ -404,6 +496,14 @@ public class BudgetServiceHardeningTests
             AccountCode = accountType == AccountType.Revenue ? "4000" : "5000",
             AccountName = accountType == AccountType.Revenue ? "Revenue" : "Expense",
             AccountType = accountType
+        };
+
+    private FinanceDimensionDefinition CreateDimensionDefinition() =>
+        new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "DEPT", Name = "Department",
+            Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true
         };
 
     private BudgetEntry CreateEntry(

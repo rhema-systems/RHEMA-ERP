@@ -1,6 +1,6 @@
 # FIN-INT-015 Procurement–Finance Budget Commitment Contract
 
-- Version: 1.0
+- Version: 1.1
 - Finance provider status: Available for development and UAT integration
 - Procurement consumer status: Pending in the Procurement-owned module
 
@@ -43,9 +43,12 @@ tenant and to the adopted scenario effective for the budget date. It also verifi
 - exact fiscal period and expense account;
 - active budget-tracked account;
 - department/cost-centre segment agreement between the account combination and budget return;
+- the complete structured transaction-dimension evidence required by the scenario's declared
+  budget-control dimensions;
 - Finance functional currency and effective approved exchange-rate record.
 
 The read model returns scenario/return/entry IDs, fiscal year and period, account and segment,
+the canonical dimension-set ID/hash and readable controlling assignments,
 functional currency, approved amount, posted actual, active reservation and available amount.
 Procurement may display these values but must not cache them as accounting authority.
 
@@ -73,6 +76,8 @@ Every evaluation/reservation request carries:
 - budget date;
 - unique stable source-line IDs;
 - exact Finance budget entry, account, fiscal-period and segment IDs;
+- structured Finance dimension definition/value IDs from the producer line. The budget cell's
+  controlling assignments must be a subset; additional analytical dimensions are permitted;
 - positive transaction amount and ISO currency;
 - exact Finance exchange-rate ID for foreign currency;
 - deterministic idempotency key and end-to-end correlation ID.
@@ -128,7 +133,9 @@ Available budget is:
 `Approved functional amount - posted actual - active Finance reservations`
 
 Posted actual is the debit-minus-credit movement on the exact expense account and fiscal period
-from posted journals. Receipt/GRNI and supplier-invoice stages therefore follow their real GL
+from posted journals whose immutable dimension set contains every controlling assignment on the
+budget entry. A transaction may carry additional analytical dimensions without escaping the cell.
+Receipt/GRNI and supplier-invoice stages therefore follow their real GL
 accounting. Procurement must not write an "actual" alongside a posted journal, and an AP invoice
 that clears GRNI must not reserve or expense the same amount again.
 
@@ -148,6 +155,7 @@ has been persisted and linked.
 Before the Procurement adapter is considered integrated, its PR should prove:
 
 - controlled selection from eligible Finance cells and no free-text budget authority;
+- preservation of the selected controlling dimension assignments on every check/reservation call;
 - draft check versus approved-requisition reserve;
 - retry and changed-payload conflict behaviour;
 - amendment target-state/version handling;
