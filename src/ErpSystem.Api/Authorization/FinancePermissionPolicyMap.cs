@@ -113,6 +113,7 @@ public static class FinancePermissionPolicyMap
             "VendorPayment" => VendorPaymentPolicy(action),
             "SupplierDebitNotes" => SupplierDebitNotesPolicy(action),
             "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
+            "FinanceDimensions" => ReadOrManage(action, methods, FinancePermissions.ManageCodingDimensions),
             "PaymentBatch" => PaymentBatchPolicy(action),
             "ApReports" => ReportPolicy(action),
             "Invoice" => ArInvoicePolicy(action),

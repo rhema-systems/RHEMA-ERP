@@ -30,6 +30,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IDocumentNumberingService? _documentNumberingService;
         private readonly IFinanceBudgetControlService? _budgetControl;
+        private readonly FinanceDimensionAdministrationService? _financeDimensions;
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -42,7 +43,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
             IDocumentNumberingService? documentNumberingService = null,
-            IFinanceBudgetControlService? budgetControl = null)
+            IFinanceBudgetControlService? budgetControl = null,
+            FinanceDimensionAdministrationService? financeDimensions = null)
         {
             _context = context;
             _currentUserService = currentUserService;
@@ -54,6 +56,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _financeAuditService = financeAuditService;
             _documentNumberingService = documentNumberingService;
             _budgetControl = budgetControl;
+            _financeDimensions = financeDimensions;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -64,6 +67,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entries = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -80,6 +86,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -94,6 +103,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -108,6 +120,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entries = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -200,6 +215,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     throw new InvalidOperationException("Transaction type must be either Debit or Credit.");
 
                 await GetValidManualPostingAccountAsync(tenantId, txnDto.AccountId, cancellationToken);
+                var dimensionSet = await ResolveManualJournalDimensionsAsync(
+                    txnDto.AccountId, dto.TransactionDate, txnDto.Dimensions, cancellationToken);
 
                 var transaction = new AccountTransaction
                 {
@@ -217,7 +234,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                     ForeignCurrencyAmount = txnDto.ForeignAmount,
                     TenantId = tenantId,
                     FiscalPeriodId = journalEntry.FiscalPeriodId,
-                    BookClassification = bookClassification
+                    BookClassification = bookClassification,
+                    FinanceDimensionSetId = dimensionSet?.Id,
+                    FinanceDimensionSet = dimensionSet
                 };
                 
                 _context.AccountTransactions.Add(transaction);
@@ -316,6 +335,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         throw new InvalidOperationException("Transaction type must be either Debit or Credit.");
 
                     await GetValidManualPostingAccountAsync(tenantId, txnDto.AccountId, cancellationToken);
+                    var dimensionSet = await ResolveManualJournalDimensionsAsync(
+                        txnDto.AccountId, transactionDate, txnDto.Dimensions, cancellationToken);
 
                     var transaction = new AccountTransaction
                     {
@@ -334,6 +355,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         TenantId = tenantId,
                         FiscalPeriodId = fiscalPeriodId,
                         BookClassification = bookClassification,
+                        FinanceDimensionSetId = dimensionSet?.Id,
+                        FinanceDimensionSet = dimensionSet,
                         PostingStatus = "Draft"
                     };
 
@@ -1304,6 +1327,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ForeignCurrencyAmount = source.ForeignCurrencyAmount,
                 TenantId = source.TenantId,
                 FiscalPeriodId = source.FiscalPeriodId,
+                FinanceDimensionSetId = source.FinanceDimensionSetId,
                 BookClassification = bookCode,
                 PostingStatus = "Posted",
                 PostedDate = postingDate
@@ -1412,6 +1436,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             return _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -1483,8 +1510,38 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CurrencyCode = transaction.TransactionCurrency,
                 ForeignAmount = transaction.ForeignCurrencyAmount,
                 ExchangeRate = transaction.ExchangeRate,
-                LineNumber = transaction.LineNumber
+                LineNumber = transaction.LineNumber,
+                FinanceDimensionSetId = transaction.FinanceDimensionSetId,
+                FinanceDimensionDisplayValue = transaction.FinanceDimensionSet?.DisplayValue,
+                Dimensions = transaction.FinanceDimensionSet?.Items
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .Select(item => new FinanceDimensionAssignmentDto
+                    {
+                        DefinitionId = item.FinanceDimensionDefinitionId,
+                        ValueId = item.FinanceDimensionValueId,
+                        DimensionCode = item.DimensionCodeSnapshot,
+                        DimensionName = item.DimensionCodeSnapshot,
+                        ValueCode = item.DimensionValueCodeSnapshot,
+                        ValueName = item.DimensionValueNameSnapshot
+                    }).ToList() ?? []
             };
+        }
+
+        private async Task<FinanceDimensionSet?> ResolveManualJournalDimensionsAsync(
+            Guid accountId,
+            DateTime transactionDate,
+            IReadOnlyList<FinancePostingDimensionValueDto>? dimensions,
+            CancellationToken cancellationToken)
+        {
+            if (_financeDimensions is null)
+            {
+                if (dimensions is { Count: > 0 })
+                    throw new InvalidOperationException("Finance dimension controls are unavailable; the journal was not saved.");
+                return null;
+            }
+
+            return await _financeDimensions.ResolveManualJournalLineAsync(
+                accountId, transactionDate, dimensions, cancellationToken);
         }
 
         public async Task UpdateApprovalStatusAsync(
@@ -1801,6 +1858,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                         t.TransactionCurrency,
                         t.ExchangeRate,
                         t.ForeignCurrencyAmount,
+                        t.FinanceDimensionSetId,
+                        FinanceDimensionDisplayValue = t.FinanceDimensionSet != null
+                            ? t.FinanceDimensionSet.DisplayValue
+                            : null,
                         t.BookClassification,
                         t.PostingStatus
                     })

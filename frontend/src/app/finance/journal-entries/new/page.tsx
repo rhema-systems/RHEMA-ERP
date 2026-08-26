@@ -14,7 +14,7 @@ import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText, Loader2, Chevrons
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import type { Account, AccountCurrencyLink, Currency, FinanceSettings, JournalType } from '@/types/finance';
+import type { Account, AccountCurrencyLink, Currency, FinanceDimensionAccountRule, FinanceDimensionDefinition, FinanceSettings, JournalType } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
 import { useToast } from '@/hooks/use-toast';
@@ -37,6 +37,11 @@ import {
     normalizeCurrencyCode,
     requireFunctionalCurrency,
 } from '@/lib/finance/manual-journal-fx';
+import {
+    getApplicableManualDimensionRules,
+    getDefaultManualDimensionValues,
+    getMissingRequiredManualDimension,
+} from '@/lib/finance/manual-journal-dimensions';
 
 interface JournalLine {
     id: string;
@@ -53,6 +58,7 @@ interface JournalLine {
     rateSource?: string;
     rateDate?: string;
     rateRequestKey?: string;
+    dimensions: Record<string, string>;
 }
 
 export default function NewJournalEntryPage() {
@@ -68,6 +74,9 @@ export default function NewJournalEntryPage() {
     const [currencyLinksByAccount, setCurrencyLinksByAccount] = useState<Record<string, AccountCurrencyLink[]>>({});
     const [currencyReferenceLoading, setCurrencyReferenceLoading] = useState(true);
     const [currencyReferenceError, setCurrencyReferenceError] = useState<string | null>(null);
+    const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [dimensionRules, setDimensionRules] = useState<FinanceDimensionAccountRule[]>([]);
+    const [dimensionsLoading, setDimensionsLoading] = useState(true);
     const functionalCurrency = financeSettings ? normalizeCurrencyCode(financeSettings.baseCurrency) : '';
 
     // Header State
@@ -160,12 +169,23 @@ export default function NewJournalEntryPage() {
         loadAccounts();
         loadCurrencyReferenceData();
         loadAccountingBooks();
+        Promise.all([
+            financeDataService.getFinanceDimensions(),
+            financeDataService.getFinanceDimensionRules(),
+        ])
+            .then(([items, rules]) => {
+                setFinanceDimensions(items.filter(item => item.isActive
+                    && item.valueSourceType === 'Lookup' && item.classification !== 'Derived'));
+                setDimensionRules(rules);
+            })
+            .catch(() => toast({ title: 'Coding dimensions unavailable', description: 'The journal will fail closed if a dimension is required.', variant: 'destructive' }))
+            .finally(() => setDimensionsLoading(false));
     }, []);
 
     // Lines State
     const [lines, setLines] = useState<JournalLine[]>([
-        { id: '1', accountId: '', description: '', currencyCode: '', exchangeRate: 1, debit: 0, credit: 0 },
-        { id: '2', accountId: '', description: '', currencyCode: '', exchangeRate: 1, debit: 0, credit: 0 },
+        { id: '1', accountId: '', description: '', currencyCode: '', exchangeRate: 1, debit: 0, credit: 0, dimensions: {} },
+        { id: '2', accountId: '', description: '', currencyCode: '', exchangeRate: 1, debit: 0, credit: 0, dimensions: {} },
     ]);
 
     // Computed Totals
@@ -224,6 +244,7 @@ export default function NewJournalEntryPage() {
                 debit: 0,
                 credit: 0,
                 rateStatus: functionalCurrency ? 'ready' : 'idle',
+                dimensions: {},
             },
         ]);
     };
@@ -350,6 +371,7 @@ export default function NewJournalEntryPage() {
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
                 debit: currency === functionalCurrency ? line.debit : 0,
                 credit: currency === functionalCurrency ? line.credit : 0,
+                dimensions: getDefaultManualDimensionValues(dimensionRules, accountId, header.entryDate),
                 rateStatus: currency === functionalCurrency ? 'ready' : 'idle',
                 rateError: undefined,
             } : line));
@@ -454,6 +476,19 @@ export default function NewJournalEntryPage() {
                 description: `Line ${invalidLines[0].index} account is not classified for ${targetBookLabel}.`,
                 variant: 'destructive'
             });
+            return;
+        }
+
+        const missingDimension = lines
+            .filter(line => line.accountId && (line.debit > 0 || line.credit > 0))
+            .map((line, index) => {
+                const rule = getMissingRequiredManualDimension(
+                    dimensionRules, line.accountId, header.entryDate, line.dimensions,
+                );
+                return rule ? `Line ${index + 1} requires ${rule.dimensionName}.` : null;
+            }).find((message): message is string => Boolean(message));
+        if (missingDimension) {
+            toast({ title: 'Coding dimension required', description: missingDimension, variant: 'destructive' });
             return;
         }
 
@@ -692,7 +727,7 @@ export default function NewJournalEntryPage() {
                         </div>
                     ) : (
                         <div className="rounded-md border overflow-x-auto">
-                            <table className="w-full min-w-[1000px]">
+                            <table className="w-full min-w-[1250px]">
                                 <thead>
                                     <tr className="border-b bg-muted/50">
                                         <th className="p-3 text-left font-medium w-[20%]">Account</th>
@@ -703,6 +738,7 @@ export default function NewJournalEntryPage() {
                                         <th className="p-3 text-right font-medium w-[10%]">F. Credit</th>
                                         <th className="p-3 text-right font-medium w-[10%]">Debit ({functionalCurrency || '—'})</th>
                                         <th className="p-3 text-right font-medium w-[10%]">Credit ({functionalCurrency || '—'})</th>
+                                        <th className="p-3 text-left font-medium min-w-[220px]">Coding dimensions</th>
                                         <th className="p-3 text-center w-[2%]"></th>
                                     </tr>
                                 </thead>
@@ -893,6 +929,50 @@ export default function NewJournalEntryPage() {
                                                         readOnly={isForeign}
                                                     />
                                                 </td>
+                                                <td className="p-3 align-top">
+                                                    {dimensionsLoading ? (
+                                                        <span className="text-xs text-muted-foreground">Loading…</span>
+                                                    ) : financeDimensions.length === 0 ? (
+                                                        <span className="text-xs text-muted-foreground">None configured</span>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            {financeDimensions.map(dimension => {
+                                                                const rule = getApplicableManualDimensionRules(
+                                                                    dimensionRules, line.accountId, header.entryDate,
+                                                                ).find(item => item.financeDimensionDefinitionId === dimension.id);
+                                                                if (rule?.ruleType === 'Prohibited') return null;
+                                                                const activeValues = dimension.values.filter(value => {
+                                                                    if (!value.isActive) return false;
+                                                                    const date = header.entryDate;
+                                                                    return value.effectiveDate.slice(0, 10) <= date
+                                                                        && (!value.expiryDate || value.expiryDate.slice(0, 10) >= date);
+                                                                });
+                                                                return (
+                                                                    <div key={dimension.id}>
+                                                                        <Label className="text-xs">{dimension.name}{rule?.ruleType === 'Required' ? ' *' : ''}{rule?.ruleType === 'Fixed' ? ' (fixed)' : ''}</Label>
+                                                                        <Select
+                                                                            value={line.dimensions[dimension.code] || '__none__'}
+                                                                            onValueChange={value => setLines(current => current.map(item =>
+                                                                                item.id === line.id
+                                                                                    ? { ...item, dimensions: { ...item.dimensions, [dimension.code]: value === '__none__' ? '' : value } }
+                                                                                    : item
+                                                                            ))}
+                                                                            disabled={rule?.ruleType === 'Fixed'}
+                                                                        >
+                                                                            <SelectTrigger className="h-8"><SelectValue placeholder="Not assigned" /></SelectTrigger>
+                                                                            <SelectContent>
+                                                                                <SelectItem value="__none__">Not assigned</SelectItem>
+                                                                                {activeValues.map(value => (
+                                                                                    <SelectItem key={value.id} value={value.code}>{value.code} — {value.name}</SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td className="p-3 text-center">
                                                     <Button
                                                         variant="ghost"
@@ -913,6 +993,7 @@ export default function NewJournalEntryPage() {
                                         <td colSpan={6} className="p-3 text-right">Totals ({functionalCurrency || '—'}):</td>
                                         <td className="p-3 text-right">{totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                         <td className="p-3 text-right">{totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td></td>
                                         <td></td>
                                     </tr>
                                 </tfoot>

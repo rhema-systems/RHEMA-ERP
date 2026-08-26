@@ -69,6 +69,12 @@ import type {
     SubledgerModule,
     TrialBalanceReportDto,
     TrialBalanceRequestDto,
+    FinanceDimensionDefinition,
+    FinanceDimensionValue,
+    FinanceDimensionAccountRule,
+    UpsertFinanceDimensionDefinition,
+    UpsertFinanceDimensionValue,
+    UpsertFinanceDimensionAccountRule,
 } from '@/types/finance';
 import type {
     CreateOpeningStockAdjustmentDto,
@@ -147,6 +153,52 @@ class FinanceDataService {
 
     async getAccountById(id: string): Promise<Account> {
         return apiService.get<Account>(`/finance/accounts/${id}`);
+    }
+
+    // ===== CODING DIMENSIONS =====
+
+    async getFinanceDimensions(includeInactive = false): Promise<FinanceDimensionDefinition[]> {
+        const suffix = includeInactive ? '?includeInactive=true' : '';
+        return apiService.get<FinanceDimensionDefinition[]>(`/finance/dimensions${suffix}`);
+    }
+
+    async createFinanceDimension(dto: UpsertFinanceDimensionDefinition): Promise<FinanceDimensionDefinition> {
+        return apiService.post<FinanceDimensionDefinition>('/finance/dimensions', dto);
+    }
+
+    async updateFinanceDimension(id: string, dto: UpsertFinanceDimensionDefinition): Promise<FinanceDimensionDefinition> {
+        return apiService.put<FinanceDimensionDefinition>(`/finance/dimensions/${id}`, dto);
+    }
+
+    async createFinanceDimensionValue(
+        definitionId: string,
+        dto: UpsertFinanceDimensionValue,
+    ): Promise<FinanceDimensionValue> {
+        return apiService.post<FinanceDimensionValue>(`/finance/dimensions/${definitionId}/values`, dto);
+    }
+
+    async updateFinanceDimensionValue(
+        definitionId: string,
+        valueId: string,
+        dto: UpsertFinanceDimensionValue,
+    ): Promise<FinanceDimensionValue> {
+        return apiService.put<FinanceDimensionValue>(`/finance/dimensions/${definitionId}/values/${valueId}`, dto);
+    }
+
+    async getFinanceDimensionRules(accountId?: string): Promise<FinanceDimensionAccountRule[]> {
+        const suffix = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+        return apiService.get<FinanceDimensionAccountRule[]>(`/finance/dimensions/rules${suffix}`);
+    }
+
+    async createFinanceDimensionRule(dto: UpsertFinanceDimensionAccountRule): Promise<FinanceDimensionAccountRule> {
+        return apiService.post<FinanceDimensionAccountRule>('/finance/dimensions/rules', dto);
+    }
+
+    async updateFinanceDimensionRule(
+        id: string,
+        dto: UpsertFinanceDimensionAccountRule,
+    ): Promise<FinanceDimensionAccountRule> {
+        return apiService.put<FinanceDimensionAccountRule>(`/finance/dimensions/rules/${id}`, dto);
     }
 
     async createAccount(dto: CreateAccountDto): Promise<Account> {

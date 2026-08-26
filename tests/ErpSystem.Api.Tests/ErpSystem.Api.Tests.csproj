@@ -127,6 +127,7 @@
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\FinanceDimensionAdministrationServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceAccessScopeServiceTests.cs" />
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />

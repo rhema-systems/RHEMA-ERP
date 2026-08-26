@@ -2398,6 +2398,12 @@ export const navigationItems: NavItem[] = [
                 icon: FolderTree,
               },
               {
+                title: 'Coding Dimensions',
+                href: '/administration/finance/dimensions',
+                icon: ListTree,
+                permissions: ['Finance.Dimensions.Manage'],
+              },
+              {
                 title: 'Account Generator',
                 href: '/administration/finance/account-generator',
                 icon: FileText,

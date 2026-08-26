@@ -377,6 +377,107 @@ export interface AccountTransaction {
     /** creditAmount = amount when transactionType === 'Credit', else 0 */
     creditAmount?: number;
     lineNumber?: number;
+    financeDimensionSetId?: string;
+    financeDimensionDisplayValue?: string;
+    dimensions?: FinanceDimensionAssignment[];
+}
+
+export interface FinanceDimensionAssignment {
+    definitionId: string;
+    valueId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+}
+
+export interface FinancePostingDimensionValue {
+    dimensionCode: string;
+    valueCode?: string;
+    sourceEntityType?: string;
+    sourceEntityId?: string;
+}
+
+export interface FinanceDimensionValue {
+    id: string;
+    financeDimensionDefinitionId: string;
+    code: string;
+    name: string;
+    parentValueId?: string;
+    sourceEntityType?: string;
+    sourceEntityId?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
+    displayOrder: number;
+}
+
+export interface FinanceDimensionDefinition {
+    id: string;
+    code: string;
+    name: string;
+    description?: string;
+    classification: 'Analytical' | 'Balancing' | 'Derived';
+    valueSourceType: 'Lookup' | 'EntityBacked';
+    sourceEntityType?: string;
+    isActive: boolean;
+    displayOrder: number;
+    values: FinanceDimensionValue[];
+}
+
+export interface UpsertFinanceDimensionDefinition {
+    code: string;
+    name: string;
+    description?: string;
+    classification: 'Analytical' | 'Balancing' | 'Derived';
+    valueSourceType: 'Lookup' | 'EntityBacked';
+    sourceEntityType?: string;
+    isActive: boolean;
+    displayOrder: number;
+}
+
+export interface UpsertFinanceDimensionValue {
+    code: string;
+    name: string;
+    parentValueId?: string;
+    sourceEntityType?: string;
+    sourceEntityId?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
+    displayOrder: number;
+}
+
+export interface FinanceDimensionAccountRule {
+    id: string;
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    financeDimensionDefinitionId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    ruleType: 'Required' | 'Optional' | 'Prohibited' | 'Fixed';
+    defaultDimensionValueId?: string;
+    defaultValueCode?: string;
+    sourceModule?: string;
+    sourceDocumentType?: string;
+    postingAction?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
+}
+
+export interface UpsertFinanceDimensionAccountRule {
+    accountId: string;
+    financeDimensionDefinitionId: string;
+    ruleType: 'Required' | 'Optional' | 'Prohibited' | 'Fixed';
+    defaultDimensionValueId?: string;
+    sourceModule?: string;
+    sourceDocumentType?: string;
+    postingAction?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
 }
 
 /** @deprecated Use AccountTransaction instead */
@@ -1122,6 +1223,7 @@ export interface CreateAccountTransactionDto {
     foreignAmount?: number;
     exchangeRate?: number;
     lineNumber?: number;
+    dimensions?: FinancePostingDimensionValue[];
 }
 
 // Controlled Opening Balances

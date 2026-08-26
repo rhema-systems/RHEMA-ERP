@@ -65,6 +65,7 @@ export interface JournalEntryFormLine {
     credit: number;
     foreignDebit?: number;
     foreignCredit?: number;
+    dimensions?: Record<string, string>;
 }
 
 // ─── Mapper ──────────────────────────────────────────────────────────────────
@@ -124,6 +125,9 @@ export function mapJournalEntryFormToCreateDto(
                 foreignAmount: isForeign ? (l.foreignDebit || undefined) : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
+                dimensions: Object.entries(l.dimensions ?? {})
+                    .filter(([, valueCode]) => Boolean(valueCode))
+                    .map(([dimensionCode, valueCode]) => ({ dimensionCode, valueCode })),
             });
         }
 
@@ -138,6 +142,9 @@ export function mapJournalEntryFormToCreateDto(
                 foreignAmount: isForeign ? (l.foreignCredit || undefined) : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
+                dimensions: Object.entries(l.dimensions ?? {})
+                    .filter(([, valueCode]) => Boolean(valueCode))
+                    .map(([dimensionCode, valueCode]) => ({ dimensionCode, valueCode })),
             });
         }
     }
