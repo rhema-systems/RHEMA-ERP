@@ -151,7 +151,8 @@ public sealed class EmployeePortalHomeDto
     // ── Expiring personal documents (externally-held certificates/IDs) ─────
     public IEnumerable<PortalExpiringDocumentDto> ExpiringDocuments { get; set; } = [];
 
-    /// <summary>Slice-10 stub: stays null until the payslip adapter lands; the shape is the contract.</summary>
+    /// <summary>The newest published payslip, by PAY PERIOD (wired in slice 10); null until
+    /// payroll generates snapshots for a run this employee is in.</summary>
     public PortalPayslipStubDto? LatestPayslip { get; set; }
 
     /// <summary>Slice-12 stub: stays empty until announcements land; the shape is the contract.</summary>
@@ -184,7 +185,8 @@ public sealed class PortalExpiringDocumentDto
     public int DaysUntilExpiry { get; set; }
 }
 
-/// <summary>Slice-10 placeholder shape — period, number and net once the adapter exists.</summary>
+/// <summary>The home tile's payslip cut — number, when it was generated, and the net.
+/// (Named "stub" since slice 3; the shape was the contract and slice 10 kept it.)</summary>
 public sealed class PortalPayslipStubDto
 {
     public string PayslipNumber { get; set; } = string.Empty;

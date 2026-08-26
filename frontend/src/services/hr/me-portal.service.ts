@@ -97,6 +97,109 @@ export interface PortalMovementNotification {
   actionUrl?: string | null;
 }
 
+// ── Payslips (slice 10) — the read-only adapter over payroll's frozen snapshots ────────────────
+// Shapes measured live (probe-slice10): the server deserializes the stored SnapshotJson and
+// returns it typed, so everything here is ordinary camelCase. `payslip` is null only when a
+// stored snapshot no longer parses.
+
+export interface MyPayslipSummary {
+  id: string;
+  payslipNumber: string;
+  runNumber: string;
+  payPeriod: number;
+  payPeriodFrom: string;
+  payPeriodTo: string;
+  currencyCode: string;
+  isSeparateBonusRun: boolean;
+  grossIncome: number;
+  netIncome: number;
+  taxAmount: number;
+  employeeContribution: number;
+  generatedAt: string;
+}
+
+export interface PayslipTransaction {
+  id: string;
+  transactionType: string;
+  componentCode: string | null;
+  description: string;
+  amount: number;
+  taxable: boolean;
+  currencyCode: string;
+}
+
+export interface PayslipContribution {
+  item: string;
+  employeeContribution: number;
+  employerContribution: number;
+  totalContribution: number;
+  openingBalance: number;
+  totalWithdrawal: number;
+  grandTotal: number;
+  firstTier: number;
+  secondTier: number;
+  isProvidentFund: boolean;
+}
+
+export interface PayslipBankDetail {
+  bankName: string | null;
+  accountNumber: string | null;
+  currencyCode: string;
+  exchangeRate: number | null;
+  amount: number;
+}
+
+export interface PayslipOvertime {
+  workingHours: number;
+  overtimeHours: number;
+  holidayHours: number;
+  saturdayHours: number;
+  sundayHours: number;
+  daySixAndSevenHours: number;
+  totalHours: number;
+}
+
+/** The frozen payslip document, as payroll serialized it at generation time. */
+export interface MyPayslipDocument {
+  runNumber: string;
+  payPeriod: number;
+  payPeriodFrom: string;
+  payPeriodTo: string;
+  isSeparateBonusRun: boolean;
+  companyName: string | null;
+  companyAddress: string | null;
+  companyPhone: string | null;
+  employeeNumber: string;
+  employeeName: string;
+  departmentName: string | null;
+  sectionName: string | null;
+  positionTitle: string | null;
+  staffCategory: string | null;
+  jobLocation: string | null;
+  ssfNumber: string | null;
+  staffTin: string | null;
+  currencyCode: string;
+  basicSalary: number;
+  grossIncome: number;
+  taxableIncome: number;
+  taxRelief: number;
+  incomeTax: number;
+  employeeContribution: number;
+  employerContribution: number;
+  netIncome: number;
+  overtime: PayslipOvertime | null;
+  /** ⚠ Deductions can be EMPTY (measured: a run with zero tax emits no rows), and a synthetic
+   * "Income Tax - Total" row carries `id: Guid.Empty` — never key rows on `id` alone. */
+  earnings: PayslipTransaction[];
+  deductions: PayslipTransaction[];
+  contributions: PayslipContribution[];
+  bankDetails: PayslipBankDetail[];
+}
+
+export interface MyPayslipDetail extends MyPayslipSummary {
+  payslip: MyPayslipDocument | null;
+}
+
 class MePortalService {
   private readonly baseUrl = '/employee-portal';
 
@@ -139,6 +242,17 @@ class MePortalService {
 
   getMovementNotifications(): Promise<PortalMovementNotification[]> {
     return apiService.get<PortalMovementNotification[]>(`${this.baseUrl}/notifications`);
+  }
+
+  // ── Payslips (slice 10) — newest PAY PERIOD first; empty until payroll publishes ──
+
+  getPayslips(): Promise<MyPayslipSummary[]> {
+    return apiService.get<MyPayslipSummary[]>(`${this.baseUrl}/payslips`);
+  }
+
+  /** Somebody else's snapshot id is a 404 lookup miss — never a 403. */
+  getPayslip(id: string): Promise<MyPayslipDetail> {
+    return apiService.get<MyPayslipDetail>(`${this.baseUrl}/payslips/${id}`);
   }
 }
 

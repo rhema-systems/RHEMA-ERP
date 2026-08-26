@@ -61,7 +61,7 @@ interface NavGroup {
 // The move-in slices rewrite these hrefs onto /me/* as each domain re-homes (D3).
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Time & Leave',
+    label: 'Time, Leave & Pay',
     icon: Clock,
     links: [
       // Slice 4: leave + attendance live in the portal.
@@ -71,6 +71,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Attendance', href: '/me/attendance' },
       // Slice 7: travel lives in the portal.
       { label: 'My Travel', href: '/me/travel' },
+      // Slice 10: the read-only payslip adapter over payroll's published snapshots.
+      { label: 'My Payslips', href: '/me/payslips' },
     ],
   },
   {

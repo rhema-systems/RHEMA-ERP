@@ -834,6 +834,83 @@ else opened with them — carry their own gates. HR's sweep protects HR only.
 
 ---
 
+## 12. Payroll — FYI, not a defect: HR now READS `PayrollPayslipSnapshots` (the portal's "My Payslips")
+
+**Added 2026-08-26 (HR area 25 slice 10).** For the payroll owner's awareness — nothing here is
+broken, and no payroll code was touched.
+
+### What HR consumes
+
+The employee self-service portal serves `GET /api/employee-portal/payslips` (+ `/{id}`) by
+querying the **`PayrollPayslipSnapshots` table directly** (read-only, `AsNoTracking`, scoped to
+the token's employee, joined to `PayrollRuns` for the period columns), and the portal home
+aggregate shows the newest snapshot (by `PayPeriodTo`) as "latest payslip". The detail route
+deserializes `SnapshotJson` into `PayrollPayslipDto` server-side. Per the agreed boundary
+(payroll-ownership / D4 in the area-25 plan): HR never calls a payroll service, never writes,
+never recomputes — the frozen snapshot is the single source, precisely so payroll's live-run
+logic stays payroll's.
+
+### What that makes worth knowing when payroll changes
+
+1. **Schema/JSON shape is now a consumed contract.** `SnapshotJson` is serialized at
+   `PayrollService.cs` (`JsonSerializer.Serialize(payslip)`, no options → **PascalCase**) from
+   `PayrollPayslipDto`. Renaming its properties, or introducing a naming policy on that
+   serialize call, changes what 7,000+ employees' payslip screens render. The columns HR reads:
+   `EmployeeId`, `PayslipNumber`, `GeneratedAt`, `GrossIncome`, `NetIncome`, `TaxAmount`,
+   `EmployeeContribution`, `SnapshotJson`, plus `PayrollRun.{RunNumber, PayPeriod,
+   PayPeriodFrom, PayPeriodTo, CurrencyCode, IsSeparateBonusRun}`.
+2. **Recalculating a run hard-deletes its snapshots** (`ClearRunDetailsAsync` →
+   `ExecuteDeleteAsync`). That is payroll's prerogative — but it now means a payslip an
+   employee saw yesterday can 404 today until snapshots are regenerated. The portal handles it
+   gracefully (404 → friendly copy); if regeneration after recalculation ever becomes optional
+   rather than habitual, employees will notice.
+3. **`PayrollController` is still bare `[Authorize]`** (already recorded under #11's HR-adjacent
+   exception) — unrelated to this read, but worth folding into the same one-line fix pass.
+
+---
+
+## 13. Payroll — creating an employee profile through the API has never worked (tracked-graph FK 547)
+
+**Found 2026-08-26** while building the portal's payslip harness (HR area 25 slice 10).
+
+### What is broken
+
+`POST /api/hr/payroll/employee-profiles` **500s for every NEW profile**, with any payload —
+explicit `paymentMethods` rows or none. Root cause is the codebase-wide tracked-graph trap
+(`BaseEntity.Id = Guid.NewGuid()` at construction): `UpsertEmployeeProfileAsync`
+(`PayrollService.cs:2358`) `Add()`s the new profile FIRST, then `UpsertPaymentMethods`
+(`:13420`) attaches payment-method rows via navigation (`profile.PaymentMethods.Add`,
+`profile.DefaultPaymentMethod = …`). Entities discovered by fixup with a pre-set key are
+tracked **Modified**, so SaveChanges emits an `UPDATE PayrollPaymentMethods … WHERE Id=@p`
+for a row that was never inserted, and the profile INSERT's `DefaultPaymentMethodId` FK
+fails — `SqlException 547` on
+`FK_PayrollEmployeeProfiles_PayrollPaymentMethods_DefaultPaymentMethodId`.
+
+### What was proven
+
+Measured live (Staging, 2026-08-26): two fresh employees, both payload shapes, 500 both
+times with the FK 547 in the API log. And the corroborating fact: **the database held ZERO
+rows in `PayrollEmployeeProfiles`** before HR's harness seeded its fixtures — the create
+path has never once succeeded, so payroll has never been able to enrol an employee through
+its own API/UI.
+
+### What it blocks
+
+The whole payroll module, practically: no profile → `calculate` silently includes nobody →
+no payslips → no snapshots. HR's portal payslip surface (area 25 slice 10, entry #12 above)
+reads snapshots and honestly shows "no payslips yet" tenant-wide until this is fixed.
+(HR's harness seeds profiles by SQL to verify its own adapter — around the API, never
+through payroll code.)
+
+### What a fix needs
+
+In `UpsertPaymentMethods` / `UpsertEmployeeComponents`: explicitly `_context.Add(...)` the
+rows constructed there (or set `EntityState.Added`) instead of relying on navigation fixup —
+the standard remedy for this trap elsewhere in the codebase. One place each; the edit-path
+variant (adding new rows to an EXISTING profile) has the same bug and the same fix.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

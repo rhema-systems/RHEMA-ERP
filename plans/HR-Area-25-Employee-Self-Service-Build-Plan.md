@@ -33,7 +33,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | **COMPLETE 2026-08-26** — 72 assertions ×2 + 379 ladder; 7 pages moved + 7 built (incl. oaths); the dead EmployeeAcceptancePending state fixed |
 | 8 | Move-in: medical + safety | **COMPLETE 2026-08-26** — 75 assertions ×2 + 451 ladder; 4 new backend self-arms; appointment .Include fix; 6 screens moved + 7 built |
 | 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | **COMPLETE 2026-08-26** — 80 assertions ×2 + 526 ladder; 4 fixes (ack repeat, withdraw dead route, committee-result leak, notice text); 10 screens moved + 1 built |
-| 10 | My payslips: the read-only payroll adapter | not started |
+| 10 | My payslips: the read-only payroll adapter | **COMPLETE 2026-08-26** — 35 assertions ×3 + 606 ladder; latest-by-PERIOD; payroll FYI #12 + defect #13 (profile create never worked) recorded |
 | 11 | Approvals & tasks inbox, notifications | not started |
 | 12 | New capabilities: change requests, HR letters, announcements & acknowledgements | not started |
 | 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
@@ -701,3 +701,46 @@ harness for the first time, which is what surfaced the fixes.
   by-id + plain-list portal routes stay service-covered-without-screens (their content is
   the held table + terms letter), and the awards mine-list's blank `nominatedByName`
   (cosmetic: the list is "mine").
+
+### Slice 10 — my payslips: the read-only payroll adapter. CLOSED 2026-08-26.
+
+`run-slice10.mjs` 35 assertions ×3 green + the 606 ladder (111/33/35/68/47/85/72/75/80).
+No migration; D4 delivered exactly as decided — no payroll code touched, no write, no
+recompute.
+
+- **The adapter:** `GET api/employee-portal/payslips` (+`/{id}`) queries the frozen
+  `PayrollPayslipSnapshots` table directly (`AsNoTracking`, token employee, joined to
+  `PayrollRuns` for period columns; the medical-me direct-DbSet precedent — payroll's own
+  reads REBUILD payslips live from the run, carry desk gates, and would defeat the
+  frozen-snapshot point). The detail deserializes `SnapshotJson` server-side — payroll
+  serializes it with no options, so the stored keys are **PascalCase**; deserializing into
+  `PayrollPayslipDto` and returning it typed makes the response camelCase like every other
+  payload. A blob that no longer parses returns its header with `payslip: null` and honest
+  copy. **"Latest" is the newest PAY PERIOD, never `GeneratedAt`** — snapshots regenerate
+  in place, so generation time moves without the payslip being new; the harness proves it
+  by generating run B's snapshots BEFORE run A's. `home.LatestPayslip` (the slice-3 typed
+  stub) is wired on the same ordering.
+- **Frontend:** `/me/payslips` (period/number/gross/tax/net; the empty state explains
+  payslips appear when payroll publishes them — the tenant's live truth, see below) and
+  `/me/payslips/[id]` (company/employee block, earnings, deductions, totals, contributions,
+  bank details; print reuses payroll's own `printing-payroll-payslip` body-class family so
+  the paper matches the desk's). Landing: a "Latest payslip" stat card that renders ONLY
+  when one exists (an all-zero money card would read as "you were paid nothing"), a
+  My Payslips tile, and the nav group renamed "Time, Leave & Pay".
+- **THE find — cross-module defect #13:** `POST payroll/employee-profiles` has NEVER worked
+  for a new profile. `BaseEntity` pre-generates `Id`, so the payment-method rows the service
+  attaches via navigation are discovered as MODIFIED — an UPDATE for a row never inserted —
+  and the profile INSERT's `DefaultPaymentMethodId` FK 547s. Corroborated by the DB:
+  **zero rows in `PayrollEmployeeProfiles` tenant-wide** — payroll has never enrolled an
+  employee through its own API. Recorded (with the one-line-per-method fix), not fixed:
+  the file is the payroll developer's. The harness seeds profiles by SQL and drives
+  everything else (runs → calculate → snapshots) through payroll's real routes.
+- **The consumed-surface FYI is #12** in the same doc: the columns + JSON shape HR now
+  reads, and the recalculate-hard-deletes-snapshots behaviour employees will now notice —
+  which the harness asserts as the graceful path (the payslip an employee saw yesterday
+  404s after a recalc, returns as a NEW id after regeneration, and home follows it).
+- Harness facts: an OPEN run blocks its pay period forever (the run never closes them —
+  period pairs derive even/odd from a per-second base); snapshots need `calculate` +
+  ≥1 employee in the run; the run's approval gate no-ops without an active payroll-run
+  workflow definition; `Deductions` is EMPTY when no tax was computed (asserted as the
+  measured reality); the unlinked wall answers 403 "not linked" in words.

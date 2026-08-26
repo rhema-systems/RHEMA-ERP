@@ -7,7 +7,8 @@
  * the detail screen whose service computed it, so the two can never honestly disagree (the
  * area-7 wrong-numbers lesson lives in the backend + harness, not here). If the aggregate
  * read fails, the quick links still render — the portal degrades, it does not die.
- * Payslip and announcement tiles appear in slices 10/12 when their stubs go live.
+ * The payslip card went live in slice 10 (it renders only when payroll has published one);
+ * announcements arrive in slice 12.
  */
 
 import Link from 'next/link';
@@ -17,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   AlertTriangle,
   Award,
+  Banknote,
   BookOpen,
   Briefcase,
   CalendarDays,
@@ -54,6 +56,7 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
     tiles: [
       { label: 'My Leave', hint: 'Balances, requests and approvals', href: '/me/leave', icon: TreePalm },
       { label: 'My Attendance', hint: 'Punch in and out, see your month', href: '/me/attendance', icon: Clock },
+      { label: 'My Payslips', hint: 'What payroll has published for you', href: '/me/payslips', icon: Banknote },
       { label: 'My Travel', hint: 'Raise and track travel requests', href: '/me/travel', icon: Plane },
       { label: 'My Appraisals', hint: 'Reviews and self-evaluations', href: '/me/performance/appraisals', icon: Target },
       { label: 'My Goals', hint: 'Draft, submit and track your goals', href: '/me/performance/goals', icon: Gauge },
@@ -285,6 +288,20 @@ export default function MeLandingPage() {
               }
               href="/me/training"
             />
+            {/* Slice 10: rendered only once payroll has published a payslip — an all-zero
+                money card would read as "you were paid nothing". */}
+            {home?.latestPayslip && (
+              <StatCard
+                icon={Banknote}
+                title="Latest payslip"
+                value={home.latestPayslip.netPay.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                detail={home.latestPayslip.payslipNumber}
+                href="/me/payslips"
+              />
+            )}
           </div>
         )}
       </section>

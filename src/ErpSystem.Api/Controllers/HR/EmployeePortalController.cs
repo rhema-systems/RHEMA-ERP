@@ -1,9 +1,14 @@
-﻿using ErpSystem.Core.DTOs.HR;
+﻿using System.Text.Json;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.DTOs.HR.Payroll;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -33,6 +38,7 @@ public class EmployeePortalController : ControllerBase
     private readonly ITrainingDashboardService     _trainingDashboardService;
     private readonly IEmployeeCertificateService   _certificateService;
     private readonly ICurrentUserService           _currentUser;
+    private readonly ApplicationDbContext          _db;
 
     public EmployeePortalController(
         IStaffMovementService          movementService,
@@ -45,7 +51,8 @@ public class EmployeePortalController : ControllerBase
         IPublicHolidayService          holidayService,
         ITrainingDashboardService      trainingDashboardService,
         IEmployeeCertificateService    certificateService,
-        ICurrentUserService            currentUser)
+        ICurrentUserService            currentUser,
+        ApplicationDbContext           db)
     {
         _movementService    = movementService;
         _actingService      = actingService;
@@ -58,6 +65,7 @@ public class EmployeePortalController : ControllerBase
         _trainingDashboardService = trainingDashboardService;
         _certificateService = certificateService;
         _currentUser        = currentUser;
+        _db                 = db;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -217,8 +225,133 @@ public class EmployeePortalController : ControllerBase
 
             ExpiringDocuments = expiringDocuments,
 
-            LatestPayslip = null,   // slice 10 wires the payroll snapshot adapter
+            // "Latest" is the newest PAY PERIOD, not the newest generation — snapshots are
+            // regenerated in place, so GeneratedAt moves without the payslip being new.
+            LatestPayslip = await _db.Set<PayrollPayslipSnapshot>()
+                .AsNoTracking()
+                .Where(s => s.EmployeeId == empId && !s.IsDeleted)
+                .OrderByDescending(s => s.PayrollRun.PayPeriodTo)
+                .ThenByDescending(s => s.GeneratedAt)
+                .Select(s => new PortalPayslipStubDto
+                {
+                    PayslipNumber = s.PayslipNumber,
+                    GeneratedAt   = s.GeneratedAt,
+                    NetPay        = s.NetIncome,
+                })
+                .FirstOrDefaultAsync(ct),
+
             Announcements = [],     // slice 12 wires announcements
+        });
+    }
+
+    // =========================================================================
+    // PAYSLIPS — the D4 read-only adapter (area 25 slice 10)
+    // =========================================================================
+    // Payroll is another team's module and stays untouched: these routes read the frozen
+    // PayrollPayslipSnapshot table directly — never the live run (whose reads rebuild
+    // payslips and carry desk gates), never a payroll service. No write, no recompute.
+    // The scoping law is the self-service one: the employee comes from the token, no route
+    // or query parameter carries an employee id, and somebody else's snapshot id is a
+    // 404 lookup miss — never a 403.
+
+    /// <summary>The caller's own payslips, newest pay period first.</summary>
+    /// <remarks>Empty until payroll generates snapshots for a run the employee is in —
+    /// the portal shows what payroll has published, nothing earlier.</remarks>
+    [HttpGet("payslips")]
+    public async Task<IActionResult> GetMyPayslips(CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+
+        var rows = await _db.Set<PayrollPayslipSnapshot>()
+            .AsNoTracking()
+            .Where(s => s.EmployeeId == empId && !s.IsDeleted)
+            .OrderByDescending(s => s.PayrollRun.PayPeriodTo)
+            .ThenByDescending(s => s.GeneratedAt)
+            .Select(s => new
+            {
+                s.Id,
+                s.PayslipNumber,
+                s.PayrollRun.RunNumber,
+                s.PayrollRun.PayPeriod,
+                s.PayrollRun.PayPeriodFrom,
+                s.PayrollRun.PayPeriodTo,
+                s.PayrollRun.CurrencyCode,
+                s.PayrollRun.IsSeparateBonusRun,
+                s.GrossIncome,
+                s.NetIncome,
+                s.TaxAmount,
+                s.EmployeeContribution,
+                s.GeneratedAt,
+            })
+            .ToListAsync(ct);
+
+        return Ok(rows);
+    }
+
+    /// <summary>One of the caller's own payslips, rendered from its frozen snapshot.</summary>
+    /// <remarks>
+    /// The stored <c>SnapshotJson</c> is PascalCase (payroll serializes it without options),
+    /// so it is deserialized into the payroll DTO here and returned typed — the response then
+    /// camelCases like every other payload instead of leaking the storage casing. A snapshot
+    /// whose JSON no longer parses returns its header with <c>payslip: null</c> rather than
+    /// failing the whole read.
+    /// </remarks>
+    [HttpGet("payslips/{id:guid}")]
+    public async Task<IActionResult> GetMyPayslip(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+
+        // Ownership is part of the lookup itself: an unowned id and a missing id are the
+        // same 404, so this route cannot be used to discover which snapshots exist.
+        var row = await _db.Set<PayrollPayslipSnapshot>()
+            .AsNoTracking()
+            .Where(s => s.Id == id && s.EmployeeId == empId && !s.IsDeleted)
+            .Select(s => new
+            {
+                s.Id,
+                s.PayslipNumber,
+                s.GeneratedAt,
+                s.GrossIncome,
+                s.NetIncome,
+                s.TaxAmount,
+                s.EmployeeContribution,
+                s.SnapshotJson,
+                s.PayrollRun.RunNumber,
+                s.PayrollRun.PayPeriod,
+                s.PayrollRun.PayPeriodFrom,
+                s.PayrollRun.PayPeriodTo,
+                s.PayrollRun.CurrencyCode,
+                s.PayrollRun.IsSeparateBonusRun,
+            })
+            .FirstOrDefaultAsync(ct);
+        if (row is null) return NotFound();
+
+        PayrollPayslipDto? payslip;
+        try
+        {
+            payslip = JsonSerializer.Deserialize<PayrollPayslipDto>(row.SnapshotJson);
+        }
+        catch (JsonException)
+        {
+            payslip = null;
+        }
+
+        return Ok(new
+        {
+            row.Id,
+            row.PayslipNumber,
+            row.RunNumber,
+            row.PayPeriod,
+            row.PayPeriodFrom,
+            row.PayPeriodTo,
+            row.CurrencyCode,
+            row.IsSeparateBonusRun,
+            row.GrossIncome,
+            row.NetIncome,
+            row.TaxAmount,
+            row.EmployeeContribution,
+            row.GeneratedAt,
+            Payslip = payslip,
         });
     }
 
