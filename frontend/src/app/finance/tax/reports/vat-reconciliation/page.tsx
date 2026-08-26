@@ -4,25 +4,38 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 import type { VATReconciliation } from '@/types/tax';
-import { FileText, Download, TrendingUp, TrendingDown } from 'lucide-react';
+import { FileText, TrendingUp, TrendingDown } from 'lucide-react';
 import Link from 'next/link';
+import { format, startOfMonth } from 'date-fns';
 
 export default function VATReconciliationPage() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [reconciliation, setReconciliation] = useState<VATReconciliation | null>(null);
     const [loading, setLoading] = useState(true);
+    const [startDate, setStartDate] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+    const [endDate, setEndDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+    const [currencyCode, setCurrencyCode] = useState('GHS');
 
     useEffect(() => {
         loadReconciliation();
-    }, []);
+    }, [startDate, endDate]);
 
     const loadReconciliation = async () => {
         try {
-            const startDate = '2024-12-01';
-            const endDate = '2024-12-31';
-            const data = await taxDataService.getVATReconciliation(startDate, endDate);
+            const [data, settings] = await Promise.all([
+                taxDataService.getVATReconciliation(startDate, endDate),
+                financeDataService.getFinanceSettings(),
+            ]);
             setReconciliation(data);
+            setCurrencyCode(settings.baseCurrency);
         } catch (error) {
             console.error('Failed to load VAT reconciliation:', error);
         } finally {
@@ -31,7 +44,10 @@ export default function VATReconciliationPage() {
     };
 
     const formatCurrency = (amount: number) => {
-        return `GHS ${amount.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return new Intl.NumberFormat('en-GH', {
+            style: 'currency',
+            currency: currencyCode,
+        }).format(amount);
     };
 
     return (
@@ -40,7 +56,7 @@ export default function VATReconciliationPage() {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold">VAT Reconciliation</h1>
-                    <p className="text-muted-foreground">Output VAT vs Input VAT for December 2024</p>
+                    <p className="text-muted-foreground">Output VAT vs Input VAT for the selected reporting period</p>
                 </div>
                 <div className="flex gap-2">
                     <Link href="/finance/tax/reports">
@@ -49,10 +65,32 @@ export default function VATReconciliationPage() {
                             All Reports
                         </Button>
                     </Link>
-                    <Button variant="outline">
-                        <Download className="mr-2 h-4 w-4" />
-                        Export
-                    </Button>
+                    <Input
+                        type="date"
+                        aria-label="VAT reconciliation start date"
+                        value={startDate}
+                        onChange={(event) => setStartDate(event.target.value)}
+                        className="w-[160px]"
+                    />
+                    <Input
+                        type="date"
+                        aria-label="VAT reconciliation end date"
+                        value={endDate}
+                        onChange={(event) => setEndDate(event.target.value)}
+                        className="w-[160px]"
+                    />
+                    {canExport && (
+                        <ReportPdfActions
+                            reportName="VAT reconciliation"
+                            onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                DOCUMENT_TYPES.financeTaxVatReconciliation,
+                                { fromDate: startDate, toDate: endDate })}
+                            onPrint={() => documentOutputService.printReportDocument(
+                                DOCUMENT_TYPES.financeTaxVatReconciliation,
+                                { fromDate: startDate, toDate: endDate })}
+                            disabled={loading || !reconciliation || !startDate || !endDate}
+                        />
+                    )}
                 </div>
             </div>
 

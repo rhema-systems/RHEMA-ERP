@@ -105,6 +105,19 @@ public static class DocumentTypes
     public const string FinanceArAgingReport = "Finance.AR.AgingReport";
     /// <summary>Parameterized customer statements rendered from the canonical AR detailed ledger.</summary>
     public const string FinanceArCustomerStatement = "Finance.AR.CustomerStatement";
+    /// <summary>Current treasury position rendered from the posted cash/bank ledger.</summary>
+    public const string FinanceCashPositionReport = "Finance.Cash.PositionReport";
+    /// <summary>Posted input-tax snapshot register.</summary>
+    public const string FinanceTaxInputRegister = "Finance.Tax.InputRegister";
+    /// <summary>Posted output-tax snapshot register.</summary>
+    public const string FinanceTaxOutputRegister = "Finance.Tax.OutputRegister";
+    /// <summary>Net VAT summary rendered from posted tax snapshots reconciled to GL.</summary>
+    public const string FinanceTaxVatReconciliation = "Finance.Tax.VatReconciliation";
+    /// <summary>WHT payable register rendered from posted withholding records.</summary>
+    public const string FinanceTaxWhtPayable = "Finance.Tax.WhtPayable";
+    /// <summary>Consolidated budget-versus-actual scenario report.</summary>
+    public const string FinanceBudgetConsolidated = "Finance.Budget.Consolidated";
+    public const string FinanceBudgetScenarioComparison = "Finance.Budget.ScenarioComparison";
     public const string FinanceTrialBalance = "Finance.TrialBalance";
     public const string FinanceIncomeStatement = "Finance.IncomeStatement";
     public const string FinanceBalanceSheet = "Finance.BalanceSheet";

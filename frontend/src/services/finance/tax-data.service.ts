@@ -64,6 +64,20 @@ interface TaxSnapshotReport {
     lines: TaxSnapshotReportLine[];
 }
 
+interface TaxWithholdingReportLine {
+    sourceDocumentId: string;
+    counterpartyName?: string | null;
+    taxCode?: string | null;
+    taxName?: string | null;
+    taxRate: number;
+    taxableBase: number;
+    withholdingAmount: number;
+}
+
+interface TaxWithholdingReport {
+    lines: TaxWithholdingReportLine[];
+}
+
 export interface VATReconciliationSummary {
     period: string;
     outputVAT: number;
@@ -310,33 +324,36 @@ class TaxDataService {
     }
 
     async getWHTSummary(startDate?: string, endDate?: string): Promise<WHTSummaryEntry[]> {
-        const queryParams = new URLSearchParams();
-        if (startDate) queryParams.append('fromDate', startDate);
-        if (endDate) queryParams.append('toDate', endDate);
+        const report = await apiService.post<TaxWithholdingReport>(
+            '/finance/tax-reports/wht-payable',
+            this.buildTaxReportRequest(startDate, endDate));
+        const groups = new Map<string, WHTSummaryEntry & { documents: Set<string> }>();
 
-        const report = await apiService.get<{
-            bySupplier?: Array<{
-                supplierName: string;
-                taxId?: string | null;
-                totalInvoiceAmount: number;
-                totalWithholdingTax: number;
-                totalNetPayment: number;
-                transactionCount: number;
-            }>;
-        }>(`/ap/reports/withholding-tax${queryParams.toString() ? `?${queryParams}` : ''}`);
+        for (const line of report.lines ?? []) {
+            const supplierName = line.counterpartyName?.trim() || 'Unknown supplier';
+            const taxType = line.taxCode?.trim() || line.taxName?.trim() || 'WHT';
+            const key = `${supplierName}\u0000${taxType}\u0000${line.taxRate}`;
+            const item = groups.get(key) ?? {
+                supplierName,
+                taxType,
+                transactionCount: 0,
+                grossAmount: 0,
+                whtRate: line.taxRate,
+                whtAmount: 0,
+                netAmount: 0,
+                documents: new Set<string>(),
+            };
+            item.documents.add(line.sourceDocumentId);
+            item.grossAmount += line.taxableBase;
+            item.whtAmount += line.withholdingAmount;
+            item.netAmount += line.taxableBase - line.withholdingAmount;
+            groups.set(key, item);
+        }
 
-        return (report.bySupplier || []).map(supplier => ({
-            supplierName: supplier.supplierName,
-            supplierTIN: supplier.taxId || undefined,
-            taxType: 'WHT',
-            transactionCount: supplier.transactionCount,
-            grossAmount: supplier.totalInvoiceAmount,
-            whtRate: supplier.totalInvoiceAmount > 0
-                ? (supplier.totalWithholdingTax / supplier.totalInvoiceAmount) * 100
-                : 0,
-            whtAmount: supplier.totalWithholdingTax,
-            netAmount: supplier.totalNetPayment,
-        }));
+        return Array.from(groups.values())
+            .map(({ documents, ...item }) => ({ ...item, transactionCount: documents.size }))
+            .sort((left, right) => left.supplierName.localeCompare(right.supplierName)
+                || left.taxType.localeCompare(right.taxType));
     }
 
     async getWhtCertificates(query: WhtCertificateQuery = {}): Promise<FinancePagedResult<WhtCertificate>> {
