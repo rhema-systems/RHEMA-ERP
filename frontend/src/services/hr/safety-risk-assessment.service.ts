@@ -65,11 +65,19 @@ class SafetyRiskAssessmentService {
     });
   }
 
-  /** HR-gated per-employee view — the employee self-service variant is area-25 work. */
+  /** HR-gated per-employee view — the employee self-service variant is `getMineForAcknowledgement`. */
   getForAcknowledgement(employeeId: string): Promise<MyRiskAcknowledgement[]> {
     return apiService.get<MyRiskAcknowledgement[]>(
       `${this.baseUrl}/for-acknowledgement/${employeeId}`,
     );
+  }
+
+  /**
+   * The caller's own acknowledgement view (area 25): every approved/active assessment, each
+   * flagged with whether THEY have signed. Open to any employee — no id, server derives the actor.
+   */
+  getMineForAcknowledgement(): Promise<MyRiskAcknowledgement[]> {
+    return apiService.get<MyRiskAcknowledgement[]>(`${this.baseUrl}/for-acknowledgement/mine`);
   }
 
   // ── CRUD + lifecycle ───────────────────────────────────────────────────────

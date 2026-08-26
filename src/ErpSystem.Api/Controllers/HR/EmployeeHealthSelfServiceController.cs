@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.HR.Medical;
+using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Data;
@@ -17,10 +18,10 @@ namespace ErpSystem.Api.Controllers.HR;
 /// carving exceptions into those controllers and weakening their class-level policy, the entire
 /// self-service surface lives here, behind a plain <c>[Authorize]</c>, in one auditable file.</para>
 ///
-/// <para>The scoping rule has no exceptions: every query filters on the health profile resolved
-/// from <c>CurrentUser.EmployeeId</c>, and <b>no route or query parameter on this controller may
-/// ever carry an employee or profile id</b>. Read-only by design — corrections to a medical record
-/// go through HR.</para>
+/// <para>The scoping rule has no exceptions: every query filters on the employee resolved from
+/// <c>CurrentUser.EmployeeId</c> (through their health profile where records are profile-keyed),
+/// and <b>no route or query parameter on this controller may ever carry an employee or profile
+/// id</b>. Read-only by design — corrections to a medical record go through HR.</para>
 /// </remarks>
 [ApiController]
 [Route("api/employee-health/me")]
@@ -178,9 +179,84 @@ public class EmployeeHealthSelfServiceController : MedicalControllerBase
             inline: false, ct);
     }
 
+    // ── Occupational-health surveillance (area 25 slice 8) ──────────────────────────────────
+    // Surveillance rows live on the SHE side of the SHE↔Medical boundary but ARE medical-grade
+    // data about this employee, so the self arm belongs on this controller, not on
+    // api/safety/occupational-health — whose class-level MedicalReadPolicy cannot be relaxed
+    // per-action. Keyed by EmployeeId directly (surveillance predates any health profile).
+
+    /// <summary>Lists the caller's own health-surveillance records.</summary>
+    [HttpGet("surveillance")]
+    public async Task<IActionResult> GetOwnSurveillance(CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out var tenantId, out _, out var employeeId) is { } error)
+            return error;
+
+        var rows = await _db.Set<SheOccupationalHealthSurveillance>()
+            .AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId &&
+                           item.TenantId == tenantId &&
+                           !item.IsDeleted)
+            .OrderByDescending(item => item.ExaminationDate)
+            .ToListAsync(ct);
+
+        return Ok(rows.Select(item => new
+        {
+            item.Id,
+            item.SurveillanceNumber,
+            item.Type,
+            item.ExaminationDate,
+            item.NextExaminationDate,
+            item.Result,
+            item.WorkRestrictionIssued
+        }));
+    }
+
+    /// <summary>Returns one of the caller's own surveillance records, findings included.</summary>
+    /// <remarks>The subject sees the full record — findings, recommendations, restriction detail —
+    /// the natural-justice rule every subject-facing read in the module follows. DocumentPath is a
+    /// server path and RecordedBy an internal actor; neither is projected.</remarks>
+    [HttpGet("surveillance/{id:guid}")]
+    public async Task<IActionResult> GetOwnSurveillanceRecord(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out var tenantId, out _, out var employeeId) is { } error)
+            return error;
+
+        // Filtered on the caller's employee id in the same query, so somebody else's record id is
+        // a 404 lookup miss, never a 403.
+        var row = await _db.Set<SheOccupationalHealthSurveillance>()
+            .AsNoTracking()
+            .Include(item => item.HealthcareFacility)
+            .SingleOrDefaultAsync(
+                item => item.Id == id &&
+                        item.EmployeeId == employeeId &&
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted, ct);
+        if (row is null)
+            return NotFound();
+
+        return Ok(new
+        {
+            row.Id,
+            row.SurveillanceNumber,
+            row.Type,
+            row.ExposureHazard,
+            row.ExaminationDate,
+            row.NextExaminationDate,
+            HealthcareFacilityName = row.HealthcareFacility?.FacilityName,
+            row.ExaminingPhysician,
+            row.Result,
+            row.Findings,
+            row.Recommendations,
+            row.WorkRestrictionIssued,
+            row.WorkRestrictionDetails
+        });
+    }
+
     /// <summary>
-    /// Resolves the health profile belonging to the authenticated employee. Every read on this
-    /// controller goes through here — it is the single point where "own" is defined.
+    /// Resolves the health profile belonging to the authenticated employee. Every profile-keyed
+    /// read on this controller goes through here — it is the single point where "own" is defined.
+    /// (Surveillance is keyed by employee id directly and filters in its own query.)
     /// </summary>
     private Task<EmployeeHealthProfile?> LoadOwnProfileAsync(
         Guid tenantId, Guid employeeId, CancellationToken ct)

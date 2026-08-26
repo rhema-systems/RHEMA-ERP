@@ -24,7 +24,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { useToast } from '@/components/ui/use-toast';
+import { toast } from 'sonner';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { safetyStopWorkService } from '@/services/hr/safety-stop-work.service';
 import { locationService } from '@/services/hr/location.service';
@@ -46,10 +46,12 @@ const STATUS_LABEL: Record<SheStopWorkStatus, string> = {
  * the SHE team routes, resolves and clears resumption. You always raise as
  * yourself — the server takes the raiser from your login. Your own orders and
  * their progress are listed below.
+ *
+ * Area 25 slice 8: re-homed from /hr/safety/raise-stop-work under the portal's unified
+ * report-a-concern surface (D3 — moved, not redirected).
  */
 export default function RaiseStopWorkPage() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
   const [locationId, setLocationId] = useState('');
@@ -60,13 +62,13 @@ export default function RaiseStopWorkPage() {
 
   // HR-gated lookup: for a plain employee this 403s and the picker simply stays empty.
   const { data: locations = [] } = useQuery({
-    queryKey: ['hr', 'locations'],
+    queryKey: ['me', 'safety', 'locations'],
     queryFn: () => locationService.getAll(),
     retry: false,
   });
 
   const { data: mine = [], isLoading: mineLoading } = useQuery({
-    queryKey: ['hr', 'safety-stop-work', 'mine'],
+    queryKey: ['me', 'safety', 'stop-work'],
     queryFn: () => safetyStopWorkService.getMine(),
   });
 
@@ -80,32 +82,28 @@ export default function RaiseStopWorkPage() {
         reasonDescription: reasonDescription.trim(),
         immediateActionsTaken: immediateActions.trim() || null,
       });
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'safety-stop-work'] });
+      await queryClient.invalidateQueries({ queryKey: ['me', 'safety', 'stop-work'] });
       setWorkDescription('');
       setReasonDescription('');
       setImmediateActions('');
       setSpecificArea('');
       setLocationId('');
-      toast({
-        title: `Stop-work order ${created.orderNumber} raised`,
-        description: 'The SHE team has been alerted. Work stays stopped until it is resolved and cleared.',
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error?.message || 'Failed to raise the order.',
-        variant: 'destructive',
-      });
+      toast.success(
+        `Stop-work order ${created.orderNumber} raised — the SHE team has been alerted. Work stays stopped until it is resolved and cleared.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to raise the order.');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Raise a Stop-Work Order"
         description="If work looks imminently dangerous, you have the authority to stop it — no role needed, no permission asked. Say what you stopped and why; the SHE team takes it from there."
+        backHref="/me/safety/report"
       />
 
       <Card className="border-destructive">

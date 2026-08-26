@@ -68,7 +68,7 @@ export default function HazardRegisterPage() {
         backHref="/hr/safety"
         actions={
           <Button asChild>
-            <Link href="/hr/safety/report-hazard">
+            <Link href="/me/safety/report/hazard">
               <Plus className="mr-2 h-4 w-4" />
               Report hazard
             </Link>

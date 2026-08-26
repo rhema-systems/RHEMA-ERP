@@ -102,6 +102,14 @@ class SafetyIncidentService {
     return apiService.get<SafetyIncidentSummary[]>(`${this.baseUrl}/for-employee/${employeeId}`);
   }
 
+  /**
+   * Incidents the caller reported or was involved in (area 25). Open to any employee —
+   * no id, the server derives the actor from the token.
+   */
+  getMine(): Promise<SafetyIncidentSummary[]> {
+    return apiService.get<SafetyIncidentSummary[]>(`${this.baseUrl}/mine`);
+  }
+
   getRequiringInvestigation(): Promise<SafetyIncidentSummary[]> {
     return apiService.get<SafetyIncidentSummary[]>(`${this.baseUrl}/requiring-investigation`);
   }

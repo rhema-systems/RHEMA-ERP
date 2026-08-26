@@ -15,9 +15,8 @@ namespace ErpSystem.Api.Controllers.HR;
 /// employee can report an incident (FR-SHE-100 / FR-ENV-025 employee reporting), and non-HR
 /// reporters are always recorded as themselves — the reporter comes from the token, never the
 /// body. Everything else — register reads, investigation, closure, involved persons, witnesses,
-/// corrective actions — is HR-gated. Employee self-service reads ("incidents I reported / am
-/// involved in") are deliberately deferred to the employee-portal work (area 25), not an
-/// oversight here.
+/// corrective actions — is HR-gated. The one employee self-service read ("incidents I reported /
+/// am involved in") is <c>GET mine</c>, delivered with the employee portal (area 25).
 /// </summary>
 [ApiController]
 [SafetyBusinessRules]
@@ -83,6 +82,13 @@ public class SafetyIncidentController : SheApiControllerBase
     [HttpGet("for-employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<SafetyIncidentSummaryDto>>> GetForEmployee(Guid employeeId)
         => Ok(await _service.GetForEmployeeAsync(employeeId));
+
+    /// <summary>Incidents the caller reported or was recorded as an involved person in — the
+    /// employee-portal read the class doc defers to area 25, delivered there. Summary rows only;
+    /// the employee always resolved from the token, no SHE permission required.</summary>
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<SafetyIncidentSummaryDto>>> GetMine()
+        => Ok(await _service.GetForEmployeeAsync(UserId));
 
     [Authorize(Policy = HrPermissions.SheReadPolicy)]
     [HttpGet("requiring-investigation")]

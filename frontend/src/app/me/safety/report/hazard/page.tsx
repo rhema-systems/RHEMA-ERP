@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useToast } from '@/components/ui/use-toast';
+import { toast } from 'sonner';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import {
   TextField,
@@ -31,6 +31,11 @@ import { SHE_HAZARD_CATEGORY_OPTIONS } from '@/types/hr/safety-hazards';
  * needed, and the server records the token's employee as the reporter. The 1–5 ratings are the
  * reporter's first estimate; SHE refines them (and the residual side) during assessment, so the
  * form keeps residual = inherent unless the reporter says controls already exist.
+ *
+ * Area 25 slice 8: re-homed from /hr/safety/report-hazard under the portal's unified
+ * report-a-concern surface (D3 — moved, not redirected). There is no "hazards I reported" read —
+ * the hazard entity carries no reporter column (recorded residual), so this form is
+ * deliberately fire-and-forget.
  */
 const reportSchema = z.object({
   name: z.string().min(1, 'Give the hazard a short name').max(200),
@@ -74,13 +79,12 @@ const blank = (v?: string) => (v && v.length > 0 ? v : null);
 
 export default function ReportHazardPage() {
   const router = useRouter();
-  const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [reportedName, setReportedName] = useState<string | null>(null);
 
   // May be gated for a plain employee — the picker then quietly hides instead of erroring.
   const { data: locations = [] } = useQuery({
-    queryKey: ['hr', 'locations'],
+    queryKey: ['me', 'safety', 'locations'],
     queryFn: () => locationService.getAll(),
     retry: false,
   });
@@ -113,16 +117,9 @@ export default function ReportHazardPage() {
         isActive: true,
       });
       setReportedName(created.name);
-      toast({
-        title: 'Hazard reported',
-        description: 'Thank you — the SHE team will assess it.',
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error?.message || 'Failed to submit the report.',
-        variant: 'destructive',
-      });
+      toast.success('Hazard reported — the SHE team will assess it.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to submit the report.');
     } finally {
       setSubmitting(false);
     }
@@ -130,8 +127,8 @@ export default function ReportHazardPage() {
 
   if (reportedName) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Hazard reported" backHref="/hr/safety" />
+      <div className="space-y-6">
+        <PageHeader title="Hazard reported" backHref="/me/safety" />
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <CheckCircle2 className="h-10 w-10 text-green-600" />
@@ -158,11 +155,11 @@ export default function ReportHazardPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Report a Hazard"
         description="See something that could hurt someone? Anyone can report it — you don't need it to have caused an incident, and you are recorded as the reporter."
-        backHref="/hr/safety"
+        backHref="/me/safety/report"
       />
 
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -250,7 +247,7 @@ export default function ReportHazardPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => router.push('/hr/safety')}
+            onClick={() => router.push('/me/safety/report')}
             disabled={submitting}
           >
             Cancel

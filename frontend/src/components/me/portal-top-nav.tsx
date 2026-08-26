@@ -119,12 +119,15 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Health & Safety',
     icon: HeartPulse,
     links: [
-      { label: 'My Medical Claims', href: '/hr/medical/my-claims' },
+      // Slice 8: medical + safety live in the portal, hub-first — coverage, claims,
+      // appointments and the health record hang off /me/medical; PPE, risk assessments and
+      // my-reports off /me/safety. Report-a-concern is the one deep entry (it must be loud).
+      { label: 'My Medical', href: '/me/medical' },
+      { label: 'My Medical Claims', href: '/me/medical/claims' },
+      { label: 'My Safety', href: '/me/safety' },
+      { label: 'Report a Concern', href: '/me/safety/report' },
       { label: 'My Awards', href: '/hr/awards/me' },
       { label: 'My Assets', href: '/hr/assets/me' },
-      { label: 'My PPE', href: '/hr/safety/my-ppe' },
-      { label: 'Report an Incident', href: '/hr/safety/report-incident' },
-      { label: 'Report a Hazard', href: '/hr/safety/report-hazard' },
     ],
   },
 ];

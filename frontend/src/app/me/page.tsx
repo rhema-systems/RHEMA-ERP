@@ -68,10 +68,10 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
   {
     title: 'Benefits, kit & safety',
     tiles: [
-      { label: 'My Medical Claims', hint: 'File and follow expense claims', href: '/hr/medical/my-claims', icon: HeartPulse },
+      { label: 'My Medical', hint: 'Coverage, claims, appointments, health record', href: '/me/medical', icon: HeartPulse },
       { label: 'My Awards', hint: 'Nominate, vote, celebrate', href: '/hr/awards/me', icon: Award },
       { label: 'My Assets', hint: 'What you hold, and requests', href: '/hr/assets/me', icon: Laptop },
-      { label: 'My PPE', hint: 'Protective equipment issued to you', href: '/hr/safety/my-ppe', icon: ShieldAlert },
+      { label: 'My Safety', hint: 'PPE, risk assessments, report a concern', href: '/me/safety', icon: ShieldAlert },
       { label: 'Internal Job Board', hint: 'Openings you can apply for', href: '/hr/recruitment/job-board', icon: Briefcase },
     ],
   },

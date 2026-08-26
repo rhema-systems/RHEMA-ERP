@@ -64,7 +64,7 @@ export default function IncidentRegisterPage() {
         backHref="/hr/safety"
         actions={
           <Button asChild>
-            <Link href="/hr/safety/report-incident">
+            <Link href="/me/safety/report/incident">
               <Plus className="mr-2 h-4 w-4" />
               Report incident
             </Link>

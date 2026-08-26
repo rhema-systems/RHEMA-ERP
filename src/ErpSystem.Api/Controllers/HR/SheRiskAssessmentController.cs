@@ -145,4 +145,11 @@ public class SheRiskAssessmentController : SheApiControllerBase
     [HttpGet("for-acknowledgement/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<MyRiskAcknowledgementDto>>> GetForAcknowledgement(Guid employeeId)
         => Ok(await _service.GetForEmployeeAcknowledgementAsync(employeeId));
+
+    /// <summary>The caller's own acknowledgement view — every approved/active assessment, each
+    /// flagged with whether THEY have signed it. Self-service (area 25): open like the acknowledge
+    /// POST above, the employee always resolved from the token.</summary>
+    [HttpGet("for-acknowledgement/mine")]
+    public async Task<ActionResult<IEnumerable<MyRiskAcknowledgementDto>>> GetMineForAcknowledgement()
+        => Ok(await _service.GetForEmployeeAcknowledgementAsync(UserId));
 }

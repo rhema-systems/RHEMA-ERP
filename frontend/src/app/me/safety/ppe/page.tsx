@@ -21,6 +21,9 @@ import type { PpeIssuance } from '@/types/hr/safety-ppe';
  * The employee's own PPE record — open to every authenticated employee, resolved from the
  * login's linked employee (no SHE role needed). Read-only: issuing and returns are recorded by
  * the SHE team on the issuance register.
+ *
+ * Area 25 slice 8: re-homed from /hr/safety/my-ppe into the portal shell (D3 — moved, not
+ * redirected; the desk keeps the SHE issuance register at /hr/safety/ppe/issuances).
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -33,17 +36,18 @@ function statusOf(i: PpeIssuance): { label: string; variant: 'secondary' | 'dest
 
 export default function MyPpePage() {
   const { data: issuances = [], isLoading, error } = useQuery({
-    queryKey: ['hr', 'safety-ppe', 'issuances', 'mine'],
+    queryKey: ['me', 'safety', 'ppe'],
     queryFn: () => safetyPpeService.getMyIssuances(),
   });
 
   const held = issuances.filter((i) => !i.isReturned);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My PPE"
         description="Everything issued to you — what you hold, what is due back and what has expired. Contact the SHE team for replacements or returns."
+        backHref="/me/safety"
       />
 
       {error ? (

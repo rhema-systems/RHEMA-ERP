@@ -31,7 +31,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | **COMPLETE 2026-08-25** — 47 assertions ×2 + 247 ladder; 12 pages re-homed + my-goals built; 3 backend fixes; 16 deep-links re-pointed |
 | 6 | Move-in: training & learning (+ the owed bond self-accept) | **COMPLETE 2026-08-25** — 85 assertions ×2 + 294 ladder; 4 pages moved + 7 built; learner step-completion dead path fixed |
 | 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | **COMPLETE 2026-08-26** — 72 assertions ×2 + 379 ladder; 7 pages moved + 7 built (incl. oaths); the dead EmployeeAcceptancePending state fixed |
-| 8 | Move-in: medical + safety | not started |
+| 8 | Move-in: medical + safety | **COMPLETE 2026-08-26** — 75 assertions ×2 + 451 ladder; 4 new backend self-arms; appointment .Include fix; 6 screens moved + 7 built |
 | 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | not started |
 | 10 | My payslips: the read-only payroll adapter | not started |
 | 11 | Approvals & tasks inbox, notifications | not started |
@@ -591,3 +591,61 @@ landed here (probation's neighbour), plus the probation "About me" surface.
   `cancellationReason`; checklist completion is owner-or-HR ("assigned to someone else").
 - The unlinked wall as measured: portal + movements + probation + oaths 403, orientation +
   travel me 400 — no 500s, the D8 layout gate fronts them all.
+
+### Slice 8 — move-in: medical + safety. CLOSED 2026-08-26.
+
+`run-slice8.mjs` 75 assertions ×2 green + the 451 ladder (111/33/35/68/47/85/72). No
+migration. The census's heaviest slice: 5 of its 7 M verdicts landed here — coverage (#27),
+appointments (#29), the safety hub (#33), my-risk-assessments (#34) and surveillance (#35)
+all needed NEW backend self-arms, built to the module's self-service law (`InternalOnly` +
+token actor + explicit projection + foreign id = 404 lookup miss).
+
+- **New self-arms (4 surfaces, zero new service methods for the lists):**
+  `api/medical/me/insurance-policies` (list / `active` / `{id}` / `{id}/dependents` — the
+  dependants only reachable THROUGH an owned policy, since the dependant DTO carries no
+  employee id) and `api/medical/me/appointments` (list/detail, read-only: booking is the
+  clinic's act) on `MedicalSelfServiceController`, whose remit widened from claims-only;
+  `api/employee-health/me/surveillance` (+`/{id}`) on the occ-health self controller — it
+  could NOT sit on `api/safety/occupational-health` because that class-level
+  MedicalReadPolicy ANDs with anything per-action; and the two SHE one-liners
+  `risk-assessments/for-acknowledgement/mine` and `incidents/mine` (the read the incident
+  controller's own docstring had deferred to area 25 by name). Self projections are
+  explicit: no `notes`/`cancellationReason` (HR commentary), no `IsFlaggedForReview`-class
+  fields, no `DocumentPath` (server path), no recorder identity.
+- **The probe-confirmed defect, fixed at the service:** `GetAppointmentByIdAsync` loaded NO
+  navigations, so every appointment detail read returned `facilityName:""`,
+  `physicianName:""`, `employeeName:""` while the list resolved them — the uneven-.Include
+  shape (the same one area 11 fixed on the policy read, whose fix comment now has a sibling).
+  Fixed with includes for all six navs the DTO maps; asserted by name in §2.
+- **Utilisation had to MOVE (the numbers-must-move rule), and the first attempt was the
+  lesson:** approving a `MedicalInsuranceClaim` does NOT consume the policy limit —
+  `ConsumePolicyUtilizationAsync` runs on the EXPENSE-claim approval path, and only when the
+  claim carries `InsurancePolicyId`. The harness now files the employee's own claim against
+  their policy, HR approves it, and the active-coverage read shows utilised 90 / remaining
+  49,910 exactly.
+- **The move (D3, atomic):** 6 screens re-homed via `git mv` — my-claims →
+  `/me/medical/claims`, my-ppe → `/me/safety/ppe`, and all four open report forms
+  (incident, hazard, stop-work, environmental) under `/me/safety/report/*` with a new
+  chooser page as the unified report-a-concern front door (#36's missing piece). **Built
+  fresh:** `/me/medical` (coverage hub: active policy, utilisation bar, dependants),
+  `/me/medical/appointments`, `/me/medical/health` (profile / conditions & allergies /
+  exams / surveillance tabs — the surveillance detail shows the SUBJECT their full findings
+  and restriction, the natural-justice rule), `/me/safety` (hub with live counts),
+  `/me/safety/risk-assessments` (awaiting/signed split + the acknowledge dialog),
+  `/me/safety/reports` (incidents / stop-work / environmental tabs). 21 link sources
+  re-pointed in the same change: portal nav (the Health & Safety group went hub-first),
+  landing tiles, desk sidebar (the 6 self entries deleted), both desk hubs, and the three
+  desk registers' report CTAs (which now open the portal forms — the register row → portal
+  detail precedent, in reverse).
+- **Harness legs worth keeping:** the self-arm two-sided AS 404s (the manager's policy /
+  appointment / surveillance ids are lookup misses, never 403s — the enumeration-proof
+  shape); the acknowledge lifecycle (server signs as the token's employee even when the
+  body names the manager, re-sign 422 with the message, DRAFT assessments neither listed
+  nor signable, the desk per-employee read still SheReadPolicy-gated, the manager's `mine`
+  independently unacknowledged); reporter stamping on all four report writes (an employee
+  naming the manager as reporter is overwritten with themselves); and the unlinked wall
+  (medical/me + employee-health/me refuse 400, SHE mine routes 403, no 500s).
+- **Recorded residuals, deliberately not built:** a "hazards I reported" read (SheHazard
+  has NO reporter column — needs a migration another slice should weigh), a PPE
+  receipt-acknowledgement (net-new entity surface), and the desk `AddPolicyDependent`
+  500-not-404 on a Guid.Empty dependant id (HR-side FK guard, out of this slice's surface).

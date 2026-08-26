@@ -24,7 +24,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { useToast } from '@/components/ui/use-toast';
+import { toast } from 'sonner';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { safetyEnvironmentalService } from '@/services/hr/safety-environmental.service';
 import { locationService } from '@/services/hr/location.service';
@@ -48,10 +48,12 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
  * contamination reported here alert the SHE team automatically; you always
  * report as yourself — the server takes the reporter from your login. Your own
  * reports and their progress are listed below.
+ *
+ * Area 25 slice 8: re-homed from /hr/safety/report-environmental-incident under the portal's
+ * unified report-a-concern surface (D3 — moved, not redirected).
  */
 export default function ReportEnvironmentalIncidentPage() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
   const [type, setType] = useState<string>('OilSpill');
@@ -67,19 +69,19 @@ export default function ReportEnvironmentalIncidentPage() {
 
   // HR-gated lookup: for a plain employee this 403s and the picker simply stays empty.
   const { data: locations = [] } = useQuery({
-    queryKey: ['hr', 'locations'],
+    queryKey: ['me', 'safety', 'locations'],
     queryFn: () => locationService.getAll(),
     retry: false,
   });
 
   const { data: mine = [], isLoading: mineLoading } = useQuery({
-    queryKey: ['hr', 'safety-env', 'mine'],
+    queryKey: ['me', 'safety', 'environmental'],
     queryFn: () => safetyEnvironmentalService.getMyIncidents(),
   });
 
   const submit = async () => {
     if (!description.trim()) {
-      toast({ title: 'Describe what happened', variant: 'destructive' });
+      toast.error('Describe what happened');
       return;
     }
     setBusy(true);
@@ -98,33 +100,28 @@ export default function ReportEnvironmentalIncidentPage() {
         // The server takes the reporter from the login — an empty id defers to the token.
         reportedById: '00000000-0000-0000-0000-000000000000',
       });
-      toast({
-        title: 'Report logged',
-        description: `Your report ${created.incidentNumber} has been logged and the SHE team alerted.`,
-      });
+      toast.success(
+        `Your report ${created.incidentNumber} has been logged and the SHE team alerted.`,
+      );
       setSpecificArea('');
       setDescription('');
       setSpillVolume('');
       setSubstanceInvolved('');
       setImmediateResponseAction('');
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'safety-env', 'mine'] });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error?.message || 'Submitting the report failed.',
-        variant: 'destructive',
-      });
+      await queryClient.invalidateQueries({ queryKey: ['me', 'safety', 'environmental'] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Submitting the report failed.');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Report an Environmental Incident"
         description="Open to every employee. Spills, exceedances, uncontrolled dumping and contamination reported here alert the SHE team automatically — you always report as yourself."
-        backHref="/hr/safety"
+        backHref="/me/safety/report"
       />
 
       <Card>

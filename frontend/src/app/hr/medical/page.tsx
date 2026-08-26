@@ -46,9 +46,11 @@ export default function MedicalHomePage() {
             icon: Receipt,
           },
           {
+            // Area 25 slice 8: the self screen lives in the portal now.
             title: 'My Medical Claims',
-            description: 'File and follow your own claims, and attach your receipts.',
-            href: '/hr/medical/my-claims',
+            description:
+              'File and follow your own claims, and attach your receipts. Opens in your self-service portal.',
+            href: '/me/medical/claims',
             icon: Receipt,
           },
           {

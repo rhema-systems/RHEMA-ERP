@@ -37,7 +37,6 @@ import {
   IdCard,
   Stamp,
   ShieldAlert,
-  FileWarning,
   Route,
   Tags,
   CalendarDays,
@@ -888,21 +887,14 @@ export const navigationItems: NavItem[] = [
         icon: HardHat,
         children: [
           { title: 'Dashboard', href: '/hr/safety/dashboard', icon: LayoutDashboard, permissions: ['HR.She.Read'] },
-          // The safety screens every employee can use: reporting. The registers and the rest
-          // answer 403 for non-HR, so without these they have no way in.
-          { title: 'Report an Incident', href: '/hr/safety/report-incident', icon: Megaphone },
-          { title: 'Report a Hazard', href: '/hr/safety/report-hazard', icon: FileWarning },
-          // Slice 15: stop-work authority — raising is the area's fourth open employee action.
-          { title: 'Raise Stop-Work', href: '/hr/safety/raise-stop-work', icon: OctagonX },
-          // Slice 17: employee environmental-incident reporting — the fifth open action (FR-ENV-025).
-          { title: 'Report Environmental Incident', href: '/hr/safety/report-environmental-incident', icon: Leaf },
+          // Area 25 slice 8: the open employee actions (report incident/hazard/environmental,
+          // raise stop-work) and My PPE moved to the self-service portal under /me/safety —
+          // reachable via "My Self-Service". Only the desk registers stay here.
           { title: 'Incidents', href: '/hr/safety/incidents', icon: AlertTriangle, permissions: ['HR.She.Read'] },
           { title: 'Hazards', href: '/hr/safety/hazards', icon: ShieldAlert, permissions: ['HR.She.Read'] },
           { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList, permissions: ['HR.She.Read'] },
           { title: 'Inspections', href: '/hr/safety/inspections', icon: ClipboardCheck, permissions: ['HR.She.Read'] },
           { title: 'Permits to Work', href: '/hr/safety/permits', icon: FileCheck, permissions: ['HR.She.Read'] },
-          // My PPE is the slice-6 self-service read: open to every employee, own record only.
-          { title: 'My PPE', href: '/hr/safety/my-ppe', icon: HardHat },
           { title: 'PPE Stock', href: '/hr/safety/ppe', icon: Package, permissions: ['HR.She.Read'] },
           { title: 'PPE Issuance', href: '/hr/safety/ppe/issuances', icon: Users, permissions: ['HR.She.Read'] },
           { title: 'Safety Equipment', href: '/hr/safety/equipment', icon: FireExtinguisher, permissions: ['HR.She.Read'] },
@@ -951,9 +943,7 @@ export const navigationItems: NavItem[] = [
         children: [
           { title: 'Dashboard', href: '/hr/medical/dashboard', icon: LayoutDashboard },
           { title: 'Medical Claims', href: '/hr/medical/claims', icon: Receipt },
-          // Employee-facing: scoped to the signed-in employee by the API, so it needs no
-          // medical permission — everyone gets it.
-          { title: 'My Medical Claims', href: '/hr/medical/my-claims', icon: Receipt },
+          // Area 25 slice 8: "My Medical Claims" moved to the portal (/me/medical/claims).
           { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark },
           { title: 'Clinical', href: '/hr/medical/clinical', icon: ClipboardCheck },
           { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart },

@@ -14,7 +14,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Lets an employee file and follow their own medical expense claims.
+/// Lets an employee file and follow their own medical expense claims, and read their own
+/// insurance coverage and clinic appointments.
 /// </summary>
 /// <remarks>
 /// <para>A reimbursement claim is the employee's own transaction, not an HR record about them, so
@@ -22,6 +23,11 @@ namespace ErpSystem.Api.Controllers.HR;
 /// HR caseload surface and requires a medical permission an employee does not hold. Filing through
 /// HR would also mean the same function both raises and adjudicates a claim, which defeats the
 /// approver recorded on it.</para>
+///
+/// <para>The coverage and appointment reads (area 25 slice 8) follow the same law: the HR
+/// registers on <see cref="MedicalInsuranceController"/> and <see cref="MedicalClinicalController"/>
+/// stay behind the medical policies, and the self arms live here — read-only, because a policy is
+/// employer-administered and an appointment is booked by the clinic; corrections go through HR.</para>
 ///
 /// <para>The scoping rule is the one <see cref="EmployeeHealthSelfServiceController"/> already
 /// states, and it has no exceptions: every claim is resolved through the employee id on the token,
@@ -43,6 +49,8 @@ namespace ErpSystem.Api.Controllers.HR;
 public class MedicalSelfServiceController : MedicalControllerBase
 {
     private readonly IMedicalExpenseClaimService _claims;
+    private readonly IMedicalInsuranceService _insurance;
+    private readonly IMedicalClinicalService _clinical;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
@@ -50,6 +58,8 @@ public class MedicalSelfServiceController : MedicalControllerBase
 
     public MedicalSelfServiceController(
         IMedicalExpenseClaimService claims,
+        IMedicalInsuranceService insurance,
+        IMedicalClinicalService clinical,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
@@ -58,6 +68,8 @@ public class MedicalSelfServiceController : MedicalControllerBase
         : base(currentUser)
     {
         _claims = claims;
+        _insurance = insurance;
+        _clinical = clinical;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
@@ -231,9 +243,199 @@ public class MedicalSelfServiceController : MedicalControllerBase
             inline: false, ct);
     }
 
+    // ── My coverage (area 25 slice 8) ────────────────────────────────────────────────────────
+
+    /// <summary>Lists the authenticated employee's own insurance policies.</summary>
+    [HttpGet("insurance-policies")]
+    public async Task<IActionResult> GetOwnPolicies(CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your own medical coverage") is { } error) return error;
+
+        var policies = await _insurance.GetPoliciesByEmployeeAsync(employeeId, ct);
+        return Ok(policies.Select(policy => new
+        {
+            policy.Id,
+            policy.ProviderName,
+            policy.PlanName,
+            policy.PolicyNumber,
+            policy.StartDate,
+            policy.EndDate,
+            policy.RemainingLimit,
+            policy.Status,
+            policy.StatusName,
+            policy.IsActive,
+        }));
+    }
+
+    /// <summary>Returns the authenticated employee's currently active policy, or 404 when none.</summary>
+    [HttpGet("insurance-policies/active")]
+    public async Task<IActionResult> GetOwnActivePolicy(CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your own medical coverage") is { } error) return error;
+
+        var policy = await _insurance.GetActivePolicyForEmployeeAsync(employeeId, ct);
+        if (policy is null) return NotFound();
+
+        return Ok(ProjectPolicy(policy));
+    }
+
+    /// <summary>Returns one of the authenticated employee's own policies.</summary>
+    [HttpGet("insurance-policies/{id:guid}")]
+    public async Task<IActionResult> GetOwnPolicy(Guid id, CancellationToken ct)
+    {
+        var owned = await LoadOwnPolicyAsync(id, ct);
+        if (owned.Error != null) return owned.Error;
+
+        return Ok(ProjectPolicy(owned.Policy!));
+    }
+
+    /// <summary>Lists the dependants covered on one of the authenticated employee's own policies.</summary>
+    /// <remarks>Reached only through an owned policy id — the dependant DTO carries no employee id
+    /// of its own, so ownership of the parent is the only scoping there is.</remarks>
+    [HttpGet("insurance-policies/{id:guid}/dependents")]
+    public async Task<IActionResult> GetOwnPolicyDependents(Guid id, CancellationToken ct)
+    {
+        var owned = await LoadOwnPolicyAsync(id, ct);
+        if (owned.Error != null) return owned.Error;
+
+        var dependents = await _insurance.GetPolicyDependentsAsync(id, ct);
+        return Ok(dependents.Select(dependent => new
+        {
+            dependent.Id,
+            dependent.DependentName,
+            dependent.Relationship,
+            dependent.MembershipNumber,
+            dependent.CoverageStartDate,
+            dependent.CoverageEndDate,
+            dependent.AnnualLimit,
+            dependent.UtilizedAmount,
+            dependent.RemainingLimit,
+            dependent.IsActive,
+        }));
+    }
+
+    // ── My appointments (area 25 slice 8) ────────────────────────────────────────────────────
+
+    /// <summary>Lists the authenticated employee's own clinic appointments.</summary>
+    [HttpGet("appointments")]
+    public async Task<IActionResult> GetOwnAppointments(CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your own medical appointments") is { } error) return error;
+
+        var appointments = await _clinical.GetAppointmentsByEmployeeAsync(employeeId, ct);
+        return Ok(appointments.Select(appointment => new
+        {
+            appointment.Id,
+            appointment.AppointmentNumber,
+            appointment.FacilityName,
+            appointment.AppointmentDateTime,
+            appointment.Status,
+            appointment.StatusName,
+        }));
+    }
+
+    /// <summary>Returns one of the authenticated employee's own appointments.</summary>
+    [HttpGet("appointments/{id:guid}")]
+    public async Task<IActionResult> GetOwnAppointment(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your own medical appointments") is { } error) return error;
+
+        MedicalAppointmentDto appointment;
+        try
+        {
+            appointment = await _clinical.GetAppointmentByIdAsync(id, ct);
+        }
+        catch (MedicalWorkflowException)
+        {
+            return NotFound();
+        }
+
+        if (appointment.EmployeeId != employeeId) return NotFound();
+
+        // Notes carry desk/clinician commentary and are deliberately not projected; the outcome
+        // summary is the part written for the patient.
+        return Ok(new
+        {
+            appointment.Id,
+            appointment.AppointmentNumber,
+            appointment.IsForDependent,
+            appointment.DependentName,
+            appointment.FacilityName,
+            appointment.PhysicianName,
+            appointment.AppointmentDateTime,
+            appointment.DurationMinutes,
+            appointment.ServiceType,
+            appointment.ServiceTypeName,
+            appointment.Purpose,
+            appointment.Status,
+            appointment.StatusName,
+            appointment.CheckInTime,
+            appointment.CheckOutTime,
+            appointment.OutcomeSummary,
+            appointment.CancellationReason,
+        });
+    }
+
+    /// <summary>
+    /// Resolves a policy and confirms it belongs to the authenticated employee — the same single
+    /// choke point <see cref="LoadOwnClaimAsync"/> is for claims. Somebody else's policy id is a
+    /// 404 lookup miss, never a 403.
+    /// </summary>
+    private async Task<(EmployeeMedicalInsurancePolicyDto? Policy, IActionResult? Error)> LoadOwnPolicyAsync(
+        Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your own medical coverage") is { } error)
+            return (null, error);
+
+        EmployeeMedicalInsurancePolicyDto policy;
+        try
+        {
+            policy = await _insurance.GetPolicyByIdAsync(id, ct);
+        }
+        catch (MedicalWorkflowException)
+        {
+            return (null, NotFound());
+        }
+
+        if (policy.EmployeeId != employeeId)
+            return (null, NotFound());
+
+        return (policy, null);
+    }
+
+    /// <summary>
+    /// The policy fields the covered employee may see. Free-text cancellation reasons and notes are
+    /// HR commentary and stay desk-side; the utilisation figures are the point of the screen.
+    /// </summary>
+    private static object ProjectPolicy(EmployeeMedicalInsurancePolicyDto policy) => new
+    {
+        policy.Id,
+        policy.ProviderName,
+        policy.PlanName,
+        policy.BenefitTierName,
+        policy.PolicyNumber,
+        policy.MembershipNumber,
+        policy.StartDate,
+        policy.EndDate,
+        policy.AnnualLimit,
+        policy.UtilizedAmount,
+        policy.RemainingLimit,
+        policy.UtilizationPercentage,
+        policy.CoversDependents,
+        policy.Status,
+        policy.StatusName,
+        policy.IsActive,
+        policy.CancellationDate,
+    };
+
     /// <summary>
     /// Resolves a claim and confirms it belongs to the authenticated employee. Every id-addressed
-    /// operation on this controller goes through here — it is the single point where "own" is
+    /// claim operation on this controller goes through here — it is the single point where "own" is
     /// defined, so a route added later cannot forget to ask.
     /// </summary>
     /// <remarks>

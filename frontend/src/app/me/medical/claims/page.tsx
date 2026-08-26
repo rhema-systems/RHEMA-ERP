@@ -34,7 +34,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { medicalSelfServiceClaimService } from '@/services/hr/medical-claims.service';
 import { medicalFacilityService } from '@/services/hr/medical-reference.service';
 import { MEDICAL_EXPENSE_TYPE_OPTIONS } from '@/types/hr/medical';
@@ -42,6 +42,9 @@ import type { MedicalExpenseType, OwnMedicalClaimSummary } from '@/types/hr/medi
 
 /**
  * An employee's own medical claims — file one, follow it, attach the receipt.
+ *
+ * Area 25 slice 8: re-homed from /hr/medical/my-claims into the portal shell (D3 — moved, not
+ * redirected; the desk keeps only the HR caseload at /hr/medical/claims).
  *
  * Everything here is scoped to the signed-in employee by the API; no id on this screen identifies
  * anybody else, and a claim belonging to someone else simply does not resolve. Approval, payment
@@ -64,7 +67,6 @@ function StatusBadgeFor({ status }: { status: string }) {
 
 export default function MyMedicalClaimsPage() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
   const [open, setOpen] = useState(false);
   const [serviceDate, setServiceDate] = useState('');
@@ -75,13 +77,13 @@ export default function MyMedicalClaimsPage() {
   const [selected, setSelected] = useState<OwnMedicalClaimSummary | null>(null);
 
   const { data: claims = [] } = useQuery({
-    queryKey: ['hr', 'my-medical-claims'],
+    queryKey: ['me', 'medical', 'claims'],
     queryFn: () => medicalSelfServiceClaimService.getMine(),
   });
 
   // Facility reads are open to any authenticated user precisely so this form can work.
   const { data: facilities = [] } = useQuery({
-    queryKey: ['hr', 'medical-facilities', 'active'],
+    queryKey: ['me', 'medical', 'facilities-active'],
     queryFn: () => medicalFacilityService.getActiveFacilities(),
   });
 
@@ -98,29 +100,26 @@ export default function MyMedicalClaimsPage() {
         amountRequested: Number(amount),
       }),
     onSuccess: () => {
-      toast({ title: 'Claim filed', description: 'Attach your receipt so HR can assess it.' });
+      toast.success('Claim filed — attach your receipt so HR can assess it.');
       setOpen(false);
       setServiceDate('');
       setDescription('');
       setAmount('');
       setFacilityId('');
-      queryClient.invalidateQueries({ queryKey: ['hr', 'my-medical-claims'] });
+      queryClient.invalidateQueries({ queryKey: ['me', 'medical', 'claims'] });
     },
     onError: (error) =>
-      toast({
-        variant: 'destructive',
-        title: 'Could not file the claim',
-        description: error instanceof Error ? error.message : 'Unexpected error',
-      }),
+      toast.error(error instanceof Error ? error.message : 'Could not file the claim'),
   });
 
   const canSubmit = serviceDate && facilityId && description.trim() && Number(amount) > 0;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My Medical Claims"
         description="Claim back medical costs you have paid for yourself. Attach the receipt — HR cannot assess a claim without it."
+        backHref="/me/medical"
         actions={
           <Button onClick={() => setOpen(true)}>
             <Plus className="mr-2 h-4 w-4" /> File a claim
@@ -192,7 +191,7 @@ export default function MyMedicalClaimsPage() {
           <AttachmentsPanel
             title="Receipts"
             note="Only you and the HR team assessing your claim can open these."
-            queryKey={['hr', 'my-medical-claims', selected.id, 'documents']}
+            queryKey={['me', 'medical', 'claims', selected.id, 'documents']}
             list={() => medicalSelfServiceClaimService.getDocuments(selected.id)}
             upload={(f, desc) =>
               medicalSelfServiceClaimService.uploadDocument(selected.id, f, 'Receipt', desc)

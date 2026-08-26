@@ -71,7 +71,7 @@ export default function StopWorkRegisterPage() {
         backHref="/hr/safety"
         actions={
           <Button asChild variant="destructive">
-            <Link href="/hr/safety/raise-stop-work">
+            <Link href="/me/safety/report/stop-work">
               <OctagonX className="mr-2 h-4 w-4" />
               Raise stop-work
             </Link>

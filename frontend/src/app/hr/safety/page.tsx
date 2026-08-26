@@ -88,10 +88,11 @@ export default function SafetyHomePage() {
         <NavCardGrid
           items={[
             {
+              // Area 25 slice 8: the open reporting screens live in the self-service portal.
               title: 'Report an Incident',
               description:
-                'Open to everyone — accidents, near misses and environmental incidents. No SHE role needed.',
-              href: '/hr/safety/report-incident',
+                'Open to everyone — accidents, near misses and environmental incidents. No SHE role needed. Opens in your self-service portal.',
+              href: '/me/safety/report/incident',
               icon: Megaphone,
             },
             {
@@ -112,15 +113,15 @@ export default function SafetyHomePage() {
             {
               title: 'Report a Hazard',
               description:
-                'Open to everyone — flag anything that could hurt someone before it does. No SHE role needed.',
-              href: '/hr/safety/report-hazard',
+                'Open to everyone — flag anything that could hurt someone before it does. No SHE role needed. Opens in your self-service portal.',
+              href: '/me/safety/report/hazard',
               icon: FileWarning,
             },
             {
               title: 'Raise Stop-Work',
               description:
-                'Open to everyone — stop work you believe is imminently dangerous and record why. No SHE role needed.',
-              href: '/hr/safety/raise-stop-work',
+                'Open to everyone — stop work you believe is imminently dangerous and record why. No SHE role needed. Opens in your self-service portal.',
+              href: '/me/safety/report/stop-work',
               icon: OctagonX,
             },
             {
@@ -162,8 +163,8 @@ export default function SafetyHomePage() {
             {
               title: 'My PPE',
               description:
-                'Open to everyone — what has been issued to you, what you hold and what has expired.',
-              href: '/hr/safety/my-ppe',
+                'Open to everyone — what has been issued to you, what you hold and what has expired. Opens in your self-service portal.',
+              href: '/me/safety/ppe',
               icon: HardHat,
             },
             {
@@ -280,8 +281,8 @@ export default function SafetyHomePage() {
             {
               title: 'Report Environmental Incident',
               description:
-                'Open to every employee — report a spill, exceedance or dumping; the SHE team is alerted automatically.',
-              href: '/hr/safety/report-environmental-incident',
+                'Open to every employee — report a spill, exceedance or dumping; the SHE team is alerted automatically. Opens in your self-service portal.',
+              href: '/me/safety/report/environmental',
               icon: Megaphone,
             },
             {

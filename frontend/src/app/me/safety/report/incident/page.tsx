@@ -8,8 +8,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useToast } from '@/components/ui/use-toast';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { toast } from 'sonner';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import {
   TextField,
@@ -30,6 +30,9 @@ import { SHE_INCIDENT_SEVERITY_OPTIONS } from '@/types/hr/safety-incidents';
  * regardless of what is sent. The incident-type picker is a nicety loaded from an HR-gated
  * lookup, so for a plain employee it quietly disappears instead of erroring; classification can
  * be refined by SHE during review.
+ *
+ * Area 25 slice 8: re-homed from /hr/safety/report-incident under the portal's unified
+ * report-a-concern surface (D3 — moved, not redirected).
  */
 const reportSchema = z.object({
   category: z.enum([
@@ -72,13 +75,12 @@ const blank = (v?: string) => (v && v.length > 0 ? v : null);
 
 export default function ReportIncidentPage() {
   const router = useRouter();
-  const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [reportedNumber, setReportedNumber] = useState<string | null>(null);
 
   // HR-gated lookup: a plain employee gets a 403 here, which is fine — the picker just hides.
   const { data: incidentTypes = [] } = useQuery({
-    queryKey: ['hr', 'safety-reference', 'incident-types', 'active'],
+    queryKey: ['me', 'safety', 'incident-types-active'],
     queryFn: () => safetyReferenceService.getIncidentTypes(true),
     retry: false,
   });
@@ -107,16 +109,11 @@ export default function ReportIncidentPage() {
         reportableToAuthority: false,
       });
       setReportedNumber(created.incidentNumber);
-      toast({
-        title: 'Incident reported',
-        description: `Reference ${created.incidentNumber}. Thank you — the SHE team has it from here.`,
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error?.message || 'Failed to submit the report.',
-        variant: 'destructive',
-      });
+      toast.success(
+        `Incident reported — reference ${created.incidentNumber}. The SHE team has it from here.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to submit the report.');
     } finally {
       setSubmitting(false);
     }
@@ -124,8 +121,8 @@ export default function ReportIncidentPage() {
 
   if (reportedNumber) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Incident reported" backHref="/hr/safety" />
+      <div className="space-y-6">
+        <PageHeader title="Incident reported" backHref="/me/safety" />
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <CheckCircle2 className="h-10 w-10 text-green-600" />
@@ -146,6 +143,7 @@ export default function ReportIncidentPage() {
               >
                 Report another
               </Button>
+              <Button onClick={() => router.push('/me/safety/reports')}>My reports</Button>
             </div>
           </CardContent>
         </Card>
@@ -154,11 +152,11 @@ export default function ReportIncidentPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Report an Incident"
         description="Accidents, near misses, dangerous occurrences, environmental incidents — anyone can report, and near misses matter as much as injuries. You are recorded as the reporter."
-        backHref="/hr/safety"
+        backHref="/me/safety/report"
       />
 
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -242,7 +240,7 @@ export default function ReportIncidentPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => router.push('/hr/safety')}
+            onClick={() => router.push('/me/safety/report')}
             disabled={submitting}
           >
             Cancel

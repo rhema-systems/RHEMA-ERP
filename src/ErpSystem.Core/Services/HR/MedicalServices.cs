@@ -1889,7 +1889,17 @@ public class MedicalClinicalService : IMedicalClinicalService
 
     public async Task<MedicalAppointmentDto> GetAppointmentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _appointmentRepository.GetByIdAsync(id);
+        // Resolved names on the DTO need their navigations loaded. The list reads on this service
+        // already include them; the by-id read did not, so a detail screen showed blanks where a
+        // list showed values — the uneven-.Include shape (measured live in area 25 slice 8).
+        var entity = await _appointmentRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.Dependent!,
+            e => e.Facility,
+            e => e.Physician!,
+            e => e.LinkedReferral!,
+            e => e.LinkedClaim!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{id}' not found.");
