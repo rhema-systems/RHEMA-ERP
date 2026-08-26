@@ -4314,6 +4314,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint(
                     "CK_FinanceControlledDocumentIssues_ContentSha256",
                     "LEN([ContentSha256]) = 64");
+                table.HasCheckConstraint(
+                    "CK_FinanceControlledDocumentIssues_RetainedArtifact",
+                    "([StoragePath] IS NULL AND [StorageProvider] IS NULL AND [FileSize] IS NULL AND [RetainUntilUtc] IS NULL) OR ([StoragePath] IS NOT NULL AND [StorageProvider] IS NOT NULL AND [FileSize] > 0 AND [RetainUntilUtc] IS NOT NULL)");
             });
         });
 

@@ -29,8 +29,29 @@ public interface IFinanceControlledDocumentIssueService
         Guid? journalEntryId,
         CancellationToken cancellationToken = default);
 
+    Task RecordRetainedIssuedAsync(
+        ControlledDocumentIssuePreparationDto preparation,
+        string fileName,
+        string contentType,
+        string contentSha256,
+        byte[] retainedContent,
+        DateTime retainUntilUtc,
+        string auditEventType,
+        string sourceModule,
+        string auditResource,
+        Guid? journalEntryId,
+        CancellationToken cancellationToken = default);
+
     Task<ControlledDocumentIssueSummaryDto> GetSummaryAsync(
         string documentType,
         Guid sourceDocumentId,
+        CancellationToken cancellationToken = default);
+
+    Task<ControlledDocumentIssueItemDto> GetIssueAsync(
+        Guid issueId,
+        CancellationToken cancellationToken = default);
+
+    Task<RetainedControlledDocumentDto> GetRetainedAsync(
+        Guid issueId,
         CancellationToken cancellationToken = default);
 }
