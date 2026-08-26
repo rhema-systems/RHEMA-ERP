@@ -2,10 +2,10 @@
 
 ## Scope of this slice
 
-This slice adds active budget control for Finance manual journals only. It does not connect
-Accounts Payable, Accounts Receivable, employee expenses, or Procurement documents yet.
-Those modules require explicit adapters so their lifecycle semantics are not guessed by the
-central posting engine.
+This foundation provides active budget control for Finance manual journals and certified direct
+Accounts Payable expense invoices. Accounts Receivable, employee expenses, and Procurement
+documents still require their own explicit adapters so their lifecycle semantics are not guessed
+by the central posting engine.
 
 Finance budget control applies only when all of the following are true:
 
@@ -43,6 +43,23 @@ reporting while the original consumed reservation remains historical evidence.
 Missing adoption, missing budget lines, dimensional mismatches, and ambiguous budget cells fail
 closed and cannot be overridden. Only an insufficient available amount can request an override.
 
+## Certified AP direct-expense adapter
+
+A direct AP expense line on an `Expense` account with `BudgetTrackingEnabled` must select one
+eligible adopted Finance Budget Entry before submission. The selected budget-cell ID is durable
+source evidence on the vendor-invoice line; it is never inferred from a free-text category.
+
+Submission reserves the exact line amount before the existing vendor-invoice approval workflow
+starts. A workflow-start failure or final rejection releases the reservation. Final AP posting
+revalidates the source version, consumes the exact reservation IDs inside the central posting
+transaction, and stamps the budget cell's immutable Finance dimensions on the expense ledger
+line. This prevents a committed journal without matching budget-consumption evidence.
+
+The adapter deliberately excludes opening invoices, PO/GRV-backed invoices, inventory/product
+lines, and fixed-asset lines. Opening invoices are cutover evidence, while PO/GRV-backed spend is
+owned by the Procurement commitment lifecycle and must not be reserved a second time in AP.
+Foreign-currency controlled lines require the exact approved Finance exchange-rate record.
+
 ## Transaction-dimension budget grain
 
 An additive scenario-level control declares which Finance transaction dimensions define its
@@ -76,8 +93,10 @@ requires a new evaluation and, when applicable, a new override.
 
 The following work is intentionally deferred:
 
-- AP vendor invoices and employee expenses: reserve at controlled submission/approval and consume
-  when the resulting Finance posting commits;
+- employee expenses: reserve at controlled submission/approval and consume when the resulting
+  Finance posting commits;
+- AP credit notes, voids, returns and other corrections: adjust or reverse budget evidence only
+  through their governed accounting lifecycle;
 - AR customer invoices: revenue budget warning only unless policy later changes;
 - Procurement requisitions and purchase orders: reconcile the existing Procurement commitment
   ledger with the canonical Finance Budget Entry instead of replacing Procurement lifecycle

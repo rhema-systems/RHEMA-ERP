@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
@@ -22,6 +23,91 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinancePostingEngineTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudgetAdapter")]
+    [Trait("Category", "PostingEngine")]
+    public async Task PostAsync_ShouldConsumeGenericProducerReservationsInsidePostingTransaction()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debitAccount = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var creditAccount = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var currentUser = CreateCurrentUser(tenantId);
+        var commitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
+        var reservationId = Guid.NewGuid();
+        commitments.Setup(service => service.ConsumeForPostingAsync(
+                tenantId,
+                "VendorInvoice",
+                It.IsAny<Guid>(),
+                It.Is<IReadOnlyList<Guid>>(ids => ids.SequenceEqual(new[] { reservationId })),
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new FinancePostingEngine(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            budgetCommitments: commitments.Object);
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.SourceDocumentType = "VendorInvoice";
+        request.BudgetReservationSourceDocumentType = "VendorInvoice";
+        request.BudgetReservationIds = new[] { reservationId };
+
+        var result = await service.PostAsync(request);
+
+        commitments.VerifyAll();
+        result.PostingStatus.Should().Be("Posted");
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudgetAdapter")]
+    [Trait("Category", "PostingEngine")]
+    public async Task PostAsync_ShouldRollbackLedger_WhenGenericReservationConsumptionFails()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debitAccount = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var creditAccount = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var currentUser = CreateCurrentUser(tenantId);
+        var commitments = new Mock<IFinanceBudgetCommitmentService>();
+        commitments.Setup(service => service.ConsumeForPostingAsync(
+                tenantId,
+                "VendorInvoice",
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FinanceBudgetCommitmentConflictException(
+                "BUDGET_POSTING_RESERVATION_MISMATCH", "Reservation drift."));
+        var service = new FinancePostingEngine(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            budgetCommitments: commitments.Object);
+        var request = CreateRequest(tenantId, debitAccount.Id, creditAccount.Id);
+        request.SourceDocumentType = "VendorInvoice";
+        request.BudgetReservationSourceDocumentType = "VendorInvoice";
+        request.BudgetReservationIds = new[] { Guid.NewGuid() };
+
+        var action = () => service.PostAsync(request);
+
+        await action.Should().ThrowAsync<FinanceBudgetCommitmentConflictException>();
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        debitAccount.Balance.Should().Be(0m);
+        creditAccount.Balance.Should().Be(0m);
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-4")]
     [Trait("Category", "PostingEngine")]

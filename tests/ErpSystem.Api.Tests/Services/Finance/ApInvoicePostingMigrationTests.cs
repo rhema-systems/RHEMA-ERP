@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.Reflection;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -12,11 +14,14 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -27,6 +32,34 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ApInvoicePostingMigrationTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public void BudgetEvidenceMigration_ShouldAddOnlyTheNullableApLineReferenceAndReverseCleanly()
+    {
+        var migration = new AddApVendorInvoiceBudgetEvidence();
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { up });
+
+        up.Operations.OfType<AddColumnOperation>().Should().ContainSingle(column =>
+            column.Table == "VendorInvoiceLineItem" &&
+            column.Name == "BudgetEntryId" &&
+            column.IsNullable);
+        up.Operations.OfType<CreateIndexOperation>().Select(index => index.Name).Should().BeEquivalentTo(
+            "IX_VendorInvoiceLineItem_BudgetEntryId",
+            "IX_VendorInvoiceLineItem_TenantId_BudgetEntryId");
+        up.Operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(foreignKey =>
+            foreignKey.PrincipalTable == "BudgetEntries" &&
+            foreignKey.OnDelete == ReferentialAction.Restrict);
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { down });
+        down.Operations.OfType<DropColumnOperation>().Should().ContainSingle(column =>
+            column.Table == "VendorInvoiceLineItem" && column.Name == "BudgetEntryId");
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
@@ -64,6 +97,177 @@ public sealed class ApInvoicePostingMigrationTests
         // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
         fixture.ExpenseAccount.Balance.Should().Be(100m);
         fixture.ApAccount.Balance.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task DirectBudgetControlledExpense_ShouldReserveBeforeApprovalWorkflowStarts()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        var budgetEntry = await SeedBudgetEntryAsync(db, fixture);
+        var reservationId = Guid.NewGuid();
+        FinanceBudgetCommitmentRequestDto? capturedRequest = null;
+        var budgetCommitments = new Mock<IFinanceBudgetCommitmentService>();
+        budgetCommitments
+            .Setup(service => service.ReserveAsync(
+                It.IsAny<FinanceBudgetCommitmentRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<FinanceBudgetCommitmentRequestDto, CancellationToken>((request, _) => capturedRequest = request)
+            .ReturnsAsync(new FinanceBudgetCommitmentResultDto
+            {
+                Reservations = new[]
+                {
+                    new FinanceBudgetReservationDto
+                    {
+                        Id = reservationId,
+                        BudgetEntryId = budgetEntry.Id,
+                        SourceDocumentType = "VendorInvoice",
+                        SourceDocumentId = fixture.Invoice.Id,
+                        Status = "Reserved",
+                        Version = 1
+                    }
+                }
+            });
+        var workflow = new Mock<IWorkflowService>();
+        workflow
+            .Setup(service => service.StartApprovalWorkflowAsync("VendorInvoice", fixture.Invoice.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var (service, _) = CreateService(db, tenantId, workflow.Object, budgetCommitments.Object);
+
+        var result = await service.SubmitForApprovalAsync(fixture.Invoice.Id);
+
+        result.Status.Should().Be(VendorInvoiceStatus.PendingApproval);
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.SourceDocumentType.Should().Be("VendorInvoice");
+        capturedRequest.SourceDocumentId.Should().Be(fixture.Invoice.Id);
+        capturedRequest.BudgetDate.Should().Be(fixture.Invoice.InvoiceDate.Date);
+        capturedRequest.Lines.Should().ContainSingle();
+        capturedRequest.Lines.Single().BudgetEntryId.Should().Be(budgetEntry.Id);
+        capturedRequest.Lines.Single().AccountId.Should().Be(fixture.ExpenseAccount.Id);
+        capturedRequest.Lines.Single().TransactionAmount.Should().Be(100m);
+        capturedRequest.Lines.Single().DimensionAssignments.Should().ContainSingle();
+        workflow.Verify(
+            service => service.StartApprovalWorkflowAsync("VendorInvoice", fixture.Invoice.Id),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task OpeningInvoice_ShouldNotCreateAnExpenseBudgetReservation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.IsOpeningBalance = true;
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        var budgetCommitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
+        var workflow = new Mock<IWorkflowService>();
+        workflow
+            .Setup(service => service.StartApprovalWorkflowAsync("VendorInvoice", fixture.Invoice.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var (service, _) = CreateService(db, tenantId, workflow.Object, budgetCommitments.Object);
+
+        var result = await service.SubmitForApprovalAsync(fixture.Invoice.Id);
+
+        result.Status.Should().Be(VendorInvoiceStatus.PendingApproval);
+        budgetCommitments.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task RejectedDirectExpenseInvoice_ShouldReleaseItsBudgetReservation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.PendingApproval;
+            invoice.ApprovalStatus = "PendingApproval";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        var reservation = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceDocumentType = "VendorInvoice",
+            SourceDocumentId = fixture.Invoice.Id,
+            Status = "Reserved",
+            ReservationVersion = 3,
+            EvaluationHash = new string('A', 64),
+            CurrencyCode = "GHS",
+            TransactionCurrencyCode = "GHS",
+            ReservedByUserId = Guid.NewGuid(),
+            ReservedAt = DateTime.UtcNow
+        };
+        db.FinanceBudgetReservations.Add(reservation);
+        await db.SaveChangesAsync();
+        ReleaseFinanceBudgetReservationDto? capturedRelease = null;
+        var budgetCommitments = new Mock<IFinanceBudgetCommitmentService>();
+        budgetCommitments
+            .Setup(service => service.ReleaseAsync(
+                reservation.Id,
+                It.IsAny<ReleaseFinanceBudgetReservationDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, ReleaseFinanceBudgetReservationDto, CancellationToken>((_, request, _) => capturedRelease = request)
+            .ReturnsAsync(new FinanceBudgetReservationDto
+            {
+                Id = reservation.Id,
+                Status = "Released",
+                Version = 4
+            });
+        var workflow = new Mock<IWorkflowService>();
+        workflow
+            .Setup(service => service.CanUserApproveAsync("VendorInvoice", fixture.Invoice.Id, It.IsAny<Guid>()))
+            .ReturnsAsync(true);
+        workflow
+            .Setup(service => service.ProcessApprovalStepAsync(
+                "VendorInvoice",
+                fixture.Invoice.Id,
+                It.IsAny<Guid>(),
+                "Reject",
+                "Budget no longer approved"))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.Cancelled
+            });
+        var (service, _) = CreateService(db, tenantId, workflow.Object, budgetCommitments.Object);
+
+        var result = await service.RejectAsync(fixture.Invoice.Id, "Budget no longer approved");
+
+        result.Status.Should().Be(VendorInvoiceStatus.Rejected);
+        capturedRelease.Should().NotBeNull();
+        capturedRelease!.ExpectedVersion.Should().Be(3);
+        capturedRelease.Reason.Should().Be("Vendor invoice was rejected.");
+        capturedRelease.IdempotencyKey.Should().Contain(fixture.Invoice.Id.ToString("N"));
+        budgetCommitments.VerifyAll();
     }
 
     [Fact]
@@ -381,6 +585,83 @@ public sealed class ApInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task BudgetControlledPostingRetry_ShouldUseDurableConsumedEvidenceBeforeReserving()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var budgetEntry = await SeedBudgetEntryAsync(db, fixture);
+        var reservationId = Guid.NewGuid();
+        var firstCommitments = new Mock<IFinanceBudgetCommitmentService>();
+        firstCommitments
+            .Setup(service => service.ReserveAsync(
+                It.IsAny<FinanceBudgetCommitmentRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceBudgetCommitmentResultDto
+            {
+                Reservations = new[]
+                {
+                    new FinanceBudgetReservationDto
+                    {
+                        Id = reservationId,
+                        BudgetEntryId = budgetEntry.Id,
+                        SourceDocumentType = "VendorInvoice",
+                        SourceDocumentId = fixture.Invoice.Id,
+                        Status = "Reserved",
+                        Version = 1
+                    }
+                }
+            });
+        firstCommitments
+            .Setup(service => service.ConsumeForPostingAsync(
+                tenantId,
+                "VendorInvoice",
+                fixture.Invoice.Id,
+                It.Is<IReadOnlyList<Guid>>(ids => ids.SequenceEqual(new[] { reservationId })),
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var (firstService, _) = CreateService(db, tenantId, budgetCommitments: firstCommitments.Object);
+
+        var first = await firstService.PostAsync(fixture.Invoice.Id);
+        var postingEvent = await db.FinancePostingEvents.SingleAsync(posting =>
+            posting.SourceDocumentType == "VendorInvoice" &&
+            posting.SourceDocumentId == fixture.Invoice.Id &&
+            posting.PostingAction == "Post");
+        db.FinanceBudgetReservations.Add(new FinanceBudgetReservation
+        {
+            Id = reservationId,
+            TenantId = tenantId,
+            BudgetEntryId = budgetEntry.Id,
+            SourceDocumentType = "VendorInvoice",
+            SourceDocumentId = fixture.Invoice.Id,
+            Status = "Consumed",
+            ReservationVersion = 2,
+            EvaluationHash = new string('C', 64),
+            CurrencyCode = "GHS",
+            TransactionCurrencyCode = "GHS",
+            ReservedByUserId = Guid.NewGuid(),
+            ReservedAt = DateTime.UtcNow,
+            ConsumedAt = DateTime.UtcNow,
+            JournalEntryId = first.JournalEntryId,
+            PostingEventId = postingEvent.Id
+        });
+        fixture.Invoice.JournalEntryId = null;
+        await db.SaveChangesAsync();
+        var retryCommitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
+        var (retryService, _) = CreateService(db, tenantId, budgetCommitments: retryCommitments.Object);
+
+        var retried = await retryService.PostAsync(fixture.Invoice.Id);
+
+        retried.JournalEntryId.Should().Be(first.JournalEntryId);
+        (await db.FinanceBudgetReservations.CountAsync()).Should().Be(1);
+        retryCommitments.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
     public async Task PostedApInvoice_ShouldNotBeEditedOrDeleted()
@@ -460,7 +741,9 @@ public sealed class ApInvoicePostingMigrationTests
 
     private static (VendorInvoiceService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateService(
         ApplicationDbContext db,
-        Guid tenantId)
+        Guid tenantId,
+        IWorkflowService? workflowService = null,
+        IFinanceBudgetCommitmentService? budgetCommitments = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -474,7 +757,8 @@ public sealed class ApInvoicePostingMigrationTests
             db,
             currentUser.Object,
             Mock.Of<ILogger<FinancePostingEngine>>(),
-            auditService);
+            auditService,
+            budgetCommitments: budgetCommitments);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
 
         var service = new VendorInvoiceService(
@@ -483,9 +767,10 @@ public sealed class ApInvoicePostingMigrationTests
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(),
             Mock.Of<IDocumentNumberingService>(),
-            Mock.Of<IWorkflowService>(),
+            workflowService ?? Mock.Of<IWorkflowService>(),
             postingEngine,
-            auditService);
+            auditService,
+            budgetCommitments: budgetCommitments);
 
         return (service, subledgerPostingMock);
     }
@@ -579,6 +864,90 @@ public sealed class ApInvoicePostingMigrationTests
         await db.SaveChangesAsync();
 
         return new ApInvoiceFixture(invoice, supplier, expenseAccount, apAccount, taxAccount);
+    }
+
+    private static async Task<BudgetEntry> SeedBudgetEntryAsync(
+        ApplicationDbContext db,
+        ApInvoiceFixture fixture)
+    {
+        fixture.ExpenseAccount.BudgetTrackingEnabled = true;
+        var line = fixture.Invoice.LineItems.Single();
+        var period = await db.FiscalPeriods.SingleAsync(period =>
+            period.TenantId == fixture.Invoice.TenantId &&
+            period.StartDate <= fixture.Invoice.InvoiceDate &&
+            period.EndDate >= fixture.Invoice.InvoiceDate);
+        var definition = new FinanceDimensionDefinition
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Invoice.TenantId,
+            Code = "DEPARTMENT",
+            Name = "Department",
+            Classification = "Analytical",
+            ValueSourceType = "Lookup",
+            IsActive = true
+        };
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Invoice.TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionDefinition = definition,
+            Code = "FIN",
+            Name = "Finance",
+            EffectiveDate = new DateTime(2025, 1, 1),
+            IsActive = true
+        };
+        var dimensionSet = new FinanceDimensionSet
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Invoice.TenantId,
+            CombinationHash = new string('B', 64),
+            DisplayValue = "DEPARTMENT=FIN"
+        };
+        dimensionSet.Items.Add(new FinanceDimensionSetItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Invoice.TenantId,
+            FinanceDimensionSetId = dimensionSet.Id,
+            FinanceDimensionSet = dimensionSet,
+            FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionDefinition = definition,
+            FinanceDimensionValueId = value.Id,
+            FinanceDimensionValue = value,
+            DimensionCodeSnapshot = definition.Code,
+            DimensionValueCodeSnapshot = value.Code,
+            DimensionValueNameSnapshot = value.Name
+        });
+        var budgetReturn = new BudgetReturn
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Invoice.TenantId,
+            BudgetScenarioId = Guid.NewGuid(),
+            Status = "Approved"
+        };
+        var budgetEntry = new BudgetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Invoice.TenantId,
+            BudgetReturnId = budgetReturn.Id,
+            BudgetReturn = budgetReturn,
+            AccountId = fixture.ExpenseAccount.Id,
+            FiscalPeriodId = period.Id,
+            FinanceDimensionSetId = dimensionSet.Id,
+            FinanceDimensionSet = dimensionSet,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            Amount = 1_000m,
+            AmountBase = 1_000m
+        };
+        line.BudgetEntryId = budgetEntry.Id;
+        db.FinanceDimensionDefinitions.Add(definition);
+        db.FinanceDimensionValues.Add(value);
+        db.FinanceDimensionSets.Add(dimensionSet);
+        db.BudgetReturns.Add(budgetReturn);
+        db.BudgetEntries.Add(budgetEntry);
+        await db.SaveChangesAsync();
+        return budgetEntry;
     }
 
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")

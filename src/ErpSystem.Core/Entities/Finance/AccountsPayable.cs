@@ -348,6 +348,16 @@ public class VendorInvoiceLineItem : TenantEntity
     public Guid? GLAccountId { get; set; }
     public virtual Account? GLAccount { get; set; }
 
+    /// <summary>
+    /// Canonical adopted Finance budget cell selected for this direct expense line. The
+    /// relationship is optional because opening, inventory, fixed-asset and Procurement/GRV
+    /// lines do not create a second AP budget commitment. When the resolved expense account is
+    /// budget-controlled, submission requires this evidence and Finance derives both the
+    /// reservation and the posted dimension set from it.
+    /// </summary>
+    public Guid? BudgetEntryId { get; set; }
+    public virtual BudgetEntry? BudgetEntry { get; set; }
+
     public Guid? FixedAssetId { get; set; }
     public virtual FixedAsset? FixedAsset { get; set; }
 

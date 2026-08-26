@@ -255,6 +255,45 @@ public sealed class FinanceBudgetCommitmentServiceTests
     }
 
     [Fact]
+    public async Task Central_posting_consume_should_link_and_audit_exact_generic_reservations()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedBudget(db, 1_000m);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+        var sourceId = Guid.NewGuid();
+        var request = Request(fixture, "reserve-ap-post", 300m);
+        request.SourceDocumentType = "VendorInvoice";
+        request.SourceDocumentId = sourceId;
+        var reservation = (await service.ReserveAsync(request)).Reservations.Single();
+        var journalEntryId = Guid.NewGuid();
+        var postingEventId = Guid.NewGuid();
+
+        await service.ConsumeForPostingAsync(
+            TenantId,
+            "VendorInvoice",
+            sourceId,
+            new[] { reservation.Id },
+            journalEntryId,
+            postingEventId);
+        await db.SaveChangesAsync();
+
+        var consumed = await db.FinanceBudgetReservations.SingleAsync(row => row.Id == reservation.Id);
+        consumed.Status.Should().Be("Consumed");
+        consumed.ReservedAmount.Should().Be(0m);
+        consumed.JournalEntryId.Should().Be(journalEntryId);
+        consumed.PostingEventId.Should().Be(postingEventId);
+        var operation = await db.FinanceBudgetReservationOperations.SingleAsync(row =>
+            row.OperationType == "ConsumeForPosting");
+        operation.PriorStatus.Should().Be("Reserved");
+        operation.ResultStatus.Should().Be("Consumed");
+        operation.PriorReservedAmount.Should().Be(300m);
+        operation.ResultReservedAmount.Should().Be(0m);
+        operation.JournalEntryId.Should().Be(journalEntryId);
+        operation.PostingEventId.Should().Be(postingEventId);
+    }
+
+    [Fact]
     public async Task Cross_tenant_budget_entry_is_concealed()
     {
         await using var db = CreateContext();
