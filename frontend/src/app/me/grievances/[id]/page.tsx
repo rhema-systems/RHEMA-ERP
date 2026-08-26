@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, ArrowUp, Reply, UserPlus, Ban, CheckCircle2, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { grievanceService } from '@/services/hr/grievance.service';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { GRIEVANCE_LADDER, SETTLED_GRIEVANCE_STATUSES } from '@/types/hr/grievance';
 
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
@@ -34,12 +34,15 @@ const levelLabel = (v: string) => GRIEVANCE_LADDER.find((l) => l.value === v)?.l
  * anyone not asked, and each refusal comes back as a 422 or 403 carrying its own reason. Deciding in
  * the client who the caller is would put a second, disagreeing copy of those rules on screen — and
  * this page is reachable by three different kinds of user.
+ *
+ * Area 25 slice 9: re-homed from /hr/grievances/[id] (D3) — the one-working-surface precedent.
+ * Its three audiences (griever, named responder, HR) are ALL portal users; the desk register's
+ * rows open this page. The assign dialog stays: it is HR's act, HR holds the employee-search
+ * permission its picker needs, and anyone else is refused in words.
  */
 export default function GrievanceDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
   const [respondOpen, setRespondOpen] = useState(false);
   const [response, setResponse] = useState('');
@@ -50,24 +53,22 @@ export default function GrievanceDetailPage() {
   const [withdrawReason, setWithdrawReason] = useState('');
 
   const { data: g, isLoading, isError } = useQuery({
-    queryKey: ['hr', 'grievances', 'detail', id],
+    queryKey: ['me', 'grievances', 'detail', id],
     queryFn: () => grievanceService.getById(id),
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'grievances'] });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['me', 'grievances'] });
 
-  const fail = (title: string) => (e: Error) =>
-    toast({ title, description: e.message, variant: 'destructive' });
+  const fail = (fallback: string) => (e: Error) => toast.error(e.message || fallback);
 
   const respondMutation = useMutation({
     mutationFn: () => grievanceService.respond(id, { response: response.trim(), resolvesGrievance: resolves }),
     onSuccess: () => {
-      toast({
-        title: resolves ? 'Recorded, and the grievance is resolved' : 'Response recorded',
-        description: resolves
-          ? undefined
-          : 'The employee will decide whether this settles the matter.',
-      });
+      toast.success(
+        resolves
+          ? 'Recorded, and the grievance is resolved'
+          : 'Response recorded — the employee will decide whether this settles the matter.',
+      );
       setRespondOpen(false); setResponse(''); setResolves(false); refresh();
     },
     onError: fail('Could not record the response'),
@@ -78,7 +79,7 @@ export default function GrievanceDetailPage() {
     // the button that calls this is disabled until then.
     mutationFn: (assignedToId: string) => grievanceService.assign(id, { assignedToId }),
     onSuccess: () => {
-      toast({ title: 'Assigned', description: 'They can now see and answer this grievance.' });
+      toast.success('Assigned — they can now see and answer this grievance.');
       setAssignOpen(false); setAssigneeId(null); refresh();
     },
     onError: fail('Could not assign it'),
@@ -87,7 +88,7 @@ export default function GrievanceDetailPage() {
   const escalateMutation = useMutation({
     mutationFn: () => grievanceService.escalate(id, {}),
     onSuccess: (updated) => {
-      toast({ title: `Escalated to ${levelLabel(updated.currentLevel)}` });
+      toast.success(`Escalated to ${levelLabel(updated.currentLevel)}`);
       refresh();
     },
     onError: fail('Could not escalate'),
@@ -96,7 +97,7 @@ export default function GrievanceDetailPage() {
   const withdrawMutation = useMutation({
     mutationFn: () => grievanceService.withdraw(id, { reason: withdrawReason.trim() }),
     onSuccess: () => {
-      toast({ title: 'Grievance withdrawn' });
+      toast.success('Grievance withdrawn');
       setWithdrawOpen(false); setWithdrawReason(''); refresh();
     },
     onError: fail('Could not withdraw it'),
@@ -112,12 +113,10 @@ export default function GrievanceDetailPage() {
 
   if (isError || !g) {
     return (
-      <div className="p-6">
-        <EmptyState
-          title="Grievance not available"
-          description="A grievance can be read by the person who raised it, by HR, and by anyone asked to answer it — and by nobody else."
-        />
-      </div>
+      <EmptyState
+        title="Grievance not available"
+        description="A grievance can be read by the person who raised it, by HR, and by anyone asked to answer it — and by nobody else."
+      />
     );
   }
 
@@ -126,11 +125,11 @@ export default function GrievanceDetailPage() {
   const stepFor = (level: string) => g.steps.find((s) => s.level === level);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={`${g.grievanceNumber} — ${g.subject}`}
         description={`Raised by ${g.employeeName} on ${new Date(g.filedDate).toLocaleDateString()}`}
-        backHref="/hr/grievances/mine"
+        backHref="/me/grievances"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={g.statusName} />

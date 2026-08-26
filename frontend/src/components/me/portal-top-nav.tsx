@@ -113,6 +113,10 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Competencies', href: '/hr/competencies/me' },
       { label: 'Internal Job Board', href: '/hr/recruitment/job-board' },
       { label: 'My Panel Interviews', href: '/hr/recruitment/my-panel' },
+      // Slice 9: discipline + grievances live in the portal. They sit in this group because
+      // they are records about your employment, not benefits or safety.
+      { label: 'My Disciplinary Record', href: '/me/discipline' },
+      { label: 'My Grievances', href: '/me/grievances' },
     ],
   },
   {
@@ -126,8 +130,9 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Medical Claims', href: '/me/medical/claims' },
       { label: 'My Safety', href: '/me/safety' },
       { label: 'Report a Concern', href: '/me/safety/report' },
-      { label: 'My Awards', href: '/hr/awards/me' },
-      { label: 'My Assets', href: '/hr/assets/me' },
+      // Slice 9: awards + assets live in the portal.
+      { label: 'My Awards', href: '/me/awards' },
+      { label: 'My Assets', href: '/me/assets' },
     ],
   },
 ];

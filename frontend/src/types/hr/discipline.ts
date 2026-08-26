@@ -560,7 +560,11 @@ export interface DisciplineNotificationSummary {
   notificationType: DisciplinaryNotificationType;
   notificationTypeName: string;
   sentDate: string;
+  /** The notice's text (area 25 slice 9): these rows ride the case detail the SUBJECT can read,
+   * and acknowledging a notice whose words you cannot read defeats the notice. */
+  content: string;
   isAcknowledged: boolean;
+  acknowledgedDate: string | null;
   isFollowupSent: boolean;
 }
 

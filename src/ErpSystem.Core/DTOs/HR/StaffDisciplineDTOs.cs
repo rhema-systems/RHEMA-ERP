@@ -1119,7 +1119,16 @@ public class StaffDisciplineNotificationSummaryDto
     public DisciplinaryNotificationType NotificationType { get; set; }
     public string NotificationTypeName => NotificationType.ToString();
     public DateTime SentDate { get; set; }
+
+    /// <summary>
+    /// The text of the notice. Added in area 25 slice 9: these rows ride the case detail — the one
+    /// read the case's SUBJECT can make — and the acknowledge act is theirs. Asking somebody to
+    /// acknowledge a notice whose words they cannot read defeats the notice.
+    /// </summary>
+    public string Content { get; set; } = string.Empty;
+
     public bool IsAcknowledged { get; set; }
+    public DateTime? AcknowledgedDate { get; set; }
     public bool IsFollowupSent { get; set; }
 }
 

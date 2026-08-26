@@ -67,6 +67,29 @@ export type LongServiceStanding =
 // ─── award types ─────────────────────────────────────────────────────────────
 
 /** Row shape of `GET /api/Awards/types`. Note: no `description` — that is detail-only. */
+/**
+ * The lean self projection served by `GET api/awards/me/types/{id}` (area 25 slice 9) — what a
+ * NOMINATOR needs to know about an award. The administrative side of the catalogue (eligibility
+ * windows, budgets, review configuration) is deliberately absent.
+ */
+export interface MyAwardType {
+  id: string;
+  name: string;
+  description: string;
+  categoryName: string;
+  frequencyName: string;
+  isTeamAward: boolean;
+  allowSelfNomination: boolean;
+  hasMonetaryReward: boolean;
+  hasCertificate: boolean;
+  hasTrophy: boolean;
+  hasLevels: boolean;
+  nominationSource: AwardNominationSource;
+  nominationSourceName: string;
+  winnerDecision: AwardWinnerDecision;
+  winnerDecisionName: string;
+}
+
 export interface AwardTypeSummary {
   id: string;
   code: string;

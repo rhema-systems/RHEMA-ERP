@@ -32,7 +32,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 6 | Move-in: training & learning (+ the owed bond self-accept) | **COMPLETE 2026-08-25** — 85 assertions ×2 + 294 ladder; 4 pages moved + 7 built; learner step-completion dead path fixed |
 | 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | **COMPLETE 2026-08-26** — 72 assertions ×2 + 379 ladder; 7 pages moved + 7 built (incl. oaths); the dead EmployeeAcceptancePending state fixed |
 | 8 | Move-in: medical + safety | **COMPLETE 2026-08-26** — 75 assertions ×2 + 451 ladder; 4 new backend self-arms; appointment .Include fix; 6 screens moved + 7 built |
-| 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | not started |
+| 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | **COMPLETE 2026-08-26** — 80 assertions ×2 + 526 ladder; 4 fixes (ack repeat, withdraw dead route, committee-result leak, notice text); 10 screens moved + 1 built |
 | 10 | My payslips: the read-only payroll adapter | not started |
 | 11 | Approvals & tasks inbox, notifications | not started |
 | 12 | New capabilities: change requests, HR letters, announcements & acknowledgements | not started |
@@ -649,3 +649,55 @@ token actor + explicit projection + foreign id = 404 lookup miss).
   has NO reporter column — needs a migration another slice should weigh), a PPE
   receipt-acknowledgement (net-new entity surface), and the desk `AddPolicyDependent`
   500-not-404 on a Guid.Empty dependant id (HR-side FK guard, out of this slice's surface).
+
+### Slice 9 — move-in: assets, awards, discipline, grievances. CLOSED 2026-08-26.
+
+`run-slice9.mjs` 80 assertions ×2 green + the 526 ladder (111/33/35/68/47/85/72/75). No
+migration. The area-16 owed residual (asset acknowledge/respond + terms-document employee
+surface) turned out to be ALREADY BUILT into the 952-line `/hr/assets/me` screen — it
+closed by re-homing that screen into the portal and putting the whole surface under
+harness for the first time, which is what surfaced the fixes.
+
+- **Four defects found by probe/survey, fixed and asserted by name:** (1) **asset
+  acknowledge was silently repeatable** — a second POST answered 200 and rewrote
+  `AcknowledgementDate` to now (measured live; the surcharge sibling already 409'd); now
+  409 "already acknowledged", and the refused repeat provably leaves the date alone.
+  (2) **the frontend's `withdrawNomination` POSTed a route that never existed** (backend:
+  `DELETE nominations/{id}`) — every Withdraw click had 404'd forever, the
+  fiction-that-type-checks shape on a WRITE. (3) **the awards committee-result read was
+  cycle-agnostic** — one pending review anywhere opened every cycle's scores to that
+  reviewer; `IsInvolvedInCycleAsync` now scopes involvement to the requested cycle, proven
+  two-sided (member reads their cycle, is refused another). (4) **discipline notices were
+  acknowledgeable but unreadable** — the subject's case detail carried notification rows
+  without their text; `StaffDisciplineNotificationSummaryDto` now carries `Content` +
+  `AcknowledgedDate` (the case detail was already the subject's discovery path — the flat
+  notifications route is desk-gated by design and stays so, asserted).
+- **New backend, deliberately small:** `GET api/awards/me/types/{awardTypeId}` — the
+  portal nomination form called the DESK type read (`HR.Awards.Read`) and 403'd for every
+  plain employee the moment they picked a cycle (measured); the self arm projects only the
+  nominator-facing fields (no eligibility windows, no budget limits, key-absence asserted).
+- **The move (D3, atomic):** 10 screens via `git mv` — `/me/assets` (plus a NEW charge
+  detail dialog: the by-id surcharge read had no screen; the run also asserts the
+  drafted-charge concealment — an un-served charge reads 404, never 403), `/me/awards` + 4
+  subpages, `/me/discipline` (with an appeals section over `appeals/mine`, a read that had
+  NO caller anywhere), `/me/grievances` + new + detail (the split-audience detail moved
+  wholesale on the one-working-surface precedent — griever, named responder and HR are all
+  portal users; the desk register's rows open it). **Built fresh:** `/me/discipline/[id]`,
+  the subject's case view — allegation, notices with acknowledge, decision + penalty,
+  appeal filing inside FR-HR-180's window, the process clock. Sidebar: the six moved self
+  entries deleted (awards' whole self block, My Assets, My Record, My Grievances; the
+  grievances group is register-only now); desk hubs + grievance register rows + the
+  discipline reminders queue and `DisciplineReminderService`'s GrievanceUnanswered
+  ActionUrl re-pointed to the portal.
+- **Harness facts worth keeping:** the tenant has NO `HrAssetRequisition` workflow
+  definition (submit 409s "No active workflow definition" — the run publishes its own, the
+  slice-4 pattern); requisition recall is the RAISER's alone (HR is told to reject
+  instead); home-aggregate ≡ assets-summary equality on all three shared figures; awards
+  `cycles/open` answers even an UNLINKED account by design (catalogue read,
+  `TryGetWriteContext`) while `awards` (received) refuses 400 — asserted as measured.
+- **Recorded, not built:** "nominations where I am the nominee" (no self read exists;
+  arguably a TDC policy question), portal home counts for awards/discipline/grievances
+  waiting-on-me figures (slice 11's unified inbox is the natural home), asset assignment
+  by-id + plain-list portal routes stay service-covered-without-screens (their content is
+  the held table + terms letter), and the awards mine-list's blank `nominatedByName`
+  (cosmetic: the list is "mine").

@@ -40,7 +40,7 @@ function GrievanceTable({ rows, emptyTitle, emptyBody, showWho = false }: {
         {rows.map((g) => (
           <TableRow key={g.id}>
             <TableCell className="font-medium">
-              <Link href={`/hr/grievances/${g.id}`} className="hover:underline">
+              <Link href={`/me/grievances/${g.id}`} className="hover:underline">
                 {g.grievanceNumber}
               </Link>
             </TableCell>
@@ -59,18 +59,21 @@ function GrievanceTable({ rows, emptyTitle, emptyBody, showWho = false }: {
 /**
  * The employee's own grievance page: what they have raised, and what they have been asked to answer.
  *
+ * Area 25 slice 9: re-homed from /hr/grievances/mine into the portal shell (D3), with the filing
+ * form and the detail alongside it.
+ *
  * The two lists sit together because they are the two ways an ordinary employee meets this module —
  * as the person who raised something, and as the person a grievance has been passed to. Neither can
  * be reached from the register, which answers 403 for anyone outside HR.
  */
 export default function MyGrievancesPage() {
   const mine = useQuery({
-    queryKey: ['hr', 'grievances', 'mine'],
+    queryKey: ['me', 'grievances', 'mine'],
     queryFn: () => grievanceService.getMine(),
   });
 
   const toAnswer = useQuery({
-    queryKey: ['hr', 'grievances', 'awaiting-my-response'],
+    queryKey: ['me', 'grievances', 'awaiting-my-response'],
     queryFn: () => grievanceService.getAwaitingMyResponse(),
   });
 
@@ -81,14 +84,14 @@ export default function MyGrievancesPage() {
   );
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
-        title="My grievances"
+        title="My Grievances"
         description="Grievances you have raised, and any you have been asked to answer."
-        backHref="/hr"
+        backHref="/me"
         actions={
           <Button asChild>
-            <Link href="/hr/grievances/new">
+            <Link href="/me/grievances/new">
               <Plus className="mr-2 h-4 w-4" />
               Raise a grievance
             </Link>

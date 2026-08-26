@@ -35,6 +35,8 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—'
  * would leave them wondering why an award they can see offers them nothing.
  *
  * ⚠ **The tally is withheld until the window closes.** A missing result is not "nobody voted".
+ *
+ * Area 25 slice 9: re-homed from /hr/awards/me/vote (D3).
  */
 export default function VotePage() {
   const queryClient = useQueryClient();
@@ -43,14 +45,14 @@ export default function VotePage() {
   const [justification, setJustification] = useState('');
 
   const { data: cycles, isLoading } = useQuery({
-    queryKey: ['my-voting-cycles'],
+    queryKey: ['me', 'awards', 'voting-cycles'],
     queryFn: () => awardsService.getMyVotingCycles(),
   });
 
   const openCycles = cycles ?? [];
 
   const { data: ballot, isFetching: loadingBallot } = useQuery({
-    queryKey: ['award-ballot', cycleId],
+    queryKey: ['me', 'awards', 'ballot', cycleId],
     queryFn: () => awardsService.getBallot(cycleId),
     enabled: Boolean(cycleId),
   });
@@ -64,7 +66,7 @@ export default function VotePage() {
     onSuccess: () => {
       toast.success('Your vote has been recorded.');
       setJustification('');
-      queryClient.invalidateQueries({ queryKey: ['award-ballot', cycleId] });
+      queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'ballot', cycleId] });
     },
     onError: (e: any) =>
       toast.error(e?.body?.detail || e?.body?.message || e?.message || 'The vote was refused.'),
@@ -75,7 +77,7 @@ export default function VotePage() {
     onSuccess: () => {
       toast.success('Your vote has been withdrawn.');
       setChoice('');
-      queryClient.invalidateQueries({ queryKey: ['award-ballot', cycleId] });
+      queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'ballot', cycleId] });
     },
     onError: (e: any) =>
       toast.error(e?.body?.detail || e?.message || 'The withdrawal was refused.'),
@@ -84,11 +86,11 @@ export default function VotePage() {
   const alreadyVoted = Boolean(ballot?.myVoteNominationId);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Vote"
         description="Awards decided by a staff vote, while their voting window is open."
-        backHref="/hr/awards/me"
+        backHref="/me/awards"
       />
 
       {isLoading ? (

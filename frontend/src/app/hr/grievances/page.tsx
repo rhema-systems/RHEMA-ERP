@@ -53,8 +53,9 @@ export default function GrievanceRegisterPage() {
         description="Employee grievances and their progress up the escalation route: supervisor, head of department, HR, GM Finance & Administration, Managing Director, Board."
         backHref="/hr"
         actions={
+          // Area 25 slice 9: filing and the detail live in the portal; the register stays here.
           <Button asChild variant="outline">
-            <Link href="/hr/grievances/new">
+            <Link href="/me/grievances/new">
               <Plus className="mr-2 h-4 w-4" />
               Raise my own grievance
             </Link>
@@ -124,7 +125,8 @@ export default function GrievanceRegisterPage() {
                 {items.map((g) => (
                   <TableRow key={g.id}>
                     <TableCell className="font-medium">
-                      <Link href={`/hr/grievances/${g.id}`} className="hover:underline">
+                      {/* The one working surface: the register row opens the portal detail. */}
+                      <Link href={`/me/grievances/${g.id}`} className="hover:underline">
                         {g.grievanceNumber}
                       </Link>
                     </TableCell>

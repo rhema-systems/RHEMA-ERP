@@ -50,6 +50,7 @@ public class AwardsMeController : HrControllerBase
     private readonly IAwardCommitteeScoringService _scoringService;
     private readonly IEmployeeAwardService _employeeAwardService;
     private readonly ILongServiceAwardService _longServiceAwardService;
+    private readonly IAwardTypeService _typeService;
 
     public AwardsMeController(
         IAwardCycleService cycleService,
@@ -60,6 +61,7 @@ public class AwardsMeController : HrControllerBase
         IAwardCommitteeScoringService scoringService,
         IEmployeeAwardService employeeAwardService,
         ILongServiceAwardService longServiceAwardService,
+        IAwardTypeService typeService,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -71,6 +73,7 @@ public class AwardsMeController : HrControllerBase
         _scoringService = scoringService;
         _employeeAwardService = employeeAwardService;
         _longServiceAwardService = longServiceAwardService;
+        _typeService = typeService;
     }
 
     /// <summary>
@@ -96,6 +99,44 @@ public class AwardsMeController : HrControllerBase
     {
         if (TryGetWriteContext(out _, out _) is { } error) return error;
         return Ok(await _cycleService.GetOpenForNominationAsync());
+    }
+
+    /// <summary>
+    /// What an award is — the details a nominator needs before putting somebody forward.
+    /// </summary>
+    /// <remarks>
+    /// Added in area 25 slice 9: the portal nomination form was calling the desk's
+    /// <c>GET api/Awards/types/{id}</c>, which needs <c>HR.Awards.Read</c> — a plain employee got a
+    /// 403 the moment they picked a cycle (measured live, probe-slice9). Projected explicitly to the
+    /// nominator-facing fields; the catalogue's administrative side (eligibility windows, budget
+    /// limits, review configuration) stays desk-only.
+    /// </remarks>
+    [HttpGet("types/{awardTypeId:guid}")]
+    public async Task<IActionResult> GetAwardTypeForNominator(Guid awardTypeId)
+    {
+        if (TryGetWriteContext(out _, out _) is { } error) return error;
+
+        var type = await _typeService.GetByIdAsync(awardTypeId);
+        if (type is null) return NotFound();
+
+        return Ok(new
+        {
+            type.Id,
+            type.Name,
+            type.Description,
+            type.CategoryName,
+            type.FrequencyName,
+            type.IsTeamAward,
+            type.AllowSelfNomination,
+            type.HasMonetaryReward,
+            type.HasCertificate,
+            type.HasTrophy,
+            type.HasLevels,
+            type.NominationSource,
+            type.NominationSourceName,
+            type.WinnerDecision,
+            type.WinnerDecisionName,
+        });
     }
 
     /// <summary>
@@ -390,12 +431,10 @@ public class AwardsMeController : HrControllerBase
         if (TryGetEmployeeWriteContext(out _, out _, out var reviewerId,
             "Viewing your committee's scores") is { } error) return error;
 
-        // Only somebody with something to score in this cycle may read its scores. Anyone else asks
-        // the awards desk.
-        var owed = await _reviewService.GetPendingReviewsAsync(reviewerId);
-        var mine = await _reviewService.GetByReviewerIdAsync(reviewerId);
-        var involved = owed.Any() || mine.Any();
-
+        // Only somebody with something to score in THIS cycle may read its scores. Anyone else asks
+        // the awards desk. (Area 25 slice 9: the check used to be cycle-agnostic — one pending
+        // review anywhere opened every cycle's result to that reviewer.)
+        var involved = await _reviewService.IsInvolvedInCycleAsync(reviewerId, cycleId);
         if (!involved)
             return NotFound();
 

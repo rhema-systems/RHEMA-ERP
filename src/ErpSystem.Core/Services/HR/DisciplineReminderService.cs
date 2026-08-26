@@ -685,7 +685,9 @@ public class DisciplineReminderService : IDisciplineReminderService
                 due, -daysOverdue, tier,
                 $"GrievanceUnanswered:{item.Id}:{due:yyyyMMdd}:t{tier}",
                 tier >= 2 ? "OverdueEscalated" : "Overdue",
-                $"/hr/grievances/{item.GrievanceId}"));
+                // Area 25 slice 9: the grievance detail lives in the portal now; every reader of
+                // this reminder (HR, the rung-holder, the griever) is a portal user.
+                $"/me/grievances/{item.GrievanceId}"));
         }
     }
 

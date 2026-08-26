@@ -41,6 +41,9 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
  *
  * ⚠ **A score, not a verdict.** Until slice 6 this carried `approved: bool?`, which cannot express
  * "the highest average wins". The desk has no route to score on a member's behalf, deliberately.
+ *
+ * Area 25 slice 9: re-homed from /hr/awards/me/reviews (D3). The committee-result read is now
+ * cycle-scoped server-side — a review in one cycle no longer opens every other cycle's scores.
  */
 export default function MyReviewsPage() {
   const queryClient = useQueryClient();
@@ -50,19 +53,19 @@ export default function MyReviewsPage() {
   const [resultCycleId, setResultCycleId] = useState('');
 
   const { data: pending, isLoading } = useQuery({
-    queryKey: ['my-pending-reviews'],
+    queryKey: ['me', 'awards', 'pending-reviews'],
     queryFn: () => awardsService.getMyPendingReviews(),
   });
 
   const { data: given } = useQuery({
-    queryKey: ['my-reviews'],
+    queryKey: ['me', 'awards', 'reviews-given'],
     queryFn: () => awardsService.getMyReviews(),
   });
 
   // The outcome of what this member scored. ⚠ A member who scores and can never see the result is
   // asked to do the work and denied the point of it - the route existed and nothing called it.
   const { data: outcome } = useQuery({
-    queryKey: ['my-committee-result', resultCycleId],
+    queryKey: ['me', 'awards', 'committee-result', resultCycleId],
     queryFn: () => awardsService.getMyCommitteeResult(resultCycleId),
     enabled: Boolean(resultCycleId),
     retry: false,
@@ -84,8 +87,8 @@ export default function MyReviewsPage() {
       setScoring(null);
       setScore('');
       setComments('');
-      queryClient.invalidateQueries({ queryKey: ['my-pending-reviews'] });
-      queryClient.invalidateQueries({ queryKey: ['my-reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'pending-reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'reviews-given'] });
     },
     onError: (e: any) =>
       toast.error(e?.body?.detail || e?.body?.message || e?.message || 'The score was refused.'),
@@ -95,11 +98,11 @@ export default function MyReviewsPage() {
   const scoreValid = score !== '' && Number.isFinite(scoreValue) && scoreValue >= 0 && scoreValue <= 100;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Nominations to score"
         description="What your award committee still owes a score on, and what you have already given."
-        backHref="/hr/awards/me"
+        backHref="/me/awards"
       />
 
       <Card>

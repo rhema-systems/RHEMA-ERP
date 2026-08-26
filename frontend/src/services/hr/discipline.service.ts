@@ -135,6 +135,18 @@ class DisciplineService {
     return apiService.get<DisciplineProcessClock>(`${this.baseUrl}/${id}/process-clock`);
   }
 
+  /**
+   * Acknowledges a notice served on the caller — the SUBJECT's own act; the server refuses anyone
+   * else, HR included, and stamps the date itself. Notice ids arrive on the case detail's
+   * `notifications` rows (area 25 slice 9). Answers `{ message }`, not the notification — refetch.
+   */
+  acknowledgeNotification(notificationId: string): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(
+      `/discipline/notifications/${notificationId}/acknowledge`,
+      { notificationId },
+    );
+  }
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   create(payload: CreateDisciplinaryCaseRequest): Promise<DisciplinaryCase> {

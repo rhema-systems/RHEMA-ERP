@@ -76,9 +76,10 @@ const KIND_LABELS: Record<string, string> = {
   GrievanceUnanswered: 'Grievance awaiting a response',
 };
 
-/** A grievance reminder points at the grievance; everything else points at the case. */
+/** A grievance reminder points at the grievance (portal detail since area 25 slice 9);
+ * everything else points at the desk case. */
 const targetHref = (kind: string, entityId: string) =>
-  kind === 'GrievanceUnanswered' ? `/hr/grievances/${entityId}` : `/hr/discipline/${entityId}`;
+  kind === 'GrievanceUnanswered' ? `/me/grievances/${entityId}` : `/hr/discipline/${entityId}`;
 
 function DaysCell({ days }: { days: number }) {
   return (

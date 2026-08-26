@@ -1718,6 +1718,13 @@ public class AssetAssignmentService : IAssetAssignmentService
             throw AssetsWorkflowException.InvalidState(
                 "Only an active assignment can be acknowledged; this one has already been closed.");
 
+        // A receipt is signed once. Without this guard a second POST answered 200 and quietly
+        // moved AcknowledgementDate to now (measured live, area 25 slice 9) — rewriting the date
+        // on the employee's word. The surcharge answer already refuses a repeat the same way.
+        if (entity.EmployeeAcknowledged)
+            throw AssetsWorkflowException.Conflict(
+                "You have already acknowledged receipt of this asset.");
+
         entity.EmployeeAcknowledged = true;
         entity.AcknowledgementDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;

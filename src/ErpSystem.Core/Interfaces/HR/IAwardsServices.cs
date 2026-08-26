@@ -204,6 +204,12 @@ public interface IAwardCommitteeReviewService
     /// on and carry no score from them yet.
     /// </remarks>
     Task<IEnumerable<AwardNominationSummaryDto>> GetPendingReviewsAsync(Guid reviewerId);
+    /// <summary>
+    /// Whether this reviewer's committees have any nomination in THIS cycle — scored or still owed.
+    /// The gate for reading a cycle's committee result (area 25 slice 9: the previous check was
+    /// cycle-agnostic, so one review anywhere opened every cycle's scores).
+    /// </summary>
+    Task<bool> IsInvolvedInCycleAsync(Guid reviewerId, Guid cycleId);
     Task<AwardCommitteeReviewDto> SubmitReviewAsync(Guid nominationId, Guid reviewerId, Guid userId, SubmitCommitteeReviewDto dto);
     Task<AwardCommitteeReviewDto> UpdateReviewAsync(Guid id, Guid userId, UpdateCommitteeReviewDto dto);
 }

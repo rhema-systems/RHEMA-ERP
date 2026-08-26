@@ -69,9 +69,10 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
     title: 'Benefits, kit & safety',
     tiles: [
       { label: 'My Medical', hint: 'Coverage, claims, appointments, health record', href: '/me/medical', icon: HeartPulse },
-      { label: 'My Awards', hint: 'Nominate, vote, celebrate', href: '/hr/awards/me', icon: Award },
-      { label: 'My Assets', hint: 'What you hold, and requests', href: '/hr/assets/me', icon: Laptop },
+      { label: 'My Awards', hint: 'Nominate, vote, celebrate', href: '/me/awards', icon: Award },
+      { label: 'My Assets', hint: 'What you hold, and requests', href: '/me/assets', icon: Laptop },
       { label: 'My Safety', hint: 'PPE, risk assessments, report a concern', href: '/me/safety', icon: ShieldAlert },
+      { label: 'My Grievances', hint: 'Raise and follow a concern of your own', href: '/me/grievances', icon: MessageSquare },
       { label: 'Internal Job Board', hint: 'Openings you can apply for', href: '/hr/recruitment/job-board', icon: Briefcase },
     ],
   },
@@ -188,12 +189,12 @@ export default function MeLandingPage() {
             <ActionChip
               count={home?.surchargesAwaitingMyResponse ?? 0}
               label="Charges awaiting your reply"
-              href="/hr/assets/me"
+              href="/me/assets"
             />
             <ActionChip
               count={home?.assetsAwaitingAcknowledgement ?? 0}
               label="Assets to sign for"
-              href="/hr/assets/me"
+              href="/me/assets"
             />
             {pendingTotal === 0 && !isError && (
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -271,7 +272,7 @@ export default function MeLandingPage() {
                   ? `${openReqs} open request${openReqs === 1 ? '' : 's'}`
                   : 'No open requests'
               }
-              href="/hr/assets/me"
+              href="/me/assets"
             />
             <StatCard
               icon={GraduationCap}

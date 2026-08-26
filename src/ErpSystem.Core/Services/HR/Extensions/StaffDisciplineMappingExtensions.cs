@@ -904,7 +904,9 @@ public static class StaffDisciplineMappingExtensions
             Id = entity.Id,
             NotificationType = entity.NotificationType,
             SentDate = entity.SentDate,
+            Content = entity.Content,
             IsAcknowledged = entity.AcknowledgedDate.HasValue,
+            AcknowledgedDate = entity.AcknowledgedDate,
             IsFollowupSent = entity.IsFollowupSent,
         };
     }

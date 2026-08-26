@@ -131,7 +131,7 @@ export default function AwardsRegisterPage() {
         actions={
           <div className="flex gap-2">
             <Button variant="outline" asChild>
-              <Link href="/hr/awards/me">
+              <Link href="/me/awards">
                 <UserPlus className="mr-2 h-4 w-4" />
                 My awards
               </Link>

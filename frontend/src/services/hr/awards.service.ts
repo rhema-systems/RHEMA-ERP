@@ -15,6 +15,7 @@ import type {
   AwardPendingReview,
   AwardType,
   AwardTypeSummary,
+  MyAwardType,
   CreateAwardNomination,
   CreateLongServiceMilestone,
   EmployeeAwardSummary,
@@ -234,6 +235,15 @@ class AwardsService {
     return apiService.get<AwardCycleSummary[]>(`${this.me}/cycles/open`);
   }
 
+  /**
+   * What an award is, for a nominator (area 25 slice 9). The desk `getType` needs
+   * `HR.Awards.Read`, which a plain employee does not hold — the portal nomination form 403'd
+   * the moment a cycle was picked. This is the lean self projection.
+   */
+  getMyType(awardTypeId: string) {
+    return apiService.get<MyAwardType>(`${this.me}/types/${awardTypeId}`);
+  }
+
   getMyVotingCycles() {
     return apiService.get<AwardCycleSummary[]>(`${this.me}/cycles/voting`);
   }
@@ -268,8 +278,13 @@ class AwardsService {
     return apiService.post<AwardNomination>(`${this.me}/nominations/${id}/submit`, {});
   }
 
+  /**
+   * ⚠ The backend route is `DELETE nominations/{id}` (204, drafts only). This method used to POST
+   * `nominations/{id}/withdraw` — a route that never existed, so the detail page's Withdraw button
+   * had 404'd forever (found in area 25 slice 9; the fiction-that-type-checks shape again).
+   */
   withdrawNomination(id: string) {
-    return apiService.post<AwardNomination>(`${this.me}/nominations/${id}/withdraw`, {});
+    return apiService.delete<void>(`${this.me}/nominations/${id}`);
   }
 
   /** What the caller still owes a score on. Empty for anyone on no committee. */

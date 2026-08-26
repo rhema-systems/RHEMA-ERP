@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { grievanceService } from '@/services/hr/grievance.service';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { GRIEVANCE_LADDER } from '@/types/hr/grievance';
 
 const MIN_STATEMENT = 20;
@@ -26,34 +26,34 @@ const MIN_STATEMENT = 20;
  * The page states what happens next, because the ladder is the part people do not know: the
  * grievance goes to the first rung, and if the answer does not satisfy them it is THEY who escalate
  * it, not HR.
+ *
+ * Area 25 slice 9: re-homed from /hr/grievances/new (D3) — filing is the employee's own act, so
+ * the form lives where employees live.
  */
 export default function NewGrievancePage() {
   const router = useRouter();
-  const { toast } = useToast();
   const [subject, setSubject] = useState('');
   const [statement, setStatement] = useState('');
 
   const fileMutation = useMutation({
     mutationFn: () => grievanceService.file({ subject: subject.trim(), statement: statement.trim() }),
     onSuccess: (created) => {
-      toast({
-        title: `Grievance ${created.grievanceNumber} raised`,
-        description: 'It has gone to the first level of the escalation route.',
-      });
-      router.push(`/hr/grievances/${created.id}`);
+      toast.success(
+        `Grievance ${created.grievanceNumber} raised — it has gone to the first level of the escalation route.`,
+      );
+      router.push(`/me/grievances/${created.id}`);
     },
-    onError: (e: Error) =>
-      toast({ title: 'Could not raise it', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(e.message || 'Could not raise it'),
   });
 
   const canSubmit = subject.trim().length > 0 && statement.trim().length >= MIN_STATEMENT;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Raise a grievance"
         description="A grievance is your own — nobody can raise, escalate or withdraw one on your behalf."
-        backHref="/hr/grievances/mine"
+        backHref="/me/grievances"
       />
 
       <Card>

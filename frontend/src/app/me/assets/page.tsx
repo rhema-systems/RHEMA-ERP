@@ -52,7 +52,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { assetPortalService } from '@/services/hr/asset-portal.service';
 import { employeeService } from '@/services/hr/employee.service';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { ASSET_REQUISITION_PRIORITIES } from '@/types/hr/assets';
 import type {
   AssetAssignmentSummary,
@@ -80,6 +80,11 @@ const EMPTY_FORM = {
 /**
  * The employee's own view of the company assets they hold — AST-6, AST-6b, AST-8, decision D4.
  *
+ * Area 25 slice 9: re-homed from /hr/assets/me into the portal shell (D3 — moved, not
+ * redirected), closing the area-16 residual: the acknowledge / terms-document / requisition /
+ * surcharge-respond employee surface now lives where employees live. This slice also added the
+ * charge DETAIL dialog — the by-id surcharge read existed with no screen.
+ *
  * Four things live here, and they are the four an employee actually does: see what is in their
  * hands, sign for it, print what they signed, and ask for something. Everything is read from the
  * `api/employee-portal` routes, which take no employee id — the token supplies it.
@@ -89,7 +94,6 @@ const EMPTY_FORM = {
  * responsibility form and a physical signature, not an administrator ticking the box in their name.
  */
 export default function MyAssetsPage() {
-  const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const [requesting, setRequesting] = useState(false);
@@ -99,41 +103,48 @@ export default function MyAssetsPage() {
   const [recallReason, setRecallReason] = useState('');
   const [answering, setAnswering] = useState<{ row: AssetSurchargeSummary; accepted: boolean } | null>(null);
   const [answerComments, setAnswerComments] = useState('');
+  const [chargeDetailId, setChargeDetailId] = useState<string | null>(null);
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['hr', 'assets', 'mine'] });
+    queryClient.invalidateQueries({ queryKey: ['me', 'assets'] });
   };
 
   const { data: summary, isLoading } = useQuery({
-    queryKey: ['hr', 'assets', 'mine', 'summary'],
+    queryKey: ['me', 'assets', 'summary'],
     queryFn: () => assetPortalService.getMyAssetSummary(),
   });
 
   const { data: history = [] } = useQuery({
-    queryKey: ['hr', 'assets', 'mine', 'history'],
+    queryKey: ['me', 'assets', 'history'],
     queryFn: () => assetPortalService.getMyAssetHistory(),
   });
 
   const { data: requisitions = [] } = useQuery({
-    queryKey: ['hr', 'assets', 'mine', 'requisitions'],
+    queryKey: ['me', 'assets', 'requisitions'],
     queryFn: () => assetPortalService.getMyRequisitions(),
   });
 
   const { data: surcharges = [] } = useQuery({
-    queryKey: ['hr', 'assets', 'mine', 'surcharges'],
+    queryKey: ['me', 'assets', 'surcharges'],
     queryFn: () => assetPortalService.getMySurcharges(),
+  });
+
+  const { data: chargeDetail } = useQuery({
+    queryKey: ['me', 'assets', 'surcharges', chargeDetailId],
+    queryFn: () => assetPortalService.getMySurcharge(chargeDetailId as string),
+    enabled: !!chargeDetailId,
   });
 
   // Only fetched once the form is open — most employees are nobody's manager, and this is a
   // request the vast majority of page loads would make for nothing.
   const { data: assetTypes = [] } = useQuery({
-    queryKey: ['hr', 'assets', 'types'],
+    queryKey: ['me', 'assets', 'types'],
     queryFn: () => assetPortalService.getAssetTypes(),
     enabled: requesting,
   });
 
   const { data: directReports = [] } = useQuery({
-    queryKey: ['hr', 'employees', 'my-direct-reports'],
+    queryKey: ['me', 'direct-reports'],
     queryFn: () => employeeService.getMyDirectReports(),
     enabled: requesting,
   });
@@ -151,11 +162,10 @@ export default function MyAssetsPage() {
   const acknowledge = useMutation({
     mutationFn: (assignmentId: string) => assetPortalService.acknowledge(assignmentId),
     onSuccess: () => {
-      toast({ title: 'Receipt acknowledged', description: 'Thank you — the record now shows your signature.' });
+      toast.success('Receipt acknowledged — the record now shows your signature.');
       invalidate();
     },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Refused'),
   });
 
   /**
@@ -168,18 +178,14 @@ export default function MyAssetsPage() {
     onSuccess: (letter) => {
       const w = window.open('', '_blank');
       if (!w) {
-        toast({
-          title: 'Pop-up blocked',
-          description: 'Allow pop-ups for this site to print your responsibility form.',
-          variant: 'destructive',
-        });
+        toast.error('Pop-up blocked — allow pop-ups for this site to print your responsibility form.');
         return;
       }
       w.document.write(letter.htmlBody);
       w.document.close();
     },
-    onError: (error: any) =>
-      toast({ title: 'Could not open the document', description: error?.message, variant: 'destructive' }),
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : 'Could not open the document'),
   });
 
   const saveRequest = useMutation({
@@ -199,29 +205,26 @@ export default function MyAssetsPage() {
         : assetPortalService.createRequisition(payload);
     },
     onSuccess: () => {
-      toast({
-        title: editingId ? 'Request updated' : 'Request saved as a draft',
-        description: editingId
-          ? undefined
-          : 'It has not gone anywhere yet — send it for approval when you are ready.',
-      });
+      toast.success(
+        editingId
+          ? 'Request updated'
+          : 'Request saved as a draft — send it for approval when you are ready.',
+      );
       setRequesting(false);
       setEditingId(null);
       setForm(EMPTY_FORM);
       invalidate();
     },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Refused'),
   });
 
   const submitRequest = useMutation({
     mutationFn: (id: string) => assetPortalService.submitRequisition(id),
     onSuccess: () => {
-      toast({ title: 'Sent for approval' });
+      toast.success('Sent for approval');
       invalidate();
     },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Refused'),
   });
 
   const recallRequest = useMutation({
@@ -230,23 +233,21 @@ export default function MyAssetsPage() {
       return assetPortalService.recallRequisition(recalling.id, recallReason || undefined);
     },
     onSuccess: () => {
-      toast({ title: 'Pulled back to draft' });
+      toast.success('Pulled back to draft');
       setRecalling(null);
       setRecallReason('');
       invalidate();
     },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Refused'),
   });
 
   const withdrawRequest = useMutation({
     mutationFn: (id: string) => assetPortalService.withdrawRequisition(id),
     onSuccess: () => {
-      toast({ title: 'Request withdrawn' });
+      toast.success('Request withdrawn');
       invalidate();
     },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Refused'),
   });
 
   /**
@@ -266,18 +267,16 @@ export default function MyAssetsPage() {
       );
     },
     onSuccess: () => {
-      toast({
-        title: answering?.accepted ? 'Charge accepted' : 'Response recorded',
-        description: answering?.accepted
-          ? undefined
-          : 'Your account goes to the approver with the charge.',
-      });
+      toast.success(
+        answering?.accepted
+          ? 'Charge accepted'
+          : 'Response recorded — your account goes to the approver with the charge.',
+      );
       setAnswering(null);
       setAnswerComments('');
       invalidate();
     },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Refused'),
   });
 
   const openNew = () => {
@@ -302,8 +301,8 @@ export default function MyAssetsPage() {
         requiredByDate: full.requiredByDate ? full.requiredByDate.slice(0, 10) : '',
       });
       setRequesting(true);
-    } catch (error: any) {
-      toast({ title: 'Could not open the request', description: error?.message, variant: 'destructive' });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not open the request');
     }
   };
 
@@ -373,11 +372,11 @@ export default function MyAssetsPage() {
   );
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
-        title="My assets"
+        title="My Assets"
         description="The company property in your hands, what you have signed for, and anything you have asked for."
-        backHref="/hr"
+        backHref="/me"
         actions={
           <Button onClick={openNew}>
             <Plus className="mr-2 h-4 w-4" />
@@ -682,36 +681,45 @@ export default function MyAssetsPage() {
                             <StatusBadge status={c.statusName} />
                           </TableCell>
                           <TableCell className="text-right">
-                            {mustAnswer ? (
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() => {
-                                    setAnswering({ row: c, accepted: true });
-                                    setAnswerComments('');
-                                  }}
-                                >
-                                  <ThumbsUp className="mr-1 h-4 w-4" />
-                                  Accept
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setAnswering({ row: c, accepted: false });
-                                    setAnswerComments('');
-                                  }}
-                                >
-                                  Dispute
-                                </Button>
-                              </div>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                {c.employeeResponse === 'NotYetGiven'
-                                  ? 'You did not respond'
-                                  : c.employeeResponseName}
-                              </span>
-                            )}
+                            <div className="flex items-center justify-end gap-2">
+                              {mustAnswer ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      setAnswering({ row: c, accepted: true });
+                                      setAnswerComments('');
+                                    }}
+                                  >
+                                    <ThumbsUp className="mr-1 h-4 w-4" />
+                                    Accept
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setAnswering({ row: c, accepted: false });
+                                      setAnswerComments('');
+                                    }}
+                                  >
+                                    Dispute
+                                  </Button>
+                                </>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">
+                                  {c.employeeResponse === 'NotYetGiven'
+                                    ? 'You did not respond'
+                                    : c.employeeResponseName}
+                                </span>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setChargeDetailId(c.id)}
+                              >
+                                Details
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -888,6 +896,103 @@ export default function MyAssetsPage() {
               Pull back to draft
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── the full charge (area 25 slice 9 — the by-id read finally has a screen) ── */}
+      <Dialog open={!!chargeDetailId} onOpenChange={(open) => !open && setChargeDetailId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Charge <span className="font-mono text-base">{chargeDetail?.surchargeNumber ?? ''}</span>
+            </DialogTitle>
+          </DialogHeader>
+          {chargeDetail && (
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-muted-foreground">What it is for</p>
+                <p>{chargeDetail.description}</p>
+              </div>
+              <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                <div>
+                  <p className="text-muted-foreground">Asset</p>
+                  <p>
+                    {chargeDetail.assetName}{' '}
+                    <span className="text-muted-foreground font-mono text-xs">
+                      {chargeDetail.assetNumber}
+                    </span>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Status</p>
+                  <StatusBadge status={chargeDetail.statusName} />
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Amount assessed</p>
+                  <p className="tabular-nums">
+                    {fmtMoney(chargeDetail.assessedAmount, chargeDetail.currencyCode)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Still outstanding</p>
+                  <p className="tabular-nums">
+                    {fmtMoney(chargeDetail.amountOutstanding, chargeDetail.currencyCode)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Judged from</p>
+                  <p className="tabular-nums">
+                    repair {fmtMoney(chargeDetail.basisRepairCost ?? 0, chargeDetail.currencyCode)} ·
+                    replacement{' '}
+                    {fmtMoney(chargeDetail.basisReplacementCost ?? 0, chargeDetail.currencyCode)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Put to you</p>
+                  <p>{fmtDate(chargeDetail.notifiedAt)}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Your response</p>
+                <p>
+                  {chargeDetail.employeeResponse === 'NotYetGiven'
+                    ? 'Not answered yet'
+                    : `${chargeDetail.employeeResponseName} on ${fmtDate(chargeDetail.employeeRespondedAt)}`}
+                </p>
+                {chargeDetail.employeeResponseComments && (
+                  <p className="text-muted-foreground mt-1 italic">
+                    &ldquo;{chargeDetail.employeeResponseComments}&rdquo;
+                  </p>
+                )}
+              </div>
+              {chargeDetail.approvalDate && (
+                <div>
+                  <p className="text-muted-foreground">Decision</p>
+                  <p>
+                    Approved {fmtDate(chargeDetail.approvalDate)}
+                    {chargeDetail.approvalComments ? ` — ${chargeDetail.approvalComments}` : ''}
+                  </p>
+                </div>
+              )}
+              {chargeDetail.waivedAt && (
+                <div>
+                  <p className="text-muted-foreground">Waived</p>
+                  <p>
+                    {fmtDate(chargeDetail.waivedAt)}
+                    {chargeDetail.waiverReason ? ` — ${chargeDetail.waiverReason}` : ''}
+                  </p>
+                </div>
+              )}
+              {chargeDetail.recoveries.length > 0 && (
+                <div>
+                  <p className="text-muted-foreground">Recovered so far</p>
+                  <p className="tabular-nums">
+                    {fmtMoney(chargeDetail.amountRecovered, chargeDetail.currencyCode)}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

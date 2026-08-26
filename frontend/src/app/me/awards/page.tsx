@@ -45,35 +45,38 @@ const fmtMoney = (v?: number | null) =>
  * ⚠ **"My awards" did not exist until slice 11.** Every route on this surface was about taking part
  * in the process; there was no way to see what you had actually won. The gap was found by the UI
  * payload probe, not by anyone using the system.
+ *
+ * Area 25 slice 9: re-homed from /hr/awards/me into the portal shell (D3 — moved, not redirected),
+ * subpages with it.
  */
 export default function MyAwardsPage() {
   const { data: myAwards, isLoading: loadingAwards } = useQuery({
-    queryKey: ['my-awards'],
+    queryKey: ['me', 'awards', 'received'],
     queryFn: () => awardsService.getMyAwards(),
   });
 
   const { data: myLongService } = useQuery({
-    queryKey: ['my-long-service'],
+    queryKey: ['me', 'awards', 'long-service'],
     queryFn: () => awardsService.getMyLongServiceAwards(),
   });
 
   const { data: myNominations, isLoading: loadingNominations } = useQuery({
-    queryKey: ['my-nominations'],
+    queryKey: ['me', 'awards', 'nominations'],
     queryFn: () => awardsService.getMyNominations(),
   });
 
   const { data: openCycles } = useQuery({
-    queryKey: ['my-open-cycles'],
+    queryKey: ['me', 'awards', 'open-cycles'],
     queryFn: () => awardsService.getMyOpenCycles(),
   });
 
   const { data: votingCycles } = useQuery({
-    queryKey: ['my-voting-cycles'],
+    queryKey: ['me', 'awards', 'voting-cycles'],
     queryFn: () => awardsService.getMyVotingCycles(),
   });
 
   const { data: pendingReviews } = useQuery({
-    queryKey: ['my-pending-reviews'],
+    queryKey: ['me', 'awards', 'pending-reviews'],
     queryFn: () => awardsService.getMyPendingReviews(),
   });
 
@@ -85,16 +88,16 @@ export default function MyAwardsPage() {
   const owed = pendingReviews ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
-        title="My awards"
+        title="My Awards"
         description="What you have been awarded, who you have put forward, and what is open to you now."
-        backHref="/hr"
+        backHref="/me"
         actions={
           <div className="flex gap-2">
             {openForVoting.length > 0 && (
               <Button variant="outline" asChild>
-                <Link href="/hr/awards/me/vote">
+                <Link href="/me/awards/vote">
                   <Vote className="mr-2 h-4 w-4" />
                   Vote
                 </Link>
@@ -102,14 +105,14 @@ export default function MyAwardsPage() {
             )}
             {owed.length > 0 && (
               <Button variant="outline" asChild>
-                <Link href="/hr/awards/me/reviews">
+                <Link href="/me/awards/reviews">
                   <ClipboardCheck className="mr-2 h-4 w-4" />
                   Score ({owed.length})
                 </Link>
               </Button>
             )}
             <Button asChild disabled={openForNomination.length === 0}>
-              <Link href="/hr/awards/me/nominate">
+              <Link href="/me/awards/nominate">
                 <UserPlus className="mr-2 h-4 w-4" />
                 Nominate a colleague
               </Link>
@@ -123,7 +126,7 @@ export default function MyAwardsPage() {
         <div className="grid gap-4 md:grid-cols-3">
           {openForNomination.length > 0 && (
             <Card className="transition hover:border-primary">
-              <Link href="/hr/awards/me/nominate">
+              <Link href="/me/awards/nominate">
               <CardContent className="flex items-center gap-3 p-4">
                 <UserPlus className="h-5 w-5 text-sky-600" />
                 <div className="min-w-0">
@@ -142,7 +145,7 @@ export default function MyAwardsPage() {
 
           {openForVoting.length > 0 && (
             <Card className="transition hover:border-primary">
-              <Link href="/hr/awards/me/vote">
+              <Link href="/me/awards/vote">
               <CardContent className="flex items-center gap-3 p-4">
                 <Vote className="h-5 w-5 text-violet-600" />
                 <div className="min-w-0">
@@ -162,7 +165,7 @@ export default function MyAwardsPage() {
               screen they will ever open. */}
           {owed.length > 0 && (
             <Card className="transition hover:border-primary">
-              <Link href="/hr/awards/me/reviews">
+              <Link href="/me/awards/reviews">
               <CardContent className="flex items-center gap-3 p-4">
                 <ClipboardCheck className="h-5 w-5 text-amber-600" />
                 <div className="min-w-0">
@@ -302,7 +305,7 @@ export default function MyAwardsPage() {
                 {nominations.map((n) => (
                   <TableRow key={n.id}>
                     <TableCell className="font-medium">
-                      <Link className="underline" href={`/hr/awards/me/nominations/${n.id}`}>
+                      <Link className="underline" href={`/me/awards/nominations/${n.id}`}>
                         {n.nominationNumber}
                       </Link>
                     </TableCell>
@@ -320,6 +323,8 @@ export default function MyAwardsPage() {
         </CardContent>
       </Card>
 
+      {/* The desk register link stays: it is permission-gated there, and an HR user arriving
+          through the portal switcher is exactly who follows it. */}
       <p className="text-sm text-muted-foreground">
         Managing the awards themselves?{' '}
         <Link className="underline" href="/hr/awards">

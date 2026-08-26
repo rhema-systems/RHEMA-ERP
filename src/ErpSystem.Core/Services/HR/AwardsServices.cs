@@ -2071,6 +2071,24 @@ public class AwardCommitteeReviewService : IAwardCommitteeReviewService
             .ToSummaryDtoList();
     }
 
+    public async Task<bool> IsInvolvedInCycleAsync(Guid reviewerId, Guid cycleId)
+    {
+        var tenantId = GetTenantId();
+
+        var memberships = (await _memberRepo.GetByEmployeeIdAsync(reviewerId))
+            .Where(m => m.TenantId == tenantId && !m.IsDeleted && m.IsActive)
+            .Select(m => m.CommitteeId)
+            .Distinct()
+            .ToList();
+        if (memberships.Count == 0)
+            return false;
+
+        // Involvement is committee-routed nominations in THIS cycle — whether already scored or
+        // still owed. A reviewer's history in other cycles proves nothing about this one.
+        var nominations = await _nominationRepo.GetForCommitteesAsync(tenantId, memberships);
+        return nominations.Any(n => n.AwardCycleId == cycleId);
+    }
+
 
 
     public async Task<AwardCommitteeReviewDto> SubmitReviewAsync(Guid nominationId, Guid reviewerId, Guid userId, SubmitCommitteeReviewDto dto)

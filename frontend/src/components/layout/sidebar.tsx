@@ -14,7 +14,6 @@ import {
   LayoutDashboard,
   Users,
   Trophy,
-  Vote,
   ShoppingCart,
   Package,
   CreditCard,
@@ -696,8 +695,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Returns', href: '/hr/assets/returns', icon: Undo2, permissions: ['HR.Assets.Read'] },
           { title: 'Register Report', href: '/hr/assets/report', icon: FileText, permissions: ['HR.Assets.Read'] },
           { title: 'Reminders', href: '/hr/assets/reminders', icon: BellRing, permissions: ['HR.Assets.Read'] },
-          // Open to every employee; the register above answers 403 without HR.
-          { title: 'My Assets', href: '/hr/assets/me', icon: UserCheck },
+          // Area 25 slice 9: "My Assets" moved to the portal (/me/assets), via "My Self-Service".
         ],
       },
       {
@@ -797,17 +795,8 @@ export const navigationItems: NavItem[] = [
         icon: Medal,
         children: [
           { title: 'Register', href: '/hr/awards', icon: Medal },
-          // Deliberately its own entry, and deliberately NOT permission-gated. Nominating a
-          // colleague, voting and scoring as a committee member are acts every employee performs -
-          // entitlement is read off the record, not granted - so this is the one awards screen most
-          // of its users will ever open. Gating it on HR.Awards.Read would lock the whole workforce
-          // out of the feature the area exists for.
-          { title: 'My Awards', href: '/hr/awards/me', icon: Award },
-          // The three acts the area exists for. Deliberately NOT permission-gated, for the same
-          // reason as "My Awards": entitlement to nominate, vote and score is read off the record.
-          { title: 'Nominate', href: '/hr/awards/me/nominate', icon: UserPlus },
-          { title: 'Vote', href: '/hr/awards/me/vote', icon: Vote },
-          { title: 'Score Nominations', href: '/hr/awards/me/reviews', icon: ClipboardCheck },
+          // Area 25 slice 9: the self surface (My Awards, Nominate, Vote, Score) moved to the
+          // portal under /me/awards — reachable via "My Self-Service". Only the desk stays here.
           { title: 'Who Qualifies', href: '/hr/awards/eligibility', icon: Users },
           { title: 'Results', href: '/hr/awards/results', icon: Trophy },
           { title: 'Long Service', href: '/hr/awards/long-service', icon: Medal },
@@ -859,22 +848,19 @@ export const navigationItems: NavItem[] = [
           // and the register above answers 403 for them — this is where their work appears. The
           // engine decides its contents, per case and per step.
           { title: 'Awaiting My Confirmation', href: '/hr/discipline/approvals', icon: Check },
-          // Open to every employee: the cases raised about them. The register above answers 403
-          // for non-HR, so this is the only discipline screen most people can open.
-          { title: 'My Record', href: '/hr/discipline/mine', icon: UserCheck },
+          // Area 25 slice 9: "My Record" moved to the portal (/me/discipline).
         ],
       },
       {
         // Area 9 slice 7, FR-HR-181. Separate from Discipline on purpose: a disciplinary case is
         // raised ABOUT an employee and a grievance BY one, which gives them opposite permissions —
         // HR cannot file, escalate or withdraw a grievance at all.
+        // Area 25 slice 9: the employee surface (mine, filing, the detail) moved to the portal
+        // under /me/grievances; the register stays and its rows open the portal detail.
         title: 'Grievances',
-        href: '/hr/grievances/mine',
+        href: '/hr/grievances',
         icon: MessagesSquare,
         children: [
-          // The employee's own page first: it is the one most people will use, and the register
-          // below answers 403 for anyone outside HR.
-          { title: 'My Grievances', href: '/hr/grievances/mine', icon: MessagesSquare },
           { title: 'Register', href: '/hr/grievances', icon: ClipboardList, permissions: ['HR.Discipline.Read'] },
         ],
       },

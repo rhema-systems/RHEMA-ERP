@@ -35,6 +35,11 @@ import type { AwardCycleSummary } from '@/types/hr/awards';
  * ⚠ **Only the eligible are offered, and never the reasons anyone else failed.** The awards desk
  * sees those; an employee choosing somebody to nominate has no business reading why a colleague did
  * not qualify.
+ *
+ * Area 25 slice 9: re-homed from /hr/awards/me/nominate (D3). The award-type read now rides the
+ * NEW self arm `awards/me/types/{id}` — this page used to call the desk `GET Awards/types/{id}`,
+ * which needs HR.Awards.Read, so a plain employee 403'd the moment they picked a cycle (measured
+ * live in probe-slice9).
  */
 export default function NominatePage() {
   const router = useRouter();
@@ -54,7 +59,7 @@ export default function NominatePage() {
   }, [search]);
 
   const { data: cycles, isLoading: loadingCycles } = useQuery({
-    queryKey: ['my-open-cycles'],
+    queryKey: ['me', 'awards', 'open-cycles'],
     queryFn: () => awardsService.getMyOpenCycles(),
   });
 
@@ -62,28 +67,32 @@ export default function NominatePage() {
   const cycle = openCycles.find((c) => c.id === cycleId);
 
   // The award type behind the chosen cycle decides whether this is a team nomination and whether
-  // the employee may put their own name forward.
+  // the employee may put their own name forward. The SELF arm — the desk read is HR-gated.
   const { data: awardType } = useQuery({
-    queryKey: ['award-type', cycle?.awardTypeId],
-    queryFn: () => awardsService.getType(cycle!.awardTypeId),
+    queryKey: ['me', 'awards', 'type', cycle?.awardTypeId],
+    queryFn: () => awardsService.getMyType(cycle?.awardTypeId as string),
     enabled: Boolean(cycle?.awardTypeId),
   });
 
   const { data: candidates, isFetching: searching } = useQuery({
-    queryKey: ['award-candidates', cycle?.awardTypeId, debounced],
+    queryKey: ['me', 'awards', 'candidates', cycle?.awardTypeId, debounced],
     queryFn: () =>
-      awardsService.getCandidates(cycle!.awardTypeId, { search: debounced || undefined, pageSize: 20 }),
+      awardsService.getCandidates(cycle?.awardTypeId as string, {
+        search: debounced || undefined,
+        pageSize: 20,
+      }),
     enabled: Boolean(cycle?.awardTypeId) && !awardType?.isTeamAward,
   });
 
   const create = useMutation({
     mutationFn: async () => {
+      if (!cycle) throw new Error('Choose an award first.');
       const nomination = await awardsService.createNomination({
-        awardTypeId: cycle!.awardTypeId,
-        awardCycleId: cycle!.id,
+        awardTypeId: cycle.awardTypeId,
+        awardCycleId: cycle.id,
         nomineeId: awardType?.isTeamAward ? null : nomineeId,
         teamName: awardType?.isTeamAward ? teamName.trim() : null,
-        year: cycle!.year,
+        year: cycle.year,
         justification: justification.trim(),
       });
       // Submitting is a second act, and deliberately so: a draft can be edited, a submitted
@@ -97,7 +106,7 @@ export default function NominatePage() {
           ? `Nomination ${nomination.nominationNumber} submitted.`
           : `Nomination ${nomination.nominationNumber} saved as a draft.`,
       );
-      router.push(`/hr/awards/me/nominations/${nomination.id}`);
+      router.push(`/me/awards/nominations/${nomination.id}`);
     },
     onError: (e: any) =>
       toast.error(e?.body?.detail || e?.body?.message || e?.message || 'The nomination was refused.'),
@@ -112,11 +121,11 @@ export default function NominatePage() {
   }, [cycle, justification, awardType, teamName, nomineeId]);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Nominate a colleague"
         description="Put someone forward for an award that is open for nominations."
-        backHref="/hr/awards/me"
+        backHref="/me/awards"
       />
 
       {loadingCycles ? (
@@ -284,7 +293,7 @@ export default function NominatePage() {
                 )}
 
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => router.push('/hr/awards/me')}>
+                  <Button variant="outline" onClick={() => router.push('/me/awards')}>
                     Cancel
                   </Button>
                   <Button disabled={!ready || create.isPending} onClick={() => create.mutate()}>

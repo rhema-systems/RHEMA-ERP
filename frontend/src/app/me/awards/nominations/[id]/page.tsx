@@ -26,6 +26,10 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
  *
  * ⚠ **Somebody else's nomination is a 404 here, not a 403.** A 403 would confirm the id exists and
  * turn this route into a way of enumerating nomination ids.
+ *
+ * Area 25 slice 9: re-homed from /hr/awards/me/nominations/[id] (D3). The Withdraw button works
+ * for the first time — the service used to POST a route that never existed (the backend is
+ * DELETE nominations/{id}).
  */
 export default function MyNominationPage() {
   const { id } = useParams<{ id: string }>();
@@ -34,7 +38,7 @@ export default function MyNominationPage() {
   const [justification, setJustification] = useState('');
 
   const { data: nomination, isLoading, isError } = useQuery({
-    queryKey: ['my-nomination', id],
+    queryKey: ['me', 'awards', 'nominations', id],
     queryFn: () => awardsService.getMyNomination(id),
     retry: false,
   });
@@ -47,8 +51,7 @@ export default function MyNominationPage() {
   const dirty = nomination ? justification.trim() !== (nomination.justification ?? '').trim() : false;
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['my-nomination', id] });
-    queryClient.invalidateQueries({ queryKey: ['my-nominations'] });
+    queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'nominations'] });
   };
 
   const save = useMutation({
@@ -71,7 +74,7 @@ export default function MyNominationPage() {
 
   const withdraw = useMutation({
     mutationFn: () => awardsService.withdrawNomination(id),
-    onSuccess: () => { toast.success('Withdrawn.'); invalidate(); router.push('/hr/awards/me'); },
+    onSuccess: () => { toast.success('Withdrawn.'); invalidate(); router.push('/me/awards'); },
     onError: (e: any) => toast.error(e?.body?.detail || e?.message || 'The withdrawal was refused.'),
   });
 
@@ -85,8 +88,8 @@ export default function MyNominationPage() {
 
   if (isError || !nomination) {
     return (
-      <div className="space-y-6 p-6">
-        <PageHeader title="Nomination" backHref="/hr/awards/me" />
+      <div className="space-y-6">
+        <PageHeader title="Nomination" backHref="/me/awards" />
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
@@ -98,11 +101,11 @@ export default function MyNominationPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={nomination.nominationNumber}
         description={`${nomination.awardTypeName}${nomination.awardCycleName ? ` — ${nomination.awardCycleName}` : ''}`}
-        backHref="/hr/awards/me"
+        backHref="/me/awards"
         actions={<Badge variant="secondary">{nomination.statusName}</Badge>}
       />
 
