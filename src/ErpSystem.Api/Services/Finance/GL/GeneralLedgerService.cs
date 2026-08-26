@@ -27,6 +27,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IAccountingBookService _accountingBookService;
         private readonly IFinancePostingEngine _financePostingEngine;
         private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
+        private readonly FinanceDimensionReportingFilterService? _dimensionReportingFilters;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -37,7 +38,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IDocumentNumberingService documentNumberingService,
             IAccountingBookService accountingBookService,
             IFinancePostingEngine financePostingEngine,
-            IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null)
+            IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null,
+            FinanceDimensionReportingFilterService? dimensionReportingFilters = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -48,6 +50,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _accountingBookService = accountingBookService;
             _financePostingEngine = financePostingEngine;
             _statementLayoutExecutionService = statementLayoutExecutionService;
+            _dimensionReportingFilters = dimensionReportingFilters;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -599,6 +602,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             var tenantId = TenantId;
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -610,7 +614,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 tenantId,
                 accounts.Select(a => a.Id).ToArray(),
                 request.AsAtDate,
-                bookClassification);
+                bookClassification,
+                dimensionFilters);
             var accountBalances = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
@@ -683,7 +688,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.UseDefaultLayout,
                 request.IncludeAccountDetails,
                 request.AccountIds,
-                request.SegmentFilters);
+                request.SegmentFilters,
+                request.DimensionFilters);
 
             return balanceSheet;
         }
@@ -942,6 +948,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             return _context.AccountTransactions
                 .AsNoTracking()
                 .Include(t => t.JournalEntry)
+                .Include(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Where(t =>
                     t.TenantId == tenantId &&
                     !t.IsDeleted &&
@@ -952,11 +960,38 @@ namespace ErpSystem.Api.Services.Finance.GL
                     statuses.Contains(t.JournalEntry.PostingStatus));
         }
 
+        private async Task<IReadOnlyCollection<ResolvedFinanceDimensionFilter>> ResolveDimensionFiltersAsync(
+            IEnumerable<FinanceDimensionFilterDto>? filters,
+            CancellationToken cancellationToken = default)
+        {
+            var requested = filters?.ToList() ?? new List<FinanceDimensionFilterDto>();
+            if (requested.Count == 0)
+            {
+                return Array.Empty<ResolvedFinanceDimensionFilter>();
+            }
+
+            if (_dimensionReportingFilters == null)
+            {
+                throw new InvalidOperationException(
+                    "Transaction-dimension filtering is not available for Finance reports.");
+            }
+
+            return await _dimensionReportingFilters.ResolveAsync(requested, cancellationToken);
+        }
+
+        private IQueryable<AccountTransaction> ApplyDimensionFilters(
+            IQueryable<AccountTransaction> query,
+            IReadOnlyCollection<ResolvedFinanceDimensionFilter>? filters)
+            => filters == null || filters.Count == 0
+                ? query
+                : _dimensionReportingFilters!.Apply(query, filters);
+
         private async Task<Dictionary<Guid, decimal>> CalculatePostedRawBalancesAsOfAsync(
             Guid tenantId,
             IReadOnlyCollection<Guid> accountIds,
             DateTime asAtDate,
-            string? bookClassification)
+            string? bookClassification,
+            IReadOnlyCollection<ResolvedFinanceDimensionFilter>? dimensionFilters = null)
         {
             if (accountIds.Count == 0)
             {
@@ -964,7 +999,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var endExclusive = asAtDate.Date.AddDays(1);
-            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+            return await ApplyDimensionFilters(
+                    BuildPostedLedgerQuery(tenantId, bookClassification),
+                    dimensionFilters)
                 .Where(t => accountIds.Contains(t.AccountId) && t.TransactionDate < endExclusive)
                 .GroupBy(t => t.AccountId)
                 .Select(g => new { AccountId = g.Key, Balance = g.Sum(t => t.DebitAmount - t.CreditAmount) })
@@ -976,7 +1013,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IReadOnlyCollection<Guid> accountIds,
             DateTime startDate,
             DateTime endDate,
-            string? bookClassification)
+            string? bookClassification,
+            IReadOnlyCollection<ResolvedFinanceDimensionFilter>? dimensionFilters = null)
         {
             if (accountIds.Count == 0)
             {
@@ -985,7 +1023,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var start = startDate.Date;
             var endExclusive = endDate.Date.AddDays(1);
-            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+            return await ApplyDimensionFilters(
+                    BuildPostedLedgerQuery(tenantId, bookClassification),
+                    dimensionFilters)
                 .Where(t =>
                     accountIds.Contains(t.AccountId) &&
                     t.TransactionDate >= start &&
@@ -1088,6 +1128,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -1100,7 +1141,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 accounts.Select(a => a.Id).ToArray(),
                 request.PeriodStart,
                 request.PeriodEnd,
-                bookClassification);
+                bookClassification,
+                dimensionFilters);
             var disposalGainAccountIds = await GetTenantDisposalGainAccountIdsAsync(tenantId);
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
@@ -1244,7 +1286,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.UseDefaultLayout,
                 request.IncludeAccountDetails,
                 request.AccountIds,
-                request.SegmentFilters);
+                request.SegmentFilters,
+                request.DimensionFilters);
 
             return incomeStatement;
         }
@@ -1258,7 +1301,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             bool useDefaultLayout,
             bool includeAccountDetails,
             IEnumerable<Guid>? accountIds,
-            IEnumerable<FinanceSegmentFilterDto>? segmentFilters)
+            IEnumerable<FinanceSegmentFilterDto>? segmentFilters,
+            IEnumerable<FinanceDimensionFilterDto>? dimensionFilters)
         {
             var requestedLayoutId = layoutId.HasValue && layoutId.Value != Guid.Empty
                 ? layoutId
@@ -1312,7 +1356,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                             .Distinct()
                             .ToList() ?? new List<Guid>(),
                         SegmentFilters = segmentFilters?.ToList()
-                            ?? new List<FinanceSegmentFilterDto>()
+                            ?? new List<FinanceSegmentFilterDto>(),
+                        DimensionFilters = dimensionFilters?.ToList()
+                            ?? new List<FinanceDimensionFilterDto>()
                     });
             }
             catch (KeyNotFoundException) when (!requestedLayoutId.HasValue)
@@ -1612,6 +1658,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var endExclusive = request.EndDate.Date.AddDays(1);
             var selectedAccountIds = request.AccountIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? new List<Guid>();
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -1630,7 +1677,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             foreach (var account in accounts)
             {
-                var transactionBaseQuery = BuildPostedLedgerQuery(tenantId, bookClassification, request.IncludeReversed)
+                var transactionBaseQuery = ApplyDimensionFilters(
+                        BuildPostedLedgerQuery(tenantId, bookClassification, request.IncludeReversed),
+                        dimensionFilters)
                     .Where(t => t.AccountId == account.Id);
 
                 if (!request.IncludeReversed)
@@ -1694,7 +1743,21 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ForeignAmount = transaction.ForeignCurrencyAmount,
                         ExchangeRate = transaction.ExchangeRate,
                         IsReversed = transaction.IsReversed,
-                        SegmentString = transaction.SegmentString
+                        SegmentString = transaction.SegmentString,
+                        FinanceDimensionSetId = transaction.FinanceDimensionSetId,
+                        FinanceDimensionDisplay = transaction.FinanceDimensionSet?.DisplayValue,
+                        Dimensions = transaction.FinanceDimensionSet?.Items
+                            .OrderBy(item => item.DimensionCodeSnapshot)
+                            .Select(item => new FinanceDimensionAssignmentDto
+                            {
+                                DefinitionId = item.FinanceDimensionDefinitionId,
+                                ValueId = item.FinanceDimensionValueId,
+                                DimensionCode = item.DimensionCodeSnapshot,
+                                DimensionName = item.DimensionCodeSnapshot,
+                                ValueCode = item.DimensionValueCodeSnapshot,
+                                ValueName = item.DimensionValueNameSnapshot
+                            })
+                            .ToList() ?? new List<FinanceDimensionAssignmentDto>()
                     });
                 }
 
@@ -1896,6 +1959,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             var tenantId = TenantId;
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -1919,7 +1983,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     tenantId,
                     accountIds,
                     periodStart.Value.AddDays(-1),
-                    bookClassification)
+                    bookClassification,
+                    dimensionFilters)
                 : new Dictionary<Guid, decimal>();
 
             var periodMovements = periodStart.HasValue
@@ -1928,13 +1993,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                     accountIds,
                     periodStart.Value,
                     asAtDate,
-                    bookClassification)
+                    bookClassification,
+                    dimensionFilters)
                 : await CalculatePostedPeriodMovementAsync(
                     tenantId,
                     accountIds,
                     DateTime.MinValue,
                     asAtDate,
-                    bookClassification);
+                    bookClassification,
+                    dimensionFilters);
 
             var trialBalance = new TrialBalanceDto
             {

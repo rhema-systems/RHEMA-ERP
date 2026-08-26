@@ -127,7 +127,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             BookClassification = request.BookClassification,
             IncludeZeroBalances = request.IncludeZeroBalances,
             AccountIds = request.AccountIds,
-            SegmentFilters = request.SegmentFilters
+            SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters
         });
 
         var rows = new List<string[]>
@@ -173,6 +174,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             IncludeAccountDetails = request.IncludeAccountDetails,
             AccountIds = request.AccountIds,
             SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters,
             LayoutId = request.LayoutId,
             UseDefaultLayout = request.UseDefaultLayout
         });
@@ -270,6 +272,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             IncludeAccountDetails = request.IncludeAccountDetails,
             AccountIds = request.AccountIds,
             SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters,
             LayoutId = request.LayoutId,
             UseDefaultLayout = request.UseDefaultLayout
         });
@@ -366,12 +369,13 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             BookClassification = request.BookClassification,
             IncludeReversed = request.IncludeReversed,
             IncludeOpeningBalances = request.IncludeOpeningBalances,
-            SegmentFilters = request.SegmentFilters
+            SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters
         });
 
         var rows = new List<string[]>
         {
-            new[] { "AccountNumber", "AccountName", "JournalEntryNumber", "TransactionDate", "LineNumber", "Description", "Reference", "SourceModule", "Debit", "Credit", "RunningBalance", "RunningBalanceType", "Segment" }
+            new[] { "AccountNumber", "AccountName", "JournalEntryNumber", "TransactionDate", "LineNumber", "Description", "Reference", "SourceModule", "Debit", "Credit", "RunningBalance", "RunningBalanceType", "Segment", "TransactionDimensions" }
         };
         foreach (var account in report.Accounts)
         {
@@ -389,7 +393,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 Money(line.CreditAmount),
                 Money(line.RunningBalance),
                 line.RunningBalanceType,
-                line.SegmentString ?? string.Empty
+                line.SegmentString ?? string.Empty,
+                line.FinanceDimensionDisplay ?? string.Empty
             }));
         }
 

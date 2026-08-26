@@ -15,6 +15,15 @@ import type { Account, DetailedLedgerAccountDto, DetailedLedgerReportDto, Financ
 import { Download, Loader2, Printer, Search } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { DEFAULT_ACCOUNTING_BOOKS, getAccountingBookName } from '@/lib/finance/accounting-books';
+import { ReportDimensionFilters } from '@/components/finance/reports/ReportDimensionFilters';
+import { AppliedReportDimensionFilters } from '@/components/finance/reports/AppliedReportDimensionFilters';
+import {
+    buildFinanceDimensionFilters,
+    readFinanceDimensionSelections,
+    toFinanceDimensionFilterQueryParameters,
+    type ReportDimensionSelections,
+} from '@/lib/finance/report-dimension-filters';
+import type { FinanceDimensionDefinition, FinanceDimensionFilterDto } from '@/types/finance';
 
 const formatDateInput = (date: Date) => date.toISOString().split('T')[0];
 const parseBooleanParam = (value: string | null, fallback: boolean) => value == null ? fallback : value === 'true';
@@ -34,6 +43,10 @@ export default function DetailedLedgerPage() {
             .filter(Boolean)
     );
     const [accounts, setAccounts] = useState<Account[]>([]);
+    const [transactionDimensions, setTransactionDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [dimensionSelections, setDimensionSelections] = useState<ReportDimensionSelections>({});
+    const [appliedDimensionFilters, setAppliedDimensionFilters] = useState<FinanceDimensionFilterDto[]>([]);
+    const [dimensionLoadError, setDimensionLoadError] = useState<string | null>(null);
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [report, setReport] = useState<DetailedLedgerReportDto | null>(null);
     const [loading, setLoading] = useState(true);
@@ -49,13 +62,21 @@ export default function DetailedLedgerPage() {
         try {
             setLoading(true);
             const settingsData = await financeDataService.getFinanceSettings();
-            const [accountData, books] = await Promise.all([
+            const [accountData, books, dimensionOptions] = await Promise.all([
                 financeDataService.getAccounts({ coaType: settingsData.coaType }),
                 financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
+                financeDataService.getFinanceDimensions(true).catch(() => {
+                    setDimensionLoadError('Transaction-dimension filters could not be loaded.');
+                    return [];
+                }),
             ]);
             setSettings(settingsData);
             if (books.length > 0) setAccountingBooks(books);
             setAccounts(accountData.filter(account => account.status === 'Active'));
+            setTransactionDimensions(dimensionOptions);
+            const initialDimensionSelections = readFinanceDimensionSelections(searchParams, dimensionOptions);
+            const initialDimensionFilters = buildFinanceDimensionFilters(dimensionOptions, initialDimensionSelections);
+            setDimensionSelections(initialDimensionSelections);
 
             if (searchParams.has('accountIds') || searchParams.has('startDate') || searchParams.has('endDate')) {
                 const data = await financeDataService.getDetailedLedger({
@@ -65,8 +86,10 @@ export default function DetailedLedgerPage() {
                     bookClassification,
                     includeReversed,
                     includeOpeningBalances: parseBooleanParam(searchParams.get('includeOpeningBalances'), true),
+                    dimensionFilters: initialDimensionFilters,
                 });
                 setReport(data);
+                setAppliedDimensionFilters(initialDimensionFilters);
             }
         } catch (err) {
             console.error('Error loading detailed ledger setup data:', err);
@@ -101,6 +124,7 @@ export default function DetailedLedgerPage() {
         try {
             setRunning(true);
             setError(null);
+            const dimensionFilters = buildFinanceDimensionFilters(transactionDimensions, dimensionSelections);
             const data = await financeDataService.getDetailedLedger({
                 startDate,
                 endDate,
@@ -108,8 +132,10 @@ export default function DetailedLedgerPage() {
                 bookClassification,
                 includeReversed,
                 includeOpeningBalances: true,
+                dimensionFilters,
             });
             setReport(data);
+            setAppliedDimensionFilters(dimensionFilters);
         } catch (err) {
             console.error('Error loading detailed ledger report:', err);
             setError('Could not generate the detailed ledger report.');
@@ -136,7 +162,12 @@ export default function DetailedLedgerPage() {
         bookClassification,
         includeReversed,
         includeOpeningBalances: true,
+        ...toFinanceDimensionFilterQueryParameters(appliedDimensionFilters),
     });
+
+    const updateDimensionSelection = (definitionId: string, valueCode: string) => {
+        setDimensionSelections((current) => ({ ...current, [definitionId]: valueCode }));
+    };
 
     const printReport = async () => {
         try {
@@ -254,11 +285,28 @@ export default function DetailedLedgerPage() {
                             />
                             <Label htmlFor="include-reversed">Include reversed</Label>
                         </div>
+                        <ReportDimensionFilters
+                            definitions={transactionDimensions}
+                            selections={dimensionSelections}
+                            onSelectionChange={updateDimensionSelection}
+                            disabled={running}
+                        />
                         <Button className="mt-6" onClick={runReport} disabled={running}>
                             {running && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Run Report
                         </Button>
                     </div>
+                    <AppliedReportDimensionFilters
+                        definitions={transactionDimensions}
+                        appliedFilters={appliedDimensionFilters}
+                        pendingFilters={buildFinanceDimensionFilters(transactionDimensions, dimensionSelections)}
+                    />
+                    {dimensionLoadError && <div className="mt-4 text-sm text-amber-700">{dimensionLoadError}</div>}
+                    {appliedDimensionFilters.length > 0 && (
+                        <p className="mt-3 text-xs text-amber-700">
+                            This ledger view includes only lines carrying the selected immutable transaction coding.
+                        </p>
+                    )}
 
                     <div className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
                         <div className="space-y-3">
@@ -386,6 +434,7 @@ function LedgerAccountSection({
                             <TableHead className="w-[130px]">Journal</TableHead>
                             <TableHead className="w-[130px]">Reference</TableHead>
                             <TableHead>Description</TableHead>
+                            <TableHead>Transaction Dimensions</TableHead>
                             <TableHead className="w-[90px]">Source</TableHead>
                             <TableHead className="text-right">Debit</TableHead>
                             <TableHead className="text-right">Credit</TableHead>
@@ -399,6 +448,7 @@ function LedgerAccountSection({
                                 <TableCell className="font-mono text-sm">{line.journalEntryNumber}</TableCell>
                                 <TableCell>{line.reference || '-'}</TableCell>
                                 <TableCell>{line.description || '-'}</TableCell>
+                                <TableCell className="text-xs">{line.financeDimensionDisplay || '-'}</TableCell>
                                 <TableCell>{line.sourceModule || 'GL'}</TableCell>
                                 <TableCell className="text-right">{line.debitAmount ? formatMoney(line.debitAmount) : '-'}</TableCell>
                                 <TableCell className="text-right">{line.creditAmount ? formatMoney(line.creditAmount) : '-'}</TableCell>
@@ -406,7 +456,7 @@ function LedgerAccountSection({
                             </TableRow>
                         ))}
                         <TableRow className="bg-muted/30 font-bold">
-                            <TableCell colSpan={5} className="text-right">Account Totals</TableCell>
+                            <TableCell colSpan={6} className="text-right">Account Totals</TableCell>
                             <TableCell className="text-right">{formatMoney(account.totalDebits)}</TableCell>
                             <TableCell className="text-right">{formatMoney(account.totalCredits)}</TableCell>
                             <TableCell />

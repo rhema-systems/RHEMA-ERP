@@ -106,3 +106,18 @@ public sealed class FinanceDimensionSetDto
     public string DisplayValue { get; set; } = string.Empty;
     public List<FinanceDimensionAssignmentDto> Assignments { get; set; } = [];
 }
+
+/// <summary>
+/// Transaction-level reporting filter. Values within one filter are ORed; multiple
+/// dimension filters are ANDed. Definition/value identities are resolved inside the
+/// current Finance tenant before any ledger query is executed.
+/// </summary>
+public sealed class FinanceDimensionFilterDto
+{
+    public Guid? FinanceDimensionDefinitionId { get; set; }
+
+    [MaxLength(30)]
+    public string? DimensionCode { get; set; }
+
+    public List<string> ValueCodes { get; set; } = [];
+}

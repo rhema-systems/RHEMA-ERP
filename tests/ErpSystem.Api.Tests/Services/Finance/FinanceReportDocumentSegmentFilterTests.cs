@@ -14,6 +14,48 @@ public sealed class FinanceReportDocumentSegmentFilterTests
 {
     [Fact]
     [Trait("Category", "ReportingExport")]
+    public async Task TrialBalanceDocument_UsesStructuredTransactionDimensionFilters()
+    {
+        var departmentId = Guid.NewGuid();
+        var ledger = new Mock<IGeneralLedgerService>();
+        ledger
+            .Setup(service => service.GenerateTrialBalanceAsync(It.IsAny<TrialBalanceRequestDto>()))
+            .ReturnsAsync(new TrialBalanceDto
+            {
+                CompanyName = "Test Company",
+                AsAtDate = new DateTime(2026, 7, 20),
+                BookClassification = "IFRS",
+                CurrencyCode = "GHS"
+            });
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(service => service.UserName).Returns("report-tester");
+        var builder = new TrialBalanceDocumentBuilder(ledger.Object, currentUser.Object);
+
+        var result = await builder.RenderAsync(new DocumentRenderRequestDto
+        {
+            DocumentType = DocumentTypes.FinanceTrialBalance,
+            Format = "pdf",
+            Options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["dimensionFilters[0].financeDimensionDefinitionId"] = departmentId.ToString(),
+                ["dimensionFilters[0].dimensionCode"] = "DEPT",
+                ["dimensionFilters[0].valueCodes"] = "FIN,OPS"
+            }
+        });
+
+        result.Content.Should().NotBeEmpty();
+        ExtractPdfText(result.Content)
+            .Should().Contain("DEPT=FIN/OPS");
+        ledger.Verify(service => service.GenerateTrialBalanceAsync(It.Is<TrialBalanceRequestDto>(request =>
+            request.DimensionFilters.Count == 1
+            && request.DimensionFilters[0].FinanceDimensionDefinitionId == departmentId
+            && request.DimensionFilters[0].DimensionCode == "DEPT"
+            && request.DimensionFilters[0].ValueCodes.SequenceEqual(new[] { "FIN", "OPS" }))), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "ReportingExport")]
     public async Task TrialBalanceDocument_UsesStructuredSegmentFilters()
     {
         var fundId = Guid.NewGuid();

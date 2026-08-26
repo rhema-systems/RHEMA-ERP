@@ -82,6 +82,7 @@ import type {
     OpeningStockOptions,
 } from '@/lib/finance/opening-balance-governance';
 import { appendFinanceSegmentFilters } from '@/lib/finance/report-segment-filters';
+import { appendFinanceDimensionFilters } from '@/lib/finance/report-dimension-filters';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
 import { apiService } from '@/services/api.service';
@@ -745,6 +746,7 @@ class FinanceDataService {
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<TrialBalanceReportDto>(`/finance/statements/trial-balance?${queryParams}`);
     }
@@ -759,6 +761,7 @@ class FinanceDataService {
         if (params.accountIds && params.accountIds.length > 0) {
             params.accountIds.forEach(accountId => queryParams.append('accountIds', accountId));
         }
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<DetailedLedgerReportDto>(`/finance/statements/detailed-ledger?${queryParams}`);
     }
@@ -772,6 +775,7 @@ class FinanceDataService {
         if (params.layoutId) queryParams.append('layoutId', params.layoutId);
         if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
     }
@@ -784,6 +788,7 @@ class FinanceDataService {
         if (params.layoutId) queryParams.append('layoutId', params.layoutId);
         if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
     }
