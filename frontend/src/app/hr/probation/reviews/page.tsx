@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ClipboardCheck, Loader2, PenLine, Send } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, Loader2, PenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -53,35 +53,30 @@ const RECOMMENDATIONS: ProbationReviewRecommendation[] = [
 ];
 
 /**
- * A reviewer's queue, and the employee's own.
+ * A reviewer's queue — the reviews the caller has been asked to conduct.
  *
- * ⚠ **Both tabs are token-derived, and they have to be.** The browser holds no employee id for the
+ * ⚠ **Token-derived, and it has to be.** The browser holds no employee id for the
  * signed-in user — the client `User` type carries roles and tenants but no employee link — so a
  * screen cannot call the by-id reviewer endpoint at all. Building this page is what surfaced that;
  * `reviews/to-conduct` exists because of it.
  *
- * ⚠ **Neither tab needs an HR permission.** A probation review is conducted by the employee's line
- * manager and acknowledged by the employee, and neither holds one. Entitlement is read off the
- * record by the API.
+ * ⚠ **No HR permission needed.** A probation review is conducted by the employee's line
+ * manager, who holds none. Entitlement is read off the record by the API.
+ *
+ * Area 25 slice 7: the "About me" tab (the employee's own reviews + acknowledgement)
+ * re-homed to the portal at /me/probation — this page is the reviewer's side only.
  */
 export default function ProbationReviewsPage() {
   const qc = useQueryClient();
   const [submitting, setSubmitting] = useState<ProbationReview | null>(null);
-  const [acknowledging, setAcknowledging] = useState<ProbationReview | null>(null);
 
   const { data: toConduct, isLoading: loadingQueue } = useQuery({
     queryKey: ['probation-reviews-to-conduct'],
     queryFn: () => probationService.getMyReviewerQueue(),
   });
 
-  const { data: mine, isLoading: loadingMine } = useQuery({
-    queryKey: ['probation-reviews-mine'],
-    queryFn: () => probationService.getMyReviews(),
-  });
-
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['probation-reviews-to-conduct'] });
-    void qc.invalidateQueries({ queryKey: ['probation-reviews-mine'] });
   };
 
   const complete = useMutation({
@@ -97,14 +92,13 @@ export default function ProbationReviewsPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Probation reviews"
-        description="Reviews you have been asked to conduct, and reviews of your own probation."
+        description="Reviews you have been asked to conduct. Reviews of your own probation live in your self-service portal."
         backHref="/hr/probation"
       />
 
       <Tabs defaultValue="conduct">
         <TabsList>
           <TabsTrigger value="conduct">To conduct ({toConduct?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="mine">About me ({mine?.length ?? 0})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="conduct">
@@ -159,60 +153,9 @@ export default function ProbationReviewsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="mine">
-          <Card>
-            <CardContent className="space-y-3 p-4">
-              {loadingMine ? (
-                <div className="flex justify-center p-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : !mine || mine.length === 0 ? (
-                <EmptyState
-                  icon={ClipboardCheck}
-                  title="No reviews about you"
-                  description="You are not currently on probation, or no review has been scheduled yet."
-                />
-              ) : (
-                mine.map((r) => (
-                  <div key={r.id} className="space-y-2 rounded-md border p-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="flex-1">
-                        <p className="font-medium">Review {r.reviewNumber}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {r.actualDate ? `Held ${fmtDate(r.actualDate)}` : `Due ${fmtDate(r.scheduledDate)}`}
-                          {r.reviewedByName ? ` · by ${r.reviewedByName}` : ''}
-                        </p>
-                      </div>
-                      {r.employeeAcknowledged ? (
-                        <Badge variant="secondary">Acknowledged</Badge>
-                      ) : r.recommendationName ? (
-                        <Button size="sm" onClick={() => setAcknowledging(r)}>
-                          <Send className="mr-2 h-4 w-4" />
-                          Acknowledge
-                        </Button>
-                      ) : (
-                        <Badge variant="outline">Not yet held</Badge>
-                      )}
-                    </div>
-                    {r.reviewerComments && (
-                      <p className="whitespace-pre-wrap text-sm">{r.reviewerComments}</p>
-                    )}
-                    {r.employeeResponse && (
-                      <p className="whitespace-pre-wrap rounded bg-muted p-2 text-sm">
-                        <span className="text-muted-foreground">Your response: </span>
-                        {r.employeeResponse}
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       <SubmitReviewDialog review={submitting} onClose={() => setSubmitting(null)} onDone={refresh} />
-      <AcknowledgeDialog review={acknowledging} onClose={() => setAcknowledging(null)} onDone={refresh} />
     </div>
   );
 }
@@ -358,65 +301,6 @@ function SubmitReviewDialog({
           <Button disabled={!canSubmit} onClick={() => submit.mutate(review)}>
             {submit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Record assessment
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AcknowledgeDialog({
-  review,
-  onClose,
-  onDone,
-}: {
-  review: ProbationReview | null;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [response, setResponse] = useState('');
-
-  const ack = useMutation({
-    mutationFn: (r: ProbationReview) =>
-      probationService.acknowledgeReview(r.id, {
-        reviewId: r.id,
-        employeeResponse: response.trim() || undefined,
-      }),
-    onSuccess: () => {
-      toast.success('Acknowledged');
-      onDone();
-      onClose();
-    },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Refused'),
-  });
-
-  if (!review) return null;
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Acknowledge review {review.reviewNumber}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          {/* Acknowledgement is testimony: it says the employee has SEEN the review, not that they
-              agree with it. The wording says so, and the response box is where disagreement goes. */}
-          <p className="text-sm text-muted-foreground">
-            This records that you have seen this review. It does not record agreement — use the box
-            below if you want your own comments on the record.
-          </p>
-          <div className="space-y-2">
-            <Label>Your response (optional)</Label>
-            <Textarea value={response} onChange={(e) => setResponse(e.target.value)} rows={4} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button disabled={ack.isPending} onClick={() => ack.mutate(review)}>
-            {ack.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            I have seen this review
           </Button>
         </DialogFooter>
       </DialogContent>

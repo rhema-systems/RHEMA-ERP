@@ -270,7 +270,10 @@ public class StaffTravelReminderService : IStaffTravelReminderService
                 d.DocumentType.ToString(),
                 d.ExpiryDate.Value.ToDateTime(TimeOnly.MinValue), days, tier,
                 $"TravelDocumentExpiring:{d.Id}:{d.ExpiryDate:yyyy-MM-dd}:{tier}",
-                $"/hr/travel/compliance/documents/{d.Id}"));
+                // Area 25 slice 7: /hr/travel/compliance/documents/{id} never existed as a route,
+                // and travel documents are employee-level with no dedicated desk register — the
+                // travel dashboard is the closest real surface until one is built.
+                "/hr/travel/dashboard"));
         }
 
         // 2. Visa applications whose visa expires within the horizon.
@@ -289,7 +292,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
                 "VisaExpiring", "Visa", v.Id, "Visa",
                 v.ExpiryDate.Value.ToDateTime(TimeOnly.MinValue), days, tier,
                 $"VisaExpiring:{v.Id}:{v.ExpiryDate:yyyy-MM-dd}:{tier}",
-                $"/hr/travel/requests/{v.StaffTravelRequestId}"));
+                $"/hr/travel/{v.StaffTravelRequestId}"));
         }
 
         // 3. Advances past their settlement deadline with money still outstanding.
@@ -303,7 +306,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
                             && a.SettlementDeadline >= backlogFloor
                             && (a.Status == TravelAdvanceStatus.Disbursed
                                 || a.Status == TravelAdvanceStatus.PartiallySettled))
-            .Select(a => new { a.Id, a.AdvanceNumber, a.SettlementDeadline })
+            .Select(a => new { a.Id, a.AdvanceNumber, a.SettlementDeadline, a.StaffTravelRequestId })
             .ToListAsync(cancellationToken);
         foreach (var a in advances)
         {
@@ -313,7 +316,9 @@ public class StaffTravelReminderService : IStaffTravelReminderService
                 "AdvanceSettlementOverdue", "Travel advance", a.Id, a.AdvanceNumber ?? string.Empty,
                 a.SettlementDeadline.Value.ToDateTime(TimeOnly.MinValue), days, tier,
                 $"AdvanceSettlementOverdue:{a.Id}:{a.SettlementDeadline:yyyy-MM-dd}:{tier}",
-                $"/hr/travel/finance/advances/{a.Id}"));
+                // Area 25 slice 7: /hr/travel/finance/advances/{id} never existed — the advance is
+                // worked from its request's Finance tab.
+                $"/hr/travel/{a.StaffTravelRequestId}"));
         }
 
         // 4. Approved trips about to depart.
@@ -333,7 +338,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
                 "TripDeparting", "Travel request", r.Id, r.RequestNumber ?? string.Empty,
                 r.TravelStartDate.ToDateTime(TimeOnly.MinValue), days, 0,
                 $"TripDeparting:{r.Id}:{r.TravelStartDate:yyyy-MM-dd}",
-                $"/hr/travel/requests/{r.Id}"));
+                $"/hr/travel/{r.Id}"));
         }
 
         return results;

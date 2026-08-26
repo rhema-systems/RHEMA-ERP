@@ -1,4 +1,6 @@
 import { apiService } from '../api.service';
+import type { StaffMovement } from '@/types/hr/movements';
+import type { StaffActingAppointment } from '@/types/hr/movement-subtypes';
 
 /**
  * Area 25 — the self-service portal's own aggregate reads. Backend: `api/employee-portal`.
@@ -62,12 +64,81 @@ export interface PortalHome {
   announcements: PortalAnnouncementStub[];
 }
 
+/** The movements dashboard the career hub renders — counts plus the working lists. */
+export interface PortalMovementsDashboard {
+  employeeId: string;
+  employeeName: string;
+  currentPositionTitle?: string | null;
+  currentOrganizationUnitName?: string | null;
+  totalMovements: number;
+  totalPromotions: number;
+  totalTransfers: number;
+  totalActingAppointments: number;
+  totalSecondments: number;
+  pendingResponseCount: number;
+  activeActingAppointmentCount: number;
+  activeSecondmentCount: number;
+  currentRoleStartDate?: string | null;
+  recentMovements: StaffMovement[];
+  pendingResponseMovements: StaffMovement[];
+  activeTemporaryAssignments: StaffMovement[];
+}
+
+/** Computed at request time from the movement data — not persisted notifications. */
+export interface PortalMovementNotification {
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  isActionRequired: boolean;
+  createdAt: string;
+  movementId: string;
+  movementNumber: string;
+  actionUrl?: string | null;
+}
+
 class MePortalService {
   private readonly baseUrl = '/employee-portal';
 
   /** The personal aggregate behind the portal landing — one read, every figure deep-linkable. */
   getHome(): Promise<PortalHome> {
     return apiService.get<PortalHome>(`${this.baseUrl}/home`);
+  }
+
+  // ── Movements (slice 7) — every read token-derived, respond ownership-checked ──
+
+  getMovementsDashboard(): Promise<PortalMovementsDashboard> {
+    return apiService.get<PortalMovementsDashboard>(`${this.baseUrl}/dashboard`);
+  }
+
+  getMovements(): Promise<StaffMovement[]> {
+    return apiService.get<StaffMovement[]>(`${this.baseUrl}/movements`);
+  }
+
+  getMovement(id: string): Promise<StaffMovement> {
+    return apiService.get<StaffMovement>(`${this.baseUrl}/movements/${id}`);
+  }
+
+  /** Refused (409, message shown as-is) unless the movement is awaiting THIS employee's answer. */
+  respondToMovement(id: string, accepted: boolean, comments?: string): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/movements/${id}/respond`, { accepted, comments });
+  }
+
+  /** Implemented/approved movements in date order — the career timeline. */
+  getCareerPath(): Promise<StaffMovement[]> {
+    return apiService.get<StaffMovement[]>(`${this.baseUrl}/career-path`);
+  }
+
+  getActingAppointments(): Promise<StaffActingAppointment[]> {
+    return apiService.get<StaffActingAppointment[]>(`${this.baseUrl}/acting-appointments`);
+  }
+
+  getSecondments(): Promise<StaffMovement[]> {
+    return apiService.get<StaffMovement[]>(`${this.baseUrl}/secondments`);
+  }
+
+  getMovementNotifications(): Promise<PortalMovementNotification[]> {
+    return apiService.get<PortalMovementNotification[]>(`${this.baseUrl}/notifications`);
   }
 }
 

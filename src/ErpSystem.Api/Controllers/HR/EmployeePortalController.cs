@@ -326,12 +326,16 @@ public class EmployeePortalController : ControllerBase
     // =========================================================================
 
     /// <summary>Acting appointments for the current employee (standalone entity, read-only).</summary>
+    /// <remarks>
+    /// The FULL rows, not the register summary: the subject's own allowance and who they are
+    /// covering for are exactly what this read exists to show (area 25 slice 7).
+    /// </remarks>
     [HttpGet("acting-appointments")]
     public async Task<IActionResult> GetActingAppointments(CancellationToken ct = default)
     {
         if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
 
-        var appointments = await _actingService.GetByEmployeeIdAsync(empId, ct);
+        var appointments = await _actingService.GetDetailedByEmployeeIdAsync(empId, ct);
         return Ok(appointments.OrderByDescending(a => a.StartDate));
     }
 
@@ -382,7 +386,10 @@ public class EmployeePortalController : ControllerBase
                     CreatedAt        = m.RequestDate,
                     MovementId       = m.Id,
                     MovementNumber   = m.MovementNumber,
-                    ActionUrl        = $"/employee/movements/{m.Id}/respond"
+                    // Area 25 slice 7: the recipient is the employee, so the link lands on the
+                    // portal movement detail (the old /employee/* paths were Blazor-era and
+                    // resolved to nothing).
+                    ActionUrl        = $"/me/movements/{m.Id}"
                 });
             }
 
@@ -399,7 +406,7 @@ public class EmployeePortalController : ControllerBase
                     CreatedAt      = m.RequestDate,
                     MovementId     = m.Id,
                     MovementNumber = m.MovementNumber,
-                    ActionUrl      = $"/employee/movements/{m.Id}"
+                    ActionUrl      = $"/me/movements/{m.Id}"
                 });
             }
 
@@ -417,7 +424,7 @@ public class EmployeePortalController : ControllerBase
                     CreatedAt      = m.EffectiveDate.Value,
                     MovementId     = m.Id,
                     MovementNumber = m.MovementNumber,
-                    ActionUrl      = $"/employee/movements/{m.Id}"
+                    ActionUrl      = $"/me/movements/{m.Id}"
                 });
             }
 
@@ -438,7 +445,7 @@ public class EmployeePortalController : ControllerBase
                     CreatedAt        = now,
                     MovementId       = m.Id,
                     MovementNumber   = m.MovementNumber,
-                    ActionUrl        = $"/employee/movements/{m.Id}"
+                    ActionUrl        = $"/me/movements/{m.Id}"
                 });
             }
         }

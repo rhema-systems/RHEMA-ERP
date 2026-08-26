@@ -1,9 +1,31 @@
 'use client';
 
+/**
+ * Area 25 slice 7 — My Movements: the portal's career hub (spec destinations #18/#19,
+ * re-homed from /hr/movements/mine).
+ *
+ * Everything personal rides the token-derived employee-portal routes; the respond act uses
+ * the portal arm, whose 409 guard only opens while the movement is genuinely awaiting THIS
+ * employee's answer (the state the slice-7 adapter fix made reachable — nothing set
+ * EmployeeAcceptancePending after area 8 moved approvals onto the engine). Checklist tasks
+ * still ride staff-movements/checklist/mine — tasks can be owed on anyone's movement.
+ *
+ * The "waiting for my approval" section is MANAGER work and deliberately links to the desk
+ * movement detail, where the workflow approval actions live.
+ */
+
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Route,
+  UserCog,
+  ArrowLeftRight,
+  Briefcase,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,52 +50,48 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { MetricTiles } from '@/components/hr/common/MetricTiles';
+import { mePortalService } from '@/services/hr/me-portal.service';
 import { movementService } from '@/services/hr/movement.service';
 import { useToast } from '@/hooks/use-toast';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
-/**
- * The employee's own view of the area — the only movement screen a non-HR user can open.
- *
- * Two things live here: movements raised about them (which they may be asked to accept), and
- * checklist tasks they personally owe on anyone's movement. Both read the caller's employee from
- * the token; neither takes an id, which is deliberate — an id-bearing route is how "read anyone's
- * record by passing their id" gets built by accident.
- */
 export default function MyMovementsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [responding, setResponding] = useState<{ id: string; accepted: boolean } | null>(null);
   const [comments, setComments] = useState('');
 
-  const { data: movements = [], isLoading } = useQuery({
-    queryKey: ['hr', 'movements', 'mine'],
-    queryFn: () => movementService.getMine(),
+  const { data: dash, isLoading } = useQuery({
+    queryKey: ['me', 'movements', 'dashboard'],
+    queryFn: () => mePortalService.getMovementsDashboard(),
   });
 
   const { data: tasks = [] } = useQuery({
-    queryKey: ['hr', 'movements', 'my-checklist'],
+    queryKey: ['me', 'movements', 'my-checklist'],
     queryFn: () => movementService.getMyChecklistItems(),
   });
 
   // Movements this caller is an approver for. Approving a report's transfer is an ordinary
   // line-manager job, and the HR register is closed to them, so this is where that work lives.
   const { data: toApprove = [] } = useQuery({
-    queryKey: ['hr', 'movements', 'awaiting-my-approval'],
+    queryKey: ['me', 'movements', 'awaiting-my-approval'],
     queryFn: () => movementService.getAwaitingMyApproval(),
   });
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['me', 'movements'] });
 
   const respond = useMutation({
     mutationFn: () => {
       if (!responding) throw new Error('No movement selected.');
-      return movementService.respond(responding.id, responding.accepted, comments || undefined);
+      return mePortalService.respondToMovement(responding.id, responding.accepted, comments || undefined);
     },
     onSuccess: () => {
       toast({ title: responding?.accepted ? 'Movement accepted' : 'Movement declined' });
       setResponding(null);
       setComments('');
-      queryClient.invalidateQueries({ queryKey: ['hr', 'movements', 'mine'] });
+      invalidate();
     },
     onError: (error: any) =>
       toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
@@ -83,21 +101,67 @@ export default function MyMovementsPage() {
     mutationFn: (itemId: string) => movementService.completeChecklistItem(itemId),
     onSuccess: () => {
       toast({ title: 'Task completed' });
-      queryClient.invalidateQueries({ queryKey: ['hr', 'movements', 'my-checklist'] });
+      invalidate();
     },
     onError: (error: any) =>
       toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
   });
 
-  const awaitingMe = movements.filter((m) => m.status === 'EmployeeAcceptancePending');
+  const awaitingMe = dash?.pendingResponseMovements ?? [];
+  const movements = dash?.recentMovements ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
-        title="My movements"
-        description="Changes to your position, unit or reporting line, and any tasks you owe on a movement."
-        backHref="/hr"
+        title="My Movements"
+        description={
+          dash?.currentPositionTitle
+            ? `${dash.currentPositionTitle}${dash.currentOrganizationUnitName ? ` · ${dash.currentOrganizationUnitName}` : ''}${dash.currentRoleStartDate ? ` · since ${fmtDate(dash.currentRoleStartDate)}` : ''}`
+            : 'Changes to your position, unit or reporting line, and any tasks you owe on a movement.'
+        }
+        backHref="/me"
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/me/movements/career-path">
+                <Route className="mr-2 h-4 w-4" /> Career timeline
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/me/movements/acting">
+                <UserCog className="mr-2 h-4 w-4" /> Acting
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/me/movements/secondments">
+                <ArrowLeftRight className="mr-2 h-4 w-4" /> Secondments
+              </Link>
+            </Button>
+          </div>
+        }
       />
+
+      {dash && (
+        <MetricTiles
+          tiles={[
+            { label: 'Movements', value: dash.totalMovements, icon: Briefcase },
+            { label: 'Promotions', value: dash.totalPromotions },
+            {
+              label: 'Awaiting your response',
+              value: dash.pendingResponseCount,
+              tone: dash.pendingResponseCount > 0 ? ('warning' as const) : undefined,
+            },
+            {
+              label: 'Active temporary roles',
+              value: dash.activeActingAppointmentCount + dash.activeSecondmentCount,
+              hint:
+                dash.activeActingAppointmentCount + dash.activeSecondmentCount > 0
+                  ? 'See Acting / Secondments'
+                  : undefined,
+            },
+          ]}
+        />
+      )}
 
       {awaitingMe.length > 0 && (
         <Card className="border-primary/40">
@@ -111,7 +175,7 @@ export default function MyMovementsPage() {
                 className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3"
               >
                 <div className="text-sm">
-                  <Link href={`/hr/movements/${m.id}`} className="font-medium hover:underline">
+                  <Link href={`/me/movements/${m.id}`} className="font-medium hover:underline">
                     {m.movementNumber}
                   </Link>{' '}
                   — {m.movementTypeName} to {m.newPositionTitle} in {m.newOrganizationUnitName},
@@ -204,7 +268,7 @@ export default function MyMovementsPage() {
                 {movements.map((m) => (
                   <TableRow key={m.id}>
                     <TableCell className="font-medium">
-                      <Link href={`/hr/movements/${m.id}`} className="hover:underline">
+                      <Link href={`/me/movements/${m.id}`} className="hover:underline">
                         {m.movementNumber}
                       </Link>
                     </TableCell>

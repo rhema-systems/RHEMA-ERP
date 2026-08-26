@@ -36,11 +36,11 @@ export default function MyOrientationPage() {
   const done = enrollments.filter(isDone);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My Orientation"
         description="Programmes you have been enrolled on — work through the content, sit the assessment, and sign off what needs signing."
-        backHref="/hr/orientation"
+        backHref="/me"
       />
 
       {isLoading ? (
@@ -101,7 +101,7 @@ function Section({ title, items }: { title: string; items: EmployeeOrientationSu
       </h2>
       <div className="space-y-2">
         {items.map((e) => (
-          <Link key={e.id} href={`/hr/orientation/mine/${e.id}`}>
+          <Link key={e.id} href={`/me/orientation/${e.id}`}>
             <Card className="transition-colors hover:bg-muted/50">
               <CardContent className="flex items-center gap-4 py-4">
                 <div className="min-w-0 flex-1">

@@ -39,11 +39,11 @@ export default function EditMyTravelRequestPage({ params }: { params: Promise<{ 
   const locked = ['Approved', 'Completed', 'Cancelled', 'Closed'].includes(r.status);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={`Edit ${r.requestNumber}`}
         description={`${r.originCity} → ${r.destinationCity}`}
-        backHref={`/hr/travel/mine/${id}`}
+        backHref={`/me/travel/${id}`}
       />
       {locked ? (
         <EmptyState

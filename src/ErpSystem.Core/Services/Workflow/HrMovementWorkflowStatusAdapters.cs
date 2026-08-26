@@ -59,7 +59,16 @@ public sealed class StaffMovementWorkflowStatusAdapter : IWorkflowStatusAdapter
         switch (outcome)
         {
             case WorkflowOutcome.Approved:
-                movement.Status = StaffMovementStatus.Approved;
+                // Area 25 slice 7: a movement that requires the employee's own acceptance is not
+                // done when the approvers are — it lands on EmployeeAcceptancePending, the status
+                // the respond arm (and the portal's "awaiting your response" card) exists for.
+                // Nothing set this status after area 8 moved approvals onto the engine, so the
+                // acceptance step was unreachable: the portal respond endpoint 409'd on every
+                // approved movement, and the "awaiting your response" filter matched nothing.
+                // RecordEmployeeResponseAsync returns the movement to Approved on acceptance.
+                movement.Status = movement.RequiresEmployeeAcceptance && movement.EmployeeResponseDate == null
+                    ? StaffMovementStatus.EmployeeAcceptancePending
+                    : StaffMovementStatus.Approved;
                 movement.AuthorizationDate = DateTime.UtcNow;
                 break;
 

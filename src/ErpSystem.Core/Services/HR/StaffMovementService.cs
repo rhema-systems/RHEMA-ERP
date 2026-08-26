@@ -600,17 +600,15 @@ public class StaffMovementService : IStaffMovementService
 
         var previousStatus = entity.Status;
 
-        // Ensure we are in the acceptance-pending stage
-        if (entity.Status == StaffMovementStatus.Approved)
-            entity.Status = StaffMovementStatus.EmployeeAcceptancePending;
-
         entity.EmployeeAccepted     = dto.Accepted;
         entity.EmployeeResponseDate = DateTime.UtcNow;
         entity.EmployeeComments     = dto.Comments;
 
-        // On acceptance progress back to Approved (ready for implementation)
-        if (dto.Accepted)
-            entity.Status = StaffMovementStatus.Approved;
+        // Either answer leaves the acceptance-pending stage (the workflow adapter is what puts a
+        // movement there now — area 25 slice 7). Approved is the entity's historical post-response
+        // status either way: the answer itself lives on the flags, and the implementation gate
+        // already refuses an unaccepted movement.
+        entity.Status = StaffMovementStatus.Approved;
 
         await _movementRepo.UpdateAsync(entity);
         await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status,

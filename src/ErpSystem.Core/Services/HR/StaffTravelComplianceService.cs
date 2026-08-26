@@ -609,7 +609,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
                 ["Route"] = $"{request.OriginCity} to {request.DestinationCity}",
                 ["Dates"] = $"{request.TravelStartDate:yyyy-MM-dd} to {request.TravelEndDate:yyyy-MM-dd}",
                 ["TravellerEmail"] = employee?.EmailAddress ?? string.Empty,
-                ["ActionPath"] = $"/hr/travel/requests/{request.Id}",
+                // Area 25 slice 7: /hr/travel/requests/{id} never existed — the desk detail is /hr/travel/{id}.
+                ["ActionPath"] = $"/hr/travel/{request.Id}",
             },
         }, cancellationToken);
 

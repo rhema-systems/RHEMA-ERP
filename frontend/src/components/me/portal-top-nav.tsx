@@ -69,7 +69,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Leave Planner', href: '/me/leave/planner' },
       { label: 'My Encashments', href: '/me/leave/encashments' },
       { label: 'My Attendance', href: '/me/attendance' },
-      { label: 'My Travel', href: '/hr/travel/mine' },
+      // Slice 7: travel lives in the portal.
+      { label: 'My Travel', href: '/me/travel' },
     ],
   },
   {
@@ -96,14 +97,19 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Waitlist', href: '/me/training/waitlist' },
       { label: 'My Service Bonds', href: '/me/training/bonds' },
       { label: 'My Mentoring', href: '/me/mentoring' },
-      { label: 'My Orientations', href: '/hr/orientation/mine' },
+      // Slice 7: orientation lives in the portal.
+      { label: 'My Orientations', href: '/me/orientation' },
     ],
   },
   {
     label: 'Career & Jobs',
     icon: Rocket,
     links: [
-      { label: 'My Movements', href: '/hr/movements/mine' },
+      // Slice 7: movements, the career timeline, probation and the oath live in the portal.
+      { label: 'My Movements', href: '/me/movements' },
+      { label: 'Career Timeline', href: '/me/movements/career-path' },
+      { label: 'My Probation', href: '/me/probation' },
+      { label: 'My Oath of Secrecy', href: '/me/oath' },
       { label: 'My Competencies', href: '/hr/competencies/me' },
       { label: 'Internal Job Board', href: '/hr/recruitment/job-board' },
       { label: 'My Panel Interviews', href: '/hr/recruitment/my-panel' },

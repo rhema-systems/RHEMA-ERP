@@ -460,7 +460,7 @@ export default function OrientationEnrollmentsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild>
-                              <Link href={`/hr/orientation/mine/${e.id}`}>View progress</Link>
+                              <Link href={`/me/orientation/${e.id}`}>View progress</Link>
                             </DropdownMenuItem>
                             {e.enrollmentStatus !== 'Withdrawn' &&
                               e.enrollmentStatus !== 'Cancelled' && (

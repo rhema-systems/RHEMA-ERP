@@ -262,7 +262,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 ["Traveller"] = traveller,
                 ["Route"] = $"{entity.OriginCity} to {entity.DestinationCity}",
                 ["Dates"] = $"{entity.TravelStartDate:yyyy-MM-dd} to {entity.TravelEndDate:yyyy-MM-dd}",
-                ["ActionPath"] = $"/hr/travel/requests/{entity.Id}",
+                // Area 25 slice 7: /hr/travel/requests/{id} never existed as a route — the desk
+                // detail (these topics' recipients are the HR role) lives at /hr/travel/{id}.
+                ["ActionPath"] = $"/hr/travel/{entity.Id}",
             },
         }, cancellationToken);
     }

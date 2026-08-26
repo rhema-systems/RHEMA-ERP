@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileCheck2, Loader2, Paperclip, ScrollText, ShieldCheck, Upload } from 'lucide-react';
+import { FileCheck2, Loader2, Paperclip, ShieldCheck, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -36,13 +36,14 @@ import { toast } from 'sonner';
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
 /**
- * Oaths of secrecy (FR-HR-030).
+ * Oaths of secrecy (FR-HR-030) — the desk register.
  *
  * ⚠ **HR cannot affirm on anyone's behalf, and this screen offers no way to try.** The only thing
  * HR can do here is record an oath that was sworn on paper, which needs a named witness. The
- * employee's own affirmation lives on their tab and takes no employee id at all — the shape of the
- * API is the guarantee, and the screen should not imply otherwise by offering a person picker next
- * to an "affirm" button.
+ * employee's own affirmation takes no employee id at all — the shape of the API is the guarantee.
+ *
+ * Area 25 slice 7: the "Mine" tab (view + affirm) re-homed to the portal at /me/oath — this
+ * page is the register side only.
  */
 export default function OathsOfSecrecyPage() {
   const qc = useQueryClient();
@@ -53,26 +54,9 @@ export default function OathsOfSecrecyPage() {
     queryFn: () => oathOfSecrecyService.getOutstanding(),
   });
 
-  const { data: mine } = useQuery({
-    queryKey: ['oaths-mine'],
-    queryFn: () => oathOfSecrecyService.getMine(),
-  });
-
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['oaths-outstanding'] });
-    void qc.invalidateQueries({ queryKey: ['oaths-mine'] });
   };
-
-  const affirm = useMutation({
-    mutationFn: () => oathOfSecrecyService.affirm({}),
-    onSuccess: () => {
-      toast.success('Oath affirmed');
-      refresh();
-    },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Refused'),
-  });
-
-  const myOath = mine?.[0];
 
   return (
     <div className="space-y-6 p-6">
@@ -85,7 +69,6 @@ export default function OathsOfSecrecyPage() {
       <Tabs defaultValue="outstanding">
         <TabsList>
           <TabsTrigger value="outstanding">Outstanding ({outstanding?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="mine">Mine</TabsTrigger>
         </TabsList>
 
         <TabsContent value="outstanding">
@@ -139,49 +122,6 @@ export default function OathsOfSecrecyPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="mine">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Your oath</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {myOath ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Badge variant="secondary">{myOath.methodName}</Badge>
-                    <span className="text-sm text-muted-foreground">
-                      Sworn {fmtDate(myOath.swornOn)}
-                      {myOath.witnessedByName ? ` before ${myOath.witnessedByName}` : ''}
-                    </span>
-                    {myOath.hasSignature && (
-                      <Badge variant="outline">
-                        <ShieldCheck className="mr-1 h-3 w-3" />
-                        Signed in the system
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="whitespace-pre-wrap rounded border bg-muted/40 p-3 text-sm">
-                    {myOath.oathText}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Alert>
-                    <ScrollText className="h-4 w-4" />
-                    <AlertDescription>
-                      You have not sworn an oath of secrecy. Read the wording below and affirm it if
-                      you agree; the date and your identity are recorded by the system.
-                    </AlertDescription>
-                  </Alert>
-                  <Button disabled={affirm.isPending} onClick={() => affirm.mutate()}>
-                    {affirm.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Affirm my oath
-                  </Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       <RecordPaperOathDialog

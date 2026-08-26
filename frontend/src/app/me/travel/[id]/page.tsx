@@ -118,11 +118,11 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
   const visibleComments = (r.comments ?? []).filter((c) => c.isVisibleToTraveller);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={r.requestNumber}
         description={`${r.originCity} → ${r.destinationCity}, ${fmtDate(r.travelStartDate)}`}
-        backHref="/hr/travel/mine"
+        backHref="/me/travel"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={humanize(r.status)} />
@@ -130,7 +130,7 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
               <>
                 <Button
                   variant="outline"
-                  onClick={() => router.push(`/hr/travel/mine/${id}/edit`)}
+                  onClick={() => router.push(`/me/travel/${id}/edit`)}
                 >
                   <Pencil className="mr-2 h-4 w-4" /> Edit
                 </Button>

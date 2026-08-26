@@ -316,7 +316,9 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityName = travel == null
                     ? null
                     : $"{travel.OriginCity} to {travel.DestinationCity}, {travel.TravelStartDate:dd MMM yyyy}";
-                info.ActionUrl = $"/hr/travel/requests/{entityId}";
+                // Area 25 slice 7: /hr/travel/requests/{id} never existed — the approver's desk
+                // detail is /hr/travel/{id}.
+                info.ActionUrl = $"/hr/travel/{entityId}";
                 return info;
             }
 

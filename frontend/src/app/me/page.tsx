@@ -54,14 +54,14 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
     tiles: [
       { label: 'My Leave', hint: 'Balances, requests and approvals', href: '/me/leave', icon: TreePalm },
       { label: 'My Attendance', hint: 'Punch in and out, see your month', href: '/me/attendance', icon: Clock },
-      { label: 'My Travel', hint: 'Raise and track travel requests', href: '/hr/travel/mine', icon: Plane },
+      { label: 'My Travel', hint: 'Raise and track travel requests', href: '/me/travel', icon: Plane },
       { label: 'My Appraisals', hint: 'Reviews and self-evaluations', href: '/me/performance/appraisals', icon: Target },
       { label: 'My Goals', hint: 'Draft, submit and track your goals', href: '/me/performance/goals', icon: Gauge },
       { label: 'My Check-Ins', hint: 'Conversations with your manager', href: '/me/performance/check-ins', icon: MessageSquare },
       { label: 'My Journal', hint: 'Your private work notes', href: '/me/performance/journal', icon: BookOpen },
       { label: 'My Training', hint: 'Courses, requests and certificates', href: '/me/training', icon: GraduationCap },
       { label: 'My Learning Paths', hint: 'Guided development journeys', href: '/me/learning', icon: Compass },
-      { label: 'My Orientations', hint: 'Onboarding checklists', href: '/hr/orientation/mine', icon: ClipboardList },
+      { label: 'My Orientations', hint: 'Onboarding checklists', href: '/me/orientation', icon: ClipboardList },
       { label: 'Peer Reviews', hint: 'Feedback you owe colleagues', href: '/me/performance/peer-reviews', icon: Users },
     ],
   },
@@ -183,7 +183,7 @@ export default function MeLandingPage() {
             <ActionChip
               count={home?.movementsAwaitingMyResponse ?? 0}
               label="Movements need your response"
-              href="/hr/movements/mine"
+              href="/me/movements"
             />
             <ActionChip
               count={home?.surchargesAwaitingMyResponse ?? 0}
@@ -348,7 +348,7 @@ export default function MeLandingPage() {
           My career
         </h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          <Link href="/hr/movements/mine" className="group">
+          <Link href="/me/movements" className="group">
             <Card className="h-full transition-colors group-hover:border-primary/50 group-hover:bg-accent/40">
               <CardContent className="flex items-start gap-3 p-4">
                 <div className="rounded-lg bg-primary/10 p-2 text-primary">

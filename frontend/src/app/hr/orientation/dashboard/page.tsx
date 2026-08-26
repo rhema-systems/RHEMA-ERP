@@ -217,7 +217,7 @@ export default function OrientationDashboardPage() {
                 {data.overdueList.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell className="font-medium">
-                      <Link href={`/hr/orientation/mine/${e.id}`} className="hover:underline">
+                      <Link href={`/me/orientation/${e.id}`} className="hover:underline">
                         {e.employeeName ?? '—'}
                       </Link>
                       {e.employeeNumber && (

@@ -617,9 +617,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard, permissions: ['HR.Orientation.Read'] },
           { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock, permissions: ['HR.Orientation.Read'] },
           { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users, permissions: ['HR.Orientation.Read'] },
-          // The one orientation screen a non-HR employee can use: their own enrollments. Everything
-          // above answers 403 for them, so without this they have no way in.
-          { title: 'My Orientation', href: '/hr/orientation/mine', icon: GraduationCap },
+          // Area 25 slice 7: My Orientation re-homed to the portal (/me/orientation).
           { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks, permissions: ['HR.Orientation.Read'] },
           { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck, permissions: ['HR.Orientation.Read'] },
         ],
@@ -714,9 +712,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft, permissions: ['HR.Movements.Read'] },
           // Standalone: most acting appointments never come from a movement at all.
           { title: 'Acting Appointments', href: '/hr/movements/acting', icon: UserCheck, permissions: ['HR.Movements.Read'] },
-          // Open to every employee: the movements raised about them, and the tasks they owe on
-          // someone else's. The register above answers 403 for non-HR.
-          { title: 'My Movements', href: '/hr/movements/mine', icon: UserCheck },
+          // Area 25 slice 7: My Movements re-homed to the portal (/me/movements).
         ],
       },
       {
@@ -728,8 +724,7 @@ export const navigationItems: NavItem[] = [
         icon: Plane,
         children: [
           { title: 'Register', href: '/hr/travel', icon: Plane },
-          // Open to every employee; the register above answers 403 without HR.Travel.Read.
-          { title: 'My Travel', href: '/hr/travel/mine', icon: UserCheck },
+          // Area 25 slice 7: My Travel re-homed to the portal (/me/travel).
           // Claims get their own entry because the finance desk works a queue ACROSS trips —
           // "approved and unpaid" — which no single travel request can show.
           { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
@@ -782,8 +777,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Register', href: '/hr/probation', icon: UserCheck },
           // The reviewer queue is deliberately its own entry: probation reviews are conducted by
           // LINE MANAGERS, who hold no HR permission at all, so this is the one screen in the area
-          // most of its users will ever open.
-          { title: 'My Reviews', href: '/hr/probation/reviews', icon: ClipboardCheck },
+          // most of its users will ever open. (Area 25 slice 7: the employee's own reviews and
+          // the oath affirmation re-homed to the portal — /me/probation and /me/oath.)
+          { title: 'Reviews to Conduct', href: '/hr/probation/reviews', icon: ClipboardCheck },
           // FR-HR-030. Not probation, but the same FRD section (onboarding), and it is the only
           // other place an oath would sensibly live.
           { title: 'Oaths of Secrecy', href: '/hr/probation/oaths', icon: ScrollText },

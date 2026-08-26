@@ -348,13 +348,13 @@ export default function MyOrientationPlayerPage() {
   const activeCertificate = certificates.find((c) => c.status === 'Active');
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title={enrollment.programTitle ?? 'Orientation'}
         description={`${enrollment.programCode ?? ''}${
           enrollment.sessionTitle ? ` · ${enrollment.sessionTitle}` : ''
         }`}
-        backHref="/hr/orientation/mine"
+        backHref="/me/orientation"
         actions={<StatusBadge status={enrollment.completionStatus} />}
       />
 

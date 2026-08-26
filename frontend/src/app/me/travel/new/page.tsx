@@ -9,11 +9,11 @@ import { TravelRequestForm } from '@/components/hr/travel/TravelRequestForm';
  */
 export default function NewMyTravelRequestPage() {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Request travel"
         description="Saved as a draft. Submit it when you are ready for approval."
-        backHref="/hr/travel/mine"
+        backHref="/me/travel"
       />
       <TravelRequestForm surface="self" />
     </div>

@@ -106,7 +106,7 @@ export function TravelRequestForm({
 
   const isEdit = !!existing;
   const isDesk = surface === 'desk';
-  const listHref = isDesk ? '/hr/travel' : '/hr/travel/mine';
+  const listHref = isDesk ? '/hr/travel' : '/me/travel';
 
   const { data: countries } = useQuery({
     queryKey: ['countries', 'active'],
@@ -234,7 +234,7 @@ export function TravelRequestForm({
       await queryClient.invalidateQueries({ queryKey: ['my-travel-requests'] });
       await queryClient.invalidateQueries({ queryKey: ['travel-request', saved.id] });
       toast({ title: isEdit ? 'Travel request updated' : 'Travel request created' });
-      router.push(isDesk ? `/hr/travel/${saved.id}` : `/hr/travel/mine/${saved.id}`);
+      router.push(isDesk ? `/hr/travel/${saved.id}` : `/me/travel/${saved.id}`);
     } catch (error) {
       toast({
         variant: 'destructive',

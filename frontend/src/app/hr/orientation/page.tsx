@@ -43,12 +43,7 @@ export default function OrientationHomePage() {
               href: '/hr/orientation/enrollments',
               icon: Users,
             },
-            {
-              title: 'My Orientation',
-              description: 'Your own programmes — work through the content, sit the assessment, sign off.',
-              href: '/hr/orientation/mine',
-              icon: GraduationCap,
-            },
+            // Area 25 slice 7: "My Orientation" re-homed to the portal (/me/orientation).
           ]}
         />
       </div>

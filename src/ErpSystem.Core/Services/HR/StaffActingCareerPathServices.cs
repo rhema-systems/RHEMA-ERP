@@ -127,6 +127,22 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// The full appointment rows for one employee — the self-service read (area 25 slice 7).
+    ///
+    /// The summary above deliberately omits the allowance and the covering-for name (it backs
+    /// org-wide register rows); the portal shows the SUBJECT their own appointment, and whether
+    /// they are paid for acting is exactly what the subject opens the page to see. The repo's
+    /// by-employee read already includes ActingPosition and ActingForEmployee, so the full
+    /// mapping resolves without a second query.
+    /// </summary>
+    public async Task<IEnumerable<StaffActingAppointmentDto>> GetDetailedByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _repo.GetByEmployeeIdAsync(employeeId);
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+    }
+
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByStatusAsync(StaffActingStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();

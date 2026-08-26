@@ -30,7 +30,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 4 | Move-in: leave + attendance | **COMPLETE 2026-08-25** — 68 assertions ×2 + 179 ladder; 2 backend fixes; 2 TDC data gaps recorded |
 | 5 | Move-in: performance (appraisals, goals, dev plan, peer evals, check-ins, journal) | **COMPLETE 2026-08-25** — 47 assertions ×2 + 247 ladder; 12 pages re-homed + my-goals built; 3 backend fixes; 16 deep-links re-pointed |
 | 6 | Move-in: training & learning (+ the owed bond self-accept) | **COMPLETE 2026-08-25** — 85 assertions ×2 + 294 ladder; 4 pages moved + 7 built; learner step-completion dead path fixed |
-| 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | not started |
+| 7 | Move-in: movements, career path, orientation, probation/confirmation, travel | **COMPLETE 2026-08-26** — 72 assertions ×2 + 379 ladder; 7 pages moved + 7 built (incl. oaths); the dead EmployeeAcceptancePending state fixed |
 | 8 | Move-in: medical + safety | not started |
 | 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | not started |
 | 10 | My payslips: the read-only payroll adapter | not started |
@@ -539,3 +539,55 @@ mine-fallback). D9's mentoring move-in landed here too (mentoring lives under tr
   POST exists and is proven, but there is no `feedback/mine` read to show what was filed or
   gate a duplicate (`SubmitFeedbackAsync` dedupes nothing) — a portal feedback form needs
   that read first. Parked for the slice-14 polish pass or a later backend addition.
+
+### Slice 7 — move-in: movements, career path, orientation, probation, travel, oaths. CLOSED 2026-08-26.
+
+`run-slice7.mjs` 72 assertions ×2 green + the 379 ladder (111/33/35/68/47/85). No
+migration. Spec rows #17–#19 re-homed; #20–#22 (career timeline, acting, secondments)
+built from nothing on the consumer-less `employee-portal` routes; #23's computed
+notification feed re-pointed and left for slice 11's unified page. D9's oaths move-in
+landed here (probation's neighbour), plus the probation "About me" surface.
+
+- **THE find, measured then fixed: `EmployeeAcceptancePending` was a DEAD STATE.** After
+  area 8 moved movement approvals onto the workflow engine, the status adapter landed every
+  approved movement on `Approved` — ignoring `RequiresEmployeeAcceptance` — so the portal
+  respond endpoint 409'd on every movement ever approved, and the old mine-page's "Awaiting
+  your response" card could never show (probe-slice7 proved it live: create → submit →
+  approve → respond → 409). `StaffMovementWorkflowStatusAdapter` now lands approval on
+  `EmployeeAcceptancePending` when acceptance is required and unanswered;
+  `RecordEmployeeResponseAsync` returns the movement to `Approved` on EITHER answer (the
+  entity's historical post-response status — the answer lives on the flags, and the
+  implement gate already refuses an unaccepted movement). Asserted by name, both legs,
+  plus equality across pending-response / dashboard count / the slice-3 home aggregate.
+- **The move (D3, atomic):** `/hr/movements/mine` rebuilt as `/me/movements` (dashboard
+  stats + respond + history + checklist tasks + the manager's waiting-for-my-approval strip,
+  which deliberately keeps DESK links — approval actions live where the workflow is);
+  orientation mine (2 pages) → `/me/orientation`; travel mine (4 pages) → `/me/travel`
+  (with `TravelRequestForm`'s portal branch re-pointed). **Built fresh:** `/me/movements/[id]`
+  (From→To card + the respond act), career-path timeline, acting, secondments,
+  `/me/probation` (my reviews + acknowledge — the natural-justice read shows the subject
+  the full assessment, not just comments) and `/me/oath` (affirm + history). **Splits:**
+  the desk probation reviews page is reviewer-queue-only (sidebar: "Reviews to Conduct");
+  the desk oaths page is register-only; orientation desk registers' "view progress" rows
+  open the portal detail.
+- **The dangling-URL family, re-pointed by recipient:** portal movement notifications
+  carried Blazor-era `/employee/movements/*` → `/me/movements/{id}` (asserted); travel
+  notifications + the workflow display carried `/hr/travel/requests/{id}`,
+  `/hr/travel/finance/advances/{id}` and `/hr/travel/compliance/documents/{id}` — routes
+  that NEVER existed → `/hr/travel/{id}` (all these topics' recipients are the HR role,
+  verified in the topic seeders), the advance via its request's Finance tab, and the
+  documents reminder to `/hr/travel/dashboard` (least-wrong: employee-level travel
+  documents have no desk register — recorded, not built). Movement reminders were audited
+  and left alone: all recipients are the HR role, so their desk URLs are correct.
+- **One more summary-vs-subject fix:** the portal acting read returned the register
+  SUMMARY DTO, which deliberately omits the allowance and the covering-for name — exactly
+  what the subject opens the page for. `GetDetailedByEmployeeIdAsync` (full DTO; the repo
+  already includes the navs) now backs the portal route; caught by the harness because its
+  fixture set an allowance where the probe's had not.
+- Facts the harness records by name: probation duration comes from the STAFF CATEGORY
+  (sending a different one is refused; omit it); the probation PERIOD read has no self arm
+  by design (the subject's window is the reviews); oath re-affirmation is allowed and kept
+  as history (the portal page shows newest-as-standing); travel cancel requires
+  `cancellationReason`; checklist completion is owner-or-HR ("assigned to someone else").
+- The unlinked wall as measured: portal + movements + probation + oaths 403, orientation +
+  travel me 400 — no 500s, the D8 layout gate fronts them all.

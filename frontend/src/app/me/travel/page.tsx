@@ -45,14 +45,14 @@ export default function MyTravelPage() {
   const items = data ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My travel"
         description="Trips you have requested, and where each one has got to."
-        backHref="/hr"
+        backHref="/me"
         actions={
           <Button asChild>
-            <Link href="/hr/travel/mine/new">
+            <Link href="/me/travel/new">
               <Plus className="mr-2 h-4 w-4" />
               Request travel
             </Link>
@@ -87,7 +87,7 @@ export default function MyTravelPage() {
                 {items.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">
-                      <Link href={`/hr/travel/mine/${r.id}`} className="hover:underline">
+                      <Link href={`/me/travel/${r.id}`} className="hover:underline">
                         {r.requestNumber}
                       </Link>
                     </TableCell>
