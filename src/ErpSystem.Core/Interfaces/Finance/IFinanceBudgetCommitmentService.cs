@@ -47,6 +47,20 @@ public interface IFinanceBudgetCommitmentService
         Guid reservationId,
         ApplyFinanceBudgetPostingOutcomeDto request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finance-internal atomic posting hook. The posting engine calls this only after it has
+    /// built the exact journal and posting-event identities and before their shared transaction
+    /// commits. Producer modules cannot use it to manufacture actuals.
+    /// </summary>
+    Task ConsumeForPostingAsync(
+        Guid tenantId,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        IReadOnlyList<Guid> reservationIds,
+        Guid journalEntryId,
+        Guid postingEventId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class FinanceBudgetCommitmentValidationException(string code, string message)

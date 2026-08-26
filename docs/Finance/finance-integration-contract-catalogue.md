@@ -27,6 +27,7 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 | FIN-INT-012 | Post-acceptance supplier return dispatch and valuation handoff | Procurement/Inventory → Finance AP/GRV/GL | Planned | 0.1 | `SupplierReturnFinanceAdapter.ConsumeDispatchAsync` (fail-closed) | Finance envelope validation is implemented; authoritative producer evidence and posting orchestration remain pending |
 | FIN-INT-013 | Supplier return commercial resolution → AP, tax and settlement | Procurement → Finance AP/Tax/Cash | Planned | 0.1 | `SupplierReturnFinanceAdapter.ConsumeCommercialResolutionAsync` (fail-closed) | Finance envelope validation is implemented; producer lifecycle, durable correlation and AP/tax settlement remain pending |
 | FIN-INT-015 | Approved Procurement demand → Finance budget commitment | Procurement → Finance Budget | Available | 1.0 | `IFinanceBudgetCommitmentService` | Finance provider is callable and tested; the Procurement lifecycle adapter remains Procurement-owned and pending |
+| FIN-INT-016 | Direct AP expense invoice → Finance budget commitment | Finance AP → Finance Budget/GL | Available | 1.0 | `IVendorInvoiceService` + `IFinanceBudgetCommitmentService` | Direct expense invoices reserve before AP approval and consume with posting; opening and PO/GRV-backed invoices remain excluded |
 
 ## Contract-wide rules
 
@@ -128,5 +129,21 @@ posted `AccountTransaction` rows on the exact budget account and fiscal period. 
 receipt and supplier-invoice stages from counting the same expenditure twice.
 
 See the detailed [Procurement budget commitment contract](procurement-finance-budget-commitment-contract.md).
+
+## FIN-INT-016 — direct AP expense budget control
+
+Direct vendor-invoice expense lines whose GL account has `BudgetTrackingEnabled` must select an
+eligible adopted Finance Budget Entry. AP stores that canonical ID on the invoice line, reserves
+the exact source amount before starting its existing approval workflow, releases the reservation
+on workflow-start failure or final rejection, and passes the exact reservation IDs to the central
+posting engine. The engine consumes them in the same transaction that creates the journal and
+posting event. The Budget Entry's immutable Finance dimensions are copied to the expense ledger
+line so budget actuals retain the same accounting grain.
+
+This adapter is intentionally limited to direct expense invoices. It rejects budget selections
+on opening, PO/GRV-backed, Inventory/Product and Fixed Asset lines. Procurement owns requisition,
+PO and receipt commitments through FIN-INT-015; AP must not reserve or count that expenditure a
+second time when the supplier invoice clears GRNI. Foreign-currency budget-controlled invoices
+must carry the exact approved Finance exchange-rate ID.
 
 Use the [adapter checklist](finance-integration-adapter-checklist.md) before implementation and the [consumer-test template](finance-integration-consumer-test-template.md) before requesting review. FIN-INT-006 is documented as the first full [reference contract](fixed-asset-disposal-ar-tax-cash-contract.md).

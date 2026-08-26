@@ -337,6 +337,7 @@ export interface VendorInvoiceLineItem {
     lineItemType: string;
     glAccountId?: string;
     glAccountName?: string;
+    budgetEntryId?: string;
     purchaseOrderItemId?: string;
     description: string;
     quantity: number;
@@ -360,6 +361,7 @@ export interface VendorInvoiceLineItem {
 export interface VendorInvoiceLineItemCreateRequest {
     lineItemType?: string;
     glAccountId?: string;
+    budgetEntryId?: string;
     purchaseOrderItemId?: string;
     description: string;
     quantity?: number;
@@ -375,6 +377,32 @@ export interface VendorInvoiceLineItemCreateRequest {
     serialNumber?: string;
     lotNumber?: string;
     expirationDate?: string;
+}
+
+export interface ApBudgetDimensionAssignment {
+    financeDimensionDefinitionId: string;
+    financeDimensionValueId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+}
+
+export interface ApBudgetCell {
+    budgetScenarioId: string;
+    budgetScenarioName: string;
+    budgetEntryId: string;
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    fiscalPeriodId: string;
+    fiscalPeriodCode: string;
+    functionalCurrencyCode: string;
+    approvedAmount: number;
+    postedActualAmount: number;
+    reservedAmount: number;
+    availableAmount: number;
+    dimensionAssignments: ApBudgetDimensionAssignment[];
 }
 
 export interface VendorPayment {
