@@ -11,6 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrencyAmount } from '@/lib/currency';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 import type { FinancePagedResult, WhtCertificate } from '@/types/tax';
 import { ArrowLeft, Ban, Download, Eye, FileText, Filter, Printer, RotateCcw, Search } from 'lucide-react';
 
@@ -57,6 +60,8 @@ function statusClass(status: string) {
 }
 
 export default function WhtCertificatesPage() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [result, setResult] = useState<FinancePagedResult<WhtCertificate> | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -251,9 +256,23 @@ export default function WhtCertificatesPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Link href="/finance/tax/reports/wht-remittances"><Button variant="outline">Remittances</Button></Link>
-                    <Button variant="outline" onClick={exportRegister} disabled={exporting}>
-                        <Download className="mr-2 h-4 w-4" /> Export Register
-                    </Button>
+                    {canExport && (
+                        <>
+                            <Button variant="outline" onClick={exportRegister} disabled={exporting}>
+                                <Download className="mr-2 h-4 w-4" /> Export Register
+                            </Button>
+                            <ReportPdfActions
+                                reportName="WHT statutory certificate register"
+                                onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                    DOCUMENT_TYPES.financeTaxWhtCertificateRegister,
+                                    { fromDate, toDate, status, searchTerm })}
+                                onPrint={() => documentOutputService.printReportDocument(
+                                    DOCUMENT_TYPES.financeTaxWhtCertificateRegister,
+                                    { fromDate, toDate, status, searchTerm })}
+                                disabled={loading || !fromDate || !toDate}
+                            />
+                        </>
+                    )}
                     <Button onClick={() => loadCertificates(1)} disabled={loading}>
                         <Filter className="mr-2 h-4 w-4" /> Apply Filters
                     </Button>

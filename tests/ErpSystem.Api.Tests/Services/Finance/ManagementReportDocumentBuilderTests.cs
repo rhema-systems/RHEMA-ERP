@@ -1,6 +1,7 @@
 using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Services.Documents.Finance;
 using ErpSystem.Core.DTOs.Documents;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
@@ -128,6 +129,119 @@ public sealed class ManagementReportDocumentBuilderTests
     }
 
     [Fact]
+    public async Task WhtRegisters_ShouldPreserveCertificateRemittanceAndCurrencyEvidence()
+    {
+        var (context, currentUser) = await CreateContextAsync();
+        var settings = new Mock<ITenantSettingsService>(MockBehavior.Strict);
+        var certificates = new Mock<IWithholdingTaxCertificateService>(MockBehavior.Strict);
+        certificates.Setup(service => service.GetApCertificatesAsync(
+                It.Is<WhtCertificateQueryDto>(query =>
+                    query.Page == 1 && query.PageSize == 200
+                    && query.FromDate == new DateTime(2025, 1, 1)
+                    && query.ToDate == new DateTime(2025, 1, 31)
+                    && query.Status == "Issued" && query.SearchTerm == "Tema"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagedResult<WhtCertificateDto>
+            {
+                Page = 1,
+                PageSize = 200,
+                TotalCount = 1,
+                Items = new[]
+                {
+                    new WhtCertificateDto
+                    {
+                        VendorPaymentId = Guid.NewGuid(),
+                        PaymentNumber = "VP-2025-001",
+                        SupplierName = "Tema Engineering Services Ltd",
+                        SupplierTin = "C000123",
+                        PaymentDate = new DateTime(2025, 1, 20),
+                        CurrencyCode = "USD",
+                        TaxCode = "WHT-SERVICES",
+                        TaxRate = 7.5m,
+                        TaxableBase = 10_000m,
+                        WithholdingAmount = 750m,
+                        CertificateNumber = "WHT-2025-001",
+                        CertificateStatus = "Issued",
+                        VersionNumber = 1,
+                        RemittanceNumber = "WHT-REM-2025-001",
+                        RemittanceStatus = "Paid"
+                    }
+                }
+            });
+        certificates.Setup(service => service.GetRemittancesAsync(
+                It.Is<WhtRemittanceQueryDto>(query =>
+                    query.Page == 1 && query.PageSize == 200
+                    && query.FromDate == new DateTime(2025, 1, 1)
+                    && query.ToDate == new DateTime(2025, 1, 31)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagedResult<WhtRemittanceDto>
+            {
+                Page = 1,
+                PageSize = 200,
+                TotalCount = 1,
+                Items = new[]
+                {
+                    new WhtRemittanceDto
+                    {
+                        Id = Guid.NewGuid(),
+                        RemittanceNumber = "WHT-REM-2025-001",
+                        PeriodFrom = new DateTime(2025, 1, 1),
+                        PeriodTo = new DateTime(2025, 1, 31),
+                        DueDate = new DateTime(2025, 2, 15),
+                        CurrencyCode = "USD",
+                        Status = "Paid",
+                        TotalWithholdingAmount = 750m,
+                        LineCount = 1,
+                        SubmissionReference = "GRA-SUB-001",
+                        PaymentReference = "PAY-001",
+                        AuthorityReceiptReference = "GRA-RCT-001",
+                        Lines =
+                        {
+                            new WhtRemittanceLineDto
+                            {
+                                Id = Guid.NewGuid(),
+                                VendorPaymentId = Guid.NewGuid(),
+                                PaymentNumber = "VP-2025-001",
+                                PaymentDate = new DateTime(2025, 1, 20),
+                                SupplierId = Guid.NewGuid(),
+                                SupplierName = "Tema Engineering Services Ltd",
+                                SupplierTin = "C000123",
+                                TaxCode = "WHT-SERVICES",
+                                TaxableBase = 10_000m,
+                                WithholdingAmount = 750m
+                            }
+                        }
+                    }
+                }
+            });
+
+        var certificateResult = await new WhtCertificateRegisterDocumentBuilder(
+                certificates.Object, context, currentUser.Object, settings.Object)
+            .RenderAsync(Request(DocumentTypes.FinanceTaxWhtCertificateRegister,
+                ("fromDate", "2025-01-01"), ("toDate", "2025-01-31"),
+                ("status", "Issued"), ("searchTerm", "Tema")));
+        var remittanceResult = await new WhtRemittanceRegisterDocumentBuilder(
+                certificates.Object, context, currentUser.Object, settings.Object)
+            .RenderAsync(Request(DocumentTypes.FinanceTaxWhtRemittanceRegister,
+                ("fromDate", "2025-01-01"), ("toDate", "2025-01-31")));
+
+        AssertPdf(certificateResult,
+            "wht-statutory-certificate-register-2025-01-01-2025-01-31.pdf",
+            "USD", "WHT-2025-001", "WHT-REM-2025-001");
+        AssertPdf(remittanceResult,
+            "wht-remittance-register-2025-01-01-2025-01-31.pdf",
+            "USD", "GRA-SUB-001", "GRA-RCT-001", "VP-2025-001");
+
+        var qaOutputPath = Environment.GetEnvironmentVariable("TDC_WHT_REGISTER_QA_PDF");
+        if (!string.IsNullOrWhiteSpace(qaOutputPath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(qaOutputPath))!);
+            await File.WriteAllBytesAsync(qaOutputPath, remittanceResult.Content);
+        }
+        certificates.VerifyAll();
+    }
+
+    [Fact]
     public async Task ConsolidatedBudget_ShouldPreserveScenarioScopeAndValidationEvidence()
     {
         var scenarioId = Guid.NewGuid();
@@ -231,6 +345,8 @@ public sealed class ManagementReportDocumentBuilderTests
             DocumentTypes.FinanceTaxOutputRegister,
             DocumentTypes.FinanceTaxVatReconciliation,
             DocumentTypes.FinanceTaxWhtPayable,
+            DocumentTypes.FinanceTaxWhtCertificateRegister,
+            DocumentTypes.FinanceTaxWhtRemittanceRegister,
             DocumentTypes.FinanceBudgetConsolidated,
             DocumentTypes.FinanceBudgetScenarioComparison
         };
