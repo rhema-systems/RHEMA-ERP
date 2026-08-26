@@ -16,6 +16,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,6 +46,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { hasDeskAccess } from '@/lib/auth-routing';
+import { mePortalService } from '@/services/hr/me-portal.service';
 import { cn } from '@/lib/utils';
 
 interface NavLink {
@@ -146,6 +148,21 @@ function initialsOf(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+/** A count bubble on an action button. Renders nothing at zero — an empty badge is noise. */
+function CountBadge({ count, className }: { count: number; className?: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={cn(
+        'absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none text-white',
+        className,
+      )}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
 export function PortalTopNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -155,6 +172,18 @@ export function PortalTopNav() {
   const displayName =
     [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || '';
   const deskUser = hasDeskAccess(user);
+
+  // Slice 11: the badges. One cheap counts read, shared by both action buttons; a failure
+  // leaves the buttons unbadged rather than breaking the chrome every portal page renders.
+  const { data: counts } = useQuery({
+    queryKey: ['me', 'inbox-counts'],
+    queryFn: () => mePortalService.getInboxCounts(),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const inboxCount =
+    (counts?.pendingApprovals ?? 0) + (counts?.pendingTasks ?? 0) + (counts?.actionItems ?? 0);
+  const unreadCount = counts?.unreadNotifications ?? 0;
 
   const groupActive = (group: NavGroup) => group.links.some((l) => pathname?.startsWith(l.href));
 
@@ -207,15 +236,32 @@ export function PortalTopNav() {
         </nav>
 
         <div className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="sm" asChild title="Tasks & Approvals">
-            <Link href="/workflow/inbox">
+          {/* Slice 11: both destinations are portal-side now. They used to point at the desk
+              /workflow/inbox (which strands records — cross-module #15) and the /notifications
+              admin console, which an Employee-only user has no business seeing. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            title="Approvals & tasks"
+            className={cn('relative', pathname?.startsWith('/me/inbox') && 'bg-accent')}
+          >
+            <Link href="/me/inbox">
               <CheckSquare className="h-4 w-4" />
               <span className="ml-1 hidden xl:inline">Approvals</span>
+              <CountBadge count={inboxCount} className="bg-amber-500" />
             </Link>
           </Button>
-          <Button variant="ghost" size="sm" asChild title="Notifications">
-            <Link href="/notifications">
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            title="Notifications"
+            className={cn('relative', pathname?.startsWith('/me/notifications') && 'bg-accent')}
+          >
+            <Link href="/me/notifications">
               <Bell className="h-4 w-4" />
+              <CountBadge count={unreadCount} className="bg-destructive" />
             </Link>
           </Button>
           <ThemeToggle />

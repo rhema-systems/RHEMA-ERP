@@ -201,3 +201,130 @@ public sealed class PortalAnnouncementStubDto
     public string Title { get; set; } = string.Empty;
     public DateTime PublishedAt { get; set; }
 }
+
+// ============================================================================
+// APPROVALS & TASKS INBOX — area 25 slice 11
+// ============================================================================
+
+/// <summary>
+/// The portal inbox: everything waiting on the caller, in three registers — workflow
+/// approvals addressed to them (directly or through a role), workflow tasks assigned to
+/// them, and module action items (acknowledge / respond / accept acts scattered across
+/// the HR areas, consolidated here as the slice-9 residual asked).
+/// </summary>
+/// <remarks>
+/// READ AND NAVIGATE, deliberately. The generic engine endpoints
+/// (<c>api/Workflow/approvals/{id}/process</c>, <c>steps/{id}/process</c>,
+/// <c>workflow/platform/mobile/actions</c>) drive the engine but never apply the module's
+/// <c>IWorkflowStatusAdapter</c> — the approval row is consumed while the entity strands in
+/// Submitted (measured live, slice-11 probe; recorded as a cross-module defect). Only the
+/// module's own approve endpoint applies the outcome, so every inbox row carries the
+/// record's URL and the act happens there, on the surface that does the whole job.
+/// </remarks>
+public sealed class EmployeePortalInboxDto
+{
+    public IEnumerable<PortalApprovalItemDto> Approvals { get; set; } = [];
+    public IEnumerable<PortalTaskItemDto> Tasks { get; set; } = [];
+    public IEnumerable<PortalActionItemDto> ActionItems { get; set; } = [];
+}
+
+/// <summary>
+/// A pending workflow approval addressed to the caller, flattened and enriched with the
+/// entity's display identity (via <c>IWorkflowEntityDisplayService</c>) — the raw feeds
+/// carry none of it, which is why the desk inbox shows bare GUIDs.
+/// </summary>
+public sealed class PortalApprovalItemDto
+{
+    public Guid ApprovalId { get; set; }
+    public Guid StepInstanceId { get; set; }
+    public string StepName { get; set; } = string.Empty;
+    public string? WorkflowName { get; set; }
+    public string EntityType { get; set; } = string.Empty;
+    public Guid? EntityId { get; set; }
+    public string? EntityNumber { get; set; }
+    public string? EntityName { get; set; }
+    /// <summary>The record page where the approval act lives. Desk URLs by design —
+    /// an approver has desk access to the record they are asked to sign.</summary>
+    public string? ActionUrl { get; set; }
+    public DateTime RequestedDate { get; set; }
+    public DateTime? DueDate { get; set; }
+    public string Priority { get; set; } = "Normal";
+    /// <summary>Null when the approval is addressed to the caller directly; the role
+    /// name when it reached them through a role arm.</summary>
+    public string? ApproverRole { get; set; }
+}
+
+/// <summary>A pending workflow step assigned to the caller by user id.</summary>
+public sealed class PortalTaskItemDto
+{
+    public Guid StepInstanceId { get; set; }
+    public string StepName { get; set; } = string.Empty;
+    public string? WorkflowName { get; set; }
+    public string EntityType { get; set; } = string.Empty;
+    public Guid? EntityId { get; set; }
+    public string? EntityNumber { get; set; }
+    public string? EntityName { get; set; }
+    public string? ActionUrl { get; set; }
+    public DateTime CreatedDate { get; set; }
+    public DateTime? DueDate { get; set; }
+}
+
+/// <summary>
+/// A module act waiting on the caller — the portal's own "to do" register.
+/// Kind: MovementResponse | SurchargeResponse | AssetAcknowledgement | DisciplineNotice |
+/// GrievanceResponse | RiskAssessmentAcknowledgement | TrainingBondAcceptance.
+/// </summary>
+public sealed class PortalActionItemDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Detail { get; set; }
+    /// <summary>Portal URLs — these acts are the employee's own and live in the portal.</summary>
+    public string ActionUrl { get; set; } = string.Empty;
+    public DateTime? Date { get; set; }
+}
+
+/// <summary>The light counts read behind the top-nav badges and the landing chips.</summary>
+public sealed class PortalInboxCountsDto
+{
+    public int PendingApprovals { get; set; }
+    public int PendingTasks { get; set; }
+    public int ActionItems { get; set; }
+    public int UnreadNotifications { get; set; }
+}
+
+// ============================================================================
+// UNIFIED NOTIFICATIONS — area 25 slice 11
+// ============================================================================
+
+/// <summary>
+/// One notification row in the unified portal feed, whatever store it came from.
+/// Source: General (api/Notifications, user-keyed) | Appraisal | Orientation
+/// (employee-keyed HR stores) | Movement (computed, never persisted).
+/// Mark-read dispatches BY SOURCE to each store's own endpoint — read state stays where
+/// it always lived; this feed invents no fourth store.
+/// </summary>
+public sealed class PortalNotificationItemDto
+{
+    public string Source { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string Category { get; set; } = "General";
+    public bool IsActionRequired { get; set; }
+    public DateTime CreatedAt { get; set; }
+    /// <summary>Null for computed rows (movements), which have no read state at all.</summary>
+    public bool? IsRead { get; set; }
+    /// <summary>False for computed rows — their ids do not survive a refresh.</summary>
+    public bool CanMarkRead { get; set; }
+    public string? ActionUrl { get; set; }
+}
+
+/// <summary>The unified feed plus its true unread count (summed from the stores' own
+/// unread-count reads, not derived from the capped page).</summary>
+public sealed class PortalNotificationsDto
+{
+    public IEnumerable<PortalNotificationItemDto> Items { get; set; } = [];
+    public int UnreadCount { get; set; }
+}

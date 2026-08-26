@@ -2,9 +2,11 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.HR.Payroll;
 using ErpSystem.Core.Entities.HR.Payroll;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -40,6 +42,15 @@ public class EmployeePortalController : ControllerBase
     private readonly ICurrentUserService           _currentUser;
     private readonly ApplicationDbContext          _db;
 
+    // Slice 11 — the inbox and unified notifications fan out to these.
+    private readonly IWorkflowEntityDisplayService  _entityDisplayService;
+    private readonly INotificationService           _notificationService;
+    private readonly IAppraisalNotificationService  _appraisalNotificationService;
+    private readonly IOrientationNotificationService _orientationNotificationService;
+    private readonly IStaffGrievanceService         _grievanceService;
+    private readonly ISheRiskAssessmentService      _riskAssessmentService;
+    private readonly ITrainingServiceBondService    _bondService;
+
     public EmployeePortalController(
         IStaffMovementService          movementService,
         IStaffActingAppointmentService actingService,
@@ -52,7 +63,14 @@ public class EmployeePortalController : ControllerBase
         ITrainingDashboardService      trainingDashboardService,
         IEmployeeCertificateService    certificateService,
         ICurrentUserService            currentUser,
-        ApplicationDbContext           db)
+        ApplicationDbContext           db,
+        IWorkflowEntityDisplayService  entityDisplayService,
+        INotificationService           notificationService,
+        IAppraisalNotificationService  appraisalNotificationService,
+        IOrientationNotificationService orientationNotificationService,
+        IStaffGrievanceService         grievanceService,
+        ISheRiskAssessmentService      riskAssessmentService,
+        ITrainingServiceBondService    bondService)
     {
         _movementService    = movementService;
         _actingService      = actingService;
@@ -66,6 +84,13 @@ public class EmployeePortalController : ControllerBase
         _certificateService = certificateService;
         _currentUser        = currentUser;
         _db                 = db;
+        _entityDisplayService = entityDisplayService;
+        _notificationService  = notificationService;
+        _appraisalNotificationService   = appraisalNotificationService;
+        _orientationNotificationService = orientationNotificationService;
+        _grievanceService     = grievanceService;
+        _riskAssessmentService = riskAssessmentService;
+        _bondService          = bondService;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -500,6 +525,14 @@ public class EmployeePortalController : ControllerBase
     {
         if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
 
+        var notifications = await BuildMovementNotificationsAsync(empId, ct);
+        return Ok(notifications.OrderByDescending(n => n.IsActionRequired).ThenByDescending(n => n.CreatedAt));
+    }
+
+    /// <summary>The movement-derived rows, shared by the movements feed above and the unified
+    /// portal feed (slice 11). Computed, never persisted — ids do not survive a refresh.</summary>
+    private async Task<List<EmployeePortalNotificationDto>> BuildMovementNotificationsAsync(Guid empId, CancellationToken ct)
+    {
         var movements = (await _movementService.GetByEmployeeAsync(empId, ct)).ToList();
         var notifications = new List<EmployeePortalNotificationDto>();
         var now = DateTime.UtcNow;
@@ -583,7 +616,415 @@ public class EmployeePortalController : ControllerBase
             }
         }
 
-        return Ok(notifications.OrderByDescending(n => n.IsActionRequired).ThenByDescending(n => n.CreatedAt));
+        return notifications;
+    }
+
+    // =========================================================================
+    // APPROVALS & TASKS INBOX + UNIFIED NOTIFICATIONS — area 25 slice 11
+    // =========================================================================
+    //
+    // READ AND NAVIGATE, deliberately. The generic engine endpoints
+    // (api/Workflow/approvals/{id}/process, steps/{id}/process, mobile/actions) drive the
+    // engine but never apply the module's IWorkflowStatusAdapter — the approval row is
+    // consumed while the entity strands in Submitted (measured live in the slice-11 probe;
+    // recorded as a cross-module defect). Only the module's own approve endpoint applies
+    // the outcome, so every inbox row carries the record's URL and the approval act
+    // happens there. The raw feeds (approvals/pending, tasks/pending) also die mid-stream
+    // on entity-graph cycles whenever they have content — which is why this projection
+    // exists instead of the portal consuming them.
+
+    private static readonly WorkflowInstanceStatus[] LiveInstanceStatuses =
+    [
+        WorkflowInstanceStatus.Created,
+        WorkflowInstanceStatus.InProgress,
+        WorkflowInstanceStatus.Waiting,
+        WorkflowInstanceStatus.Suspended,
+    ];
+
+    /// <summary>
+    /// Everything waiting on the caller: workflow approvals addressed to them (directly or
+    /// through a role), workflow tasks assigned to them, and the module action items the
+    /// HR areas scattered (acknowledge / respond / accept), consolidated.
+    /// </summary>
+    [HttpGet("inbox")]
+    public async Task<IActionResult> GetInbox(CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        if (!Guid.TryParse(_currentUser.UserId, out var userId)) return NoEmployee();
+
+        var approvals   = await BuildPendingApprovalsAsync(userId, ct);
+        var tasks       = await BuildPendingTasksAsync(userId, ct);
+        var actionItems = await BuildActionItemsAsync(empId, ct);
+
+        return Ok(new EmployeePortalInboxDto
+        {
+            Approvals   = approvals,
+            Tasks       = tasks,
+            ActionItems = actionItems,
+        });
+    }
+
+    /// <summary>The light counts behind the top-nav badges and the landing chips.</summary>
+    [HttpGet("inbox/counts")]
+    public async Task<IActionResult> GetInboxCounts(CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        if (!Guid.TryParse(_currentUser.UserId, out var userId)) return NoEmployee();
+        var tenantId = _currentUser.TenantId ?? Guid.Empty;
+        var roles = (_currentUser.Roles ?? Array.Empty<string>()).ToList();
+
+        var pendingApprovals = await PendingApprovalsQuery(userId, tenantId, roles).CountAsync(ct);
+        var pendingTasks     = await PendingTasksQuery(userId, tenantId).CountAsync(ct);
+        var actionItems      = (await BuildActionItemsAsync(empId, ct)).Count;
+        var unread           = await SumUnreadNotificationsAsync(userId, tenantId, empId, ct);
+
+        return Ok(new PortalInboxCountsDto
+        {
+            PendingApprovals    = pendingApprovals,
+            PendingTasks        = pendingTasks,
+            ActionItems         = actionItems,
+            UnreadNotifications = unread,
+        });
+    }
+
+    /// <summary>
+    /// The unified notification feed: the general store (user-keyed), the appraisal and
+    /// orientation stores (employee-keyed), and the computed movement rows — one list,
+    /// one shape. Mark-read stays with each store's own endpoint; the client dispatches
+    /// by <c>source</c>.
+    /// </summary>
+    [HttpGet("my-notifications")]
+    public async Task<IActionResult> GetMyNotifications(CancellationToken ct = default)
+    {
+        if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
+        if (!Guid.TryParse(_currentUser.UserId, out var userId)) return NoEmployee();
+        var tenantId = _currentUser.TenantId ?? Guid.Empty;
+
+        var general     = await _notificationService.GetNotificationsAsync(userId, tenantId, page: 1, pageSize: 50);
+        var appraisal   = await _appraisalNotificationService.GetAllNotificationsAsync(empId, page: 1, pageSize: 50, ct);
+        var orientation = (await _orientationNotificationService.GetByRecipientAsync(empId, unreadOnly: false, ct)).ToList();
+        var movement    = await BuildMovementNotificationsAsync(empId, ct);
+
+        var items = new List<PortalNotificationItemDto>();
+
+        items.AddRange(general.Items.Select(n => new PortalNotificationItemDto
+        {
+            Source           = "General",
+            Id               = n.Id,
+            Title            = n.Title,
+            Message          = n.Message,
+            Category         = n.Type,
+            IsActionRequired = false,
+            CreatedAt        = n.Timestamp,
+            IsRead           = n.IsRead,
+            CanMarkRead      = true,
+            ActionUrl        = n.ActionUrl,
+        }));
+
+        items.AddRange(appraisal.Select(n => new PortalNotificationItemDto
+        {
+            Source           = "Appraisal",
+            Id               = n.NotificationId,
+            Title            = n.Title,
+            Message          = n.Message,
+            Category         = n.Type.ToString(),
+            IsActionRequired = false,
+            CreatedAt        = n.CreatedDate,
+            IsRead           = n.IsRead,
+            CanMarkRead      = true,
+            ActionUrl        = n.NavigationUrl,
+        }));
+
+        items.AddRange(orientation.Select(n => new PortalNotificationItemDto
+        {
+            Source           = "Orientation",
+            Id               = n.Id,
+            Title            = n.Subject,
+            Message          = n.Message ?? string.Empty,
+            Category         = n.TypeName,
+            IsActionRequired = false,
+            CreatedAt        = n.SentAt,
+            IsRead           = n.IsRead,
+            CanMarkRead      = true,
+            ActionUrl        = n.NavigationUrl,
+        }));
+
+        items.AddRange(movement.Select(n => new PortalNotificationItemDto
+        {
+            Source           = "Movement",
+            Id               = n.Id,
+            Title            = n.Title,
+            Message          = n.Message,
+            Category         = n.Category,
+            IsActionRequired = n.IsActionRequired,
+            CreatedAt        = n.CreatedAt,
+            IsRead           = null,           // computed rows have no read state
+            CanMarkRead      = false,          // and their ids do not survive a refresh
+            ActionUrl        = n.ActionUrl,
+        }));
+
+        return Ok(new PortalNotificationsDto
+        {
+            Items = items
+                .OrderByDescending(n => n.IsActionRequired)
+                .ThenByDescending(n => n.CreatedAt)
+                .Take(100)
+                .ToList(),
+            UnreadCount = await SumUnreadNotificationsAsync(userId, tenantId, empId, ct),
+        });
+    }
+
+    // ── Inbox internals ──────────────────────────────────────────────────────
+
+    /// <summary>The true unread total: each persisted store's own unread-count read, summed.
+    /// The computed movement rows are excluded — they have no read state to be unread in.</summary>
+    private async Task<int> SumUnreadNotificationsAsync(Guid userId, Guid tenantId, Guid empId, CancellationToken ct)
+        => await _notificationService.GetUnreadCountAsync(userId, tenantId)
+         + await _appraisalNotificationService.GetUnreadCountAsync(empId, ct)
+         + await _orientationNotificationService.GetUnreadCountAsync(empId, ct);
+
+    private IQueryable<Core.Entities.Workflow.WorkflowApproval> PendingApprovalsQuery(
+        Guid userId, Guid tenantId, List<string> roles)
+        => _db.WorkflowApprovals
+            .AsNoTracking()
+            .Where(a => !a.IsDeleted
+                && a.TenantId == tenantId
+                && a.Status == WorkflowApprovalStatus.Pending
+                && (a.ApproverId == userId
+                    || (a.ApproverRole != null && roles.Contains(a.ApproverRole)))
+                && !a.StepInstance.IsDeleted
+                && LiveInstanceStatuses.Contains(a.StepInstance.WorkflowInstance.Status));
+
+    private IQueryable<Core.Entities.Workflow.WorkflowStepInstance> PendingTasksQuery(Guid userId, Guid tenantId)
+        => _db.WorkflowStepInstances
+            .AsNoTracking()
+            .Where(si => !si.IsDeleted
+                && si.TenantId == tenantId
+                && si.Status == WorkflowStepInstanceStatus.Pending
+                && si.AssignedToId == userId
+                && LiveInstanceStatuses.Contains(si.WorkflowInstance.Status)
+                // A step with pending approval rows is an approval step — it belongs in
+                // the approvals register, not twice.
+                && !si.Approvals.Any(ap => !ap.IsDeleted && ap.Status == WorkflowApprovalStatus.Pending));
+
+    private async Task<List<PortalApprovalItemDto>> BuildPendingApprovalsAsync(Guid userId, CancellationToken ct)
+    {
+        var tenantId = _currentUser.TenantId ?? Guid.Empty;
+        var roles = (_currentUser.Roles ?? Array.Empty<string>()).ToList();
+
+        var rows = await PendingApprovalsQuery(userId, tenantId, roles)
+            .OrderBy(a => a.DueDate ?? DateTime.MaxValue)
+            .ThenBy(a => a.RequestedDate)
+            .Take(100)
+            .Select(a => new
+            {
+                a.Id,
+                a.StepInstanceId,
+                a.ApproverId,
+                a.ApproverRole,
+                a.RequestedDate,
+                a.DueDate,
+                a.Priority,
+                StepName       = a.StepInstance.WorkflowStep.Name,
+                WorkflowName   = a.StepInstance.WorkflowInstance.WorkflowDefinition.Name,
+                EntityTypeName = a.StepInstance.WorkflowInstance.EntityType != null
+                    ? a.StepInstance.WorkflowInstance.EntityType.Name
+                    : null,
+                a.StepInstance.WorkflowInstance.EntityId,
+            })
+            .ToListAsync(ct);
+
+        var items = new List<PortalApprovalItemDto>(rows.Count);
+        foreach (var row in rows)
+        {
+            var (entityGuid, number, name, url) =
+                await ResolveEntityDisplayAsync(row.EntityTypeName, row.EntityId);
+            items.Add(new PortalApprovalItemDto
+            {
+                ApprovalId     = row.Id,
+                StepInstanceId = row.StepInstanceId,
+                StepName       = row.StepName,
+                WorkflowName   = row.WorkflowName,
+                EntityType     = row.EntityTypeName ?? "Unknown",
+                EntityId       = entityGuid,
+                EntityNumber   = number,
+                EntityName     = name,
+                ActionUrl      = url,
+                RequestedDate  = row.RequestedDate,
+                DueDate        = row.DueDate,
+                Priority       = row.Priority.ToString(),
+                ApproverRole   = row.ApproverId == userId ? null : row.ApproverRole,
+            });
+        }
+        return items;
+    }
+
+    private async Task<List<PortalTaskItemDto>> BuildPendingTasksAsync(Guid userId, CancellationToken ct)
+    {
+        var tenantId = _currentUser.TenantId ?? Guid.Empty;
+
+        var rows = await PendingTasksQuery(userId, tenantId)
+            .OrderBy(si => si.DueDate ?? DateTime.MaxValue)
+            .ThenBy(si => si.CreatedDate)
+            .Take(100)
+            .Select(si => new
+            {
+                si.Id,
+                si.CreatedDate,
+                si.DueDate,
+                StepName       = si.WorkflowStep.Name,
+                WorkflowName   = si.WorkflowInstance.WorkflowDefinition.Name,
+                EntityTypeName = si.WorkflowInstance.EntityType != null
+                    ? si.WorkflowInstance.EntityType.Name
+                    : null,
+                si.WorkflowInstance.EntityId,
+            })
+            .ToListAsync(ct);
+
+        var items = new List<PortalTaskItemDto>(rows.Count);
+        foreach (var row in rows)
+        {
+            var (entityGuid, number, name, url) =
+                await ResolveEntityDisplayAsync(row.EntityTypeName, row.EntityId);
+            items.Add(new PortalTaskItemDto
+            {
+                StepInstanceId = row.Id,
+                StepName       = row.StepName,
+                WorkflowName   = row.WorkflowName,
+                EntityType     = row.EntityTypeName ?? "Unknown",
+                EntityId       = entityGuid,
+                EntityNumber   = number,
+                EntityName     = name,
+                ActionUrl      = url,
+                CreatedDate    = row.CreatedDate,
+                DueDate        = row.DueDate,
+            });
+        }
+        return items;
+    }
+
+    /// <summary>Entity display identity via the canonical resolver; a missing type or an
+    /// empty id degrades to an unlinked row, never a failed inbox.</summary>
+    private async Task<(Guid? EntityGuid, string? Number, string? Name, string? Url)>
+        ResolveEntityDisplayAsync(string? entityTypeName, Guid entityId)
+    {
+        if (string.IsNullOrWhiteSpace(entityTypeName) || entityId == Guid.Empty)
+            return (entityId == Guid.Empty ? null : entityId, null, null, null);
+        var info = await _entityDisplayService.GetEntityDisplayInfoAsync(entityTypeName, entityId);
+        return (entityId, info.EntityNumber, info.EntityName, info.ActionUrl);
+    }
+
+    /// <summary>
+    /// The module acts waiting on the caller, consolidated (the slice-9 residual). Every
+    /// figure comes from the same service read its target screen makes, so the register
+    /// and the screens cannot disagree.
+    /// </summary>
+    private async Task<List<PortalActionItemDto>> BuildActionItemsAsync(Guid empId, CancellationToken ct)
+    {
+        var items = new List<PortalActionItemDto>();
+
+        var movements = (await _movementService.GetByEmployeeAsync(empId, ct))
+            .Where(m => m.Status == StaffMovementStatus.EmployeeAcceptancePending);
+        items.AddRange(movements.Select(m => new PortalActionItemDto
+        {
+            Kind      = "MovementResponse",
+            EntityId  = m.Id,
+            Title     = $"{m.MovementTypeName} {m.MovementNumber} needs your response",
+            ActionUrl = $"/me/movements/{m.Id}",
+            Date      = m.RequestDate,
+        }));
+
+        var surcharges = (await _surchargeService.GetByEmployeeIdAsync(empId))
+            .Where(x => x.Status == AssetSurchargeStatus.WithEmployee
+                     && x.EmployeeResponse == AssetSurchargeEmployeeResponse.NotYetGiven);
+        items.AddRange(surcharges.Select(s => new PortalActionItemDto
+        {
+            Kind      = "SurchargeResponse",
+            EntityId  = s.Id,
+            Title     = $"Charge {s.SurchargeNumber} on {s.AssetName} awaits your reply",
+            Detail    = $"{s.CurrencyCode} {s.AssessedAmount:n2}",
+            ActionUrl = "/me/assets",
+        }));
+
+        var unacknowledged = (await _assignmentService.GetActiveAssignmentsForEmployeeAsync(empId))
+            .Where(a => !a.EmployeeAcknowledged);
+        items.AddRange(unacknowledged.Select(a => new PortalActionItemDto
+        {
+            Kind      = "AssetAcknowledgement",
+            EntityId  = a.Id,
+            Title     = $"Sign for {a.AssetName} ({a.AssetNumber})",
+            ActionUrl = "/me/assets",
+        }));
+
+        // The subject's unacknowledged discipline notices. The flat notifications route is
+        // desk-gated by design (slice 9) — the portal reads them through the case, and this
+        // register points there.
+        var notices = await _db.Set<StaffDisciplineNotification>()
+            .AsNoTracking()
+            .Where(n => !n.IsDeleted
+                && n.AcknowledgedDate == null
+                && !n.DisciplinaryAction.IsDeleted
+                && n.DisciplinaryAction.EmployeeId == empId)
+            .Select(n => new
+            {
+                n.Id,
+                n.DisciplinaryActionId,
+                n.NotificationType,
+                n.SentDate,
+                n.DisciplinaryAction.CaseNumber,
+            })
+            .ToListAsync(ct);
+        items.AddRange(notices.Select(n => new PortalActionItemDto
+        {
+            Kind      = "DisciplineNotice",
+            EntityId  = n.Id,
+            Title     = $"{n.NotificationType} notice on case {n.CaseNumber} to acknowledge",
+            ActionUrl = $"/me/discipline/{n.DisciplinaryActionId}",
+            Date      = n.SentDate,
+        }));
+
+        var grievances = await _grievanceService.GetAwaitingMyResponseAsync(empId, ct);
+        items.AddRange(grievances.Select(g => new PortalActionItemDto
+        {
+            Kind      = "GrievanceResponse",
+            EntityId  = g.Id,
+            Title     = $"Grievance {g.GrievanceNumber} awaits your response",
+            Detail    = g.Subject,
+            ActionUrl = $"/me/grievances/{g.Id}",
+            Date      = g.FiledDate,
+        }));
+
+        // Risk acknowledgements collapse to ONE summary row: the read returns every
+        // approved/active assessment in the tenant flagged per-caller (slice-8 design), so a
+        // fresh employee "owes" dozens at once — per-row items would drown the register, and
+        // every row's act happens on the same list page anyway.
+        var unsignedRisks = (await _riskAssessmentService.GetForEmployeeAcknowledgementAsync(empId, ct))
+            .Count(r => !r.AcknowledgedByMe);
+        if (unsignedRisks > 0)
+        {
+            items.Add(new PortalActionItemDto
+            {
+                Kind      = "RiskAssessmentAcknowledgement",
+                EntityId  = Guid.Empty,
+                Title     = unsignedRisks == 1
+                    ? "1 risk assessment awaits your acknowledgement"
+                    : $"{unsignedRisks} risk assessments await your acknowledgement",
+                ActionUrl = "/me/safety/risk-assessments",
+            });
+        }
+
+        var bonds = (await _bondService.GetByEmployeeAsync(empId, ct))
+            .Where(b => b.Status == TrainingBondStatus.PendingAcceptance);
+        items.AddRange(bonds.Select(b => new PortalActionItemDto
+        {
+            Kind      = "TrainingBondAcceptance",
+            EntityId  = b.Id,
+            Title     = $"Training bond for {b.ProgramName} awaits your acceptance",
+            Detail    = $"{b.Currency} {b.BondAmount:n2} · {b.BondDurationMonths} months",
+            ActionUrl = $"/me/training/bonds/{b.Id}",
+        }));
+
+        return items;
     }
 
     // =========================================================================

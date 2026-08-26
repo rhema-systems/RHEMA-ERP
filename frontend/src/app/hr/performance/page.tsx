@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
-import { AppraisalNotificationsPanel } from '@/components/hr/performance/AppraisalNotificationsPanel';
 
 /**
  * Performance — the cycle, the appraisal run inside it, and the goal cascade underneath.
@@ -157,10 +156,10 @@ const items: NavCardItem[] = [
     icon: TriangleAlert,
   },
   {
-    title: 'Notifications',
+    title: 'My Notifications',
     description:
-      'Your appraisal queue: cycle openings and the deadline reminders HR sends from a cycle.',
-    href: '/hr/performance/notifications',
+      'Your own appraisal queue — cycle openings and deadline reminders — in the portal feed that carries every other notification too.',
+    href: '/me/notifications',
     icon: BellRing,
   },
   {
@@ -181,7 +180,6 @@ export default function PerformanceLandingPage() {
         backHref="/hr"
       />
       <NavCardGrid items={items} />
-      <AppraisalNotificationsPanel limit={5} />
     </div>
   );
 }

@@ -911,6 +911,163 @@ variant (adding new rows to an EXISTING profile) has the same bug and the same f
 
 ---
 
+## 14. Workflow platform — the pending feeds die mid-stream the moment they have content
+
+**Found 2026-08-26** while building the portal approvals inbox (HR area 25 slice 11).
+
+### What is broken
+
+`GET /api/Workflow/approvals/pending` and `GET /api/Workflow/tasks/pending` return the RAW
+EF entity graphs (`WorkflowApproval`, `WorkflowStepInstance`) — no DTO. The graph is cyclic
+(`WorkflowApproval.StepInstance ↔ WorkflowStepInstance.Approvals`, plus the instance →
+definition → steps chain), so serialization throws AFTER the 200 status line has gone out:
+the client sees **HTTP 200 with a connection that terminates mid-body**. The same shape
+kills the RESPONSE of `POST /api/Workflow/approvals/{id}/process` (it returns
+`{ success, data = approval }` — the entity again), so every process call reports a network
+error to its caller **after the action has executed server-side**.
+
+### What was proven
+
+Measured live (Staging, 2026-08-26, probe-slice11): both GET feeds answer `HTTP 200` +
+`BODY READ FAILED: terminated` whenever the caller has ≥1 pending row, and `[]` cleanly when
+empty — the endpoints have effectively never returned content. The process POST terminated
+the same way while the approval row WAS consumed (the mobile inbox count dropped 2 → 1).
+
+The server log names it exactly:
+
+```
+System.Text.Json.JsonException: A possible object cycle was detected ... Path:
+$.data.StepInstance.WorkflowInstance.WorkflowDefinition.Steps.WorkflowDefinition.Steps.
+WorkflowDefinition.Steps. ... .DefinitionKey.
+RequestPath: /api/Workflow/approvals/pending
+```
+
+followed by a second, misleading error as the global handler tries to turn it into a 500:
+`System.InvalidOperationException: StatusCode cannot be set because the response has already
+started` (`GlobalExceptionHandlingMiddleware.cs:247`). That pair — cycle exception, then
+"response has already started" — is the signature to grep for; it hides the real fault and is
+why the endpoints look healthy from the outside.
+
+### What it blocks
+
+Any consumer of a non-empty feed: the admin workflow dashboard's `pendingApprovals` stat
+card silently loses its count (its `Promise.allSettled` swallows the failure), and nothing
+can build on the two feeds. The HR portal inbox (area 25 slice 11) does NOT consume them —
+it projects its own flat DTO — which is how this stayed invisible for so long: the one
+working feed (`workflow/platform/mobile/inbox`) projects an anonymous shape.
+
+### What a fix needs
+
+Project DTOs instead of returning entities from the three actions (`approvals/pending`
+~WorkflowController.cs:2327, `tasks/pending` :1937, and the `ProcessApproval` response
+:2539). The flat projection the HR portal added (`EmployeePortalController.GetInbox`) shows
+the shape; alternatively `ReferenceHandler.IgnoreCycles` masks the crash but still ships
+unbounded graphs.
+
+---
+
+## 15. Workflow platform — a generic-inbox approval consumes the approval but strands the entity
+
+**Found 2026-08-26**, same probe. The severe one.
+
+### What is broken
+
+Approving through the generic surfaces — `POST /api/Workflow/approvals/{id}/process`,
+`POST /api/Workflow/steps/{id}/process`, or the mobile inbox's
+`POST /api/workflow/platform/mobile/actions` — drives `WorkflowEngine.ProcessStepAsync`
+ONLY. The module's `IWorkflowStatusAdapter` is **never applied**: adapters are invoked by
+each module's own approve endpoint (e.g. `StaffMovementService.ApproveAsync` →
+`_workflowIntegrationService.ProcessApprovalAsync` → `adapter.ApplyApprovalOutcome` → save).
+The controller's only integration hook, `TryApplyPostApprovalIntegrationAsync`
+(WorkflowController.cs:2552), handles ProcedureCases and ServiceRequests — nothing else.
+So a generic-inbox approval consumes the `WorkflowApproval` row and advances the instance
+while the business entity **stays `Submitted` forever**, with no pending approval left that
+could ever move it.
+
+### What was proven
+
+Measured live: two staff movements approved/rejected via `approvals/{id}/process` (string
+enum bound fine, the engine advanced, the approver's inbox emptied) — both movements still
+`Submitted` on re-read, minutes later. The module's own `staff-movements/{id}/approve`
+lands the same definition's outcome correctly (every prior area harness proves it).
+
+### What it blocks
+
+The existing `/workflow/inbox` page (backed by `mobile/actions`) is a strand-the-record
+button for every module whose status lives behind an adapter — the approver believes they
+approved; the requester sees a request stuck in Submitted with no approval pending. Every
+module on the engine is affected. The HR portal inbox (slice 11) is READ-AND-NAVIGATE for
+exactly this reason: rows deep-link to the record page, whose module commands do the whole
+job.
+
+### What a fix needs
+
+The generic process endpoints must apply the entity's status adapter after a successful
+engine step — the recall path already does exactly this
+(`TryApplyRecallStatusAsync`, WorkflowController.cs:1728: registry lookup →
+`ResolveWorkflowEntityForAdapterAsync` → apply → save); the approval/rejection outcome
+needs the same treatment wherever `ProcessStepAsync` is driven generically (ProcessApproval,
+ProcessStep, mobile/actions). Alternatively: derive the outcome from the instance status
+after the step, as `SimpleWorkflowService`'s submit path does.
+
+---
+
+## 16. Platform notifications — any user could plant a notification in any user's feed (GATED in HR slice 11)
+
+**Found and closed 2026-08-26** (HR area 25 slice 11). Recorded because the fix sits in a
+platform controller HR does not own.
+
+### What was broken
+
+`POST /api/Notifications` sat behind the controller's plain `[Authorize]` and takes an
+arbitrary `RecipientId`, title, message and `actionUrl`. Measured live: a plain Employee
+token created a notification addressed to another user, 201. Combined with the engine's own
+"Approval Required" rows, an employee could put an official-looking, arbitrary-link row into
+anyone's bell — a phishing-shaped hole the self-service portal would have surfaced to every
+employee.
+
+### The fix (applied)
+
+`[Authorize(Roles = "SuperAdmin,TenantAdmin")]` on the action — the same gate its `send-push`
+sibling already carried. Safe because backend modules write through `INotificationService`
+directly (not HTTP), and the only frontend wrapper (`notificationService.sendNotification`)
+has zero callers. If the platform team ever wants user-created notifications, they need a
+recipient-authorization rule, not the open door.
+
+---
+
+## 17. Finance — a fixed-asset approval links approvers to a route that does not exist
+
+**Found 2026-08-26** by the area-25 slice-11 route-resolution sweep over every `ActionUrl`
+`WorkflowEntityDisplayService` can emit (the portal inbox surfaces them, so they were checked
+for the first time).
+
+### What is broken
+
+`WorkflowEntityDisplayService.cs:890` sets `ActionUrl = $"/finance/fixed-assets/register/{entityId}"`
+for the `FixedAsset` entity type. That route has no page: `frontend/src/app/finance/fixed-assets/register/[id]/`
+contains only `edit/`, so the detail URL 404s. Only `/finance/fixed-assets/register/{id}/edit` exists.
+
+### What was proven
+
+All 71 `ActionUrl` values in the display service were resolved against the Next.js app tree:
+**70 resolve, this one does not** (the 25 HR ones are all clean — area 25 slice 7 fixed that
+family). Sibling fixed-asset URLs on lines 940–960 (`verification/{id}`, `capital-projects/{id}`,
+`leases/{id}`) resolve correctly, so this is a single missed route, not a pattern.
+
+### What it blocks
+
+Anyone approving a fixed-asset workflow item from a generic inbox (including HR's new portal
+inbox, which links approvals to the record) lands on a 404 instead of the asset.
+
+### What a fix needs
+
+Either add `register/[id]/page.tsx` (the detail page the edit screen implies), or point the
+ActionUrl at `/finance/fixed-assets/register/{id}/edit` — the owning team's call on whether a
+read-only detail view is wanted.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

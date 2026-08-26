@@ -149,6 +149,16 @@ export default function MeLandingPage() {
     staleTime: 60_000,
   });
 
+  // Slice 11: the inbox counts, shared with the top nav's badges (same query key, one read).
+  const { data: counts } = useQuery({
+    queryKey: ['me', 'inbox-counts'],
+    queryFn: () => mePortalService.getInboxCounts(),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const inboxCount =
+    (counts?.pendingApprovals ?? 0) + (counts?.pendingTasks ?? 0) + (counts?.actionItems ?? 0);
+
   const pendingTotal = home
     ? home.movementsAwaitingMyResponse +
       home.surchargesAwaitingMyResponse +
@@ -199,17 +209,24 @@ export default function MeLandingPage() {
               label="Assets to sign for"
               href="/me/assets"
             />
-            {pendingTotal === 0 && !isError && (
+            {/* The calm line must account for the inbox too — "nothing needs your action"
+                while three approvals wait would be a lie the portal tells about itself. */}
+            {pendingTotal === 0 && inboxCount === 0 && !isError && (
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Nothing needs your
                 action right now.
               </span>
             )}
             <Link
-              href="/workflow/inbox"
+              href="/me/inbox"
               className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors hover:bg-accent"
             >
               <CheckSquare className="h-4 w-4" /> Approvals & tasks
+              {inboxCount > 0 && (
+                <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-bold text-white">
+                  {inboxCount > 99 ? '99+' : inboxCount}
+                </span>
+              )}
             </Link>
           </div>
         )}

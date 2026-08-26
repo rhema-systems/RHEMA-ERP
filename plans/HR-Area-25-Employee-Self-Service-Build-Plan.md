@@ -34,7 +34,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 8 | Move-in: medical + safety | **COMPLETE 2026-08-26** — 75 assertions ×2 + 451 ladder; 4 new backend self-arms; appointment .Include fix; 6 screens moved + 7 built |
 | 9 | Move-in: assets (+ owed acknowledge/respond), awards, discipline, grievances | **COMPLETE 2026-08-26** — 80 assertions ×2 + 526 ladder; 4 fixes (ack repeat, withdraw dead route, committee-result leak, notice text); 10 screens moved + 1 built |
 | 10 | My payslips: the read-only payroll adapter | **COMPLETE 2026-08-26** — 35 assertions ×3 + 606 ladder; latest-by-PERIOD; payroll FYI #12 + defect #13 (profile create never worked) recorded |
-| 11 | Approvals & tasks inbox, notifications | not started |
+| 11 | Approvals & tasks inbox, notifications | **COMPLETE 2026-08-26** — 98 assertions ×2 + 641 ladder; 3 platform defects found (#14/#15/#17), the notification-forgery hole closed |
 | 12 | New capabilities: change requests, HR letters, announcements & acknowledgements | not started |
 | 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
 | 14 | Closing audit: content audit, the two greps, route resolution, polish pass | not started |
@@ -744,3 +744,89 @@ recompute.
   ≥1 employee in the run; the run's approval gate no-ops without an active payroll-run
   workflow definition; `Deductions` is EMPTY when no tax was computed (asserted as the
   measured reality); the unlinked wall answers 403 "not linked" in words.
+
+### Slice 11 — approvals & tasks inbox + unified notifications. CLOSED 2026-08-26.
+
+`run-slice11.mjs` 98 assertions ×2 green + the 641 ladder
+(111/33/35/68/47/85/72/75/80/35). No migration. Spec rows **#37 (my approvals)** and
+**#38 (my tasks — endpoint but never a screen)** close here, and **#40** moves off the desk
+admin console. Probes kept: `probe-slice11.mjs`/`11b`/`11c`/`11d`/`11e` with their outputs.
+
+- **THE find, and the reason this slice's inbox does not approve anything: approving from
+  any GENERIC workflow surface consumes the approval and STRANDS the record.** The engine
+  advances and completes the instance, but the module's `IWorkflowStatusAdapter` — the thing
+  that actually writes `Approved` onto the entity — is only ever invoked by the module's own
+  approve endpoint. Measured on all three generic paths (`approvals/{id}/process`,
+  `steps/{id}/process`, and `workflow/platform/mobile/actions`, which is what the existing
+  desk `/workflow/inbox` posts to): HTTP 200, `"status":"Succeeded"`, approval row gone,
+  workflow `hasActiveInstance:false` — and the movement still `Submitted`, now with no
+  pending approval that could ever move it. Recorded as **cross-module #15**; the portal
+  inbox is therefore **read-and-navigate**, every row deep-linking to the record page whose
+  module commands carry the whole outcome (which is also the W1 rule: never build a bespoke
+  HR approval UI).
+- **Its sibling, #14: the platform's own pending feeds have effectively never returned
+  content.** `GET Workflow/approvals/pending` and `tasks/pending` return raw EF entity
+  graphs; the `WorkflowApproval ↔ WorkflowStepInstance` cycle throws *after* the 200 status
+  line, so the client gets **200 with a body that dies mid-stream** whenever the caller has
+  ≥1 row, and a clean `[]` when they have none. The admin dashboard's `pendingApprovals`
+  stat card swallows it in a `Promise.allSettled`. Both facts are asserted in §8 on purpose,
+  so the assertions flip the day the platform team fixes them.
+- **So the portal projects its own flat DTO** (`GET employee-portal/inbox`), and — the part
+  that makes it a product rather than a feed — enriches every row through
+  `IWorkflowEntityDisplayService`, the canonical ~70-entity-type resolver that none of the
+  three platform feeds consult. Rows carry entity number, entity name, step, workflow and
+  the record URL; the desk inbox shows a bare GUID. Two registers, plus a third: **action
+  items**, the acknowledge/respond/accept acts the HR areas had scattered (movement
+  response, asset acknowledgement, asset charge, discipline notice, grievance response,
+  risk acknowledgement, training bond) — the consolidation slice 9 recorded as owed.
+  Dedup rule: a step carrying somebody else's pending approval is listed as an approval and
+  **never** duplicated into that person's tasks (asserted live, both ways).
+- **The risk-acknowledgement family collapses to ONE summary row.** Slice 8's read returns
+  every approved/active assessment in the tenant flagged per-caller, so a fresh employee
+  "owes" dozens at once (25 in this tenant, measured) — per-row items would have drowned
+  the register, and every one of them is signed on the same page anyway.
+- **The forgery hole, found by the probe and closed here: `POST api/Notifications` was
+  behind bare `[Authorize]`** and takes an arbitrary `RecipientId`, title, message and
+  `actionUrl`. A plain Employee token planted a notification in another user's feed, 201.
+  Combined with the engine's own "Approval Required" rows, that is a phishing surface the
+  portal would have shown every employee. Now admin-gated like its `send-push` sibling —
+  safe because modules write through `INotificationService` in-process and the one frontend
+  wrapper had zero callers. Recorded as **#16** (the fix lives in a platform controller).
+- **Unified notifications: four stores, one shape** (`GET employee-portal/my-notifications`).
+  The general platform store is keyed by USER, appraisal and orientation by EMPLOYEE, and
+  the movement rows are computed at request time. Read state stays with whichever store
+  owns it — mark-read dispatches BY SOURCE from the client — and `unreadCount` is the SUM of
+  the three persisted stores' own unread reads, never derived from the capped page. The
+  computed movement rows honestly carry `isRead: null` / `canMarkRead: false` (their ids are
+  regenerated on every request), and the screen says "Live" rather than offering a control
+  that would silently do nothing.
+- **A dangling-URL fix the feed would otherwise have surfaced:** `OrientationDataSeeder`
+  wrote `NavigationUrl = "/my-orientations"`, a Blazor-era route that does not exist in the
+  Next.js app → `/me/orientation`. Same family as slice 7's movement/travel re-points.
+- **Route resolution went wider this slice:** all 71 `ActionUrl` values
+  `WorkflowEntityDisplayService` can emit were resolved against the app tree, because the
+  inbox is the first surface that shows them. **70 resolve; one does not** —
+  `/finance/fixed-assets/register/{id}` has no page (only `…/edit`), recorded as **#17**.
+  All 25 HR URLs are clean, which is slice 7's work holding.
+- **D3 move-in:** `/hr/performance/notifications` (a pure employee-as-subject screen) and
+  its `AppraisalNotificationsPanel` deleted, absorbed by the unified feed; the desk sidebar
+  entry removed and the performance hub card re-pointed at `/me/notifications`. The portal
+  nav's two action buttons — which until now left the portal for the desk `/workflow/inbox`
+  and the `/notifications` **admin console** (an administration surface a plain Employee has
+  no business seeing) — now point at `/me/inbox` and `/me/notifications` with live badges.
+- **A vacuous green caught in the harness itself, worth keeping as a lesson:** the first
+  §8 draft read `strandRow.id` where the DTO field is `approvalId`, so the process POST went
+  to `/approvals/undefined/process` and did nothing — and "the record is still Submitted"
+  passed *for the wrong reason*. Only the paired assertion ("…and the approval is gone")
+  failed and exposed it. The leg now proves the act EXECUTED (HTTP 200) before asserting the
+  strand, and the blind `catch {}` that hid the error is gone. **Assert the cause, not just
+  the symptom — a call that never landed looks exactly like a call that did nothing.**
+- Two more facts the run records by name: the ordinary Draft→Approval→Approved instance
+  **completes** on approval (so its trailing manual bookend is never left pending — a
+  user-assigned task is not reachable that way; the run publishes a manual-middle definition
+  to produce a genuine one), and the bond leg is **seeded rather than compared against an
+  empty read**, because a zero-to-zero equality proves nothing.
+- **Residual recorded, not built:** `appraisalNotificationService` in the frontend now has
+  no consumers (its screen moved into the unified feed) — a candidate for the slice-14
+  polish sweep; and the SignalR live-push wiring that the desk `HeaderNotificationBell` uses
+  is not wired into the portal (the portal reads on navigation and after every mutation).

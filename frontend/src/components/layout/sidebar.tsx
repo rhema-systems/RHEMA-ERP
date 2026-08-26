@@ -560,7 +560,8 @@ export const navigationItems: NavItem[] = [
           { title: 'Employee Goals', href: '/hr/performance/employee-goals', icon: Target },
           { title: 'Team Goals', href: '/hr/performance/team-goals', icon: Users },
           { title: 'Goals At Risk', href: '/hr/performance/at-risk', icon: AlertTriangle, permissions: ['HR.Performance.Read'] },
-          { title: 'Notifications', href: '/hr/performance/notifications', icon: Bell },
+          // Appraisal notifications were a self surface on the desk; area 25 slice 11 folded
+          // them into the portal's unified feed (/me/notifications).
           {
             title: 'Deadline Enforcement',
             href: '/hr/performance/deadline-enforcement',

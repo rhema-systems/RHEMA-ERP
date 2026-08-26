@@ -200,6 +200,97 @@ export interface MyPayslipDetail extends MyPayslipSummary {
   payslip: MyPayslipDocument | null;
 }
 
+// ── Approvals & tasks inbox + unified notifications (slice 11) ────────────────────────────────
+// Shapes measured live (probe-slice11c). The inbox is READ AND NAVIGATE by design: the
+// generic engine process endpoints consume the approval but never apply the module's status
+// adapter (the entity strands in Submitted — cross-module defect #15), so every row carries
+// the record's URL and the approval act happens there, on the module's own surface.
+
+export interface PortalApprovalItem {
+  approvalId: string;
+  stepInstanceId: string;
+  stepName: string;
+  workflowName?: string | null;
+  entityType: string;
+  entityId?: string | null;
+  entityNumber?: string | null;
+  entityName?: string | null;
+  /** Desk record URL — an approver has desk access to what they are asked to sign. */
+  actionUrl?: string | null;
+  requestedDate: string;
+  dueDate?: string | null;
+  priority: string;
+  /** Null when addressed to the caller directly; the role name when via a role arm. */
+  approverRole?: string | null;
+}
+
+export interface PortalTaskItem {
+  stepInstanceId: string;
+  stepName: string;
+  workflowName?: string | null;
+  entityType: string;
+  entityId?: string | null;
+  entityNumber?: string | null;
+  entityName?: string | null;
+  actionUrl?: string | null;
+  createdDate: string;
+  dueDate?: string | null;
+}
+
+export type PortalActionItemKind =
+  | 'MovementResponse'
+  | 'SurchargeResponse'
+  | 'AssetAcknowledgement'
+  | 'DisciplineNotice'
+  | 'GrievanceResponse'
+  | 'RiskAssessmentAcknowledgement'
+  | 'TrainingBondAcceptance';
+
+export interface PortalActionItem {
+  kind: PortalActionItemKind;
+  entityId: string;
+  title: string;
+  detail?: string | null;
+  actionUrl: string;
+  date?: string | null;
+}
+
+export interface PortalInbox {
+  approvals: PortalApprovalItem[];
+  tasks: PortalTaskItem[];
+  actionItems: PortalActionItem[];
+}
+
+export interface PortalInboxCounts {
+  pendingApprovals: number;
+  pendingTasks: number;
+  actionItems: number;
+  unreadNotifications: number;
+}
+
+export type PortalNotificationSource = 'General' | 'Appraisal' | 'Orientation' | 'Movement';
+
+export interface PortalNotificationItem {
+  source: PortalNotificationSource;
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  isActionRequired: boolean;
+  createdAt: string;
+  /** Null for computed rows (movements) — they have no read state at all. */
+  isRead?: boolean | null;
+  /** False for computed rows; their ids do not survive a refresh. */
+  canMarkRead: boolean;
+  actionUrl?: string | null;
+}
+
+export interface PortalNotifications {
+  items: PortalNotificationItem[];
+  /** The true unread total — summed from the stores' own unread-count reads. */
+  unreadCount: number;
+}
+
 class MePortalService {
   private readonly baseUrl = '/employee-portal';
 
@@ -253,6 +344,48 @@ class MePortalService {
   /** Somebody else's snapshot id is a 404 lookup miss — never a 403. */
   getPayslip(id: string): Promise<MyPayslipDetail> {
     return apiService.get<MyPayslipDetail>(`${this.baseUrl}/payslips/${id}`);
+  }
+
+  // ── Inbox + unified notifications (slice 11) ──
+
+  getInbox(): Promise<PortalInbox> {
+    return apiService.get<PortalInbox>(`${this.baseUrl}/inbox`);
+  }
+
+  /** The light counts behind the top-nav badges and the landing chips. */
+  getInboxCounts(): Promise<PortalInboxCounts> {
+    return apiService.get<PortalInboxCounts>(`${this.baseUrl}/inbox/counts`);
+  }
+
+  getMyNotifications(): Promise<PortalNotifications> {
+    return apiService.get<PortalNotifications>(`${this.baseUrl}/my-notifications`);
+  }
+
+  /**
+   * Mark one notification read — dispatched BY SOURCE to the store that owns the row's
+   * read state (the unified feed invents no fourth store). Movement rows are computed and
+   * cannot be marked; callers must not send them here.
+   */
+  markNotificationRead(source: PortalNotificationSource, id: string): Promise<void> {
+    switch (source) {
+      case 'General':
+        return apiService.post<void>(`/Notifications/${id}/mark-read`, {});
+      case 'Appraisal':
+        return apiService.post<void>(`/AppraisalNotifications/${id}/read`, {});
+      case 'Orientation':
+        return apiService.post<void>(`/orientation-notifications/${id}/read`, {});
+      default:
+        return Promise.reject(new Error(`Notifications from source "${source}" have no read state.`));
+    }
+  }
+
+  /** Mark-all across the three persisted stores. */
+  async markAllNotificationsRead(): Promise<void> {
+    await Promise.all([
+      apiService.post<void>('/Notifications/mark-all-read', {}),
+      apiService.post<void>('/AppraisalNotifications/me/mark-all-read', {}),
+      apiService.post<void>('/orientation-notifications/mine/read-all', {}),
+    ]);
   }
 }
 
