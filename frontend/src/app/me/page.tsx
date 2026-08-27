@@ -33,6 +33,7 @@ import {
   HeartPulse,
   Laptop,
   Mail,
+  Megaphone,
   MessageSquare,
   Plane,
   Rocket,
@@ -326,6 +327,32 @@ export default function MeLandingPage() {
           </div>
         )}
       </section>
+
+      {/* ── Announcements (slice 12c: the slice-3 stub, now live) ──────── */}
+      {!!home?.announcements?.length && (
+        <section>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <Megaphone className="h-4 w-4" /> Announcements
+          </h2>
+          <div className="space-y-2">
+            {home.announcements.map((a) => (
+              <Link
+                key={a.id}
+                href="/me/announcements"
+                className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent"
+              >
+                <span className="font-medium">{a.title}</span>
+                <span className="text-muted-foreground">
+                  {new Date(a.publishedAt).toLocaleDateString(undefined, {
+                    day: 'numeric',
+                    month: 'short',
+                  })}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Expiring documents (only when there are any) ───────────────── */}
       {!!home?.expiringDocuments?.length && (

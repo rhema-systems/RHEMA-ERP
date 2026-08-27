@@ -50,6 +50,7 @@ public class EmployeePortalController : ControllerBase
     private readonly IStaffGrievanceService         _grievanceService;
     private readonly ISheRiskAssessmentService      _riskAssessmentService;
     private readonly ITrainingServiceBondService    _bondService;
+    private readonly IHrAnnouncementService         _announcementService;
 
     public EmployeePortalController(
         IStaffMovementService          movementService,
@@ -70,7 +71,8 @@ public class EmployeePortalController : ControllerBase
         IOrientationNotificationService orientationNotificationService,
         IStaffGrievanceService         grievanceService,
         ISheRiskAssessmentService      riskAssessmentService,
-        ITrainingServiceBondService    bondService)
+        ITrainingServiceBondService    bondService,
+        IHrAnnouncementService         announcementService)
     {
         _movementService    = movementService;
         _actingService      = actingService;
@@ -91,6 +93,7 @@ public class EmployeePortalController : ControllerBase
         _grievanceService     = grievanceService;
         _riskAssessmentService = riskAssessmentService;
         _bondService          = bondService;
+        _announcementService  = announcementService;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -265,7 +268,16 @@ public class EmployeePortalController : ControllerBase
                 })
                 .FirstOrDefaultAsync(ct),
 
-            Announcements = [],     // slice 12 wires announcements
+            // Slice 12c: the typed stub cut in slice 3 is now live. Membership is evaluated
+            // per read, so a transfer changes what the employee sees without anyone republishing.
+            Announcements = (await _announcementService.GetMineForDashboardAsync(empId, 3, ct))
+                .Select(a => new PortalAnnouncementStubDto
+                {
+                    Id = a.Id,
+                    Title = a.Title,
+                    PublishedAt = a.PublishedAt,
+                })
+                .ToList(),
         });
     }
 

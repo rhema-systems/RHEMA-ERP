@@ -111,6 +111,12 @@ public static class ControlledFileUploadCategories
     public const string HrLetterDocuments = "hr-letter-documents";
 
     /// <summary>
+    /// A file attached to a staff announcement — the notice, form or circular everybody is
+    /// being pointed at (area 25 slice 12c).
+    /// </summary>
+    public const string HrAnnouncementDocuments = "hr-announcement-documents";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -159,7 +165,10 @@ public static class ControlledFileUploadCategories
                 HrProfileChangeEvidence,
                 // A signed letter on company letterhead, handed to a bank or an embassy. If any
                 // category should not be scan-optional by tenant policy, it is this one.
-                HrLetterDocuments
+                HrLetterDocuments,
+                // An announcement attachment is the one file in HR deliberately pushed at EVERY
+                // employee at once, which makes it the worst possible thing to leave unscanned.
+                HrAnnouncementDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

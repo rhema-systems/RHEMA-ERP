@@ -27,6 +27,7 @@ using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.Announcements;
 using ErpSystem.Core.Entities.HR.Letters;
 using ErpSystem.Core.Entities.HR.ProfileChanges;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
@@ -385,6 +386,10 @@ public partial class ApplicationDbContext
     // Area 25 slice 12b — letters an employee asks HR for. HR fulfils either by issuing a
     // generated letter (frozen on the row) or by uploading a signed scan.
     public DbSet<HrLetterRequest> HrLetterRequests { get; set; } = null!;
+
+    // Area 25 slice 12c — staff announcements and who each one is aimed at.
+    public DbSet<HrAnnouncement> HrAnnouncements { get; set; } = null!;
+    public DbSet<HrAnnouncementAudience> HrAnnouncementAudiences { get; set; } = null!;
 
     // Area 9 slice 8 — the discipline reminder sweep. Covers both halves of the area, which is why
     // it sits with the grievance sets rather than the disciplinary ones.
@@ -9088,6 +9093,54 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.RequestId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- HrAnnouncement (area 25 slice 12c, D7) ----
+        builder.Entity<HrAnnouncement>(entity =>
+        {
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Category);
+            // The portal's read filters on status and the date window together.
+            entity.HasIndex(x => new { x.TenantId, x.Status, x.ExpiresOn });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            // Plain text, and unbounded: a staff notice is prose, and a MaxLength here would
+            // truncate the middle of something everyone is about to read.
+            entity.Property(x => x.Body).HasColumnType("nvarchar(max)");
+
+            entity.HasOne(x => x.PublishedBy)
+                .WithMany()
+                .HasForeignKey(x => x.PublishedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ArchivedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ArchivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- HrAnnouncementAudience ----
+        builder.Entity<HrAnnouncementAudience>(entity =>
+        {
+            entity.HasIndex(x => x.AnnouncementId);
+            entity.HasIndex(x => new { x.TargetType, x.TargetId });
+
+            entity.Property(x => x.TargetType).HasConversion<int>();
+
+            // Cascade: an audience rule has no meaning apart from its announcement (the
+            // grievance-step rule).
+            entity.HasOne(x => x.Announcement)
+                .WithMany(x => x.Audiences)
+                .HasForeignKey(x => x.AnnouncementId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ No FK on TargetId, deliberately: it points at one of SIX different tables
+            // depending on TargetType, so there is no single relationship to declare. The
+            // service resolves and validates it; an orphaned target simply matches nobody,
+            // which is the safe failure for a broadcast.
         });
 
         // ---- HrLetterRequest (area 25 slice 12b, D7) ----

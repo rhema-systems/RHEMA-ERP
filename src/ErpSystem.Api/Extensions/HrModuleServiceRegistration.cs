@@ -651,6 +651,13 @@ public static class HrModuleServiceRegistration
         // what makes the built-in templates resolvable, so a tenant that has never opened the
         // template editor can still issue a letter.
         services.AddScoped<IHrLetterRequestService, ErpSystem.Core.Services.HR.Letters.HrLetterRequestService>();
+
+        // Area 25 slice 12c — staff announcements, and the audience resolver they share with
+        // whatever broadcasts next. The resolver is the shared one on purpose: the only working
+        // rule-to-employee expansion before this was private to AppraisalCycleService, and
+        // OrientationAudienceRule has never had one at all.
+        services.AddScoped<IHrAudienceResolver, HrAudienceResolver>();
+        services.AddScoped<IHrAnnouncementService, HrAnnouncementService>();
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
             ErpSystem.Core.Services.HR.Letters.HrLettersEmailEventCatalog>();
 

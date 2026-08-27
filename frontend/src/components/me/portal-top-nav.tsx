@@ -39,6 +39,7 @@ import {
   Home,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu,
   Rocket,
   Sparkles,
@@ -242,6 +243,20 @@ export function PortalTopNav() {
           {/* Slice 11: both destinations are portal-side now. They used to point at the desk
               /workflow/inbox (which strands records — cross-module #15) and the /notifications
               admin console, which an Employee-only user has no business seeing. */}
+          {/* Slice 12c: announcements join the inbox and the bell. All three are "what the
+              organisation is telling me", as distinct from the nav groups, which are "things I
+              go and do" — which is why they live in the action bar and not in a group. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            title="Announcements"
+            className={cn(pathname?.startsWith('/me/announcements') && 'bg-accent')}
+          >
+            <Link href="/me/announcements">
+              <Megaphone className="h-4 w-4" />
+            </Link>
+          </Button>
           <Button
             variant="ghost"
             size="sm"

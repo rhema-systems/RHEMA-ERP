@@ -37,7 +37,8 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 11 | Approvals & tasks inbox, notifications | **COMPLETE 2026-08-26** — 98 assertions ×2 + 641 ladder; 3 platform defects found (#14/#15/#17), the notification-forgery hole closed |
 | 12a | New capabilities: my profile + personal-data change requests (D6) | **COMPLETE 2026-08-26** — 88 assertions ×2 + 739 ladder; census row #39 closed; 2 defects found by the probe |
 | 12b | New capabilities: HR letter requests | **COMPLETE 2026-08-27** — 80 assertions ×2 + 827 ladder; D7 revised: letters are GENERATED (or uploaded), not upload-only |
-| 12c | New capabilities: announcements & policy acknowledgements | not started |
+| 12c | New capabilities: announcements + the shared audience resolver | **COMPLETE 2026-08-27** — 61 assertions ×2 + 908 ladder; the slice-3 announcements stub wired |
+| 12d | New capabilities: policy documents & acknowledgements | not started |
 | 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
 | 14 | Closing audit: content audit, the two greps, route resolution, polish pass | not started |
 
@@ -972,3 +973,74 @@ kept payload probe (`probe12b-out.txt`), and it found all three defects below.
   would cut the signature off the bottom.
 - **New upload category** `hr-letter-documents`, in both the constant list and
   `SystemCleanScanRequired`.
+
+### Slice 12c — staff announcements + the shared audience resolver. CLOSED 2026-08-27.
+
+`run-slice12c.mjs` 61 assertions ×2 green + the 908 ladder (**969 total**). **Migration**
+`20260827005934_AddHrAnnouncements` (guarded SQL, registered). Slice 12 was split again here:
+12c is announcements plus the audience machinery, **12d** is policy documents and
+acknowledgements, which reuse it.
+
+- **`IHrAudienceResolver` is the reusable half, and it is shared on purpose.** The only working
+  rule-to-employee expansion in the codebase was private to `AppraisalCycleService`, covered
+  three axes, and walked the unit tree with one query per node; `OrientationAudienceRule` models
+  the same idea and has **no resolver at all** — its rules are stored and never expanded. Rather
+  than write a third, this one is shared: includes unioned, then exclusions subtracted (so
+  "everyone except the depot" is expressible), and the tree walked from a single load of the
+  unit edges with a cycle guard.
+- **THE correction, from the user: there is no `Department` axis.** The first cut had one,
+  taken by reflex from `Employee`'s column list. Placement in this system is
+  **`OrganizationUnit` + `OrganizationLevel`** — the chart is generic and a tenant names its own
+  tiers, so what one client calls a department another calls a section or a division. Measured
+  on live data before removing it: `OrganizationUnitId` is on 7,930 of 7,954 employees,
+  `DepartmentId` on 7,440, `SectionId` on **zero**, and only **24** people have a department
+  without a unit — 48 units against 7 departments. So the axis was redundant, coarser AND less
+  complete, and offering both would have let a sender pick the one that quietly reaches a
+  different population than they meant. `Location` stays, because a physical site is genuinely
+  orthogonal to the chart.
+- **The tree walk is proven by DELIVERY, not by a count.** The tenant's own data made this
+  possible: "Finance Department" has **0 direct members and 5 child units**, while its child
+  "Financial Accounts" holds 7,716 — so an announcement addressed only to the parent reaching
+  the fixture employee (who sits in the child) is something a direct-membership resolver could
+  not do. Supporting arithmetic: parent 7,717, child 7,716, parent-minus-child exactly 1. ⚠ The
+  harness asserts the PRECONDITION (the fixture's unit must have a parent) rather than skipping
+  when it does not — a tree-walk test that silently does not run is the vacuous green this area
+  keeps catching.
+- **A real bug caught before the harness existed:** `UpdateAsync` replaced the audience by
+  adding rows to the tracked parent's navigation collection. `BaseEntity` pre-generates `Id`, so
+  rows discovered that way are marked **Modified** — EF emits an UPDATE for a row never
+  inserted, the edit silently does nothing, and nothing errors. That is cross-module defect
+  #13's exact shape (payroll's employee-profile create). Fixed by adding through the child's own
+  repository with the FK set explicitly; `CreateAsync` may keep using the collection because its
+  parent is Added and the whole graph goes in with it. The harness asserts the fix by
+  **re-reading from the server**, which is the only way to see it.
+- **Three design calls written into the code:** the body is **plain text**, never markup (an
+  announcement reaches everybody, so HR-authored HTML would be a stored-XSS vector aimed at the
+  whole staff — the letters of 12b are HTML for the opposite reason, being server-composed);
+  there are **no per-employee read rows** (a notice board is not an obligation — where the
+  organisation must prove somebody was told, that is 12d's acknowledgement, with a signature and
+  a frozen text); and **membership is evaluated at READ time**, so a transfer changes what
+  somebody sees without anyone republishing, and a leaver stops seeing it.
+- **Publishing to an empty audience is refused**, which catches a rule naming a unit with nobody
+  in it — the announcement would look published and be read by no one. Relatedly, an empty rule
+  set reaches **nobody** rather than everybody: defaulting a forgotten step to a tenant-wide
+  broadcast is the wrong direction to fail in.
+- **A published notice is never edited in place** — archive and publish a correction, so what
+  people were told stays findable. Only a draft is deletable.
+- **The slice-3 stub is wired**, and slice 3's own assertion was **deliberately flipped**: it
+  used to assert `announcements` was EMPTY ("slice 12 wires it"), and now guards what the stub
+  was really cut for — that every row keeps the `id`/`title`/`publishedAt` shape, so the
+  frontend contract never changed twice. Same deliberate flip slice 1 made to slice 0's
+  `Auth/me` assertion.
+- **Screens:** `/me/announcements` (plain-text rendering with `whitespace-pre-line`, category
+  chips, pinned first, attachment download) and the desk at `/hr/announcements` — at the HR top
+  level rather than in administration settings, because announcements are operational rather
+  than configuration. The desk's audience builder shows the **live reach as the rules are
+  edited** ("412 recipients"), since discovering after the fact that a notice went to four
+  people, or to eight thousand, is what this feature is most prone to. Gated on `HR.Company`:
+  an announcement is a communication from the organisation, not an act on anybody's record.
+- **New upload category** `hr-announcement-documents`, in both lists — it is the one HR file
+  deliberately pushed at every employee at once.
+- **Recorded, not built:** the desk audience builder omits the **Employee** axis. The API
+  supports it (it is mostly useful as an exclusion), but picking a person needs an employee
+  search gated on `HR.Employee`, which an `HR.Company` user need not hold.

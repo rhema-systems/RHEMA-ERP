@@ -9337,3 +9337,79 @@ public enum HrLetterRequestStatus
 }
 
 #endregion
+
+#region HR Audience Targeting (area 25 slice 12c)
+
+/// <summary>
+/// How a broadcast picks its recipients. Shared by announcements (slice 12c) and, when it is
+/// built, the policy library (slice 12d).
+/// </summary>
+/// <remarks>
+/// <para><b>Where an employee sits is <c>OrganizationUnit</c> + <c>OrganizationLevel</c>, and
+/// nothing else.</b> The org structure here is generic: a tenant names its own tiers, so what
+/// one client calls a department another calls a section, a division or a directorate — the
+/// LEVEL names the tier and the UNIT is the actual box on the chart. There is deliberately no
+/// <c>Department</c> target: <c>Employee.DepartmentId</c> is a parallel legacy column, and
+/// measured on live data it is both coarser and less complete than the unit tree (7,440 of
+/// 7,954 employees carry it against 7,930 for the unit; 7 departments against 48 units; and
+/// only 24 people have a department without a unit). Offering both would let a sender pick the
+/// axis that quietly reaches a different population than the one they meant.</para>
+///
+/// <para><c>OrganizationUnit</c> includes CHILD units: announcing something to "Operations" and
+/// having it miss every team inside Operations is never what the sender meant.</para>
+///
+/// <para>Note that <c>OrientationAudienceRule</c> models the same idea and has no resolver
+/// anywhere — its rules are stored and never expanded. If orientation's audience rules are ever
+/// made to work, they should come through the resolver this enum belongs to rather than growing
+/// a second one.</para>
+/// </remarks>
+public enum HrAudienceTargetType
+{
+    /// <summary>Everyone active in the tenant. Needs no target id.</summary>
+    AllEmployees = 1,
+
+    /// <summary>A unit and everything beneath it — the placement axis.</summary>
+    OrganizationUnit = 2,
+
+    /// <summary>A tier of the org chart, whatever this tenant calls it.</summary>
+    OrganizationLevel = 3,
+
+    /// <summary>A job, wherever it sits.</summary>
+    Position = 4,
+
+    /// <summary>A physical site — orthogonal to the org chart, which is why it is its own axis.</summary>
+    Location = 5,
+
+    /// <summary>One named person — mostly useful as an exclusion.</summary>
+    Employee = 6
+}
+
+#endregion
+
+#region HR Announcements (area 25 slice 12c — decision D7)
+
+public enum HrAnnouncementCategory
+{
+    General = 1,
+    Policy = 2,
+    Benefits = 3,
+    Safety = 4,
+    Event = 5,
+
+    /// <summary>Shown first and styled to interrupt. Use sparingly, or it stops working.</summary>
+    Urgent = 6
+}
+
+public enum HrAnnouncementStatus
+{
+    /// <summary>Being written. Visible to no employee.</summary>
+    Draft = 1,
+
+    /// <summary>Live for its audience, subject to its dates.</summary>
+    Published = 2,
+
+    /// <summary>Taken down. Kept, because what was announced and when is a record.</summary>
+    Archived = 3
+}
+
+#endregion

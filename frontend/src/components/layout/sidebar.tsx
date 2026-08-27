@@ -423,6 +423,15 @@ export const navigationItems: NavItem[] = [
     // accounts, not to hide HR from staff. SuperAdmin/TenantAdmin auto-pass.
     permissions: ['hr.access'],
     children: [
+      // Area 25 slice 12c. Operational, not configuration — written and published continuously,
+      // so it sits at the top of HR rather than in administration settings. HR.Company, because
+      // an announcement is a communication from the organisation, not an act on a record.
+      {
+        title: 'Announcements',
+        href: '/hr/announcements',
+        icon: Megaphone,
+        permissions: ['HR.Company.Read'],
+      },
       // W3 slice 11: the register's detail/profile/sub-record reads are HR.Employee.Read on the
       // API now (they carry salary, identifiers and bank data), so the desk entry follows. The
       // shared employee picker rides the open paged read and does not need this.
