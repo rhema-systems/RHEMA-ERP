@@ -190,7 +190,7 @@ budget grain.
 | Evidence | Recorded value |
 | --- | --- |
 | Scenario | `UAT Dimension Budget FY2026` — `e0ec8670-cee0-4cdf-9a73-aa5e6d7918b7`, `Collecting` |
-| Return | `d65d9f6d-cfdf-4981-b750-32d87bf3457d`, Finance & Administration, `Draft` |
+| Return | `d65d9f6d-cfdf-4981-b750-32d87bf3457d`, Finance & Administration, `Draft`, initially unassigned |
 | DEPT definition | `8bc6174e-6697-48de-ad44-37b6df7a6cb9` |
 | PROJECT definition | `4dfcf296-f941-4577-bc67-65a69a482487` |
 | Values | `FIN`, `OPS`, `P100`, and `P200`; active from `2026-08-27` |
@@ -280,6 +280,14 @@ Expected:
 ### UAT-BUD-005: submit, approve, and adopt
 
 Submit and approve the controlled return, then adopt the scenario using the configured workflow.
+
+Precondition and actor handoff:
+
+1. From the scenario page, assign the controlled return to the intended preparer. An unassigned
+   return must not expose submission as an available action.
+2. The assigned preparer submits the return through the normal return workflow.
+3. A different authorized reviewer approves it; the preparer must not approve their own return.
+4. An authorized budget controller adopts the approved scenario.
 
 Expected:
 
