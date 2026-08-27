@@ -89,23 +89,22 @@ database or business-document changes.
 | `FinanceBudgetCommitmentServiceTests` | Pass — 11/11 |
 | `budget-dimension-grid.test.ts` | Pass — 6/6 |
 | Phase A source gate | Pass — merged source present |
-| Phase A schema/runtime gate | **Hold** — the configured environment reports three pending migrations; no migration was applied by this preparation run |
+| Phase A schema/runtime gate | Pass — the three reviewed migrations are applied, physical schema checks passed, and the rebuilt safe API is healthy |
 | Phase B source gate | Hold — PR `#120` is not yet in `master` |
 
 Automated regression success is a prerequisite, not business UAT sign-off. The cases below still
 require authenticated UI/API execution and retained evidence in the designated non-production
 tenant.
 
-Read-only migration inventory for the configured environment:
+The pre-deployment migration inventory for the configured environment was:
 
 1. `20260825141500_AddFinanceControlledDocumentRetention` — pending;
 2. `20260825190000_AddFinanceDimensionRuleScope` — pending;
 3. `20260825235055_AddFinanceBudgetControlDimensions` — pending.
 
-Phase A is therefore not executable yet. Apply the complete reviewed pending sequence through the
-controlled deployment process, re-run the inventory and require zero pending migrations, then
-rebuild/restart the API before beginning `UAT-BUD-001`. This preparation did not apply migrations,
-start services, seed data, or create budget documents.
+The controlled deployment described below applied that complete sequence. EF now reports zero
+pending migrations, so Phase A schema/runtime execution is permitted. No seed routine or business
+document creation was part of the deployment.
 
 ### Phase A migration deployment review — 27 August 2026
 
@@ -140,6 +139,13 @@ after its DDL succeeds. It contains no `UPDATE`, `DELETE`, seed operation, trigg
 forward table drop, or forward column drop. The two index replacements are transactional with their
 successor indexes.
 
+When applying this artifact with SQLCMD, use `-I` so the session has `QUOTED_IDENTIFIER ON`; SQL
+Server requires that setting for the filtered unique indexes. The first deployment invocation
+omitted `-I`: migration 1 committed, migration 2 stopped at its new filtered index, and migration 2's
+transaction rolled back completely. Verification proved the legacy rule index remained, no new
+scope columns remained, and no budget-dimension schema had been created. The unchanged idempotent
+artifact was then rerun with `-I`; it skipped migration 1 and completed migrations 2 and 3.
+
 Before applying it, stop or quiesce the API, take the environment's normal recoverable database
 backup/restore point, and require all of the following:
 
@@ -156,6 +162,22 @@ Abort without stamping history or manually repairing schema if the pending set, 
 database identity, provider, DDL preconditions, or post-deployment physical schema differs. After
 application, require zero pending migrations, rebuild/restart the API and frontend from the recorded
 commit, and run the automated baseline again before starting Phase A UAT.
+
+### Phase A deployment execution record — 27 August 2026
+
+| Evidence | Result |
+| --- | --- |
+| Target | SQL Server `RHEMA-AKWASI\\EXPRESS22`, database `RhemaERP` |
+| Pre-deployment backup | `RhemaERP_PhaseA_Pre_20260827-101757.bak`, `COPY_ONLY`, checksum enabled |
+| Backup verification | `RESTORE VERIFYONLY ... WITH CHECKSUM` passed |
+| Backup SHA-256 | `F1AD85E3921A9EB76356A15BE35EE39B3F58DA508643D0DE3065469531FA38B7` |
+| Applied migration head | `20260825235055_AddFinanceBudgetControlDimensions` |
+| EF pending migrations after deployment | `0` |
+| Physical schema | Retention columns/constraint, scoped rule columns/index, budget dimension columns/table/indexes/FKs all present |
+| Constraint check | `DBCC CHECKCONSTRAINTS` passed for existing controlled-document issue rows |
+| Backend baseline after deployment | Pass — 32/32 |
+| Frontend dimension-grid baseline | Pass — 6/6 |
+| Safe API runtime | Zero product workers; `RhemaERP`; startup initialization skipped; loopback health HTTP 200 |
 
 ## Phase A — worksheet and immutable budget grain
 
@@ -353,7 +375,7 @@ Do not sign off or work around any of the following:
 | --- | --- |
 | Tenant | |
 | Build/commit | |
-| Phase A migration head | `20260825235055_AddFinanceBudgetControlDimensions` / Not applied |
+| Phase A migration head | `20260825235055_AddFinanceBudgetControlDimensions` / Applied 27 August 2026 |
 | Phase B migration head | `20260826013000_AddApVendorInvoiceBudgetEvidence` / Not applied / Not required |
 | Phase executed | A / B / Both |
 | Scenario / return | |
