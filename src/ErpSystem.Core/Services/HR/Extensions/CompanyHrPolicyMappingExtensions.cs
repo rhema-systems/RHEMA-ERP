@@ -31,6 +31,9 @@ public static class CompanyHrPolicyMappingExtensions
             ReviewDueLeadDays              = entity.ReviewDueLeadDays,
             ContractExpiryLeadDays         = entity.ContractExpiryLeadDays,
             ProbationEndLeadDays           = entity.ProbationEndLeadDays,
+            GrievanceRungChaseDays         = entity.GrievanceRungChaseDays,
+            ConcernTriageChaseDays         = entity.ConcernTriageChaseDays,
+            GrievanceAgreementChaseDays    = entity.GrievanceAgreementChaseDays,
 
             RetirementCountdownLeadDays    = entity.RetirementCountdownLeadDays,
             LongServiceMilestoneYears      = entity.LongServiceMilestoneYears,
@@ -75,6 +78,9 @@ public static class CompanyHrPolicyMappingExtensions
         entity.ReviewDueLeadDays              = dto.ReviewDueLeadDays;
         entity.ContractExpiryLeadDays         = dto.ContractExpiryLeadDays;
         entity.ProbationEndLeadDays           = dto.ProbationEndLeadDays;
+        entity.GrievanceRungChaseDays         = dto.GrievanceRungChaseDays;
+        entity.ConcernTriageChaseDays         = dto.ConcernTriageChaseDays;
+        entity.GrievanceAgreementChaseDays    = dto.GrievanceAgreementChaseDays;
 
         entity.RetirementCountdownLeadDays    = dto.RetirementCountdownLeadDays;
         entity.LongServiceMilestoneYears      = dto.LongServiceMilestoneYears?.Trim() ?? string.Empty;

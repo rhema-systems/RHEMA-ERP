@@ -109,6 +109,49 @@ public class CompanyHrPolicySettings : TenantEntity
     public int ProbationEndLeadDays { get; set; } = 30;
 
     // ═══════════════════════════════════════════
+    //  EMPLOYEE-RELATIONS CLOCKS (area 9c slice 7)
+    // ═══════════════════════════════════════════
+
+    /// <summary>
+    /// Days an employee-relations case may sit at a rung unanswered before it is chased.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Ours, not TDC's, and that is why it lives here.</b> FR-HR-181 names the escalation route
+    /// and sets no time limit at any rung; five days is a working assumption raised with TDC in
+    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. Until slice 7 it was a
+    /// <c>const</c> in <c>DisciplineReminderService</c>, so TDC's eventual answer would have cost a
+    /// code change and a deploy. Now it costs a settings edit.
+    ///
+    /// <para>A reminder threshold only: it does not auto-escalate, and the employee keeps the sole
+    /// right to decide whether to escalate.</para>
+    /// </remarks>
+    [Range(1, 90)]
+    public int GrievanceRungChaseDays { get; set; } = 5;
+
+    /// <summary>
+    /// Days an anonymously-reported concern may sit untriaged before HR is chased.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately shorter than the rung clock. A whistleblower has taken a risk to report
+    /// something and has no way to chase it themselves — they cannot walk into an office and ask,
+    /// because that would identify them. An untriaged concern is the failure this module can least
+    /// afford, so three days rather than five.
+    /// </remarks>
+    [Range(1, 90)]
+    public int ConcernTriageChaseDays { get; set; } = 3;
+
+    /// <summary>
+    /// Days after a case is resolved by agreement before the missing signed agreement is chased.
+    /// </summary>
+    /// <remarks>
+    /// FR-HR-181 requires the final signed agreement be retained. A case resolved
+    /// <c>SettledByAgreement</c> with no agreement on file is the requirement unmet, and nothing
+    /// else would ever surface it — the case reads as resolved and drops off every open queue.
+    /// </remarks>
+    [Range(1, 365)]
+    public int GrievanceAgreementChaseDays { get; set; } = 14;
+
+    // ═══════════════════════════════════════════
     //  LONG-SERVICE & RETIREMENT REMINDERS
     // ═══════════════════════════════════════════
 

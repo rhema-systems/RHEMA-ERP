@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -53,6 +54,10 @@ public class DisciplineReminderService : IDisciplineReminderService
     private readonly IHrWorkingDayCalculator _workingDays;
     private readonly IAppEventBus _appEventBus;
     private readonly ICurrentUserProvider _currentUserProvider;
+    // Area 9c slice 7 — the employee-relations clocks are settings, not constants. See
+    // CompanyHrPolicySettings: FR-HR-181 sets no time limit at any rung, so five days is OUR
+    // assumption and TDC's answer must not cost a deploy.
+    private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ILogger<DisciplineReminderService> _logger;
 
     public DisciplineReminderService(
@@ -60,25 +65,32 @@ public class DisciplineReminderService : IDisciplineReminderService
         IHrWorkingDayCalculator workingDays,
         IAppEventBus appEventBus,
         ICurrentUserProvider currentUserProvider,
+        ICompanyHrPolicyProvider policyProvider,
         ILogger<DisciplineReminderService> logger)
     {
         _unitOfWork = unitOfWork;
         _workingDays = workingDays;
         _appEventBus = appEventBus;
         _currentUserProvider = currentUserProvider;
+        _policyProvider = policyProvider;
         _logger = logger;
     }
 
     private const string TopicEntityType = "StaffDisciplinaryAction";
     private const string Audience = "Internal";
 
-    /// <summary>Days a grievance may sit at a rung unanswered before it is chased.</summary>
+    /// <summary>
+    /// ⚠ Area 9c slice 7 — the rung clock MOVED to <c>CompanyHrPolicySettings</c>.
+    /// </summary>
     /// <remarks>
-    /// FR-HR-181 sets no time limit on a rung — it names the route, not a clock. Five days is a
-    /// working assumption, flagged like the query-response window: TDC should confirm it. Named here
-    /// so there is one place to change.
+    /// It was a <c>const</c> here. FR-HR-181 names the escalation route and sets no time limit at any
+    /// rung, so five days is OUR assumption, raised with TDC in
+    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered — which meant their eventual
+    /// answer would have cost a code change and a deploy. It now costs a settings edit. The same
+    /// applies to <c>ConcernTriageChaseDays</c> and <c>GrievanceAgreementChaseDays</c>, added with
+    /// the slice-7 sweeps.
     /// </remarks>
-    private const int GrievanceRungChaseDays = 5;
+    private static readonly int[] ConferenceLadder = { 7, 3, 1 };
 
     private static readonly int[] WarningExpiryLadder = { 30, 14, 7 };
     private static readonly int[] HearingLadder = { 7, 3, 1 };
@@ -220,7 +232,16 @@ public class DisciplineReminderService : IDisciplineReminderService
         await SweepCorrectiveActionsAsync(tenantId, today, pending, cancellationToken);
         await SweepWarningsExpiringAsync(tenantId, today, pending, cancellationToken);
         await SweepFinesOverdueAsync(tenantId, today, pending, cancellationToken);
-        await SweepGrievancesUnansweredAsync(tenantId, today, pending, cancellationToken);
+        // Area 9c slice 7 — the employee-relations clocks. Settings read ONCE per sweep, not per
+        // record: the provider hits the database, and four sweeps over a tenant's cases would
+        // otherwise repeat that read for every row.
+        var policy = await _policyProvider.GetAsync(cancellationToken);
+
+        await SweepGrievancesUnansweredAsync(tenantId, today, pending, policy.GrievanceRungChaseDays, cancellationToken);
+        await SweepGrievanceInvestigationsAsync(tenantId, today, pending, cancellationToken);
+        await SweepGrievanceConferencesAsync(tenantId, today, pending, cancellationToken);
+        await SweepGrievanceAgreementsAsync(tenantId, today, pending, policy.GrievanceAgreementChaseDays, cancellationToken);
+        await SweepConcernsUntriagedAsync(tenantId, today, pending, policy.ConcernTriageChaseDays, cancellationToken);
 
         var ancient = pending.Where(IsBeyondBacklogHorizon).ToList();
         if (ancient.Count > 0)
@@ -660,9 +681,10 @@ public class DisciplineReminderService : IDisciplineReminderService
     /// nothing on any screen goes looking. Escalation cannot rescue it either, because escalating
     /// requires the current rung to have ANSWERED first — so an unanswered rung stops the ladder dead.
     /// </remarks>
-    private async Task SweepGrievancesUnansweredAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    private async Task SweepGrievancesUnansweredAsync(
+        Guid tenantId, DateTime today, List<PendingReminder> pending, int chaseDays, CancellationToken cancellationToken)
     {
-        var cutoff = today.AddDays(-GrievanceRungChaseDays);
+        var cutoff = today.AddDays(-chaseDays);
 
         var items = await _unitOfWork.Repository<StaffGrievanceStep>()
             .GetQueryable(s => s.TenantId == tenantId && !s.IsDeleted
@@ -676,7 +698,7 @@ public class DisciplineReminderService : IDisciplineReminderService
 
         foreach (var item in items)
         {
-            var due = item.ReachedDate.Date.AddDays(GrievanceRungChaseDays);
+            var due = item.ReachedDate.Date.AddDays(chaseDays);
             var daysOverdue = DaysOverdue(due, today);
             var tier = EscalationTier(daysOverdue);
 
@@ -688,6 +710,174 @@ public class DisciplineReminderService : IDisciplineReminderService
                 // Area 25 slice 9: the grievance detail lives in the portal now; every reader of
                 // this reminder (HR, the rung-holder, the griever) is a portal user.
                 $"/me/grievances/{item.GrievanceId}"));
+        }
+    }
+
+    /// <summary>
+    /// Area 9c slice 7 — investigations past their target date and still open.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Only investigations that were GIVEN a target date can be chased, and that is deliberate
+    /// rather than a gap: there is no statutory grievance-investigation clock. FR-HR-178's four
+    /// weeks is the DISCIPLINARY investigation, and applying it here by default would invent a
+    /// deadline the requirement does not set and then chase people against it.
+    /// </remarks>
+    private async Task SweepGrievanceInvestigationsAsync(
+        Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        var items = await _unitOfWork.Repository<StaffGrievanceInvestigation>()
+            .GetQueryable(i => i.TenantId == tenantId && !i.IsDeleted
+                            && i.CompletedDate == null
+                            && i.TargetDate != null
+                            && i.TargetDate < today
+                            && i.Grievance.Status != GrievanceStatus.Resolved
+                            && i.Grievance.Status != GrievanceStatus.Withdrawn
+                            && i.Grievance.Status != GrievanceStatus.Closed)
+            .Select(i => new { i.Id, i.GrievanceId, i.TargetDate, Number = i.Grievance.GrievanceNumber })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var due = item.TargetDate!.Value.Date;
+            var daysOverdue = DaysOverdue(due, today);
+            var tier = EscalationTier(daysOverdue);
+
+            pending.Add(new PendingReminder(
+                "GrievanceInvestigationOverdue", "Employee-relations investigation",
+                item.GrievanceId, item.Number,
+                due, -daysOverdue, tier,
+                $"GrievanceInvestigationOverdue:{item.Id}:{due:yyyyMMdd}:t{tier}",
+                tier >= 2 ? "OverdueEscalated" : "Overdue",
+                $"/me/grievances/{item.GrievanceId}"));
+        }
+    }
+
+    /// <summary>
+    /// Area 9c slice 7 — conferences, mediations and union consultations coming up.
+    /// </summary>
+    /// <remarks>
+    /// A due-soon ladder rather than an overdue one: the value of this reminder is that people turn
+    /// up. A meeting nobody was reminded about does not become useful by being chased afterwards.
+    ///
+    /// <para>⚠ The reference carries the CASE NUMBER and the meeting type, and nothing else — not
+    /// the venue, not who is attending. A reminder travels further than the record it is about, and
+    /// "mediation between X and Y at 3pm" in a notification list tells the whole floor there is a
+    /// dispute.</para>
+    /// </remarks>
+    private async Task SweepGrievanceConferencesAsync(
+        Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // ⚠ +1, and the reason is a time-of-day trap the harness caught. `today` is midnight, so
+        // today.AddDays(7) is midnight on day 7 — and a meeting is a DATETIME with a real time on
+        // it. A 3pm meeting exactly seven days out fell OUTSIDE that horizon, so the 7-day rung
+        // never fired for any meeting not scheduled at midnight. Widening to the end of the last
+        // day fixes it; `due` is already .Date, so daysRemaining is unaffected.
+        var horizon = today.AddDays(ConferenceLadder.Max() + 1);
+
+        var items = await _unitOfWork.Repository<StaffGrievanceConference>()
+            .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted
+                            && c.Status == GrievanceConferenceStatus.Scheduled
+                            && c.ScheduledFor >= today
+                            && c.ScheduledFor <= horizon)
+            .Select(c => new { c.Id, c.GrievanceId, c.ScheduledFor, c.ConferenceType, Number = c.Grievance.GrievanceNumber })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var due = item.ScheduledFor.Date;
+            var daysRemaining = (int)(due - today).TotalDays;
+            var rung = DueSoonRung(daysRemaining, ConferenceLadder);
+            if (rung == null) continue;
+
+            pending.Add(new PendingReminder(
+                "GrievanceConferenceUpcoming", $"{item.ConferenceType}", item.GrievanceId, item.Number,
+                due, daysRemaining, 0,
+                $"GrievanceConferenceUpcoming:{item.Id}:{due:yyyyMMdd}:r{rung}",
+                "DueSoon",
+                $"/me/grievances/{item.GrievanceId}"));
+        }
+    }
+
+    /// <summary>
+    /// Area 9c slice 7 — cases settled by agreement with no signed agreement on file.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Nothing else would ever surface this.</b> FR-HR-181 requires the final signed agreement
+    /// be retained, but a case resolved <c>SettledByAgreement</c> reads as resolved and drops off
+    /// every open queue — so the requirement quietly goes unmet and the record shows a settlement
+    /// nobody can produce the paper for. Restricted to <c>SettledByAgreement</c>: a case decided
+    /// <c>NotUpheld</c> has nothing to sign.
+    /// </remarks>
+    private async Task SweepGrievanceAgreementsAsync(
+        Guid tenantId, DateTime today, List<PendingReminder> pending, int chaseDays, CancellationToken cancellationToken)
+    {
+        var cutoff = today.AddDays(-chaseDays);
+
+        var items = await _unitOfWork.Repository<StaffGrievanceResolution>()
+            .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
+                            && r.Outcome == GrievanceResolutionOutcome.SettledByAgreement
+                            && r.AgreementSignedDate == null
+                            && r.DecidedDate <= cutoff)
+            .Select(r => new { r.Id, r.GrievanceId, r.DecidedDate, Number = r.Grievance.GrievanceNumber })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var due = item.DecidedDate.Date.AddDays(chaseDays);
+            var daysOverdue = DaysOverdue(due, today);
+            var tier = EscalationTier(daysOverdue);
+
+            pending.Add(new PendingReminder(
+                "GrievanceAgreementUnsigned", "Signed agreement", item.GrievanceId, item.Number,
+                due, -daysOverdue, tier,
+                $"GrievanceAgreementUnsigned:{item.Id}:{due:yyyyMMdd}:t{tier}",
+                tier >= 2 ? "OverdueEscalated" : "Overdue",
+                $"/me/grievances/{item.GrievanceId}"));
+        }
+    }
+
+    /// <summary>
+    /// Area 9c slice 7 — anonymously-reported concerns nobody has triaged.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>The one clock here whose subject can do nothing for themselves.</b> Every other
+    /// deadline in this service belongs to somebody who can chase it: an employee awaiting an answer
+    /// can ask, a case owner can be nudged in person. A whistleblower cannot — walking into an
+    /// office to ask about their report is precisely the act that would identify them. If HR does
+    /// not look, nothing happens and nobody ever knows. Hence a shorter threshold than the rung
+    /// clock.</para>
+    ///
+    /// <para>⚠ The reference is the CONCERN NUMBER and nothing else. Not the subject, not the
+    /// category — "fraud concern outstanding" in a notification list is a far smaller haystack for
+    /// anybody trying to work out who reported it.</para>
+    ///
+    /// <para>The action path is HR's triage queue, not a portal route: only HR can act on this, and
+    /// the concern has no portal owner to send anywhere.</para>
+    /// </remarks>
+    private async Task SweepConcernsUntriagedAsync(
+        Guid tenantId, DateTime today, List<PendingReminder> pending, int chaseDays, CancellationToken cancellationToken)
+    {
+        var cutoff = today.AddDays(-chaseDays);
+
+        var items = await _unitOfWork.Repository<EmployeeRelationsConcern>()
+            .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted
+                            && c.Status == ConcernStatus.New
+                            && c.ReportedAt <= cutoff)
+            .Select(c => new { c.Id, c.ReportedAt, c.ConcernNumber })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var due = item.ReportedAt.Date.AddDays(chaseDays);
+            var daysOverdue = DaysOverdue(due, today);
+            var tier = EscalationTier(daysOverdue);
+
+            pending.Add(new PendingReminder(
+                "ConcernUntriaged", "Reported concern", item.Id, item.ConcernNumber,
+                due, -daysOverdue, tier,
+                $"ConcernUntriaged:{item.Id}:{due:yyyyMMdd}:t{tier}",
+                tier >= 2 ? "OverdueEscalated" : "Overdue",
+                "/administration/hr/employee-relations/concerns"));
         }
     }
 

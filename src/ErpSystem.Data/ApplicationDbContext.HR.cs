@@ -3626,6 +3626,21 @@ private void ConfigureHREntities(ModelBuilder builder)
                 ReviewDueLeadDays              = 30,
                 ContractExpiryLeadDays         = 60,
                 ProbationEndLeadDays           = 30,
+                // Area 9c slice 7 — the employee-relations clocks.
+                //
+                // ⚠ These MUST be listed here. The seed is an ANONYMOUS TYPE, so EF matches it to
+                // the entity property by property: a new non-nullable property that is absent here
+                // does not silently take its C# default, it makes the whole DbContext unbuildable
+                // at design time — "the seed entity cannot be added because no value was provided
+                // for the required property". Every future non-nullable setting needs a line here.
+                //
+                // Five days is OUR assumption, not TDC's: FR-HR-181 names the escalation route and
+                // sets no time limit at any rung (open question §2, still unanswered). Three days
+                // for an untriaged concern because a whistleblower cannot chase their own report —
+                // asking about it is the act that would identify them.
+                GrievanceRungChaseDays         = 5,
+                ConcernTriageChaseDays         = 3,
+                GrievanceAgreementChaseDays    = 14,
                 RetirementCountdownLeadDays    = 365,
                 LongServiceMilestoneYears      = "5,10,15,20,25",
                 DefaultCurrencyCode            = "GHS",

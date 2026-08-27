@@ -38,6 +38,14 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int ContractExpiryLeadDays { get; set; }
     public int ProbationEndLeadDays { get; set; }
 
+    // Employee-relations clocks (area 9c slice 7). ⚠ A setting the service reads is only
+    // configurable if it reaches BOTH DTOs and BOTH mapping halves — miss one and it is a dead
+    // field: the engine honours it and nobody can change it, which is the state slice 7 existed
+    // to end.
+    public int GrievanceRungChaseDays { get; set; }
+    public int ConcernTriageChaseDays { get; set; }
+    public int GrievanceAgreementChaseDays { get; set; }
+
     // Long-service & retirement reminders
     public int RetirementCountdownLeadDays { get; set; }
     public string LongServiceMilestoneYears { get; set; } = string.Empty;
@@ -92,6 +100,12 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 3650)] public int ReviewDueLeadDays { get; set; } = 30;
     [Range(0, 3650)] public int ContractExpiryLeadDays { get; set; } = 60;
     [Range(0, 3650)] public int ProbationEndLeadDays { get; set; } = 30;
+
+    // Employee-relations clocks (area 9c slice 7). Ranges match the entity's: a chase threshold of
+    // 0 would make everything overdue the instant it is created.
+    [Range(1, 90)] public int GrievanceRungChaseDays { get; set; } = 5;
+    [Range(1, 90)] public int ConcernTriageChaseDays { get; set; } = 3;
+    [Range(1, 365)] public int GrievanceAgreementChaseDays { get; set; } = 14;
 
     // Long-service & retirement reminders
     [Range(0, 3650)] public int RetirementCountdownLeadDays { get; set; } = 365;

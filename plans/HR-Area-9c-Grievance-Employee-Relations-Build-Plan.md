@@ -42,7 +42,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 4 | Case conferencing & mediation; union consultation | **COMPLETE 2026-08-27** — 86 ×2 + the 151/119/111/70 ladder = **537**; obligation 6 closed. **FR-HR-181 IS NOW FULLY DELIVERED** |
 | 5 | The responder matrix (FR-HR-084) + rung resolution | **COMPLETE 2026-08-27** — 66 ×2 + the 151/119/111/70/86 ladder = **603**; migration `AddEmployeeRelationsResponderMatrix`; the org-authority gap stops being worked around |
 | 6 | Anonymous / whistleblower concern intake | **COMPLETE 2026-08-27** — 56 ×2 + the ladder = **659**, plus **6 row-level SQL checks**; migration `AddEmployeeRelationsConcerns` |
-| 7 | Reminder-sweep extension + notifications | ⏳ |
+| 7 | Reminder-sweep extension + notifications | **COMPLETE 2026-08-27** — 46 ×2 + the ladder = **705**; migration `AddEmployeeRelationsReminderSettings`; the rung clock is a setting at last, and 3 defects were caught by the harness |
 | 8 | ER analytics & reporting | ⏳ |
 | 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | ⏳ |
 | 10 | Desk screens: the ER case register and case file | ⏳ |
@@ -769,3 +769,76 @@ are now spread across four actors with the budget written out in the header, whi
 test anyway: it demonstrates what the design actually claims — the *retrieval code* is the
 credential, not the identity of whoever holds it. *A rate limit is part of an endpoint's contract;
 a harness has to budget for it the way a client would.*
+
+---
+
+### Slice 7 — the reminder sweep's employee-relations clocks. CLOSED 2026-08-27.
+
+`run-slice7.mjs` **46 assertions ×2**, ladder 151 / 119 / 111 / 70 / 86 / 66 / 56 / 46 = **705 for
+the area**. Migration `20260827231835_AddEmployeeRelationsReminderSettings`.
+
+**The rung clock is a setting at last.** `GrievanceRungChaseDays` was a `const` in
+`DisciplineReminderService`. FR-HR-181 names the escalation route and sets **no time limit at any
+rung**, so five days is OUR assumption — raised with TDC in `HR-OPEN-QUESTIONS-FOR-TDC.md` §2 and
+still unanswered — and as a constant their eventual answer would have cost a code change and a
+deploy. The harness proves the move: it sets the clock to 20, watches day 6 fall silent, day 21
+fire, and restores it.
+
+**Four new clocks, each with a reason to exist rather than symmetry:**
+
+- **`ConcernUntriaged` — the one clock whose subject can do nothing for themselves.** Every other
+  deadline in this engine belongs to somebody who can chase it; a whistleblower cannot, because
+  asking about their report is the act that would identify them. Three days, not five.
+- **`GrievanceAgreementUnsigned` — nothing else would ever surface it.** A case resolved
+  `SettledByAgreement` reads as resolved and drops off every open queue, so FR-HR-181's retained
+  agreement quietly goes missing. Restricted to that outcome: a case decided `NotUpheld` has nothing
+  to sign, and the harness asserts it is never chased.
+- **`GrievanceInvestigationOverdue` fires only where a target date was actually set.** There is no
+  statutory grievance-investigation clock — FR-HR-178's four weeks is the *disciplinary* one — and
+  defaulting to it would invent a deadline the requirement does not set and then chase people
+  against it. Asserted: an untargeted investigation is silent even a year out.
+- **`GrievanceConferenceUpcoming`** is a due-soon ladder, because the value of that reminder is that
+  people turn up.
+
+Every new reminder carries **the case or concern number and nothing else** — no subject, no
+category, no venue, no attendee list. The harness asserts the complaint text does not appear in the
+serialised reminder. *"Fraud concern outstanding" in a notification list is a far smaller haystack
+for anybody trying to work out who reported it.*
+
+⚠ **Three defects, all caught by the harness, none by review.**
+
+1. **The setting was a DEAD FIELD.** Added to the entity, read by the service — and absent from the
+   read DTO, the update DTO and both mapping halves. The engine honoured a value **nobody could
+   change**, which is precisely the state this slice existed to end. *A setting is only configurable
+   if it reaches both DTOs and both mapping halves; miss one and it is live but unreachable.*
+2. **⚠ The scaffolded migration would have set every non-seeded tenant's clocks to ZERO.** EF
+   generated `defaultValue: 0` plus a single `UpdateData` fixing only the DEFAULT-tenant row. Zero is
+   not a neutral default here, it is the worst possible value: `ReportedAt <= today.AddDays(0)` is
+   true for everything, so every unanswered rung and every new concern is overdue the instant it is
+   created, and the first sweep fires on the entire back catalogue — the flood `BacklogHorizonDays`
+   exists to prevent, arriving through the front door. Rewritten with real defaults plus an
+   idempotent corrective `UPDATE`. **Second time this area has met it: the default is load-bearing,
+   not cosmetic.**
+3. **A time-of-day trap in the conference horizon.** `today` is midnight, so `today.AddDays(7)` is
+   midnight on day 7 — and a meeting is a `DATETIME` with a real time on it. A 3pm meeting exactly
+   seven days out fell *outside* the horizon, so **the 7-day rung never fired for any meeting not
+   scheduled at midnight**. It would still have been caught at the 3- and 1-day rungs, which is
+   exactly why this could have shipped unnoticed. *Comparing a DATETIME against a midnight-anchored
+   horizon silently loses the last day.*
+
+⚠ **And one of my own assertions was vacuous: `nonBlank(String(x))` can never fail**, because
+`String(undefined)` is `"undefined"`. It passed twice on fields that were missing from the DTO
+entirely, and hid defect 1. Both now assert the value.
+
+⚠ **A second harness lesson: a wiring proof cannot be a late snapshot.** §6 asserted that one sweep
+produced all the new kinds — and failed, because §2 had *concluded* the investigation and §5 had
+*triaged* the concern, correctly. Asserting against that moment was asserting that the fixtures were
+still broken. `preview()` now accumulates every kind seen across the whole run, which is what
+actually proves each is wired into `CollectPendingAsync`.
+
+⚠ **A design-time trap worth knowing before adding any setting:** `CompanyHrPolicySettings` is
+seeded with `HasData` using an **anonymous type**, so EF matches it property by property. A new
+non-nullable property that is not listed there does not take its C# default — it makes the whole
+`DbContext` unbuildable at design time (*"the seed entity cannot be added because no value was
+provided for the required property"*), and `dotnet ef migrations add` fails before it writes
+anything. Commented at the seed.
