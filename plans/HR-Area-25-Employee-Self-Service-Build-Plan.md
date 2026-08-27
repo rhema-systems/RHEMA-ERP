@@ -36,7 +36,8 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 10 | My payslips: the read-only payroll adapter | **COMPLETE 2026-08-26** — 35 assertions ×3 + 606 ladder; latest-by-PERIOD; payroll FYI #12 + defect #13 (profile create never worked) recorded |
 | 11 | Approvals & tasks inbox, notifications | **COMPLETE 2026-08-26** — 98 assertions ×2 + 641 ladder; 3 platform defects found (#14/#15/#17), the notification-forgery hole closed |
 | 12a | New capabilities: my profile + personal-data change requests (D6) | **COMPLETE 2026-08-26** — 88 assertions ×2 + 739 ladder; census row #39 closed; 2 defects found by the probe |
-| 12b | New capabilities: HR letters, announcements & policy acknowledgements | not started |
+| 12b | New capabilities: HR letter requests | **COMPLETE 2026-08-27** — 80 assertions ×2 + 827 ladder; D7 revised: letters are GENERATED (or uploaded), not upload-only |
+| 12c | New capabilities: announcements & policy acknowledgements | not started |
 | 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
 | 14 | Closing audit: content audit, the two greps, route resolution, polish pass | not started |
 
@@ -900,3 +901,74 @@ slice 0)** — the last of the seven M verdicts.
   foreign-evidence leg posts REAL multipart so the ownership check actually runs (it misses at
   the lookup before reaching the scanner, which is why it needs no clamd — a JSON post would
   have 415'd at model binding and proved nothing).
+
+### Slice 12b — HR letter requests. CLOSED 2026-08-27.
+
+`run-slice12b.mjs` 80 assertions ×2 green + the 827 ladder. **Migration**
+`20260826235441_AddHrLetterRequests` (guarded SQL, registered). `probe-slice12b.mjs` is the
+kept payload probe (`probe12b-out.txt`), and it found all three defects below.
+
+- **D7 REVISED, and this is the substantive decision of the slice.** D7 said letters would be
+  "request + HR fulfils with an uploaded letter — no auto-generation in the first cut". The
+  survey showed that assumption was simply wrong: HR letter GENERATION already exists and is
+  mature (`AssetTermsLetterService` renders HTML from an HR-editable template plus
+  `ICompanyProfileProvider`), and — decisively — a module's email catalog ships a **built-in
+  default body**, which its own comment calls "the difference between a requirement that works
+  out of the box and one that waits on a seed nobody remembers to run". So this slice ships
+  **both routes, generation-first**: HR previews the rendered letter, then either issues it or
+  uploads a signed scan for the cases needing a wet signature or another body's form. Four
+  types ship with defaults (employment confirmation, introduction, certificate of service,
+  salary confirmation), all editable by HR without a deployment.
+- **The generated letter is FROZEN at issue** — the opposite call from the asset terms letter,
+  which is re-rendered on demand because it describes a live assignment. A letter of employment
+  is a statement made on a date to a third party who may still hold it a year later. The
+  harness proves it the only way that means anything: it **changes the employee's surname**
+  (through slice 12a's change-request path, which applies on approval) and then asserts the
+  issued letter returns byte-identical HTML still naming them as they were, **while an
+  unissued letter previews under the new name**. Without that second half, "the letter did not
+  change" would have passed for the wrong reason.
+- **Two number series on one table.** `RequestNumber` (HLR-) identifies the ask;
+  `LetterNumber` (HRL-) is the reference printed on the issued letter and is minted only at
+  issue — a refused or withdrawn request must not consume a letter reference, because somebody
+  quoting HRL-2026-00042 must always be quoting a letter that actually left the building.
+- **Three defects the probe caught, all fixed before the harness was written:**
+  (1) **the salary figure had no currency** — the letter read "gross annual salary is
+  96,000.00". My own token descriptor documented it as carrying the tenant's currency, so the
+  contract and the implementation disagreed. `Employee.Salary` is a bare decimal with no
+  currency column anywhere, so the unit now comes from Finance's base currency
+  (`GetBaseCurrencyAsync`, the sanctioned read per `hr-finance-integration-split`, already used
+  by asset surcharges). If Finance cannot answer, the token stays null and the template drops
+  the whole clause — no figure beats an unlabelled one on a letter to a lender, who would
+  otherwise supply a currency of their own choosing. (Note the difference from
+  `AssetSurchargeService`, which REFUSES outright without a base currency: a charge must have
+  one, whereas the rest of a letter is still worth issuing.)
+  (2) **an empty signature line** — `CompanyProfileProvider` reads the signatory NAME from a
+  config key with no fallback while defaulting the TITLE to "Head of Human Resources", so an
+  unconfigured tenant rendered `<strong></strong>` above a job title. On a document that leaves
+  the building that reads as broken rather than as unsigned; the name is now guarded too, and
+  a letter with no signatory closes on the company name alone.
+  (3) **a harness fixture defect with a long tail** — `setup.mjs` sent `hireDate`, but
+  `CreateEmployeeDto` has no such property (only `DateEmployed`), so model binding silently
+  dropped it and **every fixture in this suite was created with a null employed-since date**.
+  That is why `yearsOfService` was null in the slice-12a probe and why two of the four letters
+  had nothing to print for "Employed since". Fixed here; the ladder re-ran green afterwards.
+  ⚠ **The same line is in nine other areas' `setup.mjs`** — recorded, not changed, because
+  those areas are closed and re-running their suites to confirm no assertion shifts is not this
+  slice's work.
+- **The disclosure rule is asserted by CONTENT, per letter.** "The salary token is only named
+  in one template" is a claim about a file; the harness checks all four rendered letters and
+  proves the figure appears in the salary letter and in none of the others. Slice 12a
+  deliberately hides salary from the employee's own profile, so this letter is the one
+  sanctioned path by which they receive it — issued by HR, for a stated purpose.
+- **Screens:** `/me/letters` (request, track, collect — the row branches on `fulfilment`, since
+  a generated letter opens as a document and an uploaded one downloads as a file, and offering
+  both would hand the employee a button that 404s), `/me/letters/[id]` (the frozen letter with
+  a print view), and the desk queue at `/hr/employees/letter-requests` (preview → issue, or
+  upload a signed scan, or refuse with a reason). Preview is not decoration: issuing freezes
+  the document and hands it to a bank, so reading it first is what catches a stale position.
+- **New print family** `printing-hr-letter` / `.hr-letter-print-root`, a sibling of payroll's
+  payslip family — but deliberately NOT pinned to a fixed A4 box: a payslip is one page by
+  construction, whereas a letter is prose that may run onto a second page, and clipping it
+  would cut the signature off the bottom.
+- **New upload category** `hr-letter-documents`, in both the constant list and
+  `SystemCleanScanRequired`.

@@ -76,6 +76,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Travel', href: '/me/travel' },
       // Slice 10: the read-only payslip adapter over payroll's published snapshots.
       { label: 'My Payslips', href: '/me/payslips' },
+      // Slice 12b: letters about your employment, requested here and collected here.
+      { label: 'My Letters', href: '/me/letters' },
     ],
   },
   {

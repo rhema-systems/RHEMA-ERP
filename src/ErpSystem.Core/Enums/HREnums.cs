@@ -9292,3 +9292,48 @@ public enum EmployeeProfileField
 }
 
 #endregion
+
+#region HR Letter Requests (area 25 slice 12b — decision D7/D10)
+
+/// <summary>
+/// The letters an employee may ask HR for. Each has a built-in template in
+/// <c>HrLettersEmailCatalog</c>, so a tenant that has never opened the template editor can
+/// still issue one.
+/// </summary>
+public enum HrLetterType
+{
+    /// <summary>"X has been employed by us since Y as Z" — the everyday request.</summary>
+    EmploymentConfirmation = 1,
+
+    /// <summary>An introduction addressed to a named third party.</summary>
+    IntroductionLetter = 2,
+
+    /// <summary>A certificate of service, usually wanted on or after leaving.</summary>
+    ServiceCertificate = 3,
+
+    /// <summary>
+    /// Employment confirmation that also states the salary — for a bank or a landlord.
+    /// ⚠ Only HR can issue it, and the figure comes from the employee record; the employee's
+    /// own profile deliberately never shows salary (slice 12a), so this letter is the one
+    /// sanctioned path by which they receive it, on purpose and for a stated reason.
+    /// </summary>
+    SalaryConfirmation = 4
+}
+
+/// <summary>Where a letter request stands.</summary>
+public enum HrLetterRequestStatus
+{
+    /// <summary>Asked for, waiting on HR.</summary>
+    Pending = 1,
+
+    /// <summary>HR issued it — either generated from the template or uploaded as a signed scan.</summary>
+    Issued = 2,
+
+    /// <summary>HR refused, with a reason the employee reads back.</summary>
+    Rejected = 3,
+
+    /// <summary>The employee withdrew it before HR answered.</summary>
+    Cancelled = 4
+}
+
+#endregion

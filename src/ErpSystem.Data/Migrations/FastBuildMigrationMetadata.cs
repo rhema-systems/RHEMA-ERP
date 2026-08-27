@@ -217,3 +217,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824122332_AddClearanceAssetSourcing")] partial class AddClearanceAssetSourcing { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824180024_AddAssetDocumentControlledUpload")] partial class AddAssetDocumentControlledUpload { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260826225636_AddEmployeeProfileChangeRequests")] partial class AddEmployeeProfileChangeRequests { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826235441_AddHrLetterRequests")] partial class AddHrLetterRequests { }

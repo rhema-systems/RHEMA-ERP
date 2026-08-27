@@ -647,6 +647,13 @@ public static class HrModuleServiceRegistration
         // service because it is the other surface an employee raises ABOUT their own record.
         services.AddScoped<IEmployeeProfileChangeService, EmployeeProfileChangeService>();
 
+        // Area 25 slice 12b (D7) — letters an employee asks HR for. The catalog registration is
+        // what makes the built-in templates resolvable, so a tenant that has never opened the
+        // template editor can still issue a letter.
+        services.AddScoped<IHrLetterRequestService, ErpSystem.Core.Services.HR.Letters.HrLetterRequestService>();
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.Letters.HrLettersEmailEventCatalog>();
+
         // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();

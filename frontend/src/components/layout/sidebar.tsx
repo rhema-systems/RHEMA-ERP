@@ -435,6 +435,14 @@ export const navigationItems: NavItem[] = [
         icon: UserCheck,
         permissions: ['HR.Employee.Read'],
       },
+      // Area 25 slice 12b — issuing a letter is making a statement about an employee record,
+      // so it carries the same permission and sits with the register.
+      {
+        title: 'Letter Requests',
+        href: '/hr/employees/letter-requests',
+        icon: Mail,
+        permissions: ['HR.Employee.Read'],
+      },
       // Read-only view of the org's own records. Lives here rather than under Administration
       // because it is looked at daily, not configured — and the administration tree is gated to
       // admin roles, which would hide it from the HR officers the API gate lets in.

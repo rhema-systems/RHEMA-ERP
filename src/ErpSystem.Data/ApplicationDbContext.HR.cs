@@ -27,6 +27,7 @@ using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.Letters;
 using ErpSystem.Core.Entities.HR.ProfileChanges;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -380,6 +381,10 @@ public partial class ApplicationDbContext
     // an HR officer to approve, and approval applies them.
     public DbSet<EmployeeProfileChangeRequest> EmployeeProfileChangeRequests { get; set; } = null!;
     public DbSet<EmployeeProfileChangeItem> EmployeeProfileChangeItems { get; set; } = null!;
+
+    // Area 25 slice 12b — letters an employee asks HR for. HR fulfils either by issuing a
+    // generated letter (frozen on the row) or by uploading a signed scan.
+    public DbSet<HrLetterRequest> HrLetterRequests { get; set; } = null!;
 
     // Area 9 slice 8 — the discipline reminder sweep. Covers both halves of the area, which is why
     // it sits with the grievance sets rather than the disciplinary ones.
@@ -9083,6 +9088,32 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.RequestId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- HrLetterRequest (area 25 slice 12b, D7) ----
+        builder.Entity<HrLetterRequest>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.RequestNumber }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.LetterType);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.LetterType).HasConversion<int>();
+
+            // The frozen letter: unbounded, because a letter body is prose and a MaxLength here
+            // would silently truncate the document somebody is about to hand to a bank.
+            entity.Property(x => x.IssuedDocumentHtml).HasColumnType("nvarchar(max)");
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.IssuedBy)
+                .WithMany()
+                .HasForeignKey(x => x.IssuedById)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---- StaffGrievance (FR-HR-181) ----

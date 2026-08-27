@@ -104,6 +104,13 @@ public static class ControlledFileUploadCategories
     public const string HrProfileChangeEvidence = "hr-profile-change-evidence";
 
     /// <summary>
+    /// A signed HR letter uploaded to fulfil an employee's letter request, where a generated
+    /// document will not do — a wet signature, a stamp, or an embassy's own form
+    /// (area 25 slice 12b).
+    /// </summary>
+    public const string HrLetterDocuments = "hr-letter-documents";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -149,7 +156,10 @@ public static class ControlledFileUploadCategories
                 HrSheControlledDocuments,
                 // Identity documents by definition — this is the category whose whole purpose is
                 // proving who someone is and where their money goes.
-                HrProfileChangeEvidence
+                HrProfileChangeEvidence,
+                // A signed letter on company letterhead, handed to a bank or an embassy. If any
+                // category should not be scan-optional by tenant policy, it is this one.
+                HrLetterDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }
