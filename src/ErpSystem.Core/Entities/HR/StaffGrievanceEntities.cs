@@ -148,6 +148,9 @@ public class StaffGrievance : TenantEntity
     /// <summary>FR-HR-181 obligation 9 and the case's paperwork — area 9c slice 3.</summary>
     public virtual ICollection<StaffGrievanceDocument> Documents { get; set; } = new List<StaffGrievanceDocument>();
 
+    /// <summary>Conferences, mediations and union consultations — area 9c slice 4.</summary>
+    public virtual ICollection<StaffGrievanceConference> Conferences { get; set; } = new List<StaffGrievanceConference>();
+
     public virtual ICollection<StaffGrievanceStep> Steps { get; set; } = new List<StaffGrievanceStep>();
 
     /// <summary>Everybody on the case other than the primary party — area 9c slice 1.</summary>
@@ -322,6 +325,135 @@ public class StaffGrievanceResolution : TenantEntity
 }
 
 /// <summary>
+/// A meeting convened on an employee-relations case — area 9c slice 4, decision D-8. Covers a case
+/// conference, a mediation and FR-HR-181 obligation 6's union consultation.
+/// </summary>
+/// <remarks>
+/// <para><b>One entity, three uses.</b> All three are a meeting convened on a date, at a place,
+/// chaired by somebody, attended by named people, producing notes and an outcome; what differs is
+/// why it was called, which is <see cref="ConferenceType"/>. Three tables would have been the same
+/// columns three times over.</para>
+///
+/// <para><b><see cref="Notes"/> is redacted on read, and that is the point of the field.</b> A
+/// mediation's notes record what the OTHER party said in a room they were promised was private, and
+/// a union consultation's record what the union said about a member. The case's read rule admits the
+/// griever — rightly — so without this the complainant would receive the respondent's position
+/// verbatim. HR and the chair see the notes; everyone else who may read the case sees the meeting,
+/// its type, date, venue, attendees and <see cref="Outcome"/>, and a flag saying notes exist. Same
+/// field-level shape as area 7's author-only mentoring notes: enforced on READ, not by hiding a
+/// button.</para>
+///
+/// <para><b>Held is a gate, not a flag.</b> <see cref="HeldDate"/> is only set through the hold
+/// path, which refuses to run without an outcome — a meeting recorded as held with nothing in it
+/// tells the rungs above that a step was taken when nothing is known about it.</para>
+/// </remarks>
+public class StaffGrievanceConference : TenantEntity
+{
+    [Required]
+    public Guid GrievanceId { get; set; }
+
+    [ForeignKey(nameof(GrievanceId))]
+    public virtual StaffGrievance Grievance { get; set; } = null!;
+
+    public GrievanceConferenceType ConferenceType { get; set; }
+
+    public GrievanceConferenceStatus Status { get; set; } = GrievanceConferenceStatus.Scheduled;
+
+    public DateTime ScheduledFor { get; set; }
+
+    [MaxLength(300)]
+    public string? Venue { get; set; }
+
+    /// <summary>Who chairs it. Internal or external — a mediator is very often neither party's colleague.</summary>
+    public Guid? ChairId { get; set; }
+
+    [ForeignKey(nameof(ChairId))]
+    public virtual Employee? Chair { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalChairName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalChairOrganisation { get; set; }
+
+    /// <summary>
+    /// The union consulted. Required when <see cref="ConferenceType"/> is
+    /// <see cref="GrievanceConferenceType.UnionConsultation"/>, refused otherwise.
+    /// </summary>
+    public Guid? UnionId { get; set; }
+
+    [ForeignKey(nameof(UnionId))]
+    public virtual Union? Union { get; set; }
+
+    /// <summary>Why it was convened. Visible to anyone who may read the case.</summary>
+    [MaxLength(1000)]
+    public string? Purpose { get; set; }
+
+    /// <summary>⚠ Redacted on read to HR and the chair. See the remarks — this is not a UI concern.</summary>
+    [MaxLength(6000)]
+    public string? Notes { get; set; }
+
+    /// <summary>What the meeting concluded. Visible to anyone who may read the case.</summary>
+    [MaxLength(4000)]
+    public string? Outcome { get; set; }
+
+    public DateTime? HeldDate { get; set; }
+
+    public DateTime? CancelledDate { get; set; }
+
+    [MaxLength(500)]
+    public string? CancellationReason { get; set; }
+
+    public Guid? ConvenedById { get; set; }
+
+    [ForeignKey(nameof(ConvenedById))]
+    public virtual Employee? ConvenedBy { get; set; }
+
+    public virtual ICollection<StaffGrievanceConferenceAttendee> Attendees { get; set; }
+        = new List<StaffGrievanceConferenceAttendee>();
+}
+
+/// <summary>Somebody asked to a conference — area 9c slice 4.</summary>
+/// <remarks>
+/// Internal or external, for the same reason a party may be: the union official and the mediator are
+/// the two people most likely to be at the meeting and least likely to be on the payroll.
+///
+/// <para><see cref="DidAttend"/> is deliberately <b>nullable</b>. Null means the meeting has not
+/// happened yet or attendance was never recorded; <c>false</c> means they were asked and did not
+/// come, which is a different fact and one that matters when a grievance turns on whether somebody
+/// was given a hearing.</para>
+/// </remarks>
+public class StaffGrievanceConferenceAttendee : TenantEntity
+{
+    [Required]
+    public Guid ConferenceId { get; set; }
+
+    [ForeignKey(nameof(ConferenceId))]
+    public virtual StaffGrievanceConference Conference { get; set; } = null!;
+
+    public Guid? EmployeeId { get; set; }
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee? Employee { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalOrganisation { get; set; }
+
+    /// <summary>What they are there as — "Complainant", "Union representative", "Note taker".</summary>
+    [MaxLength(200)]
+    public string? Capacity { get; set; }
+
+    /// <summary>Null until recorded. See the remarks — false is a fact, not a default.</summary>
+    public bool? DidAttend { get; set; }
+
+    [MaxLength(500)]
+    public string? ApologyReason { get; set; }
+}
+
+/// <summary>
 /// A document on an employee-relations case — area 9c slice 3, and FR-HR-181 obligation 9.
 /// </summary>
 /// <remarks>
@@ -356,6 +488,12 @@ public class StaffGrievanceDocument : TenantEntity
 
     [ForeignKey(nameof(StepId))]
     public virtual StaffGrievanceStep? Step { get; set; }
+
+    /// <summary>Set only when <see cref="Scope"/> is <c>Conference</c> — area 9c slice 4.</summary>
+    public Guid? ConferenceId { get; set; }
+
+    [ForeignKey(nameof(ConferenceId))]
+    public virtual StaffGrievanceConference? Conference { get; set; }
 
     [Required]
     [MaxLength(500)]

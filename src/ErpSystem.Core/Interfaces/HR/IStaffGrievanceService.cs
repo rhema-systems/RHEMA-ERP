@@ -153,7 +153,7 @@ public interface IStaffGrievanceService
     /// <para>The same checks stay in <see cref="AddDocumentAsync"/> as well: this one is called by
     /// the controller, that one is the last word.</para>
     /// </remarks>
-    Task ValidateDocumentPlacementAsync(Guid grievanceId, GrievanceDocumentScope scope, Guid? stepId, CancellationToken cancellationToken = default);
+    Task ValidateDocumentPlacementAsync(Guid grievanceId, GrievanceDocumentScope scope, Guid? stepId, Guid? conferenceId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Writes the attachment row for a file that has already been through the controlled upload
@@ -168,6 +168,7 @@ public interface IStaffGrievanceService
         Guid grievanceId,
         GrievanceDocumentScope scope,
         Guid? stepId,
+        Guid? conferenceId,
         string? description,
         DateTime? agreementSignedDate,
         Guid uploadedByEmployeeId,
@@ -192,6 +193,32 @@ public interface IStaffGrievanceService
     /// The employee confirms the signed agreement. Theirs alone — refused to HR and to everyone else.
     /// </summary>
     Task<StaffGrievanceDto> AcceptAgreementAsync(Guid grievanceId, AcceptGrievanceAgreementDto dto, Guid employeeId, CancellationToken cancellationToken = default);
+
+    // ── Area 9c slice 4 — conferencing, mediation, union consultation ─────────
+
+    /// <summary>
+    /// Convenes a meeting on the case — a case conference, a mediation, or FR-HR-181 obligation 6's
+    /// union consultation. HR only.
+    /// </summary>
+    Task<StaffGrievanceDto> ScheduleConferenceAsync(Guid grievanceId, ScheduleGrievanceConferenceDto dto, Guid convenedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Amends a meeting that has not happened yet. A null field means "leave alone". HR only.</summary>
+    Task<StaffGrievanceDto> UpdateConferenceAsync(Guid grievanceId, Guid conferenceId, UpdateGrievanceConferenceDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that the meeting happened, with its outcome, its notes and who came. Refused without
+    /// an outcome. HR, or whoever chairs it.
+    /// </summary>
+    Task<StaffGrievanceDto> HoldConferenceAsync(Guid grievanceId, Guid conferenceId, HoldGrievanceConferenceDto dto, Guid recordedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Cancels a meeting that has not happened. HR only.</summary>
+    Task<StaffGrievanceDto> CancelConferenceAsync(Guid grievanceId, Guid conferenceId, CancelGrievanceConferenceDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds somebody to a meeting. HR only.</summary>
+    Task<StaffGrievanceDto> AddConferenceAttendeeAsync(Guid grievanceId, Guid conferenceId, AddConferenceAttendeeDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes somebody from a meeting that has not happened yet. HR only.</summary>
+    Task<StaffGrievanceDto> RemoveConferenceAttendeeAsync(Guid grievanceId, Guid conferenceId, Guid attendeeId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

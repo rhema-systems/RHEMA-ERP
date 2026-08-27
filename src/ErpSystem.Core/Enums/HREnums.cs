@@ -2862,7 +2862,53 @@ public enum GrievanceDocumentScope
 
     /// <summary>FR-HR-181 obligation 9 — the final signed agreement. At most one per case.</summary>
     [Description("Signed Agreement")]
-    Agreement = 4
+    Agreement = 4,
+
+    /// <summary>Papers tabled at, or minutes of, a conference — appended by slice 4 as promised.</summary>
+    [Description("Conference")]
+    Conference = 5
+}
+
+/// <summary>
+/// What kind of meeting was convened on an employee-relations case — area 9c slice 4, decision D-8.
+/// </summary>
+/// <remarks>
+/// One entity for three uses rather than three tables: a case conference, a mediation and a union
+/// consultation are the same shape — a meeting convened on a date, at a place, chaired by somebody,
+/// attended by named people, producing notes and an outcome. What differs is why it was called, and
+/// that is this enum.
+///
+/// <para><see cref="UnionConsultation"/> is FR-HR-181's sixth obligation: the requirement names
+/// "union consultation notes" among the things a grievance must retain, and before slice 4 there was
+/// nowhere in the schema to put them.</para>
+/// </remarks>
+public enum GrievanceConferenceType
+{
+    /// <summary>The parties and the desk sit down to review the case.</summary>
+    [Description("Case Conference")]
+    CaseConference = 1,
+
+    /// <summary>A neutral third party works to settle it between the parties.</summary>
+    [Description("Mediation")]
+    Mediation = 2,
+
+    /// <summary>FR-HR-181 obligation 6 — consultation with a recognised union.</summary>
+    [Description("Union Consultation")]
+    UnionConsultation = 3
+}
+
+/// <summary>Where a convened meeting got to — area 9c slice 4.</summary>
+public enum GrievanceConferenceStatus
+{
+    [Description("Scheduled")]
+    Scheduled = 1,
+
+    /// <summary>It happened, and its notes and outcome are on the record.</summary>
+    [Description("Held")]
+    Held = 2,
+
+    [Description("Cancelled")]
+    Cancelled = 3
 }
 
 /// <summary>

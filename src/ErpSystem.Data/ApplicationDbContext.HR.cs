@@ -394,6 +394,11 @@ public partial class ApplicationDbContext
     // ever accepts a caller-supplied file path.
     public DbSet<StaffGrievanceDocument> StaffGrievanceDocuments { get; set; } = null!;
 
+    // Area 9c slice 4 — case conferences, mediations and FR-HR-181 obligation 6's union
+    // consultations, and who was asked to each. One typed entity rather than three tables.
+    public DbSet<StaffGrievanceConference> StaffGrievanceConferences { get; set; } = null!;
+    public DbSet<StaffGrievanceConferenceAttendee> StaffGrievanceConferenceAttendees { get; set; } = null!;
+
     // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
     // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
     // an HR officer to approve, and approval applies them.
@@ -9365,12 +9370,62 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ---- StaffGrievanceConference (area 9c slice 4, FR-HR-181 obligation 6) ----
+        builder.Entity<StaffGrievanceConference>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.ConferenceType);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ScheduledFor);
+
+            entity.Property(x => x.ConferenceType).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Conferences)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Chair)
+                .WithMany()
+                .HasForeignKey(x => x.ChairId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConvenedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ConvenedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Union)
+                .WithMany()
+                .HasForeignKey(x => x.UnionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceConferenceAttendee (area 9c slice 4) ----
+        builder.Entity<StaffGrievanceConferenceAttendee>(entity =>
+        {
+            entity.HasIndex(x => x.ConferenceId);
+            entity.HasIndex(x => x.EmployeeId);
+
+            entity.HasOne(x => x.Conference)
+                .WithMany(x => x.Attendees)
+                .HasForeignKey(x => x.ConferenceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // ---- StaffGrievanceDocument (area 9c slice 3, FR-HR-181 obligation 9) ----
         builder.Entity<StaffGrievanceDocument>(entity =>
         {
             entity.HasIndex(x => x.GrievanceId);
             entity.HasIndex(x => x.Scope);
             entity.HasIndex(x => x.StepId);
+            entity.HasIndex(x => x.ConferenceId);
 
             entity.Property(x => x.Scope).HasConversion<int>();
 
@@ -9386,6 +9441,13 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Step)
                 .WithMany()
                 .HasForeignKey(x => x.StepId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 4 — Restrict for the same reason as the step leg above: the conference
+            // already cascades from the case, so cascading here too would be a second path.
+            entity.HasOne(x => x.Conference)
+                .WithMany()
+                .HasForeignKey(x => x.ConferenceId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.UploadedBy)

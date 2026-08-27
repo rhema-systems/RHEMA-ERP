@@ -377,6 +377,7 @@ public class StaffGrievancesController : ControllerBase
         IFormFile file,
         [FromForm] GrievanceDocumentScope scope = GrievanceDocumentScope.Case,
         [FromForm] Guid? stepId = null,
+        [FromForm] Guid? conferenceId = null,
         [FromForm] string? description = null,
         [FromForm] DateTime? agreementSignedDate = null,
         CancellationToken cancellationToken = default)
@@ -389,7 +390,7 @@ public class StaffGrievancesController : ControllerBase
         // attachment", with no status and no message: 12 assertions' worth, all of them rules that
         // were working correctly and could not say so. Validating first also means a refused
         // placement never stores a file, never scans one, and never needs rolling back.
-        await _service.ValidateDocumentPlacementAsync(id, scope, stepId, cancellationToken);
+        await _service.ValidateDocumentPlacementAsync(id, scope, stepId, conferenceId, cancellationToken);
 
         return await HrAttachmentUpload.ExecuteAsync(
             this, _hrDocuments, _currentUser, _logger, file,
@@ -399,7 +400,7 @@ public class StaffGrievancesController : ControllerBase
             documentType: $"Grievance{scope}Document",
             description: description,
             persist: (uploadedById, document) => _service.AddDocumentAsync(
-                id, scope, stepId, description, agreementSignedDate, uploadedById,
+                id, scope, stepId, conferenceId, description, agreementSignedDate, uploadedById,
                 document.OriginalFileName,
                 document.FilePath,
                 document.FileSize,
@@ -443,6 +444,91 @@ public class StaffGrievancesController : ControllerBase
     [HttpDelete("{id:guid}/documents/{documentId:guid}")]
     public async Task<ActionResult<StaffGrievanceDto>> DeleteDocument(Guid id, Guid documentId)
         => Ok(await _service.DeleteDocumentAsync(id, documentId));
+
+    // =========================================================================
+    // Conferencing, mediation and union consultation — area 9c slice 4
+    // =========================================================================
+
+    /// <summary>
+    /// Convenes a meeting on the case — a case conference, a mediation, or FR-HR-181 obligation 6's
+    /// union consultation.
+    /// </summary>
+    /// <remarks>
+    /// A union consultation must name the union it consulted; nothing else may name one. That is
+    /// the requirement's sixth obligation, and a row that does not say which union retains nothing
+    /// it asks for.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/conferences")]
+    public async Task<ActionResult<StaffGrievanceDto>> ScheduleConference(
+        Guid id, [FromBody] ScheduleGrievanceConferenceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.ScheduleConferenceAsync(id, dto, employeeId));
+    }
+
+    /// <summary>Amends a meeting that has not happened yet. A null field means "leave alone".</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPut("{id:guid}/conferences/{conferenceId:guid}")]
+    public async Task<ActionResult<StaffGrievanceDto>> UpdateConference(
+        Guid id, Guid conferenceId, [FromBody] UpdateGrievanceConferenceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.UpdateConferenceAsync(id, conferenceId, dto));
+    }
+
+    /// <summary>
+    /// Records that the meeting happened — its outcome, its notes, and who came.
+    /// </summary>
+    /// <remarks>
+    /// Ungated here because a mediator or an external chair writes this up and is not in HR; the
+    /// service permits HR or whoever chairs it, and refuses everyone else.
+    ///
+    /// <para>⚠ The notes are <b>redacted on read</b> to HR and the chair. They record what the other
+    /// party said in a room they were promised was private, and the case's read rule admits the
+    /// complainant — so without that, filing a grievance would be a way to obtain the respondent's
+    /// position verbatim.</para>
+    /// </remarks>
+    [HttpPost("{id:guid}/conferences/{conferenceId:guid}/hold")]
+    public async Task<ActionResult<StaffGrievanceDto>> HoldConference(
+        Guid id, Guid conferenceId, [FromBody] HoldGrievanceConferenceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.HoldConferenceAsync(id, conferenceId, dto, employeeId));
+    }
+
+    /// <summary>Cancels a meeting that has not happened.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/conferences/{conferenceId:guid}/cancel")]
+    public async Task<ActionResult<StaffGrievanceDto>> CancelConference(
+        Guid id, Guid conferenceId, [FromBody] CancelGrievanceConferenceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.CancelConferenceAsync(id, conferenceId, dto));
+    }
+
+    /// <summary>Adds somebody to a meeting. Internal or external — exactly one.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/conferences/{conferenceId:guid}/attendees")]
+    public async Task<ActionResult<StaffGrievanceDto>> AddConferenceAttendee(
+        Guid id, Guid conferenceId, [FromBody] AddConferenceAttendeeDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.AddConferenceAttendeeAsync(id, conferenceId, dto));
+    }
+
+    /// <summary>Removes somebody from a meeting that has not happened yet.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpDelete("{id:guid}/conferences/{conferenceId:guid}/attendees/{attendeeId:guid}")]
+    public async Task<ActionResult<StaffGrievanceDto>> RemoveConferenceAttendee(
+        Guid id, Guid conferenceId, Guid attendeeId)
+        => Ok(await _service.RemoveConferenceAttendeeAsync(id, conferenceId, attendeeId));
 
     /// <summary>
     /// The employee confirms FR-HR-181's final signed agreement.

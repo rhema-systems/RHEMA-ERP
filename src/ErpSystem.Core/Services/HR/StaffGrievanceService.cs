@@ -76,6 +76,12 @@ public class StaffGrievanceService : IStaffGrievanceService
             .Include(g => g.Resolution!).ThenInclude(r => r.AgreementAcceptedBy)
             // Area 9c slice 3 — the case's paperwork.
             .Include(g => g.Documents.Where(d => !d.IsDeleted)).ThenInclude(d => d.UploadedBy)
+            // Area 9c slice 4 — conferences and who was asked to them.
+            .Include(g => g.Conferences.Where(c => !c.IsDeleted)).ThenInclude(c => c.Chair)
+            .Include(g => g.Conferences.Where(c => !c.IsDeleted)).ThenInclude(c => c.Union)
+            .Include(g => g.Conferences.Where(c => !c.IsDeleted)).ThenInclude(c => c.ConvenedBy)
+            .Include(g => g.Conferences.Where(c => !c.IsDeleted))
+                .ThenInclude(c => c.Attendees.Where(a => !a.IsDeleted)).ThenInclude(a => a.Employee)
             // ⚠ SPLIT QUERY, and it is required rather than an optimisation. As a single query this
             // graph is one JOIN across five collections and two one-to-ones, and SQL Server has to
             // materialise the result as one row: Statement (6000) + HrInterpretation (4000) +
@@ -313,7 +319,7 @@ public class StaffGrievanceService : IStaffGrievanceService
     {
         var grievance = await GetOwnedAsync(id, cancellationToken);
         EnsureMayRead(grievance, callerEmployeeId);
-        return ToDto(grievance);
+        return ToDto(grievance, callerEmployeeId);
     }
 
     // ── Writes ────────────────────────────────────────────────────────────────
@@ -949,8 +955,8 @@ public class StaffGrievanceService : IStaffGrievanceService
     // ── Area 9c slice 3 — documents and the signed agreement ──────────────────
 
     public async Task ValidateDocumentPlacementAsync(
-        Guid grievanceId, GrievanceDocumentScope scope, Guid? stepId, CancellationToken cancellationToken = default)
-        => EnsureDocumentPlacement(await GetOwnedAsync(grievanceId, cancellationToken), scope, stepId);
+        Guid grievanceId, GrievanceDocumentScope scope, Guid? stepId, Guid? conferenceId, CancellationToken cancellationToken = default)
+        => EnsureDocumentPlacement(await GetOwnedAsync(grievanceId, cancellationToken), scope, stepId, conferenceId);
 
     /// <summary>
     /// Where a document may be filed. Called twice on purpose — once by the controller BEFORE the
@@ -963,7 +969,7 @@ public class StaffGrievanceService : IStaffGrievanceService
     /// every rule below reached the caller as "An error occurred while adding the attachment".
     /// </remarks>
     private static void EnsureDocumentPlacement(
-        StaffGrievance grievance, GrievanceDocumentScope scope, Guid? stepId)
+        StaffGrievance grievance, GrievanceDocumentScope scope, Guid? stepId, Guid? conferenceId)
     {
         // ⚠ NOT EnsureOpen for the agreement. FR-HR-181's signed agreement is the written form of
         // a decision, so by definition it arrives on a case that has just been RESOLVED — gating it
@@ -989,6 +995,13 @@ public class StaffGrievanceService : IStaffGrievanceService
                         "This case has no investigation, so a document cannot be filed against one.");
                 break;
 
+            case GrievanceDocumentScope.Conference:
+                if (conferenceId is not Guid cid)
+                    throw new InvalidOperationException("A conference document must say which meeting it belongs to.");
+                if (grievance.Conferences.All(c => c.IsDeleted || c.Id != cid))
+                    throw new ArgumentException($"Meeting '{cid}' is not on this case.");
+                break;
+
             case GrievanceDocumentScope.Agreement:
                 // FR-HR-181's agreement is what SETTLES the case, so there has to be a decision for
                 // it to be the written form of. Uploading one to an unresolved case would produce a
@@ -1003,12 +1016,16 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         if (scope != GrievanceDocumentScope.Step && stepId.HasValue)
             throw new InvalidOperationException("Only a ladder-step document belongs to a step.");
+
+        if (scope != GrievanceDocumentScope.Conference && conferenceId.HasValue)
+            throw new InvalidOperationException("Only a conference document belongs to a meeting.");
     }
 
     public async Task<StaffGrievanceDocumentDto> AddDocumentAsync(
         Guid grievanceId,
         GrievanceDocumentScope scope,
         Guid? stepId,
+        Guid? conferenceId,
         string? description,
         DateTime? agreementSignedDate,
         Guid uploadedByEmployeeId,
@@ -1021,7 +1038,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         CancellationToken cancellationToken = default)
     {
         var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
-        EnsureDocumentPlacement(grievance, scope, stepId);
+        EnsureDocumentPlacement(grievance, scope, stepId, conferenceId);
 
         var now = DateTime.UtcNow;
         var document = new StaffGrievanceDocument
@@ -1030,6 +1047,7 @@ public class StaffGrievanceService : IStaffGrievanceService
             GrievanceId = grievance.Id,
             Scope = scope,
             StepId = scope == GrievanceDocumentScope.Step ? stepId : null,
+            ConferenceId = scope == GrievanceDocumentScope.Conference ? conferenceId : null,
             FileName = fileName,
             FilePath = filePath,
             FileSize = fileSize,
@@ -1148,6 +1166,219 @@ public class StaffGrievanceService : IStaffGrievanceService
         return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
     }
 
+    // ── Area 9c slice 4 — conferencing, mediation, union consultation ─────────
+
+    public async Task<StaffGrievanceDto> ScheduleConferenceAsync(
+        Guid grievanceId, ScheduleGrievanceConferenceDto dto, Guid convenedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        var hasChair = dto.ChairId.HasValue;
+        var hasExternalChair = !string.IsNullOrWhiteSpace(dto.ExternalChairName);
+        if (hasChair == hasExternalChair)
+            throw new InvalidOperationException(
+                "A chair is either a member of staff or an external person: supply exactly one of "
+                + "the chair and the external chair name.");
+
+        if (hasChair) await GetOwnedEmployeeAsync(dto.ChairId!.Value, "chairing");
+
+        // FR-HR-181 obligation 6: a union consultation is a consultation WITH somebody, and a row
+        // that does not say which union retains nothing the requirement asks for.
+        if (dto.ConferenceType == GrievanceConferenceType.UnionConsultation)
+        {
+            if (dto.UnionId is not Guid unionId)
+                throw new InvalidOperationException("A union consultation must say which union was consulted.");
+
+            var union = await _unitOfWork.Repository<Union>().GetByIdAsync(unionId);
+            if (union == null || union.IsDeleted || union.TenantId != grievance.TenantId)
+                throw new ArgumentException($"The union with ID '{unionId}' was not found.");
+        }
+        else if (dto.UnionId.HasValue)
+        {
+            throw new InvalidOperationException("Only a union consultation names a union.");
+        }
+
+        await _unitOfWork.Repository<StaffGrievanceConference>().AddAsync(new StaffGrievanceConference
+        {
+            TenantId = grievance.TenantId,
+            GrievanceId = grievance.Id,
+            ConferenceType = dto.ConferenceType,
+            Status = GrievanceConferenceStatus.Scheduled,
+            ScheduledFor = dto.ScheduledFor,
+            Venue = string.IsNullOrWhiteSpace(dto.Venue) ? null : dto.Venue.Trim(),
+            ChairId = dto.ChairId,
+            ExternalChairName = hasExternalChair ? dto.ExternalChairName!.Trim() : null,
+            ExternalChairOrganisation = string.IsNullOrWhiteSpace(dto.ExternalChairOrganisation)
+                ? null : dto.ExternalChairOrganisation.Trim(),
+            UnionId = dto.UnionId,
+            Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim(),
+            ConvenedById = convenedByEmployeeId,
+            CreatedBy = convenedByEmployeeId.ToString(),
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> UpdateConferenceAsync(
+        Guid grievanceId, Guid conferenceId, UpdateGrievanceConferenceDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+        var conference = FindScheduledConference(grievance, conferenceId, "amended");
+
+        // Null means "leave alone", not "clear" — a form that moved the date must not wipe the venue.
+        if (dto.ScheduledFor.HasValue) conference.ScheduledFor = dto.ScheduledFor.Value;
+        if (dto.Venue != null) conference.Venue = dto.Venue.Trim();
+        if (dto.Purpose != null) conference.Purpose = dto.Purpose.Trim();
+
+        if (dto.ChairId.HasValue)
+        {
+            await GetOwnedEmployeeAsync(dto.ChairId.Value, "chairing");
+            conference.ChairId = dto.ChairId;
+            conference.ExternalChairName = null;
+            conference.ExternalChairOrganisation = null;
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.ExternalChairName))
+        {
+            conference.ExternalChairName = dto.ExternalChairName.Trim();
+            conference.ChairId = null;
+        }
+
+        conference.UpdatedAt = DateTime.UtcNow;
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> HoldConferenceAsync(
+        Guid grievanceId, Guid conferenceId, HoldGrievanceConferenceDto dto, Guid recordedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+        var conference = FindScheduledConference(grievance, conferenceId, "recorded as held");
+
+        // The chair may write it up without being in HR — a mediator usually is not.
+        if (!IsHr && conference.ChairId != recordedByEmployeeId)
+            throw new UnauthorizedAccessException(
+                "Only HR or the person chairing this meeting can record what happened at it.");
+
+        var now = DateTime.UtcNow;
+        conference.Status = GrievanceConferenceStatus.Held;
+        conference.HeldDate = now;
+        conference.Outcome = dto.Outcome.Trim();
+        if (dto.Notes != null) conference.Notes = dto.Notes.Trim();
+        conference.UpdatedAt = now;
+
+        foreach (var record in dto.Attendance)
+        {
+            var attendee = conference.Attendees.FirstOrDefault(a => a.Id == record.AttendeeId && !a.IsDeleted);
+            if (attendee == null)
+                throw new ArgumentException($"Attendee '{record.AttendeeId}' is not on this meeting.");
+
+            attendee.DidAttend = record.DidAttend;
+            attendee.ApologyReason = string.IsNullOrWhiteSpace(record.ApologyReason)
+                ? null : record.ApologyReason.Trim();
+            attendee.UpdatedAt = now;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Grievance {Number}: {Type} held", grievance.GrievanceNumber, conference.ConferenceType);
+
+        // Passed so a non-HR chair is not handed back a redacted copy of the notes they just wrote.
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken), recordedByEmployeeId);
+    }
+
+    public async Task<StaffGrievanceDto> CancelConferenceAsync(
+        Guid grievanceId, Guid conferenceId, CancelGrievanceConferenceDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+        var conference = FindScheduledConference(grievance, conferenceId, "cancelled");
+
+        var now = DateTime.UtcNow;
+        conference.Status = GrievanceConferenceStatus.Cancelled;
+        conference.CancelledDate = now;
+        conference.CancellationReason = dto.Reason.Trim();
+        conference.UpdatedAt = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> AddConferenceAttendeeAsync(
+        Guid grievanceId, Guid conferenceId, AddConferenceAttendeeDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+        var conference = FindScheduledConference(grievance, conferenceId, "added to");
+
+        var hasEmployee = dto.EmployeeId.HasValue;
+        var hasExternal = !string.IsNullOrWhiteSpace(dto.ExternalName);
+        if (hasEmployee == hasExternal)
+            throw new InvalidOperationException(
+                "An attendee is either a member of staff or an external person: supply exactly one "
+                + "of the employee and the external name.");
+
+        if (hasEmployee)
+        {
+            var employee = await GetOwnedEmployeeAsync(dto.EmployeeId!.Value, "attending");
+            if (conference.Attendees.Any(a => !a.IsDeleted && a.EmployeeId == employee.Id))
+                throw new InvalidOperationException("This person is already on the attendee list.");
+        }
+
+        await _unitOfWork.Repository<StaffGrievanceConferenceAttendee>().AddAsync(new StaffGrievanceConferenceAttendee
+        {
+            TenantId = grievance.TenantId,
+            ConferenceId = conference.Id,
+            EmployeeId = dto.EmployeeId,
+            ExternalName = hasExternal ? dto.ExternalName!.Trim() : null,
+            ExternalOrganisation = string.IsNullOrWhiteSpace(dto.ExternalOrganisation)
+                ? null : dto.ExternalOrganisation.Trim(),
+            Capacity = string.IsNullOrWhiteSpace(dto.Capacity) ? null : dto.Capacity.Trim(),
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> RemoveConferenceAttendeeAsync(
+        Guid grievanceId, Guid conferenceId, Guid attendeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+        var conference = FindScheduledConference(grievance, conferenceId, "removed from");
+
+        var attendee = conference.Attendees.FirstOrDefault(a => a.Id == attendeeId && !a.IsDeleted)
+            ?? throw new ArgumentException($"Attendee '{attendeeId}' is not on this meeting.");
+
+        var now = DateTime.UtcNow;
+        attendee.IsDeleted = true;
+        attendee.DeletedAt = now;
+        attendee.UpdatedAt = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    /// <summary>
+    /// The meeting, if it is still open to change. A held meeting is a record of something that
+    /// happened and is not editable afterwards; a cancelled one is not going to happen.
+    /// </summary>
+    private static StaffGrievanceConference FindScheduledConference(
+        StaffGrievance grievance, Guid conferenceId, string verb)
+    {
+        var conference = grievance.Conferences.FirstOrDefault(c => c.Id == conferenceId && !c.IsDeleted)
+            ?? throw new ArgumentException($"Meeting '{conferenceId}' is not on this case.");
+
+        if (conference.Status != GrievanceConferenceStatus.Scheduled)
+            throw new InvalidOperationException(
+                $"This meeting is {conference.Status} and cannot be {verb}.");
+
+        return conference;
+    }
+
     private static void EnsureOpen(StaffGrievance grievance)
     {
         if (grievance.Status is GrievanceStatus.Resolved or GrievanceStatus.Withdrawn or GrievanceStatus.Closed)
@@ -1186,12 +1417,70 @@ public class StaffGrievanceService : IStaffGrievanceService
         ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
     };
 
+    /// <summary>
+    /// Who may read a meeting's notes: HR, and the person who chaired it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NARROWER than who may read the case. A mediation's notes record what the
+    /// other party said in a room they were promised was private, and a union consultation's record
+    /// what the union said about a member — and the case's read rule admits the complainant. Without
+    /// this the complainant would receive the respondent's position verbatim. The outcome, the date,
+    /// the venue and the attendee list stay visible to everyone who may read the case; only the notes
+    /// are withheld, and the DTO says so rather than pretending there are none.
+    /// </remarks>
+    private bool MaySeeConferenceNotes(StaffGrievanceConference c, Guid? callerEmployeeId)
+        => IsHr || (callerEmployeeId is Guid caller && c.ChairId == caller);
+
+    private static StaffGrievanceConferenceDto ToConferenceDto(StaffGrievanceConference c, bool maySeeNotes) => new()
+    {
+        Id = c.Id,
+        GrievanceId = c.GrievanceId,
+        ConferenceType = c.ConferenceType,
+        Status = c.Status,
+        ScheduledFor = c.ScheduledFor,
+        Venue = c.Venue,
+        ChairId = c.ChairId,
+        ChairName = c.Chair?.FullName,
+        ExternalChairName = c.ExternalChairName,
+        ExternalChairOrganisation = c.ExternalChairOrganisation,
+        UnionId = c.UnionId,
+        UnionName = c.Union?.Name,
+        Purpose = c.Purpose,
+        Notes = maySeeNotes ? c.Notes : null,
+        // "There are notes you may not see" and "there are no notes" are different facts, and a
+        // reader who cannot tell them apart cannot know to ask.
+        NotesRedacted = !maySeeNotes && !string.IsNullOrWhiteSpace(c.Notes),
+        Outcome = c.Outcome,
+        HeldDate = c.HeldDate,
+        CancelledDate = c.CancelledDate,
+        CancellationReason = c.CancellationReason,
+        ConvenedById = c.ConvenedById,
+        ConvenedByName = c.ConvenedBy?.FullName,
+        Attendees = c.Attendees
+            .Where(a => !a.IsDeleted)
+            .OrderBy(a => a.CreatedAt)
+            .Select(a => new StaffGrievanceConferenceAttendeeDto
+            {
+                Id = a.Id,
+                ConferenceId = a.ConferenceId,
+                EmployeeId = a.EmployeeId,
+                EmployeeName = a.Employee?.FullName,
+                ExternalName = a.ExternalName,
+                ExternalOrganisation = a.ExternalOrganisation,
+                Capacity = a.Capacity,
+                DidAttend = a.DidAttend,
+                ApologyReason = a.ApologyReason,
+            })
+            .ToList(),
+    };
+
     private static StaffGrievanceDocumentDto ToDocumentDto(StaffGrievanceDocument d) => new()
     {
         Id = d.Id,
         GrievanceId = d.GrievanceId,
         Scope = d.Scope,
         StepId = d.StepId,
+        ConferenceId = d.ConferenceId,
         FileName = d.FileName,
         FilePath = d.FilePath,
         FileSize = d.FileSize,
@@ -1225,7 +1514,18 @@ public class StaffGrievanceService : IStaffGrievanceService
         RemovalReason = p.RemovalReason,
     };
 
-    private static StaffGrievanceDto ToDto(StaffGrievance g) => new()
+    /// <summary>
+    /// The case file. <paramref name="callerEmployeeId"/> decides only ONE thing: whether conference
+    /// notes are readable (area 9c slice 4). Everything else on this DTO is already gated by
+    /// <see cref="EnsureMayRead"/> before the caller gets here.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ An INSTANCE method rather than static because the redaction needs <see cref="IsHr"/>.
+    /// Write paths that do not pass a caller fall back to the role check, which is right: every
+    /// write that is not the employee's own is HR-gated, and the employee's own writes should not
+    /// return them somebody else's mediation notes.
+    /// </remarks>
+    private StaffGrievanceDto ToDto(StaffGrievance g, Guid? callerEmployeeId = null) => new()
     {
         Id = g.Id,
         TenantId = g.TenantId,
@@ -1304,6 +1604,11 @@ public class StaffGrievanceService : IStaffGrievanceService
             // evidence, a report and an agreement is unreadable in insertion order.
             .OrderBy(d => d.Scope).ThenBy(d => d.UploadDate)
             .Select(ToDocumentDto)
+            .ToList(),
+        Conferences = g.Conferences
+            .Where(c => !c.IsDeleted)
+            .OrderBy(c => c.ScheduledFor)
+            .Select(c => ToConferenceDto(c, MaySeeConferenceNotes(c, callerEmployeeId)))
             .ToList(),
         Steps = g.Steps.OrderBy(s => s.Sequence).Select(s => new StaffGrievanceStepDto
         {

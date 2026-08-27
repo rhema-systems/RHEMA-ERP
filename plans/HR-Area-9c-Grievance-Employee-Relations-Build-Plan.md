@@ -39,7 +39,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 1 | The ER case register: case types, parties, representation | **COMPLETE 2026-08-27** — 119 assertions ×2 + the 147 slice-0 ladder = **266**; migration `AddEmployeeRelationsCaseTypeAndParties`; all 87 pre-existing rows correct with no back-fill |
 | 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | **COMPLETE 2026-08-27** — 111 ×2 + the 151/119 ladder = **381**; obligations 5, 7, 8 closed; `GrievanceStatus.Closed` given its first writer |
 | 3 | Documents on the controlled upload gate + the final signed agreement | **COMPLETE 2026-08-27** — 70 ×2 + the 151/119/111 ladder = **451**; obligation 9 closed; D-10 judged — the agreement stays off the workflow engine |
-| 4 | Case conferencing & mediation; union consultation | ⏳ |
+| 4 | Case conferencing & mediation; union consultation | **COMPLETE 2026-08-27** — 86 ×2 + the 151/119/111/70 ladder = **537**; obligation 6 closed. **FR-HR-181 IS NOW FULLY DELIVERED** |
 | 5 | The responder matrix (FR-HR-084) + rung resolution | ⏳ |
 | 6 | Anonymous / whistleblower concern intake | ⏳ |
 | 7 | Reminder-sweep extension + notifications | ⏳ |
@@ -154,14 +154,19 @@ Nine obligations. Scored against what exists:
 | 3 | Supervisor response | ✅ step response at `Level = Supervisor` | — |
 | 4 | HOD comments | ✅ step response at `Level = HeadOfDepartment` | — |
 | 5 | **HR interpretation** | ✅ **slice 2** — `HrInterpretation` + author + date, amendable while open, frozen once closed | 2 |
-| 6 | **Union consultation notes** | ❌ nothing anywhere. `Unions` is empty and there is no membership link. | 4 |
+| 6 | **Union consultation notes** | ✅ **slice 4** — a `UnionConsultation` conference naming the union it consulted, with its notes redacted to HR and the chair | 4 |
 | 7 | **Investigation report** | ✅ **slice 2** — `StaffGrievanceInvestigation`, internal or external investigator, natural-justice gate, completion refused without findings | 2 |
 | 8 | **Resolution decision** | ✅ **slice 2** — `StaffGrievanceResolution` with outcome, decision, remedy, decider, date and the rung it was decided at; frozen on write | 2 |
 | 9 | **Final signed agreement** | ✅ **slice 3** — a scoped document on the controlled upload gate, a supplied signing date, and the employee's own acceptance | 3 |
 
 **As surveyed: four of nine absent, one partial** — a Mandatory requirement roughly half
-delivered, which is the strongest evidence for building this area, stronger than the deferred
-wish-list. **After slice 3: one absent** — obligation 6, union consultation notes, owed to slice 4.
+delivered, which was the strongest evidence for building this area, stronger than the deferred
+wish-list.
+
+✅ **AFTER SLICE 4: ALL NINE OBLIGATIONS DELIVERED.** `run-slice0.mjs`'s census reads
+*0 of 8 artefact groups absent*. What remains in this area is the rest of the employee-relations
+module (D-1) — the responder matrix, anonymous intake, reminders, analytics, cross-links and the
+screens — not FR-HR-181 itself.
 
 Also in scope from the spec: **FR-HR-084** (`Pri. D`, source WN) — *"The system shall model a
 grievance hierarchy defining reporting lines."* Decision D-3 delivers this as an explicitly
@@ -595,3 +600,57 @@ that rule is the one most likely to be "tidied" back into `EnsureOpen` by a late
    performance (check-ins, calibration, unit goals, appraisals), recruitment requisitions and
    assets — all closed areas. Any business rule any of them raises inside `persist` has the same
    defect: a correct rule, an opaque 500. **Check those call sites; do not assume.**
+
+---
+
+### Slice 4 — conferencing, mediation and union consultation. CLOSED 2026-08-27.
+
+`run-slice4.mjs` **86 assertions ×2**, ladder 151 / 119 / 111 / 70 / 86 = **537 for the area**.
+Migration `20260827205357_AddGrievanceConferences` (guarded SQL, registered).
+
+# ✅ FR-HR-181 IS FULLY DELIVERED
+
+Slice 0's census now reads **0 of 8 artefact groups absent**. A Mandatory requirement that was
+four-of-nine absent and one partial when this area opened is complete: the ladder, the statement,
+the supervisor response, the HOD comments, HR interpretation, union consultation notes, the
+investigation report, the resolution decision and the final signed agreement.
+
+**One entity, three uses (D-8).** A case conference, a mediation and a union consultation are the
+same shape — convened on a date, at a place, chaired by somebody, attended by named people,
+producing notes and an outcome. Three tables would have been these columns three times over.
+Obligation 6 is a `UnionConsultation` conference that **must** name the union it consulted, and
+nothing else may name one: a row that does not say which union retains nothing the requirement
+asks for.
+
+**The notes redaction is the security property of this slice, not a UI nicety.** A mediation's
+notes record what the *other party* said in a room they were promised was private, and a union
+consultation's record what the union said about a member — and the case read rule admits the
+complainant, rightly. Without redaction, **filing a grievance would be a route to the respondent's
+position verbatim.** Notes are visible to HR and to whoever chaired *that* meeting; everyone who
+may read the case still sees the meeting, its type, date, venue, attendees and outcome. The
+harness asserts both arms, including that a chair sees their own meeting's notes and **not** those
+of a meeting they did not chair.
+
+⚠ `NotesRedacted` exists because *"there are notes you may not see"* and *"there are no notes"*
+are different facts, and a reader who cannot tell them apart does not know to ask. Asserted both
+ways.
+
+⚠ **The redaction lives entirely in `StaffGrievanceService.MaySeeConferenceNotes`. Nothing in the
+schema enforces it.** Any new reader of that column must apply the same rule or it leaks — said in
+the migration remarks as well as here.
+
+**Smaller calls worth keeping.** `DidAttend` is **nullable**: null means not recorded, `false`
+means asked and did not come — different facts, and the difference matters when a grievance turns
+on whether somebody was heard; `NOT NULL DEFAULT 0` would silently assert the second whenever the
+first was true. `Held` is a gate, not a flag: it refuses to run without an outcome. And the chair
+may write up the meeting without being in HR, because a mediator usually is not.
+
+⚠ **The stale-key trap recurred, exactly where slice 2 predicted it would.** Slice 0's census
+scored obligation 6 as ABSENT after slice 4 delivered it, because it looked for a key called
+`unionConsultations` when the obligation shipped as a conference *type* inside `conferences`. That
+is the second time this census has been wrong about a name. **A census is only as good as the names
+it guesses, and it must be re-read by the slice that fills something in** — a green harness beside
+a stale census reads as a gap that is not there.
+
+*(Harness bug, for completeness: one probe's outcome string was under `MinLength(20)`, so it 400'd
+on validation before reaching the attendee check it existed to make. Fixed and commented.)*

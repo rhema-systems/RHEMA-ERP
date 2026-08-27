@@ -136,6 +136,12 @@ public class StaffGrievanceDto : StaffGrievanceSummaryDto
     /// so the file reads the same way twice.
     /// </summary>
     public List<StaffGrievanceDocumentDto> Documents { get; set; } = new();
+
+    /// <summary>
+    /// Conferences, mediations and union consultations — area 9c slice 4, in the order they were
+    /// scheduled. Their notes are redacted per reader; see <see cref="StaffGrievanceConferenceDto"/>.
+    /// </summary>
+    public List<StaffGrievanceConferenceDto> Conferences { get; set; } = new();
 }
 
 /// <summary>FR-HR-181 obligation 7 — the investigation report.</summary>
@@ -211,6 +217,78 @@ public class StaffGrievanceResolutionDto
     public bool AgreementAccepted => AgreementAcceptedDate != null;
 }
 
+/// <summary>Somebody asked to a conference — area 9c slice 4.</summary>
+public class StaffGrievanceConferenceAttendeeDto
+{
+    public Guid Id { get; set; }
+    public Guid ConferenceId { get; set; }
+
+    public Guid? EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
+    public string? ExternalName { get; set; }
+    public string? ExternalOrganisation { get; set; }
+
+    public string DisplayName => EmployeeName ?? ExternalName ?? string.Empty;
+
+    public string? Capacity { get; set; }
+
+    /// <summary>Null until recorded — <c>false</c> means asked and did not come, which is a fact.</summary>
+    public bool? DidAttend { get; set; }
+    public string? ApologyReason { get; set; }
+}
+
+/// <summary>
+/// A meeting convened on the case — case conference, mediation, or FR-HR-181 obligation 6's union
+/// consultation. Area 9c slice 4.
+/// </summary>
+public class StaffGrievanceConferenceDto
+{
+    public Guid Id { get; set; }
+    public Guid GrievanceId { get; set; }
+
+    public GrievanceConferenceType ConferenceType { get; set; }
+    public string ConferenceTypeName => ConferenceType.ToString();
+
+    public GrievanceConferenceStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    public DateTime ScheduledFor { get; set; }
+    public string? Venue { get; set; }
+
+    public Guid? ChairId { get; set; }
+    public string? ChairName { get; set; }
+    public string? ExternalChairName { get; set; }
+    public string? ExternalChairOrganisation { get; set; }
+    public string ChairDisplayName => ChairName ?? ExternalChairName ?? string.Empty;
+
+    public Guid? UnionId { get; set; }
+    public string? UnionName { get; set; }
+
+    public string? Purpose { get; set; }
+
+    /// <summary>
+    /// ⚠ <b>Null for everyone but HR and the chair</b>, even when notes exist — see
+    /// <see cref="NotesRedacted"/>. A mediation's notes record what the other party said in a room
+    /// they were promised was private, and the case's read rule admits the complainant.
+    /// </summary>
+    public string? Notes { get; set; }
+
+    /// <summary>True when notes exist but this reader may not see them. Not the same as "no notes".</summary>
+    public bool NotesRedacted { get; set; }
+
+    /// <summary>What the meeting concluded. Visible to anyone who may read the case.</summary>
+    public string? Outcome { get; set; }
+
+    public DateTime? HeldDate { get; set; }
+    public DateTime? CancelledDate { get; set; }
+    public string? CancellationReason { get; set; }
+
+    public Guid? ConvenedById { get; set; }
+    public string? ConvenedByName { get; set; }
+
+    public List<StaffGrievanceConferenceAttendeeDto> Attendees { get; set; } = new();
+}
+
 /// <summary>A document on an employee-relations case — area 9c slice 3.</summary>
 public class StaffGrievanceDocumentDto
 {
@@ -221,6 +299,9 @@ public class StaffGrievanceDocumentDto
     public string ScopeName => Scope.ToString();
 
     public Guid? StepId { get; set; }
+
+    /// <summary>Set only when <see cref="Scope"/> is <c>Conference</c> — area 9c slice 4.</summary>
+    public Guid? ConferenceId { get; set; }
 
     public string FileName { get; set; } = string.Empty;
 
@@ -473,6 +554,113 @@ public class CloseGrievanceDto
     [MaxLength(1000)]
     [MinLength(10)]
     public string Reason { get; set; } = string.Empty;
+}
+
+// ── Area 9c slice 4 — conferencing, mediation and union consultation ────────
+
+/// <summary>
+/// Convenes a meeting on the case. HR's act.
+/// </summary>
+/// <remarks>
+/// Exactly one of the chair and the external chair name is supplied — a mediator is very often
+/// neither party's colleague. <c>UnionId</c> is required for a union consultation and refused for
+/// anything else.
+/// </remarks>
+public class ScheduleGrievanceConferenceDto
+{
+    [Required]
+    public GrievanceConferenceType ConferenceType { get; set; }
+
+    [Required]
+    public DateTime ScheduledFor { get; set; }
+
+    [MaxLength(300)]
+    public string? Venue { get; set; }
+
+    public Guid? ChairId { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalChairName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalChairOrganisation { get; set; }
+
+    /// <summary>Required for a union consultation — FR-HR-181 obligation 6.</summary>
+    public Guid? UnionId { get; set; }
+
+    [MaxLength(1000)]
+    public string? Purpose { get; set; }
+}
+
+/// <summary>Amends a meeting that has not happened yet. A null field means "leave alone".</summary>
+public class UpdateGrievanceConferenceDto
+{
+    public DateTime? ScheduledFor { get; set; }
+
+    [MaxLength(300)]
+    public string? Venue { get; set; }
+
+    public Guid? ChairId { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalChairName { get; set; }
+
+    [MaxLength(1000)]
+    public string? Purpose { get; set; }
+}
+
+/// <summary>
+/// Records that the meeting happened. An outcome is required here and nowhere else: a meeting
+/// recorded as held with nothing in it tells the rungs above a step was taken that nobody can read.
+/// </summary>
+public class HoldGrievanceConferenceDto
+{
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(20)]
+    public string Outcome { get; set; } = string.Empty;
+
+    /// <summary>⚠ Redacted to HR and the chair on read. FR-HR-181's "union consultation notes".</summary>
+    [MaxLength(6000)]
+    public string? Notes { get; set; }
+
+    /// <summary>Who actually came. Any attendee omitted here keeps whatever was already recorded.</summary>
+    public List<ConferenceAttendanceDto> Attendance { get; set; } = new();
+}
+
+/// <summary>One attendee's attendance, recorded when the meeting is held.</summary>
+public class ConferenceAttendanceDto
+{
+    [Required]
+    public Guid AttendeeId { get; set; }
+
+    public bool DidAttend { get; set; }
+
+    [MaxLength(500)]
+    public string? ApologyReason { get; set; }
+}
+
+public class CancelGrievanceConferenceDto
+{
+    [Required]
+    [MaxLength(500)]
+    [MinLength(5)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Adds somebody to a meeting. Internal or external — exactly one.</summary>
+public class AddConferenceAttendeeDto
+{
+    public Guid? EmployeeId { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalOrganisation { get; set; }
+
+    [MaxLength(200)]
+    public string? Capacity { get; set; }
 }
 
 // ── Area 9c slice 3 — documents and the signed agreement ─────────────────────
