@@ -9837,6 +9837,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("ExchangeRate")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("FinanceDimensionSetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("FiscalPeriodId")
                         .HasColumnType("uniqueidentifier");
 
@@ -9871,9 +9874,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("BudgetReturnId");
 
+                    b.HasIndex("FinanceDimensionSetId");
+
                     b.HasIndex("FiscalPeriodId");
 
-                    b.HasIndex("TenantId", "BudgetReturnId", "AccountId", "FiscalPeriodId")
+                    b.HasIndex("TenantId", "BudgetReturnId", "AccountId", "FiscalPeriodId", "FinanceDimensionSetId")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
@@ -10286,6 +10291,64 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("BudgetScenarios");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BudgetScenarioControlDimension", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BudgetScenarioId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("FinanceDimensionDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BudgetScenarioId");
+
+                    b.HasIndex("FinanceDimensionDefinitionId");
+
+                    b.HasIndex("TenantId", "BudgetScenarioId", "FinanceDimensionDefinitionId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("BudgetScenarioControlDimensions", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.CashTransaction", b =>
@@ -11869,6 +11932,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("DimensionCombinationHashSnapshot")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("EvaluationHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -11878,6 +11945,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceDimensionSetId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("FiscalPeriodId")
@@ -11979,9 +12049,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FinanceDimensionSetId");
+
                     b.HasIndex("PostingEventId");
 
                     b.HasIndex("TenantId", "BudgetEntryId", "Status");
+
+                    b.HasIndex("TenantId", "FinanceDimensionSetId", "Status");
 
                     b.HasIndex("TenantId", "SourceDocumentType", "SourceDocumentId", "BudgetEntryId")
                         .IsUnique()
@@ -158098,6 +158172,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
                         .HasForeignKey("FiscalPeriodId")
@@ -158113,6 +158192,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("BudgetReturn");
+
+                    b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("FiscalPeriod");
 
@@ -158268,6 +158349,33 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("ParentScenario");
 
                     b.Navigation("SupersededByUser");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BudgetScenarioControlDimension", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.BudgetScenario", "BudgetScenario")
+                        .WithMany("ControlDimensions")
+                        .HasForeignKey("BudgetScenarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionDefinition", "FinanceDimensionDefinition")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BudgetScenario");
+
+                    b.Navigation("FinanceDimensionDefinition");
 
                     b.Navigation("Tenant");
                 });
@@ -158614,11 +158722,18 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceBudgetReservation", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("Tenant");
                 });
@@ -199330,6 +199445,8 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BudgetScenario", b =>
                 {
                     b.Navigation("BudgetReturns");
+
+                    b.Navigation("ControlDimensions");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.CashTransaction", b =>

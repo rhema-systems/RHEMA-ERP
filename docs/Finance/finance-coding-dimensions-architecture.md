@@ -65,10 +65,9 @@ all AP, AR, Cash, Fixed Asset, Payroll, Procurement or Inventory activity. The r
 coverage boundary; it must not imply that untagged legacy or operational lines belong to the selected
 dimension.
 
-Dimension breakdown/pivot and dimension-grained budget cells remain the next two Finance-owned
-phases. Until the budget phase lands, the existing account/period budget-control grain remains
-authoritative; the UI must not imply that a dimension selection has constrained budget availability
-when it has not.
+Dimension breakdown/pivot remains deferred. Dimension-grained budget cells and actual matching are
+implemented in the Finance budget provider; worksheet presentation and producer certification remain
+separate phases. Legacy scenarios retain their account/period grain and must not be reinterpreted.
 
 Producers submit structured dimension facts on `FinancePostingLineDto.Dimensions`. They do not
 select a stored Finance dimension-set ID. Finance resolves the tenant-owned value, effective date,
@@ -171,7 +170,8 @@ unchanged.
 5. Move financial-report filters to transaction-line semantics. **Implemented for Trial Balance,
    Income Statement, Balance Sheet and Detailed Ledger; Cash Flow and breakdown/pivot remain
    deferred.**
-6. Extend budget cells and actual matching to the configured control dimensions.
+6. Extend budget cells and actual matching to the configured control dimensions. **Implemented
+   in the Finance budget provider; producer certification remains adapter-specific.**
 7. Certify Finance and operational adapters individually.
 8. Enable mandatory enforcement by account/source only after certification.
 

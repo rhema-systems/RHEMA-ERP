@@ -6,6 +6,7 @@ public sealed class FinanceBudgetCellQueryDto
     public Guid? AccountId { get; set; }
     public Guid? FiscalPeriodId { get; set; }
     public Guid? SegmentValueId { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentInputDto> DimensionAssignments { get; set; } = Array.Empty<BudgetDimensionAssignmentInputDto>();
 }
 
 public class FinanceBudgetCellDto
@@ -23,6 +24,9 @@ public class FinanceBudgetCellDto
     public string FiscalPeriodCode { get; set; } = string.Empty;
     public Guid? SegmentValueId { get; set; }
     public string? SegmentValue { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string? DimensionCombinationHash { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentDto> DimensionAssignments { get; set; } = Array.Empty<BudgetDimensionAssignmentDto>();
     public string FunctionalCurrencyCode { get; set; } = string.Empty;
     public decimal ApprovedAmount { get; set; }
     public decimal PostedActualAmount { get; set; }
@@ -40,6 +44,7 @@ public sealed class FinanceBudgetCommitmentLineDto
     public Guid AccountId { get; set; }
     public Guid FiscalPeriodId { get; set; }
     public Guid? SegmentValueId { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentInputDto> DimensionAssignments { get; set; } = Array.Empty<BudgetDimensionAssignmentInputDto>();
     public decimal TransactionAmount { get; set; }
     public string TransactionCurrencyCode { get; set; } = string.Empty;
     public Guid? ExchangeRateId { get; set; }
@@ -77,6 +82,9 @@ public sealed class FinanceBudgetCommitmentEvaluationLineDto
     public Guid AccountId { get; set; }
     public Guid FiscalPeriodId { get; set; }
     public Guid? SegmentValueId { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string? DimensionCombinationHash { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentDto> DimensionAssignments { get; set; } = Array.Empty<BudgetDimensionAssignmentDto>();
     public IReadOnlyList<string> SourceLineIds { get; set; } = Array.Empty<string>();
     public string TransactionCurrencyCode { get; set; } = string.Empty;
     public decimal TransactionAmount { get; set; }
@@ -103,6 +111,8 @@ public sealed class FinanceBudgetReservationDto
 {
     public Guid Id { get; set; }
     public Guid BudgetEntryId { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string? DimensionCombinationHash { get; set; }
     public string SourceDocumentType { get; set; } = string.Empty;
     public Guid SourceDocumentId { get; set; }
     public string? SourceDocumentReference { get; set; }

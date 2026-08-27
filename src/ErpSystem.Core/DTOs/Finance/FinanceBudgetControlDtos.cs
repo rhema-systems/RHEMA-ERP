@@ -29,6 +29,9 @@ public sealed class FinanceBudgetControlLineDto
     public Guid? BudgetEntryId { get; set; }
     public Guid? SegmentValueId { get; set; }
     public string? SegmentValue { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string? DimensionCombinationHash { get; set; }
+    public IReadOnlyList<BudgetDimensionAssignmentDto> DimensionAssignments { get; set; } = Array.Empty<BudgetDimensionAssignmentDto>();
     public decimal RequestedAmount { get; set; }
     public decimal BudgetAmount { get; set; }
     public decimal PostedActualAmount { get; set; }

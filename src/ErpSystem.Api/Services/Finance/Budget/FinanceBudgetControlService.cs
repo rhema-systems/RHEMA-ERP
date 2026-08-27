@@ -96,6 +96,8 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                         AccountId = line.AccountId,
                         FiscalPeriodId = line.FiscalPeriodId,
                         SegmentValueId = line.SegmentValueId,
+                        FinanceDimensionSetId = line.FinanceDimensionSetId,
+                        DimensionCombinationHashSnapshot = line.DimensionCombinationHash,
                         CurrencyCode = evaluation.CurrencyCode,
                         SourceDocumentType = ManualJournalSource,
                         SourceDocumentId = journalEntryId,
@@ -103,7 +105,7 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                         BudgetDate = evaluation.EntryDate.Date,
                         SourceLineIdsJson = System.Text.Json.JsonSerializer.Serialize(new[]
                         {
-                            $"{line.AccountId:N}:{line.FiscalPeriodId:N}"
+                            $"{line.AccountId:N}:{line.FiscalPeriodId:N}:{line.DimensionCombinationHash ?? "LEGACY"}"
                         }),
                         TransactionCurrencyCode = evaluation.CurrencyCode,
                         TransactionAmount = line.RequestedAmount,
@@ -353,6 +355,10 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
         var journal = await _db.JournalEntries.AsNoTracking()
             .Include(x => x.FiscalPeriod)
             .Include(x => x.Transactions).ThenInclude(x => x.Account)
+            .Include(x => x.Transactions).ThenInclude(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
+            .Include(x => x.Transactions).ThenInclude(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionValue)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == journalEntryId && !x.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Manual journal was not found for this tenant.");
         if (journal.FiscalPeriod == null)
@@ -360,11 +366,12 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
 
         var requested = journal.Transactions
             .Where(x => x.Account.AccountType == AccountType.Expense && x.Account.BudgetTrackingEnabled)
-            .GroupBy(x => x.AccountId)
+            .GroupBy(x => new { x.AccountId, x.FinanceDimensionSetId })
             .Select(group => new
             {
-                AccountId = group.Key,
+                AccountId = group.Key.AccountId,
                 Account = group.First().Account,
+                DimensionSet = group.First().FinanceDimensionSet,
                 Amount = Math.Max(0m, group.Sum(x => x.DebitAmount - x.CreditAmount))
             })
             .Where(x => x.Amount > 0)
@@ -415,6 +422,10 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             ? new List<BudgetEntry>()
             : await _db.BudgetEntries.AsNoTracking()
                 .Include(x => x.BudgetReturn).ThenInclude(x => x!.SegmentValue)
+                .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                    .ThenInclude(x => x.FinanceDimensionDefinition)
+                .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                    .ThenInclude(x => x.FinanceDimensionValue)
                 .Where(x => x.TenantId == tenantId && !x.IsDeleted
                     && accountIds.Contains(x.AccountId)
                     && x.FiscalPeriodId == journal.FiscalPeriodId
@@ -429,6 +440,7 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                 .Where(x => x.BudgetReturn!.SegmentValueId.HasValue
                     ? controlSegments.Any(s => s.SegmentLookupValueId == x.BudgetReturn.SegmentValueId)
                     : controlSegments.Count == 0)
+                .Where(x => BudgetEntryMatchesTransactionSet(x, request.DimensionSet))
                 .ToList();
             var line = new FinanceBudgetControlLineDto
             {
@@ -465,12 +477,11 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                 line.BudgetEntryId = entry.Id;
                 line.SegmentValueId = entry.BudgetReturn!.SegmentValueId;
                 line.SegmentValue = entry.BudgetReturn.SegmentValue?.SegmentValue;
+                line.FinanceDimensionSetId = entry.FinanceDimensionSetId;
+                line.DimensionCombinationHash = entry.FinanceDimensionSet?.CombinationHash;
+                line.DimensionAssignments = MapAssignments(entry);
                 line.BudgetAmount = entry.AmountBase;
-                line.PostedActualAmount = await _db.AccountTransactions.AsNoTracking()
-                    .Where(x => x.TenantId == tenantId && !x.IsDeleted
-                        && x.AccountId == request.AccountId && x.FiscalPeriodId == journal.FiscalPeriodId
-                        && x.JournalEntry.PostingStatus == "Posted" && !x.JournalEntry.IsDeleted)
-                    .SumAsync(x => x.DebitAmount - x.CreditAmount, cancellationToken);
+                line.PostedActualAmount = await PostedActualAsync(entry, tenantId, cancellationToken);
                 line.ReservedAmount = await _db.FinanceBudgetReservations.AsNoTracking()
                     .Where(x => x.TenantId == tenantId && !x.IsDeleted && x.BudgetEntryId == entry.Id
                         && x.Status == ReservedStatus
@@ -542,14 +553,72 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             || key.Contains("COSTCENTER", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool BudgetEntryMatchesTransactionSet(
+        BudgetEntry entry,
+        FinanceDimensionSet? transactionSet)
+    {
+        if (entry.FinanceDimensionSet is null)
+            return true;
+        if (transactionSet is null)
+            return false;
+        return entry.FinanceDimensionSet.Items.All(required => transactionSet.Items.Any(actual =>
+            actual.FinanceDimensionDefinitionId == required.FinanceDimensionDefinitionId
+            && actual.FinanceDimensionValueId == required.FinanceDimensionValueId));
+    }
+
+    private async Task<decimal> PostedActualAsync(
+        BudgetEntry entry,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var query = _db.AccountTransactions.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                && x.AccountId == entry.AccountId && x.FiscalPeriodId == entry.FiscalPeriodId
+                && x.JournalEntry.PostingStatus == "Posted" && !x.JournalEntry.IsDeleted);
+        if (entry.FinanceDimensionSet is not null)
+        {
+            var requiredValueIds = entry.FinanceDimensionSet.Items
+                .Select(item => item.FinanceDimensionValueId).ToArray();
+            var matchingSetIds = _db.FinanceDimensionSetItems.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && requiredValueIds.Contains(item.FinanceDimensionValueId))
+                .GroupBy(item => item.FinanceDimensionSetId)
+                .Where(group => group.Count() == requiredValueIds.Length)
+                .Select(group => group.Key);
+            query = query.Where(transaction => transaction.FinanceDimensionSetId.HasValue
+                && matchingSetIds.Contains(transaction.FinanceDimensionSetId.Value));
+        }
+        return await query.SumAsync(
+            transaction => transaction.DebitAmount - transaction.CreditAmount,
+            cancellationToken);
+    }
+
+    private static IReadOnlyList<BudgetDimensionAssignmentDto> MapAssignments(BudgetEntry entry) =>
+        entry.FinanceDimensionSet?.Items
+            .OrderBy(item => item.FinanceDimensionDefinition.DisplayOrder)
+            .ThenBy(item => item.DimensionCodeSnapshot)
+            .Select(item => new BudgetDimensionAssignmentDto
+            {
+                FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                FinanceDimensionValueId = item.FinanceDimensionValueId,
+                DimensionCode = item.DimensionCodeSnapshot,
+                DimensionName = item.FinanceDimensionDefinition.Name,
+                ValueCode = item.DimensionValueCodeSnapshot,
+                ValueName = item.DimensionValueNameSnapshot
+            }).ToList() ?? new List<BudgetDimensionAssignmentDto>();
+
     private static string EvaluationHash(
         Guid tenantId,
         JournalEntry journal,
         string currencyCode,
         IEnumerable<FinanceBudgetControlLineDto> lines)
     {
-        var cells = lines.OrderBy(x => x.AccountId).Select(x => string.Join('|',
+        var cells = lines
+            .OrderBy(x => x.AccountId)
+            .ThenBy(x => x.DimensionCombinationHash, StringComparer.Ordinal)
+            .Select(x => string.Join('|',
             x.AccountId.ToString("N"), x.FiscalPeriodId.ToString("N"), x.BudgetEntryId?.ToString("N") ?? "NONE",
+            x.DimensionCombinationHash ?? "NONE",
             x.RequestedAmount.ToString("0.00", CultureInfo.InvariantCulture), x.BudgetAmount.ToString("0.00", CultureInfo.InvariantCulture),
             x.PostedActualAmount.ToString("0.00", CultureInfo.InvariantCulture), x.ReservedAmount.ToString("0.00", CultureInfo.InvariantCulture), x.DecisionCode));
         return Hash($"{tenantId:N}|{journal.Id:N}|{journal.EntryDate:yyyyMMdd}|{currencyCode}|{string.Join(";", cells)}");
@@ -580,6 +649,8 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                 || reservation.FiscalPeriodId != line.FiscalPeriodId
                 || reservation.BudgetScenarioId != line.BudgetScenarioId
                 || reservation.BudgetReturnId != line.BudgetReturnId
+                || reservation.FinanceDimensionSetId != line.FinanceDimensionSetId
+                || reservation.DimensionCombinationHashSnapshot != line.DimensionCombinationHash
                 || reservation.ReservedAmount != line.RequestedAmount)
                 throw new InvalidOperationException("The journal or adopted Finance budget changed after reservation. Withdraw and resubmit it.");
         }

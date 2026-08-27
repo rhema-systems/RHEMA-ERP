@@ -177,6 +177,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<OpeningBalanceLine> OpeningBalanceLines { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
+    public DbSet<BudgetScenarioControlDimension> BudgetScenarioControlDimensions { get; set; }
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
     public DbSet<BudgetRevision> BudgetRevisions { get; set; }
@@ -7709,6 +7710,27 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
+        builder.Entity<BudgetScenarioControlDimension>(entity =>
+        {
+            entity.ToTable("BudgetScenarioControlDimensions");
+            entity.HasIndex(item => new
+                {
+                    item.TenantId,
+                    item.BudgetScenarioId,
+                    item.FinanceDimensionDefinitionId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(item => item.BudgetScenario)
+                .WithMany(scenario => scenario.ControlDimensions)
+                .HasForeignKey(item => item.BudgetScenarioId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FinanceDimensionDefinition)
+                .WithMany()
+                .HasForeignKey(item => item.FinanceDimensionDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<BudgetReturn>(entity =>
         {
             entity.Property(budgetReturn => budgetReturn.RowVersion).IsRowVersion().IsConcurrencyToken();
@@ -7738,10 +7760,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     entry.TenantId,
                     entry.BudgetReturnId,
                     entry.AccountId,
-                    entry.FiscalPeriodId
+                    entry.FiscalPeriodId,
+                    entry.FinanceDimensionSetId
                 })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(entry => entry.FinanceDimensionSet)
+                .WithMany()
+                .HasForeignKey(entry => entry.FinanceDimensionSetId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<FinanceBudgetReservation>(entity =>
@@ -7763,6 +7790,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             });
             entity.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(x => new { x.TenantId, x.BudgetEntryId, x.Status });
+            entity.HasIndex(x => new { x.TenantId, x.FinanceDimensionSetId, x.Status });
+            entity.HasOne(x => x.FinanceDimensionSet)
+                .WithMany()
+                .HasForeignKey(x => x.FinanceDimensionSetId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => new { x.TenantId, x.SourceDocumentType, x.SourceDocumentId, x.BudgetEntryId })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0 AND [Status] = 'Reserved'");

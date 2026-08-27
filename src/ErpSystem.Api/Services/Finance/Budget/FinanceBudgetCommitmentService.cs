@@ -57,6 +57,10 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             .Include(x => x.Account)
             .Include(x => x.FiscalPeriod)
             .Include(x => x.BudgetReturn).ThenInclude(x => x!.SegmentValue)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionValue)
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
                 && x.FiscalPeriodId == period.Id
                 && x.BudgetReturn!.TenantId == tenantId && !x.BudgetReturn.IsDeleted
@@ -75,6 +79,8 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
         foreach (var entry in entries)
         {
             if (!await BudgetReturnMatchesAccountAsync(entry, date, cancellationToken))
+                continue;
+            if (!EntryContainsAssignments(entry, query.DimensionAssignments))
                 continue;
             result.Add(await BuildPositionAsync(entry, scenario, date, null, null, null, cancellationToken));
         }
@@ -145,6 +151,8 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                         AccountId = line.AccountId,
                         FiscalPeriodId = line.FiscalPeriodId,
                         SegmentValueId = line.SegmentValueId,
+                        FinanceDimensionSetId = line.FinanceDimensionSetId,
+                        DimensionCombinationHashSnapshot = line.DimensionCombinationHash,
                         CurrencyCode = evaluation.FunctionalCurrencyCode,
                         SourceDocumentType = Normalize(request.SourceDocumentType, 50, "source document type"),
                         SourceDocumentId = request.SourceDocumentId,
@@ -375,6 +383,10 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             .Include(x => x.FiscalPeriod)
             .Include(x => x.BudgetReturn).ThenInclude(x => x!.BudgetScenario)
             .Include(x => x.BudgetReturn).ThenInclude(x => x!.SegmentValue)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionValue)
             .Where(x => x.TenantId == tenantId && entryIds.Contains(x.Id) && !x.IsDeleted)
             .ToDictionaryAsync(x => x.Id, cancellationToken);
         if (entries.Count != entryIds.Length)
@@ -411,6 +423,9 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                 AccountId = entry.AccountId,
                 FiscalPeriodId = entry.FiscalPeriodId,
                 SegmentValueId = entry.BudgetReturn!.SegmentValueId,
+                FinanceDimensionSetId = entry.FinanceDimensionSetId,
+                DimensionCombinationHash = entry.FinanceDimensionSet?.CombinationHash,
+                DimensionAssignments = MapAssignments(entry),
                 SourceLineIds = lines.Select(x => Normalize(x.SourceLineId, 100, "source line ID")).ToList(),
                 TransactionCurrencyCode = currency,
                 TransactionAmount = transactionAmount,
@@ -457,6 +472,10 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             .Include(x => x.FiscalPeriod)
             .Include(x => x.BudgetReturn).ThenInclude(x => x!.BudgetScenario)
             .Include(x => x.BudgetReturn).ThenInclude(x => x!.SegmentValue)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
+            .Include(x => x.FinanceDimensionSet).ThenInclude(x => x!.Items)
+                .ThenInclude(x => x.FinanceDimensionValue)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == budgetEntryId && !x.IsDeleted, cancellationToken)
             ?? throw NotFound("BUDGET_ENTRY_NOT_FOUND", "The Finance budget entry was not found in this tenant.");
         await ValidateBudgetCellAsync(entry, date, cancellationToken);
@@ -475,11 +494,26 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
         CancellationToken cancellationToken)
     {
         var tenantId = entry.TenantId;
-        var actual = await _db.AccountTransactions.AsNoTracking()
+        var actualQuery = _db.AccountTransactions.AsNoTracking()
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
                 && x.AccountId == entry.AccountId && x.FiscalPeriodId == entry.FiscalPeriodId
-                && x.JournalEntry.PostingStatus == "Posted" && !x.JournalEntry.IsDeleted)
-            .SumAsync(x => x.DebitAmount - x.CreditAmount, cancellationToken);
+                && x.JournalEntry.PostingStatus == "Posted" && !x.JournalEntry.IsDeleted);
+        if (entry.FinanceDimensionSet is not null)
+        {
+            var requiredValueIds = entry.FinanceDimensionSet.Items
+                .Select(item => item.FinanceDimensionValueId).ToArray();
+            var matchingSetIds = _db.FinanceDimensionSetItems.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && requiredValueIds.Contains(item.FinanceDimensionValueId))
+                .GroupBy(item => item.FinanceDimensionSetId)
+                .Where(group => group.Count() == requiredValueIds.Length)
+                .Select(group => group.Key);
+            actualQuery = actualQuery.Where(transaction =>
+                transaction.FinanceDimensionSetId.HasValue
+                && matchingSetIds.Contains(transaction.FinanceDimensionSetId.Value));
+        }
+        var actual = await actualQuery.SumAsync(
+            x => x.DebitAmount - x.CreditAmount, cancellationToken);
         var reservationsQuery = _db.FinanceBudgetReservations.AsNoTracking()
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
                 && x.BudgetEntryId == entry.Id && x.Status == ReservedStatus);
@@ -505,6 +539,9 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             FiscalPeriodCode = entry.FiscalPeriod.PeriodCode,
             SegmentValueId = entry.BudgetReturn!.SegmentValueId,
             SegmentValue = entry.BudgetReturn.SegmentValue?.SegmentValue,
+            FinanceDimensionSetId = entry.FinanceDimensionSetId,
+            DimensionCombinationHash = entry.FinanceDimensionSet?.CombinationHash,
+            DimensionAssignments = MapAssignments(entry),
             FunctionalCurrencyCode = functionalCurrency,
             ApprovedAmount = entry.AmountBase,
             PostedActualAmount = actual,
@@ -530,6 +567,17 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             entry.TenantId, entry.FiscalPeriod.FiscalYearId, date, cancellationToken);
         if (official is null || official.Id != entry.BudgetReturn.BudgetScenarioId)
             throw Validation("BUDGET_SCENARIO_NOT_EFFECTIVE", "The Finance budget entry is not in the adopted scenario effective for this date.");
+        var controlDimensionIds = await _db.BudgetScenarioControlDimensions.AsNoTracking()
+            .Where(item => item.TenantId == entry.TenantId && !item.IsDeleted
+                && item.BudgetScenarioId == entry.BudgetReturn.BudgetScenarioId)
+            .Select(item => item.FinanceDimensionDefinitionId)
+            .ToListAsync(cancellationToken);
+        var assignedDefinitionIds = entry.FinanceDimensionSet?.Items
+            .Select(item => item.FinanceDimensionDefinitionId).ToHashSet()
+            ?? new HashSet<Guid>();
+        if (!assignedDefinitionIds.SetEquals(controlDimensionIds))
+            throw Validation("BUDGET_DIMENSION_GRAIN_INVALID",
+                "The Finance budget entry does not contain exactly the scenario's controlling dimension assignments.");
         if (!await BudgetReturnMatchesAccountAsync(entry, date, cancellationToken))
             throw Validation("BUDGET_SEGMENT_MISMATCH", "The budget return department/cost-centre does not match the account combination.");
     }
@@ -737,6 +785,7 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
                 throw Validation("BUDGET_SOURCE_LINE_DUPLICATE", "Source line IDs must be unique within a Finance budget request.");
             if (line.BudgetEntryId == Guid.Empty || line.AccountId == Guid.Empty || line.FiscalPeriodId == Guid.Empty)
                 throw Validation("BUDGET_CELL_ID_REQUIRED", "Budget entry, account and fiscal-period IDs are required.");
+            ValidateAssignments(line.DimensionAssignments);
             if (line.TransactionAmount <= 0m)
                 throw Validation("BUDGET_LINE_AMOUNT_INVALID", "Budget commitment line amounts must be positive.");
             _ = NormalizeCurrency(line.TransactionCurrencyCode);
@@ -746,7 +795,8 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
     private static void ValidateLineMatchesCell(FinanceBudgetCommitmentLineDto line, BudgetEntry entry)
     {
         if (line.AccountId != entry.AccountId || line.FiscalPeriodId != entry.FiscalPeriodId
-            || line.SegmentValueId != entry.BudgetReturn!.SegmentValueId)
+            || line.SegmentValueId != entry.BudgetReturn!.SegmentValueId
+            || !EntryMatchesAssignments(entry, line.DimensionAssignments))
             throw Validation("BUDGET_CELL_MISMATCH", "The producer line does not match the canonical Finance budget cell.");
     }
 
@@ -776,6 +826,8 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
             if (row is null || row.ReservedAmount != line.RequestedFunctionalAmount
                 || row.TransactionAmount != line.TransactionAmount
                 || row.SourceVersion != request.SourceVersion
+                || row.FinanceDimensionSetId != line.FinanceDimensionSetId
+                || row.DimensionCombinationHashSnapshot != line.DimensionCombinationHash
                 || row.EvaluationHash != evaluation.EvaluationHash)
                 throw Conflict("BUDGET_ACTIVE_RESERVATION_CONFLICT", "The source or Finance budget position changed after its active reservation. Use the target-state adjustment operation.");
         }
@@ -791,6 +843,8 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
     {
         Id = row.Id,
         BudgetEntryId = row.BudgetEntryId,
+        FinanceDimensionSetId = row.FinanceDimensionSetId,
+        DimensionCombinationHash = row.DimensionCombinationHashSnapshot,
         SourceDocumentType = row.SourceDocumentType,
         SourceDocumentId = row.SourceDocumentId,
         SourceDocumentReference = row.SourceDocumentReference,
@@ -826,6 +880,9 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
         FiscalPeriodCode = source.FiscalPeriodCode,
         SegmentValueId = source.SegmentValueId,
         SegmentValue = source.SegmentValue,
+        FinanceDimensionSetId = source.FinanceDimensionSetId,
+        DimensionCombinationHash = source.DimensionCombinationHash,
+        DimensionAssignments = source.DimensionAssignments,
         FunctionalCurrencyCode = source.FunctionalCurrencyCode,
         ApprovedAmount = source.ApprovedAmount,
         PostedActualAmount = source.PostedActualAmount,
@@ -871,6 +928,64 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
             || key.Contains("COSTCENTER", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool EntryContainsAssignments(
+        BudgetEntry entry,
+        IReadOnlyCollection<BudgetDimensionAssignmentInputDto>? requested)
+    {
+        if (requested is null || requested.Count == 0)
+            return true;
+        ValidateAssignments(requested);
+        if (entry.FinanceDimensionSet is null)
+            return false;
+        return requested.All(input => entry.FinanceDimensionSet.Items.Any(item =>
+            item.FinanceDimensionDefinitionId == input.FinanceDimensionDefinitionId
+            && item.FinanceDimensionValueId == input.FinanceDimensionValueId));
+    }
+
+    private static bool EntryMatchesAssignments(
+        BudgetEntry entry,
+        IReadOnlyCollection<BudgetDimensionAssignmentInputDto>? supplied)
+    {
+        var assignments = supplied ?? Array.Empty<BudgetDimensionAssignmentInputDto>();
+        ValidateAssignments(assignments);
+        if (entry.FinanceDimensionSet is null)
+            return true;
+        return entry.FinanceDimensionSet.Items.All(required => assignments.Any(actual =>
+            actual.FinanceDimensionDefinitionId == required.FinanceDimensionDefinitionId
+            && actual.FinanceDimensionValueId == required.FinanceDimensionValueId));
+    }
+
+    private static void ValidateAssignments(
+        IReadOnlyCollection<BudgetDimensionAssignmentInputDto> assignments)
+    {
+        if (assignments.Any(item => item.FinanceDimensionDefinitionId == Guid.Empty
+                || item.FinanceDimensionValueId == Guid.Empty)
+            || assignments.Select(item => item.FinanceDimensionDefinitionId).Distinct().Count()
+                != assignments.Count)
+            throw Validation("BUDGET_DIMENSIONS_INVALID",
+                "Budget dimension assignments must contain one non-empty value per dimension.");
+    }
+
+    private static IReadOnlyList<BudgetDimensionAssignmentDto> MapAssignments(BudgetEntry entry) =>
+        entry.FinanceDimensionSet?.Items
+            .OrderBy(item => item.FinanceDimensionDefinition.DisplayOrder)
+            .ThenBy(item => item.DimensionCodeSnapshot)
+            .Select(item => new BudgetDimensionAssignmentDto
+            {
+                FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                FinanceDimensionValueId = item.FinanceDimensionValueId,
+                DimensionCode = item.DimensionCodeSnapshot,
+                DimensionName = item.FinanceDimensionDefinition.Name,
+                ValueCode = item.DimensionValueCodeSnapshot,
+                ValueName = item.DimensionValueNameSnapshot
+            }).ToList() ?? new List<BudgetDimensionAssignmentDto>();
+
+    private static string AssignmentHash(
+        IEnumerable<BudgetDimensionAssignmentInputDto>? assignments) =>
+        string.Join(',', (assignments ?? Array.Empty<BudgetDimensionAssignmentInputDto>())
+            .OrderBy(item => item.FinanceDimensionDefinitionId)
+            .Select(item => $"{item.FinanceDimensionDefinitionId:N}:{item.FinanceDimensionValueId:N}"));
+
     private static string RequestHash(FinanceBudgetCommitmentRequestDto request) => Hash(string.Join('|', new[]
     {
         Normalize(request.SourceDocumentType, 50, "source document type"),
@@ -879,7 +994,7 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
         Normalize(request.SourceVersion, 64, "source version"),
         request.BudgetDate.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         string.Join(';', request.Lines.OrderBy(x => x.SourceLineId, StringComparer.Ordinal).Select(x =>
-            FormattableString.Invariant($"{Normalize(x.SourceLineId, 100, "source line ID")},{x.BudgetEntryId:N},{x.AccountId:N},{x.FiscalPeriodId:N},{x.SegmentValueId?.ToString("N") ?? "NONE"},{x.TransactionAmount:0.00},{NormalizeCurrency(x.TransactionCurrencyCode)},{x.ExchangeRateId?.ToString("N") ?? "NONE"}")))
+            FormattableString.Invariant($"{Normalize(x.SourceLineId, 100, "source line ID")},{x.BudgetEntryId:N},{x.AccountId:N},{x.FiscalPeriodId:N},{x.SegmentValueId?.ToString("N") ?? "NONE"},{AssignmentHash(x.DimensionAssignments)},{x.TransactionAmount:0.00},{NormalizeCurrency(x.TransactionCurrencyCode)},{x.ExchangeRateId?.ToString("N") ?? "NONE"}")))
     }));
 
     private static string EvaluationHash(
@@ -889,7 +1004,7 @@ IF @result < 0 THROW 51000, 'Unable to acquire Finance budget reservation lock.'
     {
         tenantId.ToString("N"), RequestHash(request), evaluation.FunctionalCurrencyCode,
         string.Join(';', evaluation.Lines.OrderBy(x => x.BudgetEntryId).Select(x => FormattableString.Invariant(
-            $"{x.BudgetEntryId:N},{x.BudgetScenarioId:N},{x.RequestedFunctionalAmount:0.00},{x.BudgetAmount:0.00},{x.PostedActualAmount:0.00},{x.OtherReservationsAmount:0.00},{x.AvailableAmount:0.00}")))
+            $"{x.BudgetEntryId:N},{x.BudgetScenarioId:N},{x.DimensionCombinationHash ?? "NONE"},{x.RequestedFunctionalAmount:0.00},{x.BudgetAmount:0.00},{x.PostedActualAmount:0.00},{x.OtherReservationsAmount:0.00},{x.AvailableAmount:0.00}")))
     }));
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
