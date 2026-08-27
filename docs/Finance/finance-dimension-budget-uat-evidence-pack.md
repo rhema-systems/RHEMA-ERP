@@ -180,6 +180,46 @@ commit, and run the automated baseline again before starting Phase A UAT.
 | Safe API runtime | Zero product workers; `RhemaERP`; startup initialization skipped; loopback health HTTP 200 |
 | Frontend runtime | Clean reviewed UAT worktree on port 3000; `/login` HTTP 200 |
 
+### Phase A authenticated execution checkpoint — 27 August 2026
+
+Tenant `FINANCE-DEMO` was exercised through the Finance UI with the `admin` actor. The controlled
+fixture uses FY2026 and September 2026 because the four lookup values are effective from
+27 August 2026; January through August must therefore remain unavailable for this full-period
+budget grain.
+
+| Evidence | Recorded value |
+| --- | --- |
+| Scenario | `UAT Dimension Budget FY2026` — `e0ec8670-cee0-4cdf-9a73-aa5e6d7918b7`, `Collecting` |
+| Return | `d65d9f6d-cfdf-4981-b750-32d87bf3457d`, Finance & Administration, `Draft` |
+| DEPT definition | `8bc6174e-6697-48de-ad44-37b6df7a6cb9` |
+| PROJECT definition | `4dfcf296-f941-4577-bc67-65a69a482487` |
+| Values | `FIN`, `OPS`, `P100`, and `P200`; active from `2026-08-27` |
+| Controlled account | `100-6000-0000` — Salaries - Finance & Administration |
+| Controlled period | `2026-09` — `b50f7d32-dee1-4d52-96a6-08ac64ed75b4` |
+| FIN/P100 entry | `41f00c0f-e1e0-421a-a4bb-deb78fecaf7f`; GHS 10,000; set `4d912757-dd92-f1c4-fab3-abe3a3847ad9`; hash `B7CF81D4EE75B0D4C1846A3C29B177919F8FCE61267DC3668A0DBB566750CFAC` |
+| OPS/P200 entry | `82682379-d3bf-46e8-bda2-703c79b49db5`; GHS 4,000; set `979bab42-46f7-908e-fa58-2adae0555a8d`; hash `29146971290363FC6899DC7D1897C4FA06431B5395014C5EEC569D740B72608C` |
+| Checkpoint database state | 2 active entries; GHS 14,000 total; return `Draft`; submitted/approved dates null |
+
+| Case | Result | Evidence summary |
+| --- | --- | --- |
+| `UAT-BUD-001` | Pass | The scenario reopened with exact `DEPT` then `PROJECT` controls and one Finance return. |
+| `UAT-BUD-002` | Pass | A DEPT-only combination produced `Select one value for every budget-control dimension`; January-August cells were disabled for the complete values while September-December were enabled. |
+| `UAT-BUD-003` | Pass | The two amounts were saved, reloaded, and remained isolated under their exact immutable dimension sets and hashes. |
+| `UAT-BUD-004` | Pass | Existing scenario `Test Budget` (`17455956-749a-40c8-ad5d-47df6cd86a88`) and return `61f68e83-768d-4181-becc-d98e40666aa7` rendered all 12 periods with `Budget grain: Account and period (legacy)` and no invented control selection. |
+| `UAT-BUD-005` | Hold | The controlled return intentionally remains `Draft`. Submission, reviewer approval, and adoption require the explicit operator/workflow handoff; no hidden API or database bypass was used. |
+
+Two defects were discovered and contained during this execution:
+
+1. creating a top-level lookup value compared null parent and null current IDs as if the new value
+   were its own parent. The guard now runs only when both IDs exist; the focused Finance dimension
+   administration suite passes 9/9;
+2. the worksheet expected fiscal-year summary DTOs to embed periods, producing an Account/Total-only
+   grid. It now calls the dedicated tenant-scoped fiscal-period endpoint, sorts the returned periods,
+   and labels legacy grain explicitly. The focused worksheet and dimension-grid suites pass 7/7.
+
+These fixes are local to the controlled evidence branch at this checkpoint. Do not claim deployed
+or merged status until their focused change set has completed the normal review path.
+
 ## Phase A — worksheet and immutable budget grain
 
 ### UAT-BUD-001: create a dimension-controlled scenario
