@@ -220,6 +220,7 @@ public class VendorInvoiceLineItemDto
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
     public string? GLAccountName { get; set; }
+    public Guid? BudgetEntryId { get; set; }
     public Guid? FixedAssetId { get; set; }
     public Guid? CapitalizationJournalEntryId { get; set; }
     public Guid? CapitalizationPostingEventId { get; set; }
@@ -246,6 +247,7 @@ public class VendorInvoiceLineItemCreateDto
 {
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
+    public Guid? BudgetEntryId { get; set; }
     public Guid? FixedAssetId { get; set; }
     /// <summary>
     /// Legacy procurement PO line id only; do not send FinancePurchaseOrderItem ids in this field.

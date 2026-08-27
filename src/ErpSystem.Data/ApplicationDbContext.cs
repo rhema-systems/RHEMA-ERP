@@ -2125,6 +2125,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.GLAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BudgetEntry)
+                .WithMany()
+                .HasForeignKey(e => e.BudgetEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.BudgetEntryId });
             entity.HasOne(e => e.FixedAsset)
                 .WithMany()
                 .HasForeignKey(e => e.FixedAssetId)
