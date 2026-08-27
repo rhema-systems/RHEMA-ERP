@@ -92,4 +92,24 @@ describe('Budget return fiscal-period grid', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Account and period (legacy)')).toBeInTheDocument();
   });
+
+  it('keeps the detailed account-period grid visible below the category tabs', async () => {
+    await act(async () => {
+      render(
+        <Suspense fallback={<div>Loading</div>}>
+          <BudgetReturnEditorPage
+            params={Promise.resolve({ id: 'return-1' })}
+          />
+        </Suspense>
+      );
+      await Promise.resolve();
+    });
+
+    const workspace = await screen.findByTestId('budget-return-workspace');
+    const grid = await screen.findByTestId('budget-account-period-grid');
+
+    expect(workspace).toHaveClass('min-h-[calc(100vh-4rem)]');
+    expect(workspace).not.toHaveClass('h-[calc(100vh-4rem)]');
+    expect(grid).toHaveClass('min-h-[24rem]');
+  });
 });
