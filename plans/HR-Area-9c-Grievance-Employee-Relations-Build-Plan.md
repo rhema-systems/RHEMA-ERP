@@ -40,7 +40,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | **COMPLETE 2026-08-27** — 111 ×2 + the 151/119 ladder = **381**; obligations 5, 7, 8 closed; `GrievanceStatus.Closed` given its first writer |
 | 3 | Documents on the controlled upload gate + the final signed agreement | **COMPLETE 2026-08-27** — 70 ×2 + the 151/119/111 ladder = **451**; obligation 9 closed; D-10 judged — the agreement stays off the workflow engine |
 | 4 | Case conferencing & mediation; union consultation | **COMPLETE 2026-08-27** — 86 ×2 + the 151/119/111/70 ladder = **537**; obligation 6 closed. **FR-HR-181 IS NOW FULLY DELIVERED** |
-| 5 | The responder matrix (FR-HR-084) + rung resolution | ⏳ |
+| 5 | The responder matrix (FR-HR-084) + rung resolution | **COMPLETE 2026-08-27** — 66 ×2 + the 151/119/111/70/86 ladder = **603**; migration `AddEmployeeRelationsResponderMatrix`; the org-authority gap stops being worked around |
 | 6 | Anonymous / whistleblower concern intake | ⏳ |
 | 7 | Reminder-sweep extension + notifications | ⏳ |
 | 8 | ER analytics & reporting | ⏳ |
@@ -654,3 +654,60 @@ a stale census reads as a gap that is not there.
 
 *(Harness bug, for completeness: one probe's outcome string was under `MinLength(20)`, so it 400'd
 on validation before reaching the attendee check it existed to make. Fixed and commented.)*
+
+---
+
+### Slice 5 — the responder matrix (FR-HR-084). CLOSED 2026-08-27.
+
+`run-slice5.mjs` **66 assertions ×2**, ladder 151 / 119 / 111 / 70 / 86 / 66 = **603 for the
+area**. Migration `20260827215716_AddEmployeeRelationsResponderMatrix` (guarded SQL, registered).
+New service, controller and admin surface at `api/hr/employee-relations/responders`.
+
+**The org-authority gap stops being worked around.** §3.2's measurement — `ManagerId` 486 of 8,353
+(5.8%), unit heads 2 of 48, both *worse* than six weeks earlier — is why FR-HR-181's Supervisor
+and HOD rungs cannot be derived. This is the fourth requirement to hit that wall, and rather than
+work around it a fourth time, slice 5 builds what was already recommended to TDC: HR names who
+answers, on a screen. Resolution is **unit row → tenant default → nobody**; the case is auto-
+assigned on file, on open-case and **on every escalation**, which is the point — before this, every
+escalation landed on a rung nobody was named for and sat there until an HR officer happened to look.
+
+⚠ **The most important assertion in this slice is the negative one, and it runs FIRST, before any
+matrix row exists.** A case in an uncovered unit must still file and simply arrive unassigned.
+The matrix covers 0 of 48 units on a fresh tenant; if that path ever throws, the matrix will have
+turned a working system into a broken one for 94% of staff. For the same reason `resolve` answers
+**200 with `resolved: false`**, never 404 — showing HR where the matrix resolves to nobody is the
+admin screen's main job, and a lookup that errors cannot be rendered as a gap.
+
+**No unique index on (unit, level), and one must not be added.** A slot legitimately holds several
+rows over time: acting cover while the usual responder is on leave is exactly what the effective
+window is for. What must be refused is two rows *in force on the same day* — a temporal overlap no
+unique index can express, enforced in `ValidateAsync`. A unique index would not tighten the rule,
+it would delete the feature. Said in the EF config and in the migration remarks, because it looks
+like an omission.
+
+**The griever is never auto-assigned to answer their own case.** The matrix can legitimately name
+them — somebody who answers the HOD rung can also raise a grievance — and `RespondAsync` would then
+refuse the only person the step names, stranding the case with no way out but an HR override.
+
+⚠ **Two defects the teardown found, and the teardown only found them because it was ASSERTED.**
+
+1. **The delete gate is `DisciplineAdmin`, not `DisciplineWrite`** — matching that permission's own
+   description, *"delete discipline and grievance records and catalogue entries"*. Changing who
+   answers a rung is a Write act (update the row, or end its window); deleting the record that
+   somebody was responsible is administrative. The harness assumed HR could, and its `try/catch`
+   **silently swallowed six 403s while reporting a clean matrix** — the [[hr-tierb-tail-area-survey]]
+   shape exactly. It now asserts the 403 and tears down as admin.
+2. **The overlap refusal could not name who was blocking the slot.** It read *"Somebody already
+   answers Supervisor for this scope"* because the sibling query had no `Include` on the employee.
+   A rule that fires correctly but cannot say whose assignment to end first leaves the HR officer
+   exactly where they started. Fixed.
+
+**Also owed, and recorded rather than done:** this matrix is what would unblock **FR-HR-080** — a
+head of department may issue only verbal warnings — which area 9 built correctly and left inert
+because the system could not tell who a head of department was. Opening it is a **gate change in
+the discipline area**, not a rule change, and it is out of scope here. Noted on the controller for
+whoever reopens area 9.
+
+⚠ *A recurring harness trap, now commented in the file: `fileCase()` leaves the token as the
+GRIEVER's. Every section that writes must re-authenticate as HR — forgetting it reads as a
+permissions defect in code that is correct, and cost one run here.*

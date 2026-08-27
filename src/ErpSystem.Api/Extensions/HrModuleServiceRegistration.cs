@@ -641,6 +641,9 @@ public static class HrModuleServiceRegistration
         // FR-HR-181's grievance ladder. Separate from the disciplinary case on purpose: a grievance
         // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.
         services.AddScoped<IStaffGrievanceService, StaffGrievanceService>();
+        // Area 9c slice 5 — FR-HR-084's responder matrix. StaffGrievanceService depends on it
+        // to name a rung's responder on file and on escalate.
+        services.AddScoped<IEmployeeRelationsResponderService, EmployeeRelationsResponderService>();
 
         // Area 25 slice 12 (D6) — the employee's own profile, and the approval path for the parts
         // of it that carry identity or payment consequences. Registered beside the grievance

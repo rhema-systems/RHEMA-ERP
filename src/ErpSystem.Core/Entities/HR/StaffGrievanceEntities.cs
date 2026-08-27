@@ -325,6 +325,64 @@ public class StaffGrievanceResolution : TenantEntity
 }
 
 /// <summary>
+/// Who answers an employee-relations case at a given rung, for a given part of the organisation —
+/// area 9c slice 5, decision D-3. This is <b>FR-HR-084</b>: "model a grievance hierarchy defining
+/// reporting lines."
+/// </summary>
+/// <remarks>
+/// <para><b>Why this is maintained and not derived, which is the whole point.</b> FR-HR-181's ladder
+/// names Supervisor and HOD rungs, and the obvious implementation resolves them from
+/// <c>Employees.ManagerId</c> and <c>OrganizationUnits.HeadEmployeeId</c>. Measured on the DEFAULT
+/// tenant on 2026-08-27: <b>ManagerId is set for 486 of 8,353 employees (5.8%) and unit heads for 2
+/// of 48</b> — and both were WORSE than when the same measurement was taken six weeks earlier.
+/// Deriving authority from that data resolves to nobody for 94% of staff.</para>
+///
+/// <para>This is the <b>fourth</b> requirement to hit that wall — FR-HR-080's HOD sanction rule,
+/// FR-HR-173's establishment check (already downgraded to advisory for exactly this reason),
+/// FR-HR-181's rungs, and now FR-HR-084. Rather than work around it a fourth time, slice 5 builds
+/// the alternative already put to TDC in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4: HR names who
+/// answers, directly, on a screen. ⚠ <b>If reporting lines are ever genuinely maintained, this table
+/// does not need removing</b> — it is the override layer a derived lookup would need anyway.</para>
+///
+/// <para><b>A null <see cref="OrganizationUnitId"/> is the tenant-wide default</b>, not a missing
+/// value. Resolution is: the row for the employee's unit, else the tenant default, else nobody —
+/// and "nobody" is a supported outcome, not a failure. A case in a unit with no row is still
+/// filed; it simply arrives unassigned for HR to route by hand, exactly as every case did before
+/// this table existed.</para>
+///
+/// <para><b>The effective window is for acting arrangements</b> — somebody covering while the usual
+/// responder is on leave. Overlapping windows for one slot are refused by the service, because two
+/// people answering the same rung for the same unit on the same day is not a policy, it is a bug
+/// that would resolve arbitrarily.</para>
+/// </remarks>
+public class EmployeeRelationsResponder : TenantEntity
+{
+    /// <summary>Null means the tenant-wide default. See the remarks — this is a value, not a gap.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    /// <summary>The rung this person answers.</summary>
+    public GrievanceEscalationLevel Level { get; set; }
+
+    [Required]
+    public Guid ResponderEmployeeId { get; set; }
+
+    [ForeignKey(nameof(ResponderEmployeeId))]
+    public virtual Employee ResponderEmployee { get; set; } = null!;
+
+    /// <summary>Null means "since always".</summary>
+    public DateTime? EffectiveFrom { get; set; }
+
+    /// <summary>Null means "until further notice" — at most one such row per slot.</summary>
+    public DateTime? EffectiveTo { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
 /// A meeting convened on an employee-relations case — area 9c slice 4, decision D-8. Covers a case
 /// conference, a mediation and FR-HR-181 obligation 6's union consultation.
 /// </summary>

@@ -399,6 +399,11 @@ public partial class ApplicationDbContext
     public DbSet<StaffGrievanceConference> StaffGrievanceConferences { get; set; } = null!;
     public DbSet<StaffGrievanceConferenceAttendee> StaffGrievanceConferenceAttendees { get; set; } = null!;
 
+    // Area 9c slice 5 — FR-HR-084's responder matrix: who answers which rung, for which unit.
+    // Maintained by HR rather than derived from ManagerId/HeadEmployeeId, which are populated for
+    // 5.8% and 2-of-48 respectively (measured 2026-08-27).
+    public DbSet<EmployeeRelationsResponder> EmployeeRelationsResponders { get; set; } = null!;
+
     // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
     // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
     // an HR officer to approve, and approval applies them.
@@ -9367,6 +9372,32 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.AgreementAcceptedBy)
                 .WithMany()
                 .HasForeignKey(x => x.AgreementAcceptedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeRelationsResponder (area 9c slice 5, FR-HR-084) ----
+        builder.Entity<EmployeeRelationsResponder>(entity =>
+        {
+            // The resolution lookup's index: level + scope, which is exactly what ResolveAsync
+            // filters on.
+            entity.HasIndex(x => new { x.TenantId, x.Level, x.OrganizationUnitId });
+            entity.HasIndex(x => x.ResponderEmployeeId);
+
+            entity.Property(x => x.Level).HasConversion<int>();
+
+            // ⚠ NO unique index on (unit, level). A slot legitimately holds several rows over time
+            // — an acting arrangement while the usual responder is on leave is the case this table
+            // exists for. What must be refused is two rows in force on the SAME DAY, which is a
+            // temporal overlap no unique index can express; the service enforces it. Adding a
+            // unique index here would break acting cover, which is the feature.
+            entity.HasOne(x => x.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ResponderEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.ResponderEmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -737,3 +737,89 @@ public class DisciplineReminderLogEntryDto
 }
 
 #endregion
+
+// ============================================================================
+// EMPLOYEE-RELATIONS RESPONDER MATRIX — area 9c slice 5, FR-HR-084
+// ============================================================================
+
+#region Responder matrix
+
+public class EmployeeRelationsResponderDto
+{
+    public Guid Id { get; set; }
+
+    /// <summary>Null is the tenant-wide default, not a missing value.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary>What the admin screen shows in the unit column for a default row.</summary>
+    public string ScopeName => OrganizationUnitName ?? "All units (default)";
+
+    public GrievanceEscalationLevel Level { get; set; }
+    public string LevelName => Level.ToString();
+
+    public Guid ResponderEmployeeId { get; set; }
+    public string? ResponderName { get; set; }
+    public string? ResponderEmployeeNumber { get; set; }
+
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public string? Notes { get; set; }
+
+    /// <summary>True when this row is the one in force today.</summary>
+    public bool IsCurrent { get; set; }
+}
+
+public class UpsertEmployeeRelationsResponderDto
+{
+    /// <summary>Omit for the tenant-wide default.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    [Required]
+    public GrievanceEscalationLevel Level { get; set; }
+
+    [Required]
+    public Guid ResponderEmployeeId { get; set; }
+
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// What the matrix would resolve to, without filing anything — so the admin screen can show the
+/// answer and, just as importantly, show where it resolves to nobody.
+/// </summary>
+public class ResponderResolutionDto
+{
+    public Guid? OrganizationUnitId { get; set; }
+    public GrievanceEscalationLevel Level { get; set; }
+    public string LevelName => Level.ToString();
+
+    public Guid? ResponderEmployeeId { get; set; }
+    public string? ResponderName { get; set; }
+
+    /// <summary>"Unit", "Default", or "None" — which rule produced this answer.</summary>
+    public string ResolvedBy { get; set; } = "None";
+
+    /// <summary>
+    /// False when nothing matched. ⚠ A supported outcome, not an error: the case is still filed and
+    /// HR routes it by hand, exactly as every case did before the matrix existed.
+    /// </summary>
+    public bool Resolved => ResponderEmployeeId != null;
+}
+
+/// <summary>Every rung's answer for one unit — the row the admin screen renders.</summary>
+public class ResponderCoverageDto
+{
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public List<ResponderResolutionDto> Levels { get; set; } = new();
+
+    /// <summary>How many of the six rungs resolve to somebody. The number HR is trying to raise.</summary>
+    public int CoveredLevels => Levels.Count(l => l.Resolved);
+}
+
+#endregion

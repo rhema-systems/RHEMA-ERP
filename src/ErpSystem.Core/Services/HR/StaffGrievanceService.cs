@@ -22,15 +22,18 @@ public class StaffGrievanceService : IStaffGrievanceService
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IEmployeeRelationsResponderService _responders;
     private readonly ILogger<StaffGrievanceService> _logger;
 
     public StaffGrievanceService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IEmployeeRelationsResponderService responders,
         ILogger<StaffGrievanceService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _responders = responders;
         _logger = logger;
     }
 
@@ -146,6 +149,41 @@ public class StaffGrievanceService : IStaffGrievanceService
     private StaffGrievanceStep CurrentStep(StaffGrievance grievance)
         => grievance.Steps.OrderBy(s => s.Sequence).LastOrDefault()
            ?? throw new InvalidOperationException("This grievance has no escalation step, which should not be possible.");
+
+    /// <summary>
+    /// Names a responder on a step from the matrix, if the matrix has one — area 9c slice 5.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Resolving to nobody is a supported outcome, not a failure.</b> The matrix covers
+    /// 0 of 48 units on a fresh tenant, and a case in an uncovered unit must still be filed: it
+    /// simply arrives unassigned for HR to route by hand, exactly as every case did before slice 5.
+    /// This method therefore returns quietly rather than throwing, and the harness asserts that a
+    /// case in an uncovered unit files successfully.</para>
+    ///
+    /// <para>The griever is never auto-assigned to answer their own case. The matrix could name
+    /// them — somebody who answers the HOD rung can also raise a grievance — and
+    /// <c>RespondAsync</c> would then refuse the only person the step names, leaving it stuck with
+    /// no way forward but an HR override.</para>
+    /// </remarks>
+    private async Task TryAutoAssignAsync(
+        StaffGrievance grievance, StaffGrievanceStep step, CancellationToken cancellationToken)
+    {
+        if (step.AssignedToId.HasValue) return;
+
+        // The primary party's unit. There is no unit on the case itself — see GetPagedAsync.
+        var unitId = grievance.Employee?.OrganizationUnitId
+                     ?? (await _unitOfWork.Repository<Employee>().GetByIdAsync(grievance.EmployeeId))?.OrganizationUnitId;
+
+        var resolution = await _responders.ResolveAsync(unitId, step.Level, cancellationToken);
+        if (resolution.ResponderEmployeeId is not Guid responderId) return;
+        if (responderId == grievance.EmployeeId) return;
+
+        step.AssignedToId = responderId;
+        step.UpdatedAt = DateTime.UtcNow;
+
+        if (grievance.Status == GrievanceStatus.Filed)
+            grievance.Status = GrievanceStatus.UnderReview;
+    }
 
     /// <summary>
     /// The read rule: the griever, HR, or someone named on one of the steps. A grievance is usually
@@ -358,6 +396,13 @@ public class StaffGrievanceService : IStaffGrievanceService
         await _unitOfWork.Repository<StaffGrievance>().AddAsync(grievance);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // Area 9c slice 5 — the matrix names the Supervisor rung's responder if it has one. Done
+        // after the save so the step has an identity; a no-match leaves the case unassigned, which
+        // is exactly how every case behaved before the matrix existed.
+        var saved = await GetOwnedAsync(grievance.Id, cancellationToken);
+        await TryAutoAssignAsync(saved, CurrentStep(saved), cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         _logger.LogInformation("Grievance filed: {Number}", grievance.GrievanceNumber);
 
         return ToDto(await GetOwnedAsync(grievance.Id, cancellationToken));
@@ -507,6 +552,13 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // Area 9c slice 5 — the rung it has just arrived at gets its responder from the matrix.
+        // ⚠ This is the point of the matrix: before it, every escalation landed on a rung nobody
+        // was named for, and the case sat there until an HR officer happened to look.
+        var escalated = await GetOwnedAsync(grievanceId, cancellationToken);
+        await TryAutoAssignAsync(escalated, CurrentStep(escalated), cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         _logger.LogInformation("Grievance {Number} escalated to {Level}", grievance.GrievanceNumber, nextLevel);
 
         return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
@@ -574,6 +626,10 @@ public class StaffGrievanceService : IStaffGrievanceService
         });
 
         await _unitOfWork.Repository<StaffGrievance>().AddAsync(grievance);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var openedCase = await GetOwnedAsync(grievance.Id, cancellationToken);
+        await TryAutoAssignAsync(openedCase, CurrentStep(openedCase), cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Employee-relations case opened: {Number} ({Type})",
