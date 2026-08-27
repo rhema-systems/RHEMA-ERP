@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.Finance.Budget;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -197,6 +198,71 @@ public class BudgetServiceHardeningTests
         await act.Should()
             .ThrowAsync<InvalidOperationException>()
             .WithMessage("*approved*");
+    }
+
+    [Fact]
+    public async Task SubmitReturnAsync_StartsWorkflowAndPersistsSubmittedState()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var budgetReturn = CreateReturn(scenario.Id, CurrentUserId);
+        db.BudgetScenarios.Add(scenario);
+        db.BudgetReturns.Add(budgetReturn);
+        db.BudgetEntries.Add(new BudgetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            BudgetReturnId = budgetReturn.Id,
+            AccountId = Guid.NewGuid(),
+            FiscalPeriodId = Guid.NewGuid(),
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            Amount = 14_000m,
+            AmountBase = 14_000m
+        });
+        await db.SaveChangesAsync();
+
+        var workflowInstanceId = Guid.NewGuid();
+        var workflow = new Mock<IWorkflowService>(MockBehavior.Strict);
+        workflow.Setup(service => service.StartApprovalWorkflowAsync("BudgetReturn", budgetReturn.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = workflowInstanceId
+            });
+
+        var result = await CreateService(db, workflow.Object).SubmitReturnAsync(
+            budgetReturn.Id,
+            Convert.ToBase64String(budgetReturn.RowVersion));
+
+        result.Status.Should().Be("Submitted");
+        result.SubmittedDate.Should().NotBeNull();
+        (await db.BudgetReturns.AsNoTracking().SingleAsync(item => item.Id == budgetReturn.Id))
+            .Status.Should().Be("Submitted");
+        workflow.Verify(service => service.StartApprovalWorkflowAsync("BudgetReturn", budgetReturn.Id), Times.Once);
+    }
+
+    [Fact]
+    public void BudgetWorkflowMutations_KeepTransactionsInsideTheExecutionStrategy()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
+            directory = directory.Parent;
+
+        directory.Should().NotBeNull("the repository root must be discoverable from the test output");
+        var source = File.ReadAllText(Path.Combine(
+            directory!.FullName,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Budget",
+            "BudgetService.cs"));
+
+        AssertRetryableWorkflowMethod(source, "SubmitScenarioAsync", "ArchiveScenarioAsync");
+        AssertRetryableWorkflowMethod(source, "SubmitReturnAsync", "RecallReturnAsync");
+        AssertRetryableWorkflowMethod(source, "RecallReturnAsync", "ENTRIES");
     }
 
     [Fact]
@@ -431,13 +497,26 @@ public class BudgetServiceHardeningTests
         return new ApplicationDbContext(options, TenantId);
     }
 
-    private BudgetService CreateService(ApplicationDbContext db)
+    private BudgetService CreateService(ApplicationDbContext db, IWorkflowService? workflow = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(service => service.TenantId).Returns(TenantId);
         currentUser.SetupGet(service => service.UserId).Returns(CurrentUserId.ToString());
 
-        return new BudgetService(db, currentUser.Object, Mock.Of<IWorkflowService>());
+        return new BudgetService(db, currentUser.Object, workflow ?? Mock.Of<IWorkflowService>());
+    }
+
+    private static void AssertRetryableWorkflowMethod(string source, string methodName, string nextMarker)
+    {
+        var start = source.IndexOf($" {methodName}(", StringComparison.Ordinal);
+        var end = source.IndexOf(nextMarker, start + methodName.Length, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0);
+        end.Should().BeGreaterThan(start);
+
+        var method = source[start..end];
+        method.Should().Contain("CreateExecutionStrategy()");
+        method.Should().Contain("ExecuteInTransactionAsync(");
+        method.Should().NotContain("BeginTransactionAsync(");
     }
 
     private BudgetScenario CreateScenario(string status = "Collecting") =>

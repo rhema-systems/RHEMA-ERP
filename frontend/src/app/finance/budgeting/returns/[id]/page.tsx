@@ -91,10 +91,11 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
             setAuditHistory(auditData);
             setFinanceDimensions(dimensions);
 
-            // 3. Get Fiscal Year for Periods
-            const fy = await financeDataService.getFiscalYearById(scen.fiscalYearId);
-            // Sort periods by number
-            const sortedPeriods = [...(fy.periods || [])].sort((a, b) => a.periodNumber - b.periodNumber);
+            // Fiscal-year summaries intentionally do not embed their child periods. Load the
+            // tenant-scoped period collection explicitly so the worksheet cannot silently
+            // collapse to an Account/Total-only grid.
+            const fiscalPeriods = await financeDataService.getFiscalPeriods(scen.fiscalYearId);
+            const sortedPeriods = [...fiscalPeriods].sort((a, b) => a.periodNumber - b.periodNumber);
             setPeriods(sortedPeriods);
 
             // 4. Build Grid Data
@@ -301,6 +302,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         || normalizedRoles.has('tenantadmin')
         || normalizedRoles.has('superadmin');
     const isAssignedUser = budgetReturn.assignedToUserId === user?.id;
+    const hasAssignee = Boolean(budgetReturn.assignedToUserId);
     const isDraftLike = budgetReturn.status === 'Draft' || budgetReturn.status === 'Rejected';
     const scenarioIsCollecting = scenario.status === 'Collecting';
     const isEditable = isDraftLike
@@ -308,6 +310,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Edit')));
     const canSubmit = isDraftLike
         && scenarioIsCollecting
+        && hasAssignee
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Submit')));
     const canRecall = budgetReturn.status === 'Submitted'
         && scenarioIsCollecting
@@ -316,7 +319,10 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     const hasControlledDimensions = scenario.controlDimensions.length > 0;
 
     const renderGrid = (accountList: Account[]) => (
-        <div className="h-full min-h-0 border rounded-md overflow-auto">
+        <div
+            data-testid="budget-account-period-grid"
+            className="h-full min-h-[24rem] overflow-auto rounded-md border"
+        >
             <Table>
                 <TableHeader>
                     <TableRow>
@@ -378,7 +384,10 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     );
 
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
+        <div
+            data-testid="budget-return-workspace"
+            className="flex min-h-[calc(100vh-4rem)] flex-col"
+        >
             {/* Header */}
             <div className="flex-none p-6 pb-2 space-y-4">
                 <Breadcrumb>
@@ -409,6 +418,11 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </p>
                     </div>
                     <div className="flex gap-2">
+                        {isDraftLike && scenarioIsCollecting && !hasAssignee && (
+                            <div className="flex max-w-xs items-center rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                Assign this return from the scenario page before submission.
+                            </div>
+                        )}
                         {(isEditable || canSubmit || canRecall) && (
                             <>
                                 {isEditable && (
@@ -523,11 +537,17 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </CardContent>
                     </Card>
                 )}
+                {!hasControlledDimensions && (
+                    <div className="rounded-md border bg-muted/20 px-4 py-3 text-sm">
+                        <span className="font-medium">Budget grain:</span>{' '}
+                        Account and period (legacy)
+                    </div>
+                )}
             </div>
 
-            {/* Content - Full Height Grid */}
-            <div className="flex-1 min-h-0 p-6 pt-2 overflow-hidden flex flex-col">
-                <Tabs defaultValue="Expenses" className="flex-1 min-h-0 flex flex-col" onValueChange={setActiveTab}>
+            {/* Keep the account grid visible when controlled dimensions make the header taller than the viewport. */}
+            <div className="flex min-h-[28rem] flex-1 flex-col p-6 pt-2">
+                <Tabs defaultValue="Expenses" className="flex min-h-[24rem] flex-1 flex-col" onValueChange={setActiveTab}>
                     <div className="flex items-center justify-between mb-2">
                         <TabsList>
                             <TabsTrigger value="Expenses">Expenses ({expenseAccounts.length})</TabsTrigger>
@@ -551,14 +571,14 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </div>
                     </div>
 
-                    <TabsContent value="Expenses" className="flex-1 min-h-0 overflow-auto bg-white relative">
+                    <TabsContent value="Expenses" className="relative min-h-[24rem] flex-1 overflow-auto bg-white">
                         {activeCombinationKey ? renderGrid(expenseAccounts) : (
                             <div className="flex h-full items-center justify-center rounded-md border text-sm text-muted-foreground">
                                 Add or select a complete dimension combination before entering amounts.
                             </div>
                         )}
                     </TabsContent>
-                    <TabsContent value="Revenue" className="flex-1 min-h-0 overflow-auto bg-white relative">
+                    <TabsContent value="Revenue" className="relative min-h-[24rem] flex-1 overflow-auto bg-white">
                         {activeCombinationKey ? renderGrid(revenueAccounts) : (
                             <div className="flex h-full items-center justify-center rounded-md border text-sm text-muted-foreground">
                                 Add or select a complete dimension combination before entering amounts.
