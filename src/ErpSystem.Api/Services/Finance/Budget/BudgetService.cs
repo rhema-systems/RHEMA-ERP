@@ -9,6 +9,8 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -290,33 +292,43 @@ public partial class BudgetService : IBudgetService
     public async Task<BudgetScenarioDto> SubmitScenarioAsync(Guid id, string rowVersion)
     {
         var tenantId = TenantId;
-        var scenario = await _context.BudgetScenarios
-            .Include(s => s.FiscalYear)
-            .Include(s => s.BudgetReturns)
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
+        var submittedAt = DateTime.UtcNow;
+        Guid? workflowInstanceId = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        if (scenario == null)
-            throw new KeyNotFoundException("Budget scenario not found.");
-        if (scenario.Status != CollectingStatus)
-            throw new InvalidOperationException("Only Collecting scenarios can be submitted for approval.");
-        ApplyRowVersion(scenario, rowVersion);
-        if (scenario.BudgetReturns.Count == 0)
-            throw new InvalidOperationException("A scenario without budget returns cannot be submitted.");
-        if (scenario.BudgetReturns.Any(budgetReturn => budgetReturn.Status != ApprovedStatus))
-            throw new InvalidOperationException("All budget returns must be approved before the scenario can be submitted.");
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        async Task SubmitAttemptAsync(CancellationToken cancellationToken)
         {
+            // Every retry must reload the aggregate and workflow graph. Reusing tracked entities
+            // from a rolled-back attempt can leak stale status or duplicate workflow evidence.
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var scenario = await _context.BudgetScenarios
+                .Include(s => s.FiscalYear)
+                .Include(s => s.BudgetReturns)
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id, cancellationToken);
+
+            if (scenario == null)
+                throw new KeyNotFoundException("Budget scenario not found.");
+            if (scenario.Status != CollectingStatus)
+                throw new InvalidOperationException("Only Collecting scenarios can be submitted for approval.");
+            ApplyRowVersion(scenario, rowVersion);
+            if (scenario.BudgetReturns.Count == 0)
+                throw new InvalidOperationException("A scenario without budget returns cannot be submitted.");
+            if (scenario.BudgetReturns.Any(budgetReturn => budgetReturn.Status != ApprovedStatus))
+                throw new InvalidOperationException("All budget returns must be approved before the scenario can be submitted.");
+
             scenario.Status = InReviewStatus;
-            scenario.UpdatedAt = DateTime.UtcNow;
+            scenario.UpdatedAt = submittedAt;
             scenario.LastModifiedById = CurrentUserId;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BudgetScenario", id);
             if (!workflowResult.Success)
                 throw new InvalidOperationException(
                     workflowResult.Message ?? "Unable to start budget scenario approval workflow.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+            if (!workflowInstanceId.HasValue || workflowInstanceId == Guid.Empty)
+                throw new InvalidOperationException("Budget scenario workflow did not return an instance ID.");
 
             await RecordAuditAsync(
                 FinanceAuditEvents.BudgetScenarioSubmitted,
@@ -324,16 +336,34 @@ public partial class BudgetService : IBudgetService
                 scenario.Id,
                 new { Status = CollectingStatus },
                 new { scenario.Status },
-                workflowInstanceId: workflowResult.WorkflowInstanceId);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
+                workflowInstanceId: workflowInstanceId);
         }
 
-        return await MapToDtoAsync(scenario);
+        if (_context.Database.IsRelational())
+        {
+            await strategy.ExecuteInTransactionAsync(
+                async operationToken => await SubmitAttemptAsync(operationToken),
+                async verificationToken => workflowInstanceId.HasValue
+                    && await _context.BudgetScenarios.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == id
+                            && item.Status == InReviewStatus, verificationToken)
+                    && await _context.WorkflowInstances.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == workflowInstanceId.Value
+                            && item.EntityId == id && !item.IsDeleted, verificationToken),
+                IsolationLevel.ReadCommitted,
+                CancellationToken.None);
+        }
+        else
+        {
+            await SubmitAttemptAsync(CancellationToken.None);
+        }
+
+        _context.ChangeTracker.Clear();
+        var submittedScenario = await _context.BudgetScenarios
+            .Include(s => s.FiscalYear)
+            .Include(s => s.BudgetReturns)
+            .FirstAsync(s => s.TenantId == tenantId && s.Id == id);
+        return await MapToDtoAsync(submittedScenario);
     }
 
     public async Task<BudgetScenarioDto> ArchiveScenarioAsync(Guid id, string rowVersion)
@@ -536,39 +566,49 @@ public partial class BudgetService : IBudgetService
 
     public async Task<BudgetReturnDto> SubmitReturnAsync(Guid id, string rowVersion)
     {
-        var budgetReturn = await GetReturnEntityAsync(id);
-        EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
-        await EnsureCanPrepareReturnAsync(budgetReturn);
+        var tenantId = TenantId;
+        var submittedAt = DateTime.UtcNow;
+        Guid? workflowInstanceId = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        if (budgetReturn.Status != DraftStatus && budgetReturn.Status != RejectedStatus)
-            throw new InvalidOperationException("Only Draft or Rejected returns can be submitted.");
-        if (!budgetReturn.AssignedToUserId.HasValue)
-            throw new InvalidOperationException("The budget return must be assigned before it can be submitted.");
-
-        var hasMaterialEntry = await _context.BudgetEntries.AnyAsync(entry =>
-            entry.TenantId == TenantId
-            && entry.BudgetReturnId == id
-            && entry.Amount != 0);
-        if (!hasMaterialEntry)
-            throw new InvalidOperationException("Enter at least one non-zero budget amount before submitting.");
-        ApplyRowVersion(budgetReturn, rowVersion);
-        var previousStatus = budgetReturn.Status;
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        async Task SubmitAttemptAsync(CancellationToken cancellationToken)
         {
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var budgetReturn = await GetReturnEntityAsync(id);
+            EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
+            await EnsureCanPrepareReturnAsync(budgetReturn);
+
+            if (budgetReturn.Status != DraftStatus && budgetReturn.Status != RejectedStatus)
+                throw new InvalidOperationException("Only Draft or Rejected returns can be submitted.");
+            if (!budgetReturn.AssignedToUserId.HasValue)
+                throw new InvalidOperationException("The budget return must be assigned before it can be submitted.");
+
+            var hasMaterialEntry = await _context.BudgetEntries.AnyAsync(entry =>
+                entry.TenantId == tenantId
+                && entry.BudgetReturnId == id
+                && entry.Amount != 0,
+                cancellationToken);
+            if (!hasMaterialEntry)
+                throw new InvalidOperationException("Enter at least one non-zero budget amount before submitting.");
+            ApplyRowVersion(budgetReturn, rowVersion);
+            var previousStatus = budgetReturn.Status;
+
             budgetReturn.Status = SubmittedStatus;
-            budgetReturn.SubmittedDate = DateTime.UtcNow;
+            budgetReturn.SubmittedDate = submittedAt;
             budgetReturn.ApprovedDate = null;
             budgetReturn.RejectionReason = null;
-            budgetReturn.UpdatedAt = DateTime.UtcNow;
+            budgetReturn.UpdatedAt = submittedAt;
             budgetReturn.LastModifiedById = CurrentUserId;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BudgetReturn", id);
             if (!workflowResult.Success)
                 throw new InvalidOperationException(
                     workflowResult.Message ?? "Unable to start budget return approval workflow.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+            if (!workflowInstanceId.HasValue || workflowInstanceId == Guid.Empty)
+                throw new InvalidOperationException("Budget return workflow did not return an instance ID.");
 
             await RecordAuditAsync(
                 FinanceAuditEvents.BudgetReturnSubmitted,
@@ -576,31 +616,52 @@ public partial class BudgetService : IBudgetService
                 budgetReturn.Id,
                 new { Status = previousStatus },
                 new { budgetReturn.Status, budgetReturn.SubmittedDate },
-                workflowInstanceId: workflowResult.WorkflowInstanceId);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
+                workflowInstanceId: workflowInstanceId);
         }
 
-        return await MapToReturnDtoAsync(budgetReturn);
+        if (_context.Database.IsRelational())
+        {
+            await strategy.ExecuteInTransactionAsync(
+                async operationToken => await SubmitAttemptAsync(operationToken),
+                async verificationToken => workflowInstanceId.HasValue
+                    && await _context.BudgetReturns.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == id
+                            && item.Status == SubmittedStatus && item.SubmittedDate != null,
+                            verificationToken)
+                    && await _context.WorkflowInstances.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == workflowInstanceId.Value
+                            && item.EntityId == id && !item.IsDeleted, verificationToken),
+                IsolationLevel.ReadCommitted,
+                CancellationToken.None);
+        }
+        else
+        {
+            await SubmitAttemptAsync(CancellationToken.None);
+        }
+
+        _context.ChangeTracker.Clear();
+        return await MapToReturnDtoAsync(await GetReturnEntityAsync(id));
     }
 
     public async Task<BudgetReturnDto> RecallReturnAsync(Guid id, string rowVersion, string? reason)
     {
-        var budgetReturn = await GetReturnEntityAsync(id);
-        EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
-        await EnsureCanPrepareReturnAsync(budgetReturn);
-        if (budgetReturn.Status != SubmittedStatus)
-            throw new InvalidOperationException("Only Submitted returns can be recalled.");
-        ApplyRowVersion(budgetReturn, rowVersion);
+        var tenantId = TenantId;
         var normalizedReason = NormalizeOptionalText(reason) ?? "Recalled by preparer.";
+        var recalledAt = DateTime.UtcNow;
+        Guid? workflowInstanceId = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        async Task RecallAttemptAsync(CancellationToken cancellationToken)
         {
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var budgetReturn = await GetReturnEntityAsync(id);
+            EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
+            await EnsureCanPrepareReturnAsync(budgetReturn);
+            if (budgetReturn.Status != SubmittedStatus)
+                throw new InvalidOperationException("Only Submitted returns can be recalled.");
+            ApplyRowVersion(budgetReturn, rowVersion);
+
             var workflowResult = await _workflowService.RecallWorkflowAsync(
                 "BudgetReturn",
                 id,
@@ -609,14 +670,17 @@ public partial class BudgetService : IBudgetService
             if (!workflowResult.Success)
                 throw new InvalidOperationException(
                     workflowResult.Message ?? "Unable to recall the budget return workflow.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+            if (!workflowInstanceId.HasValue || workflowInstanceId == Guid.Empty)
+                throw new InvalidOperationException("Budget return recall did not return a workflow instance ID.");
 
             budgetReturn.Status = DraftStatus;
             budgetReturn.SubmittedDate = null;
             budgetReturn.ApprovedDate = null;
             budgetReturn.RejectionReason = normalizedReason;
-            budgetReturn.UpdatedAt = DateTime.UtcNow;
+            budgetReturn.UpdatedAt = recalledAt;
             budgetReturn.LastModifiedById = CurrentUserId;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             await RecordAuditAsync(
                 FinanceAuditEvents.BudgetReturnRecalled,
@@ -625,16 +689,32 @@ public partial class BudgetService : IBudgetService
                 new { Status = SubmittedStatus },
                 new { budgetReturn.Status },
                 normalizedReason,
-                workflowResult.WorkflowInstanceId);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
+                workflowInstanceId);
         }
 
-        return await MapToReturnDtoAsync(budgetReturn);
+        if (_context.Database.IsRelational())
+        {
+            await strategy.ExecuteInTransactionAsync(
+                async operationToken => await RecallAttemptAsync(operationToken),
+                async verificationToken => workflowInstanceId.HasValue
+                    && await _context.BudgetReturns.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == id
+                            && item.Status == DraftStatus && item.SubmittedDate == null,
+                            verificationToken)
+                    && await _context.WorkflowInstances.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == workflowInstanceId.Value
+                            && item.EntityId == id && item.Status == WorkflowInstanceStatus.Cancelled
+                            && !item.IsDeleted, verificationToken),
+                IsolationLevel.ReadCommitted,
+                CancellationToken.None);
+        }
+        else
+        {
+            await RecallAttemptAsync(CancellationToken.None);
+        }
+
+        _context.ChangeTracker.Clear();
+        return await MapToReturnDtoAsync(await GetReturnEntityAsync(id));
     }
 
     // ========================================================================
