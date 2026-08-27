@@ -338,6 +338,18 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                             <Badge className="bg-green-600 hover:bg-green-700">Official</Badge>
                         )}
                     </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                        <span className="mr-1 text-xs text-muted-foreground">Budget grain:</span>
+                        {scenario.controlDimensions.length === 0 ? (
+                            <Badge variant="outline">Account + fiscal period</Badge>
+                        ) : [...scenario.controlDimensions]
+                            .sort((left, right) => left.displayOrder - right.displayOrder)
+                            .map(dimension => (
+                                <Badge key={dimension.financeDimensionDefinitionId} variant="outline">
+                                    {dimension.dimensionCode} — {dimension.dimensionName}
+                                </Badge>
+                            ))}
+                    </div>
                 </div>
                 <div className="flex gap-2">
                     <div className="flex gap-2">
