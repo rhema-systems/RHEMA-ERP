@@ -2,15 +2,18 @@
 
 ## Purpose and release boundary
 
-This pack certifies the stacked Finance changes delivered by PRs `#114`, `#115`, and `#116`:
+This pack certifies two separately gated Finance releases:
 
-- the canonical transaction-dimension budget grain;
-- the dimension-aware Finance budget worksheet; and
-- direct Accounts Payable expense reservation and consumption.
+- **Phase A (merged):** the canonical transaction-dimension budget grain from PR `#114` and the
+  dimension-aware Finance budget worksheet from PR `#115`;
+- **Phase B (promotion pending):** direct Accounts Payable expense reservation and consumption,
+  originally reviewed in PR `#116` and promoted to `master` by PR `#120`.
 
-Run this pack only after the three PRs and their prerequisite Finance-dimension control plane have
-merged, their migrations have been applied through the controlled deployment process, and the API
-and frontend have been rebuilt. Do not use production data for the first execution.
+Phase A may be executed after the controlled deployment has applied migration
+`20260825235055_AddFinanceBudgetControlDimensions` and rebuilt the API and frontend from a commit
+containing PRs `#114` and `#115`. Do not execute Phase B until PR `#120` is in `master`, migration
+`20260826013000_AddApVendorInvoiceBudgetEvidence` has been applied, and both applications have been
+rebuilt from that later commit. Do not use production data for the first execution.
 
 The pack does not certify Procurement commitments, employee expenses, supplier returns, standalone
 supplier debit notes, or AP correction/reversal budget evidence. Those remain separate lifecycle
@@ -60,6 +63,49 @@ Use one open fiscal period and one active, direct-posting expense account with
 The values selected for the positive case must be effective for the whole fiscal period. Prepare an
 adopted budget cell for `DEPT=FIN + PROJECT=P100` with a functional-currency amount of `GHS 10,000`.
 Do not reuse this cell for unrelated test cases unless the expected available balance is adjusted.
+
+## Deployment gates
+
+| Gate | Required evidence | Permitted execution |
+| --- | --- | --- |
+| Phase A source | PRs `#114` and `#115` are ancestors of the deployed commit | Worksheet cases `UAT-BUD-001` through `UAT-BUD-005` |
+| Phase A schema | Migration history contains `20260825235055_AddFinanceBudgetControlDimensions` and the physical schema matches it | Worksheet persistence and reload |
+| Phase B source | PR `#120` is an ancestor of the deployed commit | AP cases `UAT-APB-001` through `UAT-APB-008` |
+| Phase B schema | Migration history contains `20260826013000_AddApVendorInvoiceBudgetEvidence` and `VendorInvoiceLineItem.BudgetEntryId` has its governed FK/indexes | AP selection, reservation, and posting |
+| Runtime | API and frontend build identifiers match the recorded deployed commit | Any sign-off assertion |
+
+Stop at the first failed gate. Never stamp migration history, edit budget evidence, or substitute a
+different tenant/account/dimension combination to make the pack pass.
+
+## Pre-UAT automated baseline — 27 August 2026
+
+This preparation run used merged `master` commit `eacaf677` (PRs `#114` and `#115`) and made no
+database or business-document changes.
+
+| Verification | Result |
+| --- | --- |
+| `BudgetServiceHardeningTests` | Pass — 13/13 |
+| `FinanceDimensionAdministrationServiceTests` | Pass — 8/8 |
+| `FinanceBudgetCommitmentServiceTests` | Pass — 11/11 |
+| `budget-dimension-grid.test.ts` | Pass — 6/6 |
+| Phase A source gate | Pass — merged source present |
+| Phase A schema/runtime gate | **Hold** — the configured environment reports three pending migrations; no migration was applied by this preparation run |
+| Phase B source gate | Hold — PR `#120` is not yet in `master` |
+
+Automated regression success is a prerequisite, not business UAT sign-off. The cases below still
+require authenticated UI/API execution and retained evidence in the designated non-production
+tenant.
+
+Read-only migration inventory for the configured environment:
+
+1. `20260825141500_AddFinanceControlledDocumentRetention` — pending;
+2. `20260825190000_AddFinanceDimensionRuleScope` — pending;
+3. `20260825235055_AddFinanceBudgetControlDimensions` — pending.
+
+Phase A is therefore not executable yet. Apply the complete reviewed pending sequence through the
+controlled deployment process, re-run the inventory and require zero pending migrations, then
+rebuild/restart the API before beginning `UAT-BUD-001`. This preparation did not apply migrations,
+start services, seed data, or create budget documents.
 
 ## Phase A — worksheet and immutable budget grain
 
@@ -130,6 +176,9 @@ Expected:
 - audit history identifies the actors and lifecycle timestamps.
 
 ## Phase B — direct AP expense control
+
+**Hold point:** this phase is documentation-only until PR `#120` and its migration are deployed. A
+successful Phase A result does not authorize or imply AP budget-control sign-off.
 
 ### UAT-APB-001: list only eligible budget cells
 
@@ -254,7 +303,9 @@ Do not sign off or work around any of the following:
 | --- | --- |
 | Tenant | |
 | Build/commit | |
-| Migration head | |
+| Phase A migration head | `20260825235055_AddFinanceBudgetControlDimensions` / Not applied |
+| Phase B migration head | `20260826013000_AddApVendorInvoiceBudgetEvidence` / Not applied / Not required |
+| Phase executed | A / B / Both |
 | Scenario / return | |
 | BudgetEntry / combination hash | |
 | AP invoice | |

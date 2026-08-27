@@ -5,9 +5,10 @@
 The direct AP expense adapter is safe for create, submit, reject, approve, and post. The current AP
 correction paths are not yet fully certified for dimension-aware budget control.
 
-Do not extend PR `#116` with these changes while its foundation is under review. Implement the
-correction lifecycle as a separate Finance-owned PR after the dimension-budget foundation merges.
-Supplier-return producer changes remain Procurement/Inventory-owned.
+Do not extend the AP adapter promotion PR `#120` with these changes. Implement the correction
+lifecycle as a separate Finance-owned PR only after the promoted adapter is in `master` and its
+positive reservation/consumption UAT is complete. Supplier-return producer changes remain
+Procurement/Inventory-owned.
 
 Primary source evidence:
 
@@ -40,8 +41,8 @@ pre-post lifecycle termination must release the active reservation.
 
 | Lifecycle | Current accounting behavior | Budget result | Assessment |
 | --- | --- | --- | --- |
-| Workflow rejection before posting | Releases active AP reservation before marking the invoice rejected | Available amount is restored | Certified by PR `#116` |
-| Workflow-start failure | Releases reservations and returns the invoice to Draft | No orphan reservation | Certified by PR `#116` |
+| Workflow rejection before posting | Releases active AP reservation before marking the invoice rejected | Available amount is restored | Implemented in PR `#116`; promotion/UAT pending through PR `#120` |
+| Workflow-start failure | Releases reservations and returns the invoice to Draft | No orphan reservation | Implemented in PR `#116`; promotion/UAT pending through PR `#120` |
 | Void of Draft/Pending/Approved invoice without a journal | Marks the invoice Voided, but does not release an existing reservation | Active reservation can remain indefinitely | **Release blocker** |
 | Full void of posted invoice | Central reversal plan swaps debit/credit and preserves `FinanceDimensionSetId` | Net posted actual returns to zero and availability recovers | Arithmetic is correct; immutable budget-reversal operation is missing |
 | Linked supplier debit note | Credits the exact historical expense account and tax lineage | Legacy account-period budgets net correctly; dimension-controlled budgets may not because the original dimension set is not copied | **Release blocker** |
