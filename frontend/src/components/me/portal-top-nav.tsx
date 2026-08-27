@@ -79,6 +79,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Payslips', href: '/me/payslips' },
       // Slice 12b: letters about your employment, requested here and collected here.
       { label: 'My Letters', href: '/me/letters' },
+      // Slice 12d: the policies that apply to you, and the ones awaiting your signature.
+      { label: 'Company Policies', href: '/me/policies' },
     ],
   },
   {

@@ -29,6 +29,7 @@ using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Entities.HR.Announcements;
 using ErpSystem.Core.Entities.HR.Letters;
+using ErpSystem.Core.Entities.HR.Policies;
 using ErpSystem.Core.Entities.HR.ProfileChanges;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -390,6 +391,11 @@ public partial class ApplicationDbContext
     // Area 25 slice 12c — staff announcements and who each one is aimed at.
     public DbSet<HrAnnouncement> HrAnnouncements { get; set; } = null!;
     public DbSet<HrAnnouncementAudience> HrAnnouncementAudiences { get; set; } = null!;
+
+    // Area 25 slice 12d — the staff policy library and the acknowledgements it collects.
+    public DbSet<HrPolicyDocument> HrPolicyDocuments { get; set; } = null!;
+    public DbSet<HrPolicyAudience> HrPolicyAudiences { get; set; } = null!;
+    public DbSet<HrPolicyAcknowledgement> HrPolicyAcknowledgements { get; set; } = null!;
 
     // Area 9 slice 8 — the discipline reminder sweep. Covers both halves of the area, which is why
     // it sits with the grievance sets rather than the disciplinary ones.
@@ -9093,6 +9099,77 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.RequestId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- HrPolicyDocument (area 25 slice 12d, D7) ----
+        builder.Entity<HrPolicyDocument>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PolicyNumber }).IsUnique();
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Category);
+            entity.HasIndex(x => new { x.TenantId, x.Status, x.EffectiveFrom });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            entity.HasOne(x => x.PublishedBy)
+                .WithMany()
+                .HasForeignKey(x => x.PublishedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ArchivedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ArchivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The version chain. Restrict, not cascade: deleting a superseded policy must not
+            // take its replacement — or its signatures — with it.
+            entity.HasOne(x => x.Supersedes)
+                .WithMany()
+                .HasForeignKey(x => x.SupersedesPolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- HrPolicyAudience ----
+        builder.Entity<HrPolicyAudience>(entity =>
+        {
+            entity.HasIndex(x => x.PolicyId);
+            entity.HasIndex(x => new { x.TargetType, x.TargetId });
+
+            entity.Property(x => x.TargetType).HasConversion<int>();
+
+            entity.HasOne(x => x.Policy)
+                .WithMany(x => x.Audiences)
+                .HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ No FK on TargetId — it points at one of five tables by TargetType. Same
+            // deliberate absence as the announcement audience.
+        });
+
+        // ---- HrPolicyAcknowledgement ----
+        builder.Entity<HrPolicyAcknowledgement>(entity =>
+        {
+            // One answer per person per policy. The unique index is the guard that makes a
+            // double-submit a database error rather than two contradictory signatures.
+            entity.HasIndex(x => new { x.TenantId, x.PolicyId, x.EmployeeId }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Outcome);
+
+            entity.Property(x => x.Outcome).HasConversion<int>();
+
+            // Cascade from the policy: an acknowledgement of a policy that no longer exists is
+            // not evidence of anything. (Which is also why a PUBLISHED policy is never deleted —
+            // the service refuses it; only an unsigned draft can go.)
+            entity.HasOne(x => x.Policy)
+                .WithMany(x => x.Acknowledgements)
+                .HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---- HrAnnouncement (area 25 slice 12c, D7) ----

@@ -38,6 +38,7 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 12a | New capabilities: my profile + personal-data change requests (D6) | **COMPLETE 2026-08-26** — 88 assertions ×2 + 739 ladder; census row #39 closed; 2 defects found by the probe |
 | 12b | New capabilities: HR letter requests | **COMPLETE 2026-08-27** — 80 assertions ×2 + 827 ladder; D7 revised: letters are GENERATED (or uploaded), not upload-only |
 | 12c | New capabilities: announcements + the shared audience resolver | **COMPLETE 2026-08-27** — 61 assertions ×2 + 908 ladder; the slice-3 announcements stub wired |
+| 12d | New capabilities: the policy library + acknowledgements (D7) | **COMPLETE 2026-08-27** — 117 assertions ×2 + **1,086 ladder**; reuses 12c's resolver; the compliance roster paged after it measured 2.27 MB |
 | 12d | New capabilities: policy documents & acknowledgements | not started |
 | 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
 | 14 | Closing audit: content audit, the two greps, route resolution, polish pass | not started |
@@ -1044,3 +1045,66 @@ acknowledgements, which reuse it.
 - **Recorded, not built:** the desk audience builder omits the **Employee** axis. The API
   supports it (it is mostly useful as an exclusion), but picking a person needs an employee
   search gated on `HR.Employee`, which an `HR.Company` user need not hold.
+
+### Slice 12d — the policy library and its acknowledgements. CLOSED 2026-08-27.
+
+`run-slice12d.mjs` 117 assertions ×2 green + the full ladder (**1,086 total**). **Migration**
+`20260827015130_AddHrPolicyLibrary` (guarded SQL, registered). `probe-slice12d.mjs` is the kept
+payload probe (`probe12d-out.txt`). This is the second consumer of 12c's `IHrAudienceResolver`,
+and the reason it was built shared.
+
+- **The thing nothing in the codebase had: "who has *not* acknowledged".** Every acknowledgement
+  store in the module — `OrientationAcknowledgement`, the discipline notice ack, the risk-ack of
+  area 10 — can answer *who signed*, because a signature is a row. None can answer *who has not*,
+  because non-signature is the **absence** of a row. The compliance roster is that missing
+  left join: the audience resolved **now**, minus the signatures collected. Resolving now (rather
+  than freezing a recipient list at publish) is what makes a starter who joined last week show as
+  outstanding without anyone republishing — the same read-time rule 12c took for announcements.
+- **⚠ It was a 2.27 MB report on its first working run.** A tenant-wide policy resolves to 7,940
+  people, and returning the whole left join measured **2.27 MB / 1,244 ms** — a compliance screen
+  nobody could open, and the sort of thing that only shows up if the harness runs at real scale
+  rather than against a fixture of one. Fixed with a `filter` + `page`/`pageSize`, defaulting to
+  the **Outstanding** slice because that is the work: **15 KB / 288 ms** after. The important
+  half of the design is that the **four totals are still computed over the whole audience** on
+  every page — a paged report whose headline numbers page with it is a report that lies. The
+  counts come from ids only; names are fetched for the visible page.
+- **Declining is an answer, not a discharge.** `HrPolicyAcknowledgementOutcome` is deliberately
+  `{ Signed, Declined }` with **no `Pending`** — pending is the absence of a row, and giving it a
+  value would have created two ways to be outstanding that could disagree. A declined policy
+  stays in the employee's outstanding list and in HR's outstanding count; refusing tells HR
+  something, it does not clear the obligation. Signing later is allowed and the earlier reason is
+  **kept** — the record of a reversal is more useful than a clean one.
+- **The declaration is echoed back on signing, and a mismatch is refused.** The wording the
+  employee saw is sent with their signature and compared; a policy edited while their page sat
+  open cannot capture a signature against text they never read. The agreed wording is then
+  **copied onto the signature row**, so changing the policy's declaration afterwards cannot
+  rewrite what somebody already agreed to. Same frozen-document principle as the payslip
+  snapshots of slice 10 and the issued letters of 12b.
+- **A published policy is frozen in four ways**: it cannot be edited, its **document cannot be
+  replaced**, it cannot be deleted, and it cannot be published twice. The document one matters
+  most and is the least obvious — a signature says "I read the attached", so swapping the
+  attachment silently rewrites history. A correction is a **new version that supersedes**, which
+  archives v1 and asks everyone for a fresh signature. v1's signatures survive on v1's own
+  roster, because they are the proof of what was agreed at the time.
+- **Publishing is gated on there being something to read**: no document, no publish. Also no
+  declaration when acknowledgement is asked for, no audience, and no sub-one-day window.
+- **The acknowledgement checkbox is disabled until the document has been opened.** A low bar —
+  it proves a download, not comprehension — but a one-click "I agree" beside an unopened PDF
+  makes the evidence worthless, and evidence is the entire point of the feature.
+- **It feeds the slice-11 inbox** as a `PolicyAcknowledgement` action item pointing at
+  `/me/policies/{id}`, and signing clears it. An inbox that keeps finished work is an inbox
+  nobody reads, so the harness asserts the item **disappears**, not just that it appeared.
+- **Screens:** `/me/policies` (outstanding first, declined deliberately left in that group),
+  `/me/policies/[id]` (read, sign, or decline with a reason) and the desk `/hr/policies`
+  (register + a compliance drawer defaulting to the outstanding filter, with paging). Gated on
+  `HR.Company` like announcements — a policy is issued by the organisation, not performed on
+  anybody's record.
+- **New upload category** `hr-policy-documents`, in both lists.
+- **Recorded, not built:** the desk's audience control is **everyone-only**. The API takes the
+  full 12c rule set, but a policy addressed by a complicated rule is one whose scope nobody can
+  explain, which is a poor property for a document people sign; a narrower audience is a
+  deliberate API call until there is a reason to expose it. Also not built: a **reminder sweep**
+  for overdue acknowledgements — the due date is computed and displayed, and areas 9 and 15b
+  already have the sweep pattern to copy, but it wants the notification decisions of a later
+  slice rather than a fifth bespoke reminder.
+

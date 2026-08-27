@@ -9413,3 +9413,47 @@ public enum HrAnnouncementStatus
 }
 
 #endregion
+
+#region HR Policy Library + Acknowledgements (area 25 slice 12d — decision D7)
+
+public enum HrPolicyCategory
+{
+    General = 1,
+    CodeOfConduct = 2,
+    HumanResources = 3,
+    HealthAndSafety = 4,
+    Finance = 5,
+    InformationTechnology = 6
+}
+
+/// <summary>
+/// Where a policy stands. A superseded version is <see cref="Archived"/> rather than deleted —
+/// the acknowledgements against it are evidence of what somebody agreed to, and they are
+/// meaningless without the version they agreed to.
+/// </summary>
+public enum HrPolicyStatus
+{
+    Draft = 1,
+    Published = 2,
+    Archived = 3
+}
+
+/// <summary>
+/// What an employee did when asked to acknowledge a policy.
+/// </summary>
+/// <remarks>
+/// There is deliberately no <c>Pending</c> member. Acknowledgement rows are created only when
+/// somebody actually acts, so "pending" is the ABSENCE of a row, not a state in it — see
+/// <c>HrPolicyAcknowledgement</c>'s remarks for why the roster is computed rather than
+/// pre-seeded.
+/// </remarks>
+public enum HrPolicyAcknowledgementOutcome
+{
+    /// <summary>They read it and agreed.</summary>
+    Signed = 1,
+
+    /// <summary>They read it and refused, with a reason. A real outcome, not a failure.</summary>
+    Declined = 2
+}
+
+#endregion

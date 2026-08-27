@@ -19,6 +19,7 @@ import {
   CreditCard,
   UserCheck,
   Briefcase,
+  BookText,
   Megaphone,
   Settings,
   ChevronDown,
@@ -430,6 +431,14 @@ export const navigationItems: NavItem[] = [
         title: 'Announcements',
         href: '/hr/announcements',
         icon: Megaphone,
+        permissions: ['HR.Company.Read'],
+      },
+      // Area 25 slice 12d — the policy library and its acknowledgements. Same HR.Company
+      // family: a policy is issued by the organisation, not performed on a record.
+      {
+        title: 'Policy Library',
+        href: '/hr/policies',
+        icon: BookText,
         permissions: ['HR.Company.Read'],
       },
       // W3 slice 11: the register's detail/profile/sub-record reads are HR.Employee.Read on the

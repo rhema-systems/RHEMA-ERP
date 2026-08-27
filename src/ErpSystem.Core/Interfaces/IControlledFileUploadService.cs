@@ -117,6 +117,12 @@ public static class ControlledFileUploadCategories
     public const string HrAnnouncementDocuments = "hr-announcement-documents";
 
     /// <summary>
+    /// A company policy in the staff library — the document people are asked to read and, for
+    /// some of them, to sign (area 25 slice 12d).
+    /// </summary>
+    public const string HrPolicyDocuments = "hr-policy-documents";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -168,7 +174,10 @@ public static class ControlledFileUploadCategories
                 HrLetterDocuments,
                 // An announcement attachment is the one file in HR deliberately pushed at EVERY
                 // employee at once, which makes it the worst possible thing to leave unscanned.
-                HrAnnouncementDocuments
+                HrAnnouncementDocuments,
+                // A policy document is pushed at everyone AND signed for. A signature against an
+                // unscanned file is the last thing anybody wants to have to explain.
+                HrPolicyDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

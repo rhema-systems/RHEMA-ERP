@@ -658,6 +658,11 @@ public static class HrModuleServiceRegistration
         // OrientationAudienceRule has never had one at all.
         services.AddScoped<IHrAudienceResolver, HrAudienceResolver>();
         services.AddScoped<IHrAnnouncementService, HrAnnouncementService>();
+
+        // Area 25 slice 12d — the policy library and its acknowledgements. Shares the resolver
+        // above: a policy applies to whoever is in scope now, so the outstanding roster is
+        // computed rather than pre-seeded.
+        services.AddScoped<IHrPolicyService, HrPolicyService>();
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
             ErpSystem.Core.Services.HR.Letters.HrLettersEmailEventCatalog>();
 

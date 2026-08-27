@@ -51,6 +51,7 @@ public class EmployeePortalController : ControllerBase
     private readonly ISheRiskAssessmentService      _riskAssessmentService;
     private readonly ITrainingServiceBondService    _bondService;
     private readonly IHrAnnouncementService         _announcementService;
+    private readonly IHrPolicyService               _policyService;
 
     public EmployeePortalController(
         IStaffMovementService          movementService,
@@ -72,7 +73,8 @@ public class EmployeePortalController : ControllerBase
         IStaffGrievanceService         grievanceService,
         ISheRiskAssessmentService      riskAssessmentService,
         ITrainingServiceBondService    bondService,
-        IHrAnnouncementService         announcementService)
+        IHrAnnouncementService         announcementService,
+        IHrPolicyService               policyService)
     {
         _movementService    = movementService;
         _actingService      = actingService;
@@ -94,6 +96,7 @@ public class EmployeePortalController : ControllerBase
         _riskAssessmentService = riskAssessmentService;
         _bondService          = bondService;
         _announcementService  = announcementService;
+        _policyService        = policyService;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -1024,6 +1027,22 @@ public class EmployeePortalController : ControllerBase
                 ActionUrl = "/me/safety/risk-assessments",
             });
         }
+
+        // Slice 12d: policies still waiting on a signature. Listed per policy rather than
+        // collapsed like the risk acknowledgements, because each one is a distinct document the
+        // employee must actually open and read — and there are a handful, not dozens.
+        var policies = await _policyService.GetMyOutstandingAsync(empId, ct);
+        items.AddRange(policies.Select(p => new PortalActionItemDto
+        {
+            Kind      = "PolicyAcknowledgement",
+            EntityId  = p.Id,
+            Title     = $"Acknowledge \"{p.Title}\"",
+            Detail    = p.AcknowledgementDueBy is { } due
+                ? $"{p.CategoryName} · due {due:d MMM yyyy}"
+                : p.CategoryName,
+            ActionUrl = $"/me/policies/{p.Id}",
+            Date      = p.PublishedAt,
+        }));
 
         var bonds = (await _bondService.GetByEmployeeAsync(empId, ct))
             .Where(b => b.Status == TrainingBondStatus.PendingAcceptance);

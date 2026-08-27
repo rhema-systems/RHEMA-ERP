@@ -20,6 +20,7 @@ import {
   Award,
   Banknote,
   BookOpen,
+  BookText,
   Briefcase,
   CalendarDays,
   CheckCircle2,
@@ -76,6 +77,7 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
     tiles: [
       { label: 'My Profile', hint: 'Your details, and requests to correct them', href: '/me/profile', icon: UserRound },
       { label: 'My Letters', hint: 'Ask HR for a letter, and collect it', href: '/me/letters', icon: Mail },
+      { label: 'Company Policies', hint: 'What applies to you, and what wants your signature', href: '/me/policies', icon: BookText },
       { label: 'My Medical', hint: 'Coverage, claims, appointments, health record', href: '/me/medical', icon: HeartPulse },
       { label: 'My Awards', hint: 'Nominate, vote, celebrate', href: '/me/awards', icon: Award },
       { label: 'My Assets', hint: 'What you hold, and requests', href: '/me/assets', icon: Laptop },
