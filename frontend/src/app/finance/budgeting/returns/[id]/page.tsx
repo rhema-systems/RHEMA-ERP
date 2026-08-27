@@ -91,10 +91,11 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
             setAuditHistory(auditData);
             setFinanceDimensions(dimensions);
 
-            // 3. Get Fiscal Year for Periods
-            const fy = await financeDataService.getFiscalYearById(scen.fiscalYearId);
-            // Sort periods by number
-            const sortedPeriods = [...(fy.periods || [])].sort((a, b) => a.periodNumber - b.periodNumber);
+            // Fiscal-year summaries intentionally do not embed their child periods. Load the
+            // tenant-scoped period collection explicitly so the worksheet cannot silently
+            // collapse to an Account/Total-only grid.
+            const fiscalPeriods = await financeDataService.getFiscalPeriods(scen.fiscalYearId);
+            const sortedPeriods = [...fiscalPeriods].sort((a, b) => a.periodNumber - b.periodNumber);
             setPeriods(sortedPeriods);
 
             // 4. Build Grid Data
@@ -522,6 +523,12 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                             )}
                         </CardContent>
                     </Card>
+                )}
+                {!hasControlledDimensions && (
+                    <div className="rounded-md border bg-muted/20 px-4 py-3 text-sm">
+                        <span className="font-medium">Budget grain:</span>{' '}
+                        Account and period (legacy)
+                    </div>
                 )}
             </div>
 
