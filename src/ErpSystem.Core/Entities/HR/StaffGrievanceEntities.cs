@@ -33,7 +33,27 @@ public class StaffGrievance : TenantEntity
     [MaxLength(50)]
     public string GrievanceNumber { get; set; } = string.Empty;
 
-    /// <summary>The employee raising it. Always the token's employee — never supplied in a payload.</summary>
+    /// <summary>
+    /// What kind of employee-relations case this is — area 9c slice 1, decision D-4.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="EmployeeRelationsCaseType.Grievance"/>, which is also enum member 1,
+    /// so every row written before this column existed is correct with no back-fill. ⚠ The type is
+    /// descriptive, not a permission boundary: read access is still decided entirely by who is on
+    /// the case.
+    /// </remarks>
+    public EmployeeRelationsCaseType CaseType { get; set; } = EmployeeRelationsCaseType.Grievance;
+
+    /// <summary>
+    /// The employee raising it — and, since area 9c, the case's PRIMARY PARTY.
+    /// </summary>
+    /// <remarks>
+    /// Always the token's employee on the grievance path; never supplied in a payload, which is why
+    /// HR cannot raise a grievance on somebody's behalf. It stays <b>required</b> under decision
+    /// D-7: every employee-relations case at TDC concerns at least one identifiable employee, and a
+    /// case about a class of staff names the affected employee or the union representative as
+    /// primary. Everybody else on the case is a <see cref="StaffGrievanceParty"/>.
+    /// </remarks>
     [Required]
     public Guid EmployeeId { get; set; }
 
@@ -70,6 +90,89 @@ public class StaffGrievance : TenantEntity
     public string? WithdrawalReason { get; set; }
 
     public virtual ICollection<StaffGrievanceStep> Steps { get; set; } = new List<StaffGrievanceStep>();
+
+    /// <summary>Everybody on the case other than the primary party — area 9c slice 1.</summary>
+    public virtual ICollection<StaffGrievanceParty> Parties { get; set; } = new List<StaffGrievanceParty>();
+}
+
+/// <summary>
+/// Somebody involved in an employee-relations case besides the primary party — area 9c slice 1,
+/// decision D-7.
+/// </summary>
+/// <remarks>
+/// <para><b>Why the party may be external.</b> Representation at a grievance is very often by a
+/// union official or a lawyer who is not on the payroll, and FR-HR-181 requires union consultation
+/// be retained. Modelling every party as an <c>Employee</c> FK would have made the commonest real
+/// representative unrecordable, so exactly one of <see cref="EmployeeId"/> and
+/// <see cref="ExternalName"/> is supplied and the service refuses both or neither.</para>
+///
+/// <para><b>⚠ Being a party is not by itself a right to read the case.</b> The read rule set in
+/// area 9 slice 7 — the primary party, HR, or somebody named on a step — is deliberately narrower
+/// than "anyone involved", because a case is usually ABOUT somebody and the respondent must not be
+/// handed the complainant's statement by being added to it. Slice 1 does not widen it. What a
+/// respondent is owed is a matter of natural justice handled by the disclosure the process makes,
+/// not by a row in this table.</para>
+/// </remarks>
+public class StaffGrievanceParty : TenantEntity
+{
+    [Required]
+    public Guid GrievanceId { get; set; }
+
+    [ForeignKey(nameof(GrievanceId))]
+    public virtual StaffGrievance Grievance { get; set; } = null!;
+
+    public GrievancePartyRole Role { get; set; }
+
+    /// <summary>Set when the party is a member of staff. Mutually exclusive with <see cref="ExternalName"/>.</summary>
+    public Guid? EmployeeId { get; set; }
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee? Employee { get; set; }
+
+    /// <summary>Set when the party is not a member of staff — a union official, a lawyer.</summary>
+    [MaxLength(200)]
+    public string? ExternalName { get; set; }
+
+    /// <summary>The body an external party comes from, when it is not the union named below.</summary>
+    [MaxLength(200)]
+    public string? ExternalOrganisation { get; set; }
+
+    /// <summary>
+    /// Whom this party acts for. Set for a representative or union representative; null everywhere
+    /// else. Points at an employee rather than at another party row, because the person most often
+    /// represented is the primary party, who has no party row of their own.
+    /// </summary>
+    public Guid? RepresentsEmployeeId { get; set; }
+
+    [ForeignKey(nameof(RepresentsEmployeeId))]
+    public virtual Employee? RepresentsEmployee { get; set; }
+
+    /// <summary>The recognised union a union representative acts for. FR-HR-181's union thread.</summary>
+    public Guid? UnionId { get; set; }
+
+    [ForeignKey(nameof(UnionId))]
+    public virtual Union? Union { get; set; }
+
+    public DateTime AddedDate { get; set; }
+
+    /// <summary>Who added them, from their own token — HR, in every path that exists today.</summary>
+    public Guid? AddedById { get; set; }
+
+    [ForeignKey(nameof(AddedById))]
+    public virtual Employee? AddedBy { get; set; }
+
+    /// <summary>Why they are on the case. Not the substance of the case — that lives on the steps.</summary>
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Cleared when a party stands down — a representative replaced, a witness withdrawn. Kept as a
+    /// date rather than a delete so the case file still reads correctly for the period they acted.
+    /// </summary>
+    public DateTime? RemovedDate { get; set; }
+
+    [MaxLength(500)]
+    public string? RemovalReason { get; set; }
 }
 
 /// <summary>

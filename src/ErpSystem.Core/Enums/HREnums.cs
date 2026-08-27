@@ -2834,6 +2834,81 @@ public enum GrievanceStepOutcome
     Escalated = 3
 }
 
+/// <summary>
+/// What kind of employee-relations case this is — area 9c slice 1, decision D-4.
+/// </summary>
+/// <remarks>
+/// <para>Area 9 slice 7 built one store for one thing: the FR-HR-181 grievance. An employee-relations
+/// function handles more than grievances — a conflict two people want mediated, a welfare or
+/// counselling matter, a consultation with the union — and before this enum existed those had
+/// nowhere to live at all, so they were kept off the system entirely.</para>
+///
+/// <para><b>Grievance is deliberately member 1</b>, so that the column defaults to it and every row
+/// written before this existed is correct without a data fix. Nothing else may be renumbered for the
+/// same reason.</para>
+///
+/// <para>⚠ The case type is <i>not</i> a permission boundary and must never become one. What may be
+/// read is decided by who is on the case (the primary party, HR, or somebody named on a step or as a
+/// party), exactly as it was for the grievance alone.</para>
+/// </remarks>
+public enum EmployeeRelationsCaseType
+{
+    /// <summary>FR-HR-181's formal grievance, escalating up the six-rung ladder.</summary>
+    [Description("Grievance")]
+    Grievance = 1,
+
+    /// <summary>A dispute between colleagues that is being mediated rather than adjudicated.</summary>
+    [Description("Conflict / Mediation")]
+    ConflictMediation = 2,
+
+    /// <summary>A welfare or counselling matter — hardship, bereavement, wellbeing support.</summary>
+    [Description("Welfare / Counselling")]
+    WelfareCounselling = 3,
+
+    /// <summary>A consultation with a recognised union, which FR-HR-181 requires be retained.</summary>
+    [Description("Union Consultation")]
+    UnionConsultation = 4,
+
+    /// <summary>Employee-relations work that fits none of the above. Kept last.</summary>
+    [Description("Other")]
+    Other = 5
+}
+
+/// <summary>
+/// The part somebody plays in an employee-relations case, beyond the primary party — area 9c
+/// slice 1, decision D-7.
+/// </summary>
+/// <remarks>
+/// The case's own <c>EmployeeId</c> is the primary party and is never repeated here; adding them as
+/// a party is refused. Everybody else on a case — the person complained of, a representative, a
+/// union official, a witness, a mediator — is one of these.
+/// </remarks>
+public enum GrievancePartyRole
+{
+    /// <summary>A further employee the case concerns, alongside the primary party.</summary>
+    [Description("Affected Employee")]
+    AffectedEmployee = 1,
+
+    /// <summary>The person the case is about. ⚠ Being a respondent does NOT confer a right to read.</summary>
+    [Description("Respondent")]
+    Respondent = 2,
+
+    /// <summary>Acts for another party — a colleague, a friend, a lawyer.</summary>
+    [Description("Representative")]
+    Representative = 3,
+
+    /// <summary>Acts for another party on behalf of a recognised union.</summary>
+    [Description("Union Representative")]
+    UnionRepresentative = 4,
+
+    [Description("Witness")]
+    Witness = 5,
+
+    /// <summary>Convenes and chairs a mediation between the parties.</summary>
+    [Description("Mediator")]
+    Mediator = 6
+}
+
 public enum EmployeeTerminationType
 {
     [Description("Involuntary For Cause")]

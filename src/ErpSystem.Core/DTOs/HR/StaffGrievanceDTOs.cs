@@ -27,10 +27,49 @@ public class StaffGrievanceStepDto
     public string OutcomeName => Outcome.ToString();
 }
 
+/// <summary>Somebody on the case besides the primary party — area 9c slice 1.</summary>
+public class StaffGrievancePartyDto
+{
+    public Guid Id { get; set; }
+    public Guid GrievanceId { get; set; }
+    public GrievancePartyRole Role { get; set; }
+    public string RoleName => Role.ToString();
+
+    public Guid? EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
+    public string? ExternalName { get; set; }
+    public string? ExternalOrganisation { get; set; }
+
+    /// <summary>Resolved display name, whichever kind of party this is. The list renders this.</summary>
+    public string DisplayName => EmployeeName ?? ExternalName ?? string.Empty;
+
+    public Guid? RepresentsEmployeeId { get; set; }
+    public string? RepresentsEmployeeName { get; set; }
+    public Guid? UnionId { get; set; }
+    public string? UnionName { get; set; }
+
+    public DateTime AddedDate { get; set; }
+    public Guid? AddedById { get; set; }
+    public string? AddedByName { get; set; }
+    public string? Notes { get; set; }
+
+    public DateTime? RemovedDate { get; set; }
+    public string? RemovalReason { get; set; }
+
+    /// <summary>False once the party has stood down. The case file still shows them.</summary>
+    public bool IsActive => RemovedDate == null;
+}
+
 public class StaffGrievanceSummaryDto
 {
     public Guid Id { get; set; }
     public string GrievanceNumber { get; set; } = string.Empty;
+
+    /// <summary>Area 9c: which kind of employee-relations case this is. Defaults to Grievance.</summary>
+    public EmployeeRelationsCaseType CaseType { get; set; }
+    public string CaseTypeName => CaseType.ToString();
+
+    /// <summary>The primary party.</summary>
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
@@ -42,6 +81,12 @@ public class StaffGrievanceSummaryDto
 
     /// <summary>True while the rung the grievance sits at has not answered.</summary>
     public bool AwaitingResponse { get; set; }
+
+    /// <summary>
+    /// How many parties are currently on the case besides the primary one. A count rather than the
+    /// rows: the register must not carry who is involved in every case on the page.
+    /// </summary>
+    public int ActivePartyCount { get; set; }
 }
 
 public class StaffGrievanceDto : StaffGrievanceSummaryDto
@@ -59,6 +104,13 @@ public class StaffGrievanceDto : StaffGrievanceSummaryDto
 
     /// <summary>The full ladder in order — every rung reached, answered or not.</summary>
     public List<StaffGrievanceStepDto> Steps { get; set; } = new();
+
+    /// <summary>
+    /// Everybody on the case besides the primary party, those who have stood down included —
+    /// area 9c slice 1. Ordered by role then by when they were added, so the file reads the same
+    /// way twice.
+    /// </summary>
+    public List<StaffGrievancePartyDto> Parties { get; set; } = new();
 }
 
 /// <summary>
@@ -118,6 +170,76 @@ public class WithdrawGrievanceDto
 {
     [Required]
     [MaxLength(1000)]
+    [MinLength(5)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+// ── Area 9c slice 1 — the employee-relations register ────────────────────────
+
+/// <summary>
+/// Opens an employee-relations case that is NOT a grievance — a mediation, a welfare matter, a
+/// union consultation.
+/// </summary>
+/// <remarks>
+/// ⚠ This is HR's act and takes an explicit <see cref="EmployeeId"/>, which is the exact opposite of
+/// <see cref="FileGrievanceDto"/> and deliberately so. A grievance is the employee's own complaint
+/// and nobody may raise one for them; a mediation or a welfare case is opened by the desk ABOUT
+/// somebody, the way a disciplinary case is. The service refuses
+/// <see cref="EmployeeRelationsCaseType.Grievance"/> here for that reason — it would be a
+/// raise-on-behalf-of by the back door.
+/// </remarks>
+public class OpenEmployeeRelationsCaseDto
+{
+    [Required]
+    public EmployeeRelationsCaseType CaseType { get; set; }
+
+    /// <summary>The primary party — whom the case is about.</summary>
+    [Required]
+    public Guid EmployeeId { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string Subject { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(6000)]
+    [MinLength(20)]
+    public string Statement { get; set; } = string.Empty;
+}
+
+/// <summary>Adds somebody to a case. HR's act.</summary>
+/// <remarks>
+/// Exactly one of <see cref="EmployeeId"/> and <see cref="ExternalName"/> must be supplied —
+/// representation is very often by a union official or a lawyer who is not on the payroll.
+/// </remarks>
+public class AddGrievancePartyDto
+{
+    [Required]
+    public GrievancePartyRole Role { get; set; }
+
+    public Guid? EmployeeId { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalOrganisation { get; set; }
+
+    /// <summary>Whom they act for. Only meaningful for a representative.</summary>
+    public Guid? RepresentsEmployeeId { get; set; }
+
+    /// <summary>The union they act for. Only meaningful for a union representative.</summary>
+    public Guid? UnionId { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>Stands a party down. Not a delete — the case file must still read correctly.</summary>
+public class RemoveGrievancePartyDto
+{
+    [Required]
+    [MaxLength(500)]
     [MinLength(5)]
     public string Reason { get; set; } = string.Empty;
 }

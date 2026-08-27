@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -19,6 +20,26 @@ public interface IStaffGrievanceService
     Task<IEnumerable<StaffGrievanceSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default);
 
     Task<IEnumerable<StaffGrievanceSummaryDto>> GetByStatusAsync(GrievanceStatus status, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The employee-relations register — area 9c slice 1. HR only, and paged in the DATABASE.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetAllAsync"/> is kept for the callers that already have it, but it materialises
+    /// every case in the tenant and every step of each. That was tolerable at 69 rows and is not the
+    /// shape to build a register on — the area-25 compliance roster measured 2.27 MB before it was
+    /// paged. This one counts and pages before it projects.
+    /// </remarks>
+    Task<PagedResult<StaffGrievanceSummaryDto>> GetPagedAsync(
+        int page,
+        int pageSize,
+        EmployeeRelationsCaseType? caseType = null,
+        GrievanceStatus? status = null,
+        GrievanceEscalationLevel? level = null,
+        Guid? organizationUnitId = null,
+        bool? awaitingResponseOnly = null,
+        string? search = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Grievances sitting unanswered at a given rung — HR's view of where the ladder is stuck.</summary>
     Task<IEnumerable<StaffGrievanceSummaryDto>> GetAwaitingResponseAsync(GrievanceEscalationLevel? level = null, CancellationToken cancellationToken = default);
@@ -58,6 +79,24 @@ public interface IStaffGrievanceService
 
     /// <summary>The griever withdraws. Also theirs alone.</summary>
     Task<StaffGrievanceDto> WithdrawAsync(Guid grievanceId, WithdrawGrievanceDto dto, Guid grieverEmployeeId, CancellationToken cancellationToken = default);
+
+    // ── Area 9c slice 1 — the wider employee-relations register ───────────────
+
+    /// <summary>
+    /// Opens a non-grievance employee-relations case. HR only.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Refuses <see cref="EmployeeRelationsCaseType.Grievance"/>. A grievance is the employee's own
+    /// act and this method takes an explicit employee id, so allowing it here would be exactly the
+    /// raise-on-behalf-of that <see cref="FileAsync"/> is shaped to prevent.
+    /// </remarks>
+    Task<StaffGrievanceDto> OpenCaseAsync(OpenEmployeeRelationsCaseDto dto, Guid openedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds a party — respondent, representative, union official, witness, mediator. HR only.</summary>
+    Task<StaffGrievanceDto> AddPartyAsync(Guid grievanceId, AddGrievancePartyDto dto, Guid addedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Stands a party down. Not a delete — the file must still read correctly. HR only.</summary>
+    Task<StaffGrievanceDto> RemovePartyAsync(Guid grievanceId, Guid partyId, RemoveGrievancePartyDto dto, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

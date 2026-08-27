@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffGrievance;
@@ -56,7 +57,27 @@ public class StaffGrievanceService : IStaffGrievanceService
             .Where(g => g.TenantId == tenantId && !g.IsDeleted)
             .Include(g => g.Employee)
             .Include(g => g.Steps.OrderBy(s => s.Sequence)).ThenInclude(s => s.AssignedTo)
-            .Include(g => g.Steps).ThenInclude(s => s.RespondedBy);
+            .Include(g => g.Steps).ThenInclude(s => s.RespondedBy)
+            // Area 9c slice 1. Soft-deleted parties are filtered here rather than in the projection
+            // so a removed row cannot reach ActivePartyCount by a route the DTO never sees. A party
+            // who has STOOD DOWN is not soft-deleted — RemovedDate is set and the row stays visible.
+            .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.Employee)
+            .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.RepresentsEmployee)
+            .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.Union)
+            .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.AddedBy);
+
+    /// <summary>
+    /// The register's query — tenant-scoped and soft-delete filtered, with NO includes.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="Scoped"/>. The paged register counts and pages before it
+    /// projects, and dragging every step and party of every case across the wire to build one page
+    /// of summaries is the shape that made the area-25 compliance roster a 2.27 MB response.
+    /// </remarks>
+    private IQueryable<StaffGrievance> RegisterQuery(Guid tenantId) =>
+        _unitOfWork.Repository<StaffGrievance>()
+            .GetQueryable()
+            .Where(g => g.TenantId == tenantId && !g.IsDeleted);
 
     private async Task<StaffGrievance> GetOwnedAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -124,6 +145,106 @@ public class StaffGrievanceService : IStaffGrievanceService
         => (await Scoped(GetTenantId()).Where(g => g.Status == status)
                 .OrderByDescending(g => g.FiledDate).ToListAsync(cancellationToken))
             .Select(ToSummary).ToList();
+
+    public async Task<PagedResult<StaffGrievanceSummaryDto>> GetPagedAsync(
+        int page,
+        int pageSize,
+        EmployeeRelationsCaseType? caseType = null,
+        GrievanceStatus? status = null,
+        GrievanceEscalationLevel? level = null,
+        Guid? organizationUnitId = null,
+        bool? awaitingResponseOnly = null,
+        string? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        // A caller who asks for page 0 means page 1, and a caller who asks for everything does not
+        // get everything — an unbounded page size is how a register becomes a 2.27 MB response.
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize < 1 ? 25 : Math.Min(pageSize, 200);
+
+        var query = RegisterQuery(GetTenantId());
+
+        if (caseType.HasValue) query = query.Where(g => g.CaseType == caseType.Value);
+        if (status.HasValue) query = query.Where(g => g.Status == status.Value);
+        if (level.HasValue) query = query.Where(g => g.CurrentLevel == level.Value);
+
+        // The primary party's unit. There is no unit on the case itself, and putting one there
+        // would go stale the moment somebody transfers — the case belongs to whoever raised it.
+        if (organizationUnitId.HasValue)
+            query = query.Where(g => g.Employee.OrganizationUnitId == organizationUnitId.Value);
+
+        // "Stuck" means the rung it currently sits at has not answered. Expressed against the
+        // highest-sequence step so SQL can evaluate it, rather than the in-memory CurrentStep()
+        // the unpaged read uses — the two must agree, and slice 1's harness asserts that they do.
+        if (awaitingResponseOnly == true)
+            query = query.Where(g => g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                     == GrievanceStepOutcome.AwaitingResponse);
+        else if (awaitingResponseOnly == false)
+            query = query.Where(g => g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                     != GrievanceStepOutcome.AwaitingResponse);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(g =>
+                g.GrievanceNumber.Contains(term)
+                || g.Subject.Contains(term)
+                || g.Employee.FirstName.Contains(term)
+                || g.Employee.LastName.Contains(term)
+                || g.Employee.EmployeeNumber.Contains(term));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        // Projected lean and composed after materialisation: Employee.FullName is [NotMapped], so
+        // it cannot cross into SQL, and asking for the whole Employee to read three strings would
+        // undo the point of paging in the database.
+        var rows = await query
+            .OrderByDescending(g => g.FiledDate)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(g => new
+            {
+                g.Id,
+                g.GrievanceNumber,
+                g.CaseType,
+                g.EmployeeId,
+                g.Employee.FirstName,
+                g.Employee.MiddleName,
+                g.Employee.LastName,
+                g.Subject,
+                g.FiledDate,
+                g.Status,
+                g.CurrentLevel,
+                AwaitingResponse = g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                   == GrievanceStepOutcome.AwaitingResponse,
+                ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
+            })
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<StaffGrievanceSummaryDto>
+        {
+            Items = rows.Select(r => new StaffGrievanceSummaryDto
+            {
+                Id = r.Id,
+                GrievanceNumber = r.GrievanceNumber,
+                CaseType = r.CaseType,
+                EmployeeId = r.EmployeeId,
+                EmployeeName = string.IsNullOrEmpty(r.MiddleName)
+                    ? $"{r.FirstName} {r.LastName}"
+                    : $"{r.FirstName} {r.MiddleName} {r.LastName}",
+                Subject = r.Subject,
+                FiledDate = r.FiledDate,
+                Status = r.Status,
+                CurrentLevel = r.CurrentLevel,
+                AwaitingResponse = r.AwaitingResponse,
+                ActivePartyCount = r.ActivePartyCount,
+            }).ToList(),
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize,
+        };
+    }
 
     public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetAwaitingResponseAsync(GrievanceEscalationLevel? level = null, CancellationToken cancellationToken = default)
     {
@@ -360,6 +481,183 @@ public class StaffGrievanceService : IStaffGrievanceService
         return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
     }
 
+    // ── Area 9c slice 1 — the wider employee-relations register ───────────────
+
+    public async Task<StaffGrievanceDto> OpenCaseAsync(
+        OpenEmployeeRelationsCaseDto dto, Guid openedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        // A grievance is the employee's own complaint. This method takes an explicit employee id,
+        // so permitting Grievance here would be the raise-on-behalf-of that FileAsync's whole shape
+        // exists to prevent — and it would be reachable by HR, which is exactly who must not have it.
+        if (dto.CaseType == EmployeeRelationsCaseType.Grievance)
+            throw new InvalidOperationException(
+                "A grievance can only be raised by the employee it belongs to. Use the grievance form; "
+                + "this route opens the other employee-relations case types.");
+
+        var tenantId = GetTenantId();
+        var subject = await GetOwnedEmployeeAsync(dto.EmployeeId, "primary party");
+
+        var now = DateTime.UtcNow;
+        var grievance = new StaffGrievance
+        {
+            TenantId = tenantId,
+            GrievanceNumber = await GenerateNumberAsync(tenantId, cancellationToken),
+            CaseType = dto.CaseType,
+            EmployeeId = subject.Id,
+            Subject = dto.Subject.Trim(),
+            Statement = dto.Statement.Trim(),
+            FiledDate = now,
+            Status = GrievanceStatus.Filed,
+            // Non-grievance cases open with HR, not with the supervisor: nobody has escalated
+            // anything to reach them — the desk opened them.
+            CurrentLevel = GrievanceEscalationLevel.HumanResources,
+            CreatedBy = openedByEmployeeId.ToString(),
+        };
+
+        grievance.Steps.Add(new StaffGrievanceStep
+        {
+            TenantId = tenantId,
+            Level = GrievanceEscalationLevel.HumanResources,
+            Sequence = 1,
+            ReachedDate = now,
+            Outcome = GrievanceStepOutcome.AwaitingResponse,
+            CreatedBy = openedByEmployeeId.ToString(),
+        });
+
+        await _unitOfWork.Repository<StaffGrievance>().AddAsync(grievance);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employee-relations case opened: {Number} ({Type})",
+            grievance.GrievanceNumber, grievance.CaseType);
+
+        return ToDto(await GetOwnedAsync(grievance.Id, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> AddPartyAsync(
+        Guid grievanceId, AddGrievancePartyDto dto, Guid addedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        var hasEmployee = dto.EmployeeId.HasValue;
+        var hasExternal = !string.IsNullOrWhiteSpace(dto.ExternalName);
+
+        if (hasEmployee == hasExternal)
+            throw new InvalidOperationException(
+                "A party is either a member of staff or an external person: supply exactly one of "
+                + "the employee and the external name.");
+
+        Employee? employee = null;
+        if (hasEmployee)
+        {
+            employee = await GetOwnedEmployeeAsync(dto.EmployeeId!.Value, "party");
+
+            // The primary party is already on the case. Adding them again would put the same person
+            // in two places with two different roles, and — for Respondent — would say the employee
+            // raised a case against themselves.
+            if (employee.Id == grievance.EmployeeId)
+                throw new InvalidOperationException(
+                    "This employee is already the primary party on this case and cannot be added again.");
+
+            var alreadyOn = grievance.Parties.Any(p =>
+                !p.IsDeleted && p.RemovedDate == null && p.EmployeeId == employee.Id && p.Role == dto.Role);
+            if (alreadyOn)
+                throw new InvalidOperationException($"This person is already on the case as {dto.Role}.");
+        }
+
+        if (dto.RepresentsEmployeeId.HasValue)
+        {
+            if (dto.Role is not (GrievancePartyRole.Representative or GrievancePartyRole.UnionRepresentative))
+                throw new InvalidOperationException(
+                    "Only a representative or union representative acts for somebody else.");
+
+            // They must represent someone actually on the case, or the field records nothing.
+            var represented = dto.RepresentsEmployeeId.Value;
+            var onCase = represented == grievance.EmployeeId
+                || grievance.Parties.Any(p => !p.IsDeleted && p.RemovedDate == null && p.EmployeeId == represented);
+            if (!onCase)
+                throw new InvalidOperationException(
+                    "A representative can only act for somebody who is already a party to this case.");
+        }
+
+        if (dto.UnionId.HasValue && dto.Role != GrievancePartyRole.UnionRepresentative)
+            throw new InvalidOperationException("Only a union representative acts for a union.");
+
+        if (dto.UnionId.HasValue)
+        {
+            var union = await _unitOfWork.Repository<Union>().GetByIdAsync(dto.UnionId.Value);
+            if (union == null || union.IsDeleted || union.TenantId != grievance.TenantId)
+                throw new ArgumentException($"The union with ID '{dto.UnionId}' was not found.");
+        }
+
+        var party = new StaffGrievanceParty
+        {
+            TenantId = grievance.TenantId,
+            GrievanceId = grievance.Id,
+            Role = dto.Role,
+            EmployeeId = employee?.Id,
+            ExternalName = hasExternal ? dto.ExternalName!.Trim() : null,
+            ExternalOrganisation = string.IsNullOrWhiteSpace(dto.ExternalOrganisation)
+                ? null : dto.ExternalOrganisation.Trim(),
+            RepresentsEmployeeId = dto.RepresentsEmployeeId,
+            UnionId = dto.UnionId,
+            Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
+            AddedDate = DateTime.UtcNow,
+            AddedById = addedByEmployeeId,
+            CreatedBy = addedByEmployeeId.ToString(),
+        };
+
+        // ⚠ Through the REPOSITORY, not grievance.Parties.Add(...). The grievance is already tracked
+        // on this path, so adding to its navigation collection makes EF treat the new row as
+        // Modified and issue an UPDATE against a row that does not exist. Same trap, same fix, as
+        // the escalation step above — see [[ef-tracked-graph-write-traps]].
+        await _unitOfWork.Repository<StaffGrievanceParty>().AddAsync(party);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> RemovePartyAsync(
+        Guid grievanceId, Guid partyId, RemoveGrievancePartyDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        var party = grievance.Parties.FirstOrDefault(p => p.Id == partyId && !p.IsDeleted)
+            ?? throw new ArgumentException($"Party with ID '{partyId}' was not found on this case.");
+
+        if (party.RemovedDate != null)
+            throw new InvalidOperationException("This party has already stood down.");
+
+        // Standing somebody down leaves anyone acting FOR them without a principal, which is a fact
+        // about the case worth refusing to hide: their representative rows go too, and say why.
+        //
+        // ⚠ Guarded on the party being internal. RepresentsEmployeeId points at an EMPLOYEE, so for
+        // an external party (a union official, a lawyer) EmployeeId is null — and `p.
+        // RepresentsEmployeeId == party.EmployeeId` would then be `null == null`, matching every
+        // party on the case who represents nobody and standing the whole case down.
+        var represented = party.EmployeeId is Guid principalId
+            ? grievance.Parties
+                .Where(p => !p.IsDeleted && p.RemovedDate == null && p.RepresentsEmployeeId == principalId)
+                .ToList()
+            : new List<StaffGrievanceParty>();
+
+        var now = DateTime.UtcNow;
+        party.RemovedDate = now;
+        party.RemovalReason = dto.Reason.Trim();
+        party.UpdatedAt = now;
+
+        foreach (var rep in represented)
+        {
+            rep.RemovedDate = now;
+            rep.RemovalReason = $"The party they acted for stood down: {dto.Reason.Trim()}";
+            rep.UpdatedAt = now;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
     private static void EnsureOpen(StaffGrievance grievance)
     {
         if (grievance.Status is GrievanceStatus.Resolved or GrievanceStatus.Withdrawn or GrievanceStatus.Closed)
@@ -372,6 +670,7 @@ public class StaffGrievanceService : IStaffGrievanceService
     {
         Id = g.Id,
         GrievanceNumber = g.GrievanceNumber,
+        CaseType = g.CaseType,
         EmployeeId = g.EmployeeId,
         EmployeeName = g.Employee?.FullName ?? string.Empty,
         Subject = g.Subject,
@@ -380,6 +679,28 @@ public class StaffGrievanceService : IStaffGrievanceService
         CurrentLevel = g.CurrentLevel,
         AwaitingResponse = g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
             == GrievanceStepOutcome.AwaitingResponse,
+        ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
+    };
+
+    private static StaffGrievancePartyDto ToPartyDto(StaffGrievanceParty p) => new()
+    {
+        Id = p.Id,
+        GrievanceId = p.GrievanceId,
+        Role = p.Role,
+        EmployeeId = p.EmployeeId,
+        EmployeeName = p.Employee?.FullName,
+        ExternalName = p.ExternalName,
+        ExternalOrganisation = p.ExternalOrganisation,
+        RepresentsEmployeeId = p.RepresentsEmployeeId,
+        RepresentsEmployeeName = p.RepresentsEmployee?.FullName,
+        UnionId = p.UnionId,
+        UnionName = p.Union?.Name,
+        AddedDate = p.AddedDate,
+        AddedById = p.AddedById,
+        AddedByName = p.AddedBy?.FullName,
+        Notes = p.Notes,
+        RemovedDate = p.RemovedDate,
+        RemovalReason = p.RemovalReason,
     };
 
     private static StaffGrievanceDto ToDto(StaffGrievance g) => new()
@@ -387,6 +708,15 @@ public class StaffGrievanceService : IStaffGrievanceService
         Id = g.Id,
         TenantId = g.TenantId,
         GrievanceNumber = g.GrievanceNumber,
+        CaseType = g.CaseType,
+        ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
+        Parties = g.Parties
+            .Where(p => !p.IsDeleted)
+            // Role then when they joined: the file must read the same way twice, and a case with a
+            // respondent and two representatives is unreadable in insertion order.
+            .OrderBy(p => p.Role).ThenBy(p => p.AddedDate)
+            .Select(ToPartyDto)
+            .ToList(),
         EmployeeId = g.EmployeeId,
         EmployeeName = g.Employee?.FullName ?? string.Empty,
         EmployeeNumber = g.Employee?.EmployeeNumber,

@@ -36,7 +36,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | Slice | Title | Status |
 |---|---|---|
 | 0 | Survey, fixtures, endpoint + payload census | **COMPLETE 2026-08-27** — 147 assertions ×2, zero failures; the ladder proven end to end, and `GrievanceStatus.Closed` found to have no writer |
-| 1 | The ER case register: case types, parties, representation | ⏳ |
+| 1 | The ER case register: case types, parties, representation | **COMPLETE 2026-08-27** — 119 assertions ×2 + the 147 slice-0 ladder = **266**; migration `AddEmployeeRelationsCaseTypeAndParties`; all 87 pre-existing rows correct with no back-fill |
 | 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | ⏳ |
 | 3 | Documents on the controlled upload gate + the final signed agreement | ⏳ |
 | 4 | Case conferencing & mediation; union consultation | ⏳ |
@@ -396,3 +396,71 @@ its own fresh grievance. Three of the four grievances this run files exist for t
 **Owed to later slices from here:** fill or delete the empty untracked
 `frontend/src/app/hr/grievances/[id]/` folder and stop HR's register linking into `/me/`
 (both slice 10); give `getByStatus` a caller or remove it (slice 12).
+
+---
+
+### Slice 1 — the employee-relations register. CLOSED 2026-08-27.
+
+`run-slice1.mjs` **119 assertions ×2** green, plus the slice-0 ladder re-run at 147 =
+**266 for the area**. Migration `20260827164241_AddEmployeeRelationsCaseTypeAndParties`
+(guarded SQL, registered in `FastBuildMigrationMetadata`).
+
+**Delivered:** `EmployeeRelationsCaseType` + `CaseType` on the case (D-4); `StaffGrievanceParty`
+with representation, union and external parties (D-7); the DB-paged register with case-type /
+status / rung / unit / stuck / search filters; `POST cases` for the non-grievance types;
+`POST {id}/parties` and `{id}/parties/{partyId}/remove`; and the `api/hr/employee-relations`
+route with `api/grievances` kept as the alias (D-6).
+
+**The migration's default is the whole no-back-fill story, and it was verified in the database
+rather than inferred.** `EmployeeRelationsCaseType.Grievance` is enum member 1 and the column is
+added `NOT NULL CONSTRAINT DF_StaffGrievances_CaseType DEFAULT (1)`, so all **87** existing rows
+became correct as the column landed — confirmed by direct query (`CaseType 1 → 87`, nothing
+else). There is no back-fill statement in that migration because none is needed, and none may be
+added later on the assumption that there is one. ⚠ **Nothing in that enum may be renumbered.**
+
+**Three refusals that are the point of the slice, all asserted two-sided:**
+
+1. **`POST cases` refuses `CaseType.Grievance` (422).** That route takes an explicit employee id
+   because the desk opens a mediation ABOUT somebody; permitting Grievance would be the
+   raise-on-behalf-of that `FileAsync`'s whole shape prevents, reachable by exactly the actor who
+   must not have it.
+2. **Being a party does not confer a right to read.** The respondent on a mediation is refused
+   `GET {id}` (403 *"not yours"*) and it does not appear in what they owe. A respondent must not
+   receive the complainant's statement by being recorded as a respondent; what they are owed is
+   disclosure the process makes, not a row in a table.
+3. **A closed case takes no more parties** (422), and standing a party down is not a delete —
+   `RemovedDate` + a reason, with the row still in the file.
+
+**A bug found in my own code before the build, and now asserted so it cannot return.** Standing a
+party down also stands down anyone acting FOR them. The comparison
+`p.RepresentsEmployeeId == party.EmployeeId` is `null == null` for an **external** party — a union
+official or a lawyer has no employee id — so removing one would have stood down every party on
+the case who represents nobody. Guarded on `party.EmployeeId is Guid principalId`; the harness
+adds an unrelated witness, removes the external union rep, and asserts the witness is untouched.
+
+⚠ **A harness defect the twice-from-different-states rule caught, and worth generalising.** §1
+asserted *"every pre-existing case reads as a Grievance"* — which passed on the first run and
+**failed on the second**, because §4 of the same file opens a mediation and a welfare case. The
+assertion was true only against a virgin database. Replaced with two that survive: every case
+carries a valid type name (a failed DEFAULT would surface as 0 or unknown), and the
+Grievance-typed count is **≥ 87**, the measured pre-migration baseline. **A no-regression
+assertion written against "everything currently in the table" is not a no-regression assertion —
+it is a snapshot, and the run that proves it is the second one.**
+
+**Two decisions taken in code and worth knowing before slice 2:**
+
+- **Non-grievance cases open at the HR rung**, not at Supervisor. Nobody escalated anything to
+  reach them — the desk opened them — and starting at Supervisor would have invented a rung that
+  never happened.
+- **The register pages in the DATABASE and projects lean.** It uses its own query with no
+  includes, not the `Scoped()` graph the case file uses, and the harness asserts a register row
+  carries no `steps`, no `parties` and no `statement`. `GetAllAsync` is left alone for its
+  existing callers. ⚠ `Employee.FullName` is `[NotMapped]`, so the name parts are projected and
+  composed after materialisation — a `Select` that touches `FullName` will not translate.
+- The paged "stuck" predicate is SQL over the highest-sequence step; the unpaged one is
+  `CurrentStep()` in memory. **They must agree**, and the harness asserts they do rather than
+  trusting that they will.
+
+**Not a problem after all:** the D-6 route alias gives `GetById` two endpoints, and
+`CreatedAtAction` is used by both `File` and `OpenCase`. Link generation resolved it; both create
+paths return 201. No named route needed.

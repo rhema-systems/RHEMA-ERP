@@ -378,6 +378,11 @@ public partial class ApplicationDbContext
     public DbSet<StaffGrievance> StaffGrievances { get; set; } = null!;
     public DbSet<StaffGrievanceStep> StaffGrievanceSteps { get; set; } = null!;
 
+    // Area 9c slice 1 — everybody on an employee-relations case besides the primary party:
+    // respondent, representative, union official, witness, mediator. A party may be external
+    // (a union official or a lawyer), which is why it is not an Employee FK alone.
+    public DbSet<StaffGrievanceParty> StaffGrievanceParties { get; set; } = null!;
+
     // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
     // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
     // an HR officer to approve, and approval applies them.
@@ -9267,13 +9272,57 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.EmployeeId);
             entity.HasIndex(x => x.Status);
             entity.HasIndex(x => x.CurrentLevel);
+            // Area 9c slice 1: the register's first filter, and the one every non-grievance case
+            // type is read through.
+            entity.HasIndex(x => new { x.TenantId, x.CaseType });
 
             entity.Property(x => x.Status).HasConversion<int>();
             entity.Property(x => x.CurrentLevel).HasConversion<int>();
+            entity.Property(x => x.CaseType).HasConversion<int>()
+                .HasDefaultValue(EmployeeRelationsCaseType.Grievance);
 
             entity.HasOne(x => x.Employee)
                 .WithMany()
                 .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceParty (area 9c slice 1) ----
+        builder.Entity<StaffGrievanceParty>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Role);
+
+            entity.Property(x => x.Role).HasConversion<int>();
+
+            // Cascade from the case, as the step does: a party has no meaning apart from the case
+            // it is a party TO.
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Parties)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict on every Employee leg — an employee is never deleted out from under a case
+            // file, and three separate legs to the same table mean cascade paths SQL Server refuses.
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RepresentsEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.RepresentsEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AddedBy)
+                .WithMany()
+                .HasForeignKey(x => x.AddedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Union)
+                .WithMany()
+                .HasForeignKey(x => x.UnionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
