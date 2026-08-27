@@ -107,6 +107,56 @@ controlled deployment process, re-run the inventory and require zero pending mig
 rebuild/restart the API before beginning `UAT-BUD-001`. This preparation did not apply migrations,
 start services, seed data, or create budget documents.
 
+### Phase A migration deployment review — 27 August 2026
+
+The bounded idempotent SQL was generated from
+`20260824223000_GrantFinanceReportExportToChiefAccountant` through
+`20260825235055_AddFinanceBudgetControlDimensions` with:
+
+```powershell
+dotnet ef migrations script `
+  20260824223000_GrantFinanceReportExportToChiefAccountant `
+  20260825235055_AddFinanceBudgetControlDimensions `
+  --project src/ErpSystem.Data/ErpSystem.Data.csproj `
+  --startup-project src/ErpSystem.Api/ErpSystem.Api.csproj `
+  --context ApplicationDbContext `
+  --no-build `
+  --idempotent
+```
+
+The reviewed artifact contains 283 lines and has SHA-256
+`FD508C00542971A26C0D82BA40BD34B9BFC4E864BE0A95F320A67967A96B9868`. Regenerate and require the
+same hash from the reviewed source/build before deployment; do not copy an untracked local artifact
+between environments.
+
+| Migration | Reviewed forward operations | Existing-row effect |
+| --- | --- | --- |
+| `20260825141500_AddFinanceControlledDocumentRetention` | Add four nullable retention columns and an all-null-or-complete retained-artifact check constraint | Existing hash-only issue rows satisfy the all-null branch; no data rewrite |
+| `20260825190000_AddFinanceDimensionRuleScope` | Replace the legacy three-column rule index; add nullable source module, document type, and posting action; create the scoped unique index | Existing rules retain null scope and are not rewritten |
+| `20260825235055_AddFinanceBudgetControlDimensions` | Replace the BudgetEntry uniqueness index; add nullable dimension-set evidence to entries/reservations; create scenario-control table, indexes, and restrictive foreign keys | Existing legacy entries and reservations remain null-grain records; no backfill |
+
+The script contains three ordered `BEGIN TRANSACTION`/`COMMIT` units and records each migration only
+after its DDL succeeds. It contains no `UPDATE`, `DELETE`, seed operation, trigger replacement,
+forward table drop, or forward column drop. The two index replacements are transactional with their
+successor indexes.
+
+Before applying it, stop or quiesce the API, take the environment's normal recoverable database
+backup/restore point, and require all of the following:
+
+1. SQL Server is the configured provider and the resolved database is exactly the intended
+   non-production UAT database;
+2. the last applied migration is exactly
+   `20260824223000_GrantFinanceReportExportToChiefAccountant`;
+3. the pending set is exactly the three migrations listed above, in that order;
+4. the deployed binaries and model snapshot come from the reviewed commit containing PRs `#114`
+   and `#115`;
+5. no competing migration or application startup initializer is running.
+
+Abort without stamping history or manually repairing schema if the pending set, artifact hash,
+database identity, provider, DDL preconditions, or post-deployment physical schema differs. After
+application, require zero pending migrations, rebuild/restart the API and frontend from the recorded
+commit, and run the automated baseline again before starting Phase A UAT.
+
 ## Phase A — worksheet and immutable budget grain
 
 ### UAT-BUD-001: create a dimension-controlled scenario
