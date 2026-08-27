@@ -145,6 +145,9 @@ public class StaffGrievance : TenantEntity
     /// <summary>FR-HR-181 obligation 8 — the resolution decision. One per case, or none.</summary>
     public virtual StaffGrievanceResolution? Resolution { get; set; }
 
+    /// <summary>FR-HR-181 obligation 9 and the case's paperwork — area 9c slice 3.</summary>
+    public virtual ICollection<StaffGrievanceDocument> Documents { get; set; } = new List<StaffGrievanceDocument>();
+
     public virtual ICollection<StaffGrievanceStep> Steps { get; set; } = new List<StaffGrievanceStep>();
 
     /// <summary>Everybody on the case other than the primary party — area 9c slice 1.</summary>
@@ -276,6 +279,114 @@ public class StaffGrievanceResolution : TenantEntity
 
     [ForeignKey(nameof(OutcomeRecordedById))]
     public virtual Employee? OutcomeRecordedBy { get; set; }
+
+    // ── FR-HR-181 obligation 9: the final signed agreement (area 9c slice 3) ──
+
+    /// <summary>
+    /// When the agreement was signed off the system, as written on the paper HR then uploaded.
+    /// </summary>
+    /// <remarks>
+    /// Supplied by HR rather than stamped, because the signature happens in a room and the scan
+    /// arrives afterwards — stamping <c>UtcNow</c> would record when somebody got round to
+    /// uploading it, which is not what FR-HR-181 asks to be retained. The document itself is a
+    /// <see cref="StaffGrievanceDocument"/> scoped <c>Agreement</c>.
+    /// </remarks>
+    public DateTime? AgreementSignedDate { get; set; }
+
+    /// <summary>
+    /// When the employee confirmed the agreement in the system — their own act, and the reason this
+    /// stayed off the workflow engine.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NOT an approval (build-plan decision D-10, judged here rather than assumed).
+    /// The engine models a proposal somebody with authority confirms or refuses, and routes onward
+    /// on refusal. This is a two-party acceptance: if the employee declines, nothing routes anywhere
+    /// — the case simply is not settled, and their remedy is the ladder they already have. Recording
+    /// acceptance as an approval would also put a decision about the employee's own case into a
+    /// queue somebody else can action, which is the one thing this module refuses everywhere else.
+    /// </remarks>
+    public DateTime? AgreementAcceptedDate { get; set; }
+
+    public Guid? AgreementAcceptedById { get; set; }
+
+    [ForeignKey(nameof(AgreementAcceptedById))]
+    public virtual Employee? AgreementAcceptedBy { get; set; }
+
+    /// <summary>
+    /// What the employee said when they accepted. Its own column rather than appended to
+    /// <see cref="RemedyOrUndertakings"/>, because that field is part of the frozen decision and
+    /// editing it to hold a later remark would corrupt exactly the artefact FR-HR-181 retains.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? AgreementAcceptanceComment { get; set; }
+}
+
+/// <summary>
+/// A document on an employee-relations case — area 9c slice 3, and FR-HR-181 obligation 9.
+/// </summary>
+/// <remarks>
+/// <para><b>Before slice 3 a grievance had no document surface at all.</b> Not a broken one: none.
+/// The complaint as filed on paper, the evidence an investigation gathered, and the final signed
+/// agreement the requirement names explicitly all had nowhere to live.</para>
+///
+/// <para><b>Everything here goes through the controlled upload gate</b> — scan, central-DMS
+/// registration, row write, rollback if that write fails — under its own
+/// <c>hr-grievance-documents</c> category. ⚠ <see cref="FilePath"/> is a stored location and
+/// <b>never a URL</b>: the files live outside the web root and reading one needs the bearer token,
+/// so an <c>&lt;a href&gt;</c> cannot work. The shape this replaces elsewhere in the port — a create
+/// endpoint taking <c>fileName</c> and <c>filePath</c> as JSON and storing no file at all — must
+/// never appear on this table.</para>
+///
+/// <para><b>Scope is enforced by the service, not by the shape.</b> A <c>Step</c> document carries
+/// a <see cref="StepId"/> and an <c>Investigation</c> one does not, and neither the database nor the
+/// DTO can express "exactly the right one for this scope".</para>
+/// </remarks>
+public class StaffGrievanceDocument : TenantEntity
+{
+    [Required]
+    public Guid GrievanceId { get; set; }
+
+    [ForeignKey(nameof(GrievanceId))]
+    public virtual StaffGrievance Grievance { get; set; } = null!;
+
+    public GrievanceDocumentScope Scope { get; set; } = GrievanceDocumentScope.Case;
+
+    /// <summary>Set only when <see cref="Scope"/> is <c>Step</c>.</summary>
+    public Guid? StepId { get; set; }
+
+    [ForeignKey(nameof(StepId))]
+    public virtual StaffGrievanceStep? Step { get; set; }
+
+    [Required]
+    [MaxLength(500)]
+    public string FileName { get; set; } = string.Empty;
+
+    /// <summary>⚠ A stored location, never a URL. See the remarks.</summary>
+    [Required]
+    [MaxLength(1000)]
+    public string FilePath { get; set; } = string.Empty;
+
+    public long FileSize { get; set; }
+
+    /// <summary>The scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    public DateTime UploadDate { get; set; }
+
+    [Required]
+    public Guid UploadedById { get; set; }
+
+    [ForeignKey(nameof(UploadedById))]
+    public virtual Employee UploadedBy { get; set; } = null!;
 }
 
 /// <summary>

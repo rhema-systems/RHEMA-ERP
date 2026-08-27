@@ -1,9 +1,12 @@
 using ErpSystem.Api.Filters;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -36,10 +39,29 @@ public class StaffGrievancesController : ControllerBase
     private readonly IStaffGrievanceService _service;
     private readonly ICurrentUserService _currentUser;
 
-    public StaffGrievancesController(IStaffGrievanceService service, ICurrentUserService currentUser)
+    // Area 9c slice 3 — the controlled upload gate and its counterpart for reading a file back.
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<StaffGrievancesController> _logger;
+
+    public StaffGrievancesController(
+        IStaffGrievanceService service,
+        ICurrentUserService currentUser,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ILogger<StaffGrievancesController> logger)
     {
         _service = service;
         _currentUser = currentUser;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
 
     // =========================================================================
@@ -329,5 +351,120 @@ public class StaffGrievancesController : ControllerBase
             return BadRequest("Your user account is not linked to an employee record.");
 
         return Ok(await _service.CloseAsync(id, dto, employeeId));
+    }
+
+    // =========================================================================
+    // Documents and the signed agreement — area 9c slice 3
+    // =========================================================================
+
+    /// <summary>
+    /// Uploads a document to the case, through the controlled upload gate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Multipart, and there is deliberately no JSON alternative. A create endpoint taking
+    /// <c>fileName</c> and <c>filePath</c> as JSON stores no file at all — the "attachment" is a
+    /// string somebody typed and the list renders it beautifully — and that is the shape area 16
+    /// had to replace wholesale. Nothing on this controller accepts a caller-supplied path.
+    ///
+    /// <para>Scope <c>Agreement</c> is FR-HR-181 obligation 9. It needs a recorded decision to be
+    /// the written form of, and there may be only one per case.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/documents")]
+    [RequestSizeLimit(50 * 1024 * 1024)]
+    public async Task<IActionResult> UploadDocument(
+        Guid id,
+        IFormFile file,
+        [FromForm] GrievanceDocumentScope scope = GrievanceDocumentScope.Case,
+        [FromForm] Guid? stepId = null,
+        [FromForm] string? description = null,
+        [FromForm] DateTime? agreementSignedDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        // ⚠ Checked BEFORE the file goes anywhere near the gate, and this is not premature
+        // optimisation. HrAttachmentUpload.ExecuteAsync catches everything its persist callback
+        // throws — it has to, so a scanned and DMS-registered document is never left pointing at a
+        // row that was never written — and answers a generic 500. Every placement rule raised
+        // inside the callback therefore reached the caller as "An error occurred while adding the
+        // attachment", with no status and no message: 12 assertions' worth, all of them rules that
+        // were working correctly and could not say so. Validating first also means a refused
+        // placement never stores a file, never scans one, and never needs rolling back.
+        await _service.ValidateDocumentPlacementAsync(id, scope, stepId, cancellationToken);
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "StaffGrievance",
+            sourceRecordId: id,
+            sourceLabel: "Employee-relations case document",
+            documentType: $"Grievance{scope}Document",
+            description: description,
+            persist: (uploadedById, document) => _service.AddDocumentAsync(
+                id, scope, stepId, description, agreementSignedDate, uploadedById,
+                document.OriginalFileName,
+                document.FilePath,
+                document.FileSize,
+                document.FileUploadRecordId,
+                document.DocumentRecordId,
+                document.DocumentVersionId,
+                cancellationToken),
+            cancellationToken,
+            category: ControlledFileUploadCategories.HrGrievanceDocuments);
+    }
+
+    /// <summary>
+    /// Streams a case document.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ungated at the attribute level ON PURPOSE, and gated hard in the service instead: the
+    /// employee whose case it is must be able to read their own agreement, and they are not in HR.
+    /// The service applies the case's own read rule — griever, HR, or somebody named on a step —
+    /// before this ever streams a byte. The entitlement check is never the download helper's.
+    ///
+    /// <para>This endpoint is the only route to the file: it lives outside the web root and reading
+    /// it needs the bearer token, so <c>filePath</c> on the DTO can never be used as an href.</para>
+    /// </remarks>
+    [HttpGet("documents/{documentId:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid documentId, CancellationToken cancellationToken = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var document = await _service.GetDocumentAsync(documentId, _currentUser.EmployeeId, cancellationToken);
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId, document.FileUploadRecordId,
+            document.FilePath, document.FileName, fallbackContentType: null,
+            inline: true, cancellationToken);
+    }
+
+    /// <summary>Removes a document from the case. Refused once the employee has accepted an agreement.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpDelete("{id:guid}/documents/{documentId:guid}")]
+    public async Task<ActionResult<StaffGrievanceDto>> DeleteDocument(Guid id, Guid documentId)
+        => Ok(await _service.DeleteDocumentAsync(id, documentId));
+
+    /// <summary>
+    /// The employee confirms FR-HR-181's final signed agreement.
+    /// </summary>
+    /// <remarks>
+    /// Ungated here and refused to everyone but the case's own employee — their act, like filing,
+    /// escalating and withdrawing.
+    ///
+    /// <para><b>Decision D-10, judged rather than assumed.</b> This is deliberately NOT a workflow
+    /// approval. The engine models a proposal that somebody with authority confirms or refuses, and
+    /// routes onward when they refuse. Here, if the employee declines, nothing routes anywhere — the
+    /// case simply is not settled and their remedy is the ladder they already have. Modelling it as
+    /// an approval would also drop a decision about the employee's own case into a queue that
+    /// somebody else can action, which this module refuses everywhere else.</para>
+    /// </remarks>
+    [HttpPost("{id:guid}/agreement/accept")]
+    public async Task<ActionResult<StaffGrievanceDto>> AcceptAgreement(
+        Guid id, [FromBody] AcceptGrievanceAgreementDto? dto = null)
+    {
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.AcceptAgreementAsync(id, dto ?? new AcceptGrievanceAgreementDto(), employeeId));
     }
 }

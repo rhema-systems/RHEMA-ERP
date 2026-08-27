@@ -36,6 +36,20 @@ public static class ControlledFileUploadCategories
     public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
 
     /// <summary>
+    /// Paperwork on an employee-relations case — the grievance statement as filed on paper, evidence
+    /// gathered during an investigation, the investigation report itself, and FR-HR-181's final
+    /// signed agreement.
+    /// </summary>
+    /// <remarks>
+    /// Its own category rather than a share of the discipline pile, even though the two halves sit
+    /// behind one permission family. A grievance is raised BY an employee and is usually ABOUT a
+    /// colleague, so its documents name people who are not the subject of any case — and retention
+    /// and access rules for "somebody's complaint about their manager" should not have to be
+    /// expressed as "some of the documents in the disciplinary pile".
+    /// </remarks>
+    public const string HrGrievanceDocuments = "hr-grievance-documents";
+
+    /// <summary>
     /// Signed oaths of secrecy (FR-HR-030). Its own category rather than a general HR bucket: an
     /// oath is a legal instrument naming one person, kept for the life of their employment, and
     /// retention and access rules that apply to it should not have to be expressed as "some of the
@@ -145,6 +159,10 @@ public static class ControlledFileUploadCategories
                 HrLeaveAttachments,
                 HrPipAttachments,
                 HrDisciplineDocuments,
+                // An employee-relations file holds a complaint about a named colleague, the
+                // evidence gathered about them, and a signed agreement between the two. A tenant
+                // policy should not be able to admit any of that unscanned.
+                HrGrievanceDocuments,
                 HrStaffMovementAttachments,
                 HrOfferLetters,
                 HrMedicalExamDocuments,

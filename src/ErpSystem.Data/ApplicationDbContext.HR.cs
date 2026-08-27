@@ -389,6 +389,11 @@ public partial class ApplicationDbContext
     public DbSet<StaffGrievanceInvestigation> StaffGrievanceInvestigations { get; set; } = null!;
     public DbSet<StaffGrievanceResolution> StaffGrievanceResolutions { get; set; } = null!;
 
+    // Area 9c slice 3 — the case's paperwork, including FR-HR-181 obligation 9's final signed
+    // agreement. Everything here goes through the controlled upload gate; nothing on this table
+    // ever accepts a caller-supplied file path.
+    public DbSet<StaffGrievanceDocument> StaffGrievanceDocuments { get; set; } = null!;
+
     // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
     // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
     // an HR officer to approve, and approval applies them.
@@ -9351,6 +9356,41 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.OutcomeRecordedBy)
                 .WithMany()
                 .HasForeignKey(x => x.OutcomeRecordedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 3 — who accepted the signed agreement.
+            entity.HasOne(x => x.AgreementAcceptedBy)
+                .WithMany()
+                .HasForeignKey(x => x.AgreementAcceptedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceDocument (area 9c slice 3, FR-HR-181 obligation 9) ----
+        builder.Entity<StaffGrievanceDocument>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.Scope);
+            entity.HasIndex(x => x.StepId);
+
+            entity.Property(x => x.Scope).HasConversion<int>();
+
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ Restrict, not Cascade, even though the step cascades from the case. Two cascade
+            // paths from StaffGrievances into this table — one direct, one through the step — is
+            // exactly what SQL Server refuses. Deleting a case still removes its documents by the
+            // direct leg.
+            entity.HasOne(x => x.Step)
+                .WithMany()
+                .HasForeignKey(x => x.StepId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

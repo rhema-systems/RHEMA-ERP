@@ -38,7 +38,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 0 | Survey, fixtures, endpoint + payload census | **COMPLETE 2026-08-27** — 147 assertions ×2, zero failures; the ladder proven end to end, and `GrievanceStatus.Closed` found to have no writer |
 | 1 | The ER case register: case types, parties, representation | **COMPLETE 2026-08-27** — 119 assertions ×2 + the 147 slice-0 ladder = **266**; migration `AddEmployeeRelationsCaseTypeAndParties`; all 87 pre-existing rows correct with no back-fill |
 | 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | **COMPLETE 2026-08-27** — 111 ×2 + the 151/119 ladder = **381**; obligations 5, 7, 8 closed; `GrievanceStatus.Closed` given its first writer |
-| 3 | Documents on the controlled upload gate + the final signed agreement | ⏳ |
+| 3 | Documents on the controlled upload gate + the final signed agreement | **COMPLETE 2026-08-27** — 70 ×2 + the 151/119/111 ladder = **451**; obligation 9 closed; D-10 judged — the agreement stays off the workflow engine |
 | 4 | Case conferencing & mediation; union consultation | ⏳ |
 | 5 | The responder matrix (FR-HR-084) + rung resolution | ⏳ |
 | 6 | Anonymous / whistleblower concern intake | ⏳ |
@@ -157,11 +157,11 @@ Nine obligations. Scored against what exists:
 | 6 | **Union consultation notes** | ❌ nothing anywhere. `Unions` is empty and there is no membership link. | 4 |
 | 7 | **Investigation report** | ✅ **slice 2** — `StaffGrievanceInvestigation`, internal or external investigator, natural-justice gate, completion refused without findings | 2 |
 | 8 | **Resolution decision** | ✅ **slice 2** — `StaffGrievanceResolution` with outcome, decision, remedy, decider, date and the rung it was decided at; frozen on write | 2 |
-| 9 | **Final signed agreement** | ❌ no document surface on grievances at all. | 3 |
+| 9 | **Final signed agreement** | ✅ **slice 3** — a scoped document on the controlled upload gate, a supplied signing date, and the employee's own acceptance | 3 |
 
 **As surveyed: four of nine absent, one partial** — a Mandatory requirement roughly half
 delivered, which is the strongest evidence for building this area, stronger than the deferred
-wish-list. **After slice 2: two absent** (obligations 6 and 9), owed to slices 4 and 3.
+wish-list. **After slice 3: one absent** — obligation 6, union consultation notes, owed to slice 4.
 
 Also in scope from the spec: **FR-HR-084** (`Pri. D`, source WN) — *"The system shall model a
 grievance hierarchy defining reporting lines."* Decision D-3 delivers this as an explicitly
@@ -534,3 +534,64 @@ expects is only as good as that name; re-read it after the slice that fills it.*
 migration have no resolution row: what was actually *decided*, as opposed to what the responder
 wrote, was never captured. Manufacturing it in a migration would be worse than leaving the gap
 visible, and the migration's remarks say so, so nobody adds one later believing it was forgotten.
+
+---
+
+### Slice 3 — documents and the signed agreement. CLOSED 2026-08-27.
+
+`run-slice3.mjs` **70 assertions ×2**, ladder 151 / 119 / 111 / 70 = **451 for the area**.
+Migration `20260827174902_AddGrievanceDocumentsAndSignedAgreement` (guarded SQL, registered).
+**FR-HR-181 now has one obligation outstanding** — 6, union consultation notes, owed to slice 4.
+
+**Before this slice a grievance had no document surface at all.** Not a broken one: none. Now
+`StaffGrievanceDocument`, scoped Case / Step / Investigation / Agreement, entirely on the
+controlled upload gate under a new scan-mandatory `hr-grievance-documents` category. The harness
+asserts the gate actually *ran* — a row carries `fileUploadRecordId` and `documentRecordId` — and
+that `filePath` is not a URL, because the shape this replaces elsewhere in the port is a create
+endpoint taking `fileName` and `filePath` as JSON and storing nothing.
+
+**D-10 judged, not deferred: the agreement stays off the workflow engine.** The engine models a
+proposal somebody with authority confirms or refuses, and routes onward on refusal. This is a
+two-party acceptance: if the employee declines, nothing routes anywhere — the case is simply not
+settled and their remedy is the ladder they already have. Modelling it as an approval would also
+put a decision about the employee's own case into a queue somebody else can action, which this
+module refuses everywhere else. Recorded on the entity and the endpoint, not only here.
+
+Two details of the agreement worth keeping: **`AgreementSignedDate` is supplied, not stamped**
+(the signing happens in a room and the scan arrives afterwards, so `UtcNow` would record when
+somebody got round to uploading it), and the employee's acceptance note has **its own column** —
+appending it to `RemedyOrUndertakings` would edit part of the frozen decision to hold a remark
+made after it was taken. The harness asserts the decision and the remedy are untouched by
+acceptance.
+
+⚠ **Three bugs found in my own code before the build, all the same misconception**, and worth
+stating as a rule: **a terminal state is not one gate.** An agreement is the written form of a
+decision, so it necessarily arrives on a case that has just been RESOLVED — but uploads, and
+document deletion, were both gated on `EnsureOpen`, which refuses resolved cases. Obligation 9
+would have been **unreachable by construction**, and every test of it would have read as a
+permissions bug. There is now a weaker `EnsureNotAbandoned` (everything but Withdrawn and Closed),
+and the harness asserts explicitly that a resolved case really does accept its agreement — because
+that rule is the one most likely to be "tidied" back into `EnsureOpen` by a later slice.
+
+⚠ **Two defects the harness found that review would not have.**
+
+1. **The include graph crossed SQL Server's 8060-byte row limit.** Slices 1, 2 and 3 each added
+   includes to `Scoped()`; individually fine, together one JOIN across five collections and two
+   one-to-ones. Slice 3's documents tipped it over, and the failure mode is the nasty one:
+   **`FileAsync` saved the row and then died reading it back**, so filing a grievance 500'd while
+   the grievance was created. Same 8060 shape as [[hr-movements-area-survey]]'s area-8 create.
+   Fixed with `.AsSplitQuery()`, which is required here rather than an optimisation and also kills
+   the cartesian explosion. **An include graph has a size limit, and it bites on the READ.**
+2. **`HrAttachmentUpload.ExecuteAsync` swallows business-rule exceptions.** It catches everything
+   its `persist` callback throws — it must, so a scanned and registered document is never left
+   pointing at a row that was never written — and answers a generic 500. So **five rules that were
+   working perfectly could not say so**: 12 assertions failed, every one of them a correct refusal
+   rendered as *"An error occurred while adding the attachment"*. Fixed by validating placement
+   **before** the upload (`ValidateDocumentPlacementAsync`), which also means a refused placement
+   never stores a file, never scans one and never needs rolling back. The checks stay in
+   `AddDocumentAsync` too — the controller asks first, the service is the last word.
+
+   ⚠ **This generalises beyond HR area 9c and is owed to slice 12.** That helper is used by
+   performance (check-ins, calibration, unit goals, appraisals), recruitment requisitions and
+   assets — all closed areas. Any business rule any of them raises inside `persist` has the same
+   defect: a correct rule, an opaque 500. **Check those call sites; do not assume.**

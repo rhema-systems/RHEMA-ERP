@@ -2835,6 +2835,37 @@ public enum GrievanceStepOutcome
 }
 
 /// <summary>
+/// Which part of an employee-relations case a document belongs to — area 9c slice 3.
+/// </summary>
+/// <remarks>
+/// Mirrors <see cref="DisciplinaryDocumentScope"/>, which area 9 built for the disciplinary case
+/// and the grievance half never got: before slice 3 a grievance had no document surface at all, so
+/// FR-HR-181's "final signed agreement" could not be held anywhere.
+///
+/// <para>⚠ There is deliberately no <c>Conference</c> member yet. Slice 4 builds the conference
+/// entity, and a scope pointing at a table that does not exist would be an FK with nowhere to go.
+/// It is appended there — this enum is append-only, like every other in this file.</para>
+/// </remarks>
+public enum GrievanceDocumentScope
+{
+    /// <summary>Belongs to the case as a whole — the complaint as filed on paper, correspondence.</summary>
+    [Description("Case")]
+    Case = 1,
+
+    /// <summary>Attached to one rung's answer.</summary>
+    [Description("Ladder Step")]
+    Step = 2,
+
+    /// <summary>Evidence gathered during the investigation, or the report itself.</summary>
+    [Description("Investigation")]
+    Investigation = 3,
+
+    /// <summary>FR-HR-181 obligation 9 — the final signed agreement. At most one per case.</summary>
+    [Description("Signed Agreement")]
+    Agreement = 4
+}
+
+/// <summary>
 /// What a resolved employee-relations case actually decided — FR-HR-181's "resolution decision",
 /// area 9c slice 2.
 /// </summary>

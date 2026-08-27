@@ -130,6 +130,12 @@ public class StaffGrievanceDto : StaffGrievanceSummaryDto
     public string? ClosureReason { get; set; }
     public Guid? ClosedById { get; set; }
     public string? ClosedByName { get; set; }
+
+    /// <summary>
+    /// Obligation 9 and the case's paperwork — area 9c slice 3. Ordered by scope then upload date,
+    /// so the file reads the same way twice.
+    /// </summary>
+    public List<StaffGrievanceDocumentDto> Documents { get; set; } = new();
 }
 
 /// <summary>FR-HR-181 obligation 7 — the investigation report.</summary>
@@ -192,6 +198,49 @@ public class StaffGrievanceResolutionDto
 
     public DateTime? OutcomeRecordedDate { get; set; }
     public string? OutcomeRecordedByName { get; set; }
+
+    // FR-HR-181 obligation 9 — area 9c slice 3.
+    public DateTime? AgreementSignedDate { get; set; }
+    public DateTime? AgreementAcceptedDate { get; set; }
+    public Guid? AgreementAcceptedById { get; set; }
+    public string? AgreementAcceptedByName { get; set; }
+
+    public string? AgreementAcceptanceComment { get; set; }
+
+    /// <summary>True once the employee has confirmed the agreement in the system.</summary>
+    public bool AgreementAccepted => AgreementAcceptedDate != null;
+}
+
+/// <summary>A document on an employee-relations case — area 9c slice 3.</summary>
+public class StaffGrievanceDocumentDto
+{
+    public Guid Id { get; set; }
+    public Guid GrievanceId { get; set; }
+
+    public GrievanceDocumentScope Scope { get; set; }
+    public string ScopeName => Scope.ToString();
+
+    public Guid? StepId { get; set; }
+
+    public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ⚠ A stored location, NEVER a URL. The file lives outside the web root and reading it needs
+    /// the bearer token, so the UI must go through the download endpoint — an anchor href cannot
+    /// work. Carried only so the desk can see where a document was filed.
+    /// </summary>
+    public string FilePath { get; set; } = string.Empty;
+
+    public long FileSize { get; set; }
+    public string? Description { get; set; }
+
+    public DateTime UploadDate { get; set; }
+    public Guid UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
+
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
 }
 
 /// <summary>
@@ -424,6 +473,23 @@ public class CloseGrievanceDto
     [MaxLength(1000)]
     [MinLength(10)]
     public string Reason { get; set; } = string.Empty;
+}
+
+// ── Area 9c slice 3 — documents and the signed agreement ─────────────────────
+
+/// <summary>
+/// The employee confirms FR-HR-181's final signed agreement.
+/// </summary>
+/// <remarks>
+/// ⚠ Their own act, like escalating and withdrawing, and refused to HR — which is also why this is
+/// an acceptance rather than a workflow approval (decision D-10). If they decline, nothing routes
+/// anywhere: the case is simply not settled and their remedy is the ladder they already have.
+/// </remarks>
+public class AcceptGrievanceAgreementDto
+{
+    /// <summary>Optional note from the employee on accepting. Not a condition of acceptance.</summary>
+    [MaxLength(1000)]
+    public string? Comment { get; set; }
 }
 
 #endregion

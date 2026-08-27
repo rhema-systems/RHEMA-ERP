@@ -72,7 +72,21 @@ public class StaffGrievanceService : IStaffGrievanceService
             .Include(g => g.Investigation!).ThenInclude(i => i.Investigator)
             .Include(g => g.Investigation!).ThenInclude(i => i.OpenedBy)
             .Include(g => g.Resolution!).ThenInclude(r => r.DecidedBy)
-            .Include(g => g.Resolution!).ThenInclude(r => r.OutcomeRecordedBy);
+            .Include(g => g.Resolution!).ThenInclude(r => r.OutcomeRecordedBy)
+            .Include(g => g.Resolution!).ThenInclude(r => r.AgreementAcceptedBy)
+            // Area 9c slice 3 — the case's paperwork.
+            .Include(g => g.Documents.Where(d => !d.IsDeleted)).ThenInclude(d => d.UploadedBy)
+            // ⚠ SPLIT QUERY, and it is required rather than an optimisation. As a single query this
+            // graph is one JOIN across five collections and two one-to-ones, and SQL Server has to
+            // materialise the result as one row: Statement (6000) + HrInterpretation (4000) +
+            // ResolutionSummary (4000) + the investigation's Findings/Evidence/Recommendation (4000
+            // each) + the resolution's Decision/Remedy (4000 each) + every step's Response (4000).
+            // That crossed the 8060-byte row limit the moment slice 3 added the documents, and
+            // FAILED ON THE READ — `FileAsync` saved the row and then died reading it back with
+            // "Cannot create a row of size 8079". Splitting also removes the cartesian explosion
+            // that five collections would otherwise produce. Ordering is preserved: the OrderBy
+            // inside the Steps include and the explicit sorts in ToDto both still apply.
+            .AsSplitQuery();
 
     /// <summary>
     /// The register's query — tenant-scoped and soft-delete filtered, with NO includes.
@@ -932,9 +946,225 @@ public class StaffGrievanceService : IStaffGrievanceService
         return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
     }
 
+    // ── Area 9c slice 3 — documents and the signed agreement ──────────────────
+
+    public async Task ValidateDocumentPlacementAsync(
+        Guid grievanceId, GrievanceDocumentScope scope, Guid? stepId, CancellationToken cancellationToken = default)
+        => EnsureDocumentPlacement(await GetOwnedAsync(grievanceId, cancellationToken), scope, stepId);
+
+    /// <summary>
+    /// Where a document may be filed. Called twice on purpose — once by the controller BEFORE the
+    /// file is uploaded, once here as the last word.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The pre-flight call is not belt-and-braces, it is the only thing that makes these rules
+    /// visible: <c>HrAttachmentUpload.ExecuteAsync</c> catches everything its persist callback
+    /// throws, rolls the stored document back, and answers a generic 500. Raised only from here,
+    /// every rule below reached the caller as "An error occurred while adding the attachment".
+    /// </remarks>
+    private static void EnsureDocumentPlacement(
+        StaffGrievance grievance, GrievanceDocumentScope scope, Guid? stepId)
+    {
+        // ⚠ NOT EnsureOpen for the agreement. FR-HR-181's signed agreement is the written form of
+        // a decision, so by definition it arrives on a case that has just been RESOLVED — gating it
+        // on "open" would make obligation 9 unreachable by construction. Withdrawn and Closed cases
+        // still take nothing.
+        if (scope == GrievanceDocumentScope.Agreement) EnsureNotAbandoned(grievance);
+        else EnsureOpen(grievance);
+
+        // Scope is enforced here because neither the database nor the DTO can express "exactly the
+        // right companion id for this scope".
+        switch (scope)
+        {
+            case GrievanceDocumentScope.Step:
+                if (stepId is not Guid sid)
+                    throw new InvalidOperationException("A ladder-step document must say which step it belongs to.");
+                if (grievance.Steps.All(s => s.Id != sid))
+                    throw new ArgumentException($"Step '{sid}' is not on this case.");
+                break;
+
+            case GrievanceDocumentScope.Investigation:
+                if (grievance.Investigation == null)
+                    throw new InvalidOperationException(
+                        "This case has no investigation, so a document cannot be filed against one.");
+                break;
+
+            case GrievanceDocumentScope.Agreement:
+                // FR-HR-181's agreement is what SETTLES the case, so there has to be a decision for
+                // it to be the written form of. Uploading one to an unresolved case would produce a
+                // signed agreement about nothing.
+                if (grievance.Resolution == null)
+                    throw new InvalidOperationException(
+                        "Record the resolution decision before uploading the agreement that sets it out.");
+                if (grievance.Documents.Any(d => !d.IsDeleted && d.Scope == GrievanceDocumentScope.Agreement))
+                    throw new InvalidOperationException("This case already has a signed agreement.");
+                break;
+        }
+
+        if (scope != GrievanceDocumentScope.Step && stepId.HasValue)
+            throw new InvalidOperationException("Only a ladder-step document belongs to a step.");
+    }
+
+    public async Task<StaffGrievanceDocumentDto> AddDocumentAsync(
+        Guid grievanceId,
+        GrievanceDocumentScope scope,
+        Guid? stepId,
+        string? description,
+        DateTime? agreementSignedDate,
+        Guid uploadedByEmployeeId,
+        string fileName,
+        string filePath,
+        long fileSize,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId,
+        CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureDocumentPlacement(grievance, scope, stepId);
+
+        var now = DateTime.UtcNow;
+        var document = new StaffGrievanceDocument
+        {
+            TenantId = grievance.TenantId,
+            GrievanceId = grievance.Id,
+            Scope = scope,
+            StepId = scope == GrievanceDocumentScope.Step ? stepId : null,
+            FileName = fileName,
+            FilePath = filePath,
+            FileSize = fileSize,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+            UploadDate = now,
+            UploadedById = uploadedByEmployeeId,
+            CreatedBy = uploadedByEmployeeId.ToString(),
+        };
+
+        await _unitOfWork.Repository<StaffGrievanceDocument>().AddAsync(document);
+
+        // The signature date belongs to the agreement, and it is SUPPLIED rather than stamped: the
+        // signing happens in a room and the scan arrives afterwards, so UtcNow would record when
+        // somebody got round to uploading it.
+        if (scope == GrievanceDocumentScope.Agreement && grievance.Resolution is { } resolution)
+        {
+            resolution.AgreementSignedDate = agreementSignedDate ?? now;
+            resolution.UpdatedAt = now;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var saved = (await GetOwnedAsync(grievanceId, cancellationToken))
+            .Documents.First(d => d.Id == document.Id);
+        return ToDocumentDto(saved);
+    }
+
+    public async Task<StaffGrievanceDocumentDto> GetDocumentAsync(
+        Guid documentId, Guid? callerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var document = await _unitOfWork.Repository<StaffGrievanceDocument>()
+            .GetQueryable()
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted && d.Id == documentId)
+            .Include(d => d.UploadedBy)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new ArgumentException($"Document with ID '{documentId}' not found.");
+
+        // ⚠ The entitlement check is this service's, never the download helper's — and it is the
+        // CASE's rule, not a rule of its own. A document is exactly as readable as the case it is
+        // filed against.
+        var grievance = await GetOwnedAsync(document.GrievanceId, cancellationToken);
+        EnsureMayRead(grievance, callerEmployeeId);
+
+        return ToDocumentDto(document);
+    }
+
+    public async Task<StaffGrievanceDto> DeleteDocumentAsync(
+        Guid grievanceId, Guid documentId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+
+        // A wrongly-uploaded agreement has to be removable from the resolved case it landed on —
+        // see AddDocumentAsync for why "open" is the wrong gate here.
+        EnsureNotAbandoned(grievance);
+
+        var document = grievance.Documents.FirstOrDefault(d => d.Id == documentId && !d.IsDeleted)
+            ?? throw new ArgumentException($"Document with ID '{documentId}' was not found on this case.");
+
+        if (document.Scope == GrievanceDocumentScope.Agreement
+            && grievance.Resolution?.AgreementAcceptedDate != null)
+            throw new InvalidOperationException(
+                "The employee has accepted this agreement and it can no longer be removed.");
+
+        var now = DateTime.UtcNow;
+        document.IsDeleted = true;
+        document.DeletedAt = now;
+        document.UpdatedAt = now;
+
+        if (document.Scope == GrievanceDocumentScope.Agreement && grievance.Resolution is { } resolution)
+            resolution.AgreementSignedDate = null;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> AcceptAgreementAsync(
+        Guid grievanceId, AcceptGrievanceAgreementDto dto, Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+
+        // Theirs alone, exactly as escalating and withdrawing are. HR cannot accept an agreement on
+        // an employee's behalf, and nobody else can accept one about them.
+        if (grievance.EmployeeId != employeeId)
+            throw new UnauthorizedAccessException(
+                "Only the employee this case belongs to can accept its agreement.");
+
+        var resolution = grievance.Resolution
+            ?? throw new InvalidOperationException("This case has not been resolved, so there is no agreement to accept.");
+
+        if (!grievance.Documents.Any(d => !d.IsDeleted && d.Scope == GrievanceDocumentScope.Agreement))
+            throw new InvalidOperationException(
+                "There is no signed agreement on this case yet. HR uploads it before you confirm it.");
+
+        if (resolution.AgreementAcceptedDate != null)
+            throw new InvalidOperationException("You have already accepted this agreement.");
+
+        var now = DateTime.UtcNow;
+        resolution.AgreementAcceptedDate = now;
+        resolution.AgreementAcceptedById = employeeId;
+        resolution.UpdatedAt = now;
+
+        // Its own column. Appending it to RemedyOrUndertakings would edit part of the frozen
+        // decision to hold a remark made after the fact.
+        if (!string.IsNullOrWhiteSpace(dto.Comment))
+            resolution.AgreementAcceptanceComment = dto.Comment.Trim();
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Grievance {Number}: agreement accepted by the employee", grievance.GrievanceNumber);
+
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
     private static void EnsureOpen(StaffGrievance grievance)
     {
         if (grievance.Status is GrievanceStatus.Resolved or GrievanceStatus.Withdrawn or GrievanceStatus.Closed)
+            throw new InvalidOperationException($"This grievance is {grievance.Status} and cannot be changed.");
+    }
+
+    /// <summary>
+    /// The weaker gate: everything except a case that was abandoned rather than settled.
+    /// </summary>
+    /// <remarks>
+    /// A RESOLVED case still has work to do — FR-HR-181's signed agreement is written FROM the
+    /// decision, so it necessarily arrives afterwards. A Withdrawn or Closed case has no agreement
+    /// to sign, because nothing was agreed.
+    /// </remarks>
+    private static void EnsureNotAbandoned(StaffGrievance grievance)
+    {
+        if (grievance.Status is GrievanceStatus.Withdrawn or GrievanceStatus.Closed)
             throw new InvalidOperationException($"This grievance is {grievance.Status} and cannot be changed.");
     }
 
@@ -954,6 +1184,24 @@ public class StaffGrievanceService : IStaffGrievanceService
         AwaitingResponse = g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
             == GrievanceStepOutcome.AwaitingResponse,
         ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
+    };
+
+    private static StaffGrievanceDocumentDto ToDocumentDto(StaffGrievanceDocument d) => new()
+    {
+        Id = d.Id,
+        GrievanceId = d.GrievanceId,
+        Scope = d.Scope,
+        StepId = d.StepId,
+        FileName = d.FileName,
+        FilePath = d.FilePath,
+        FileSize = d.FileSize,
+        Description = d.Description,
+        UploadDate = d.UploadDate,
+        UploadedById = d.UploadedById,
+        UploadedByName = d.UploadedBy?.FullName,
+        FileUploadRecordId = d.FileUploadRecordId,
+        DocumentRecordId = d.DocumentRecordId,
+        DocumentVersionId = d.DocumentVersionId,
     };
 
     private static StaffGrievancePartyDto ToPartyDto(StaffGrievanceParty p) => new()
@@ -1044,7 +1292,19 @@ public class StaffGrievanceService : IStaffGrievanceService
             DecidedAtLevel = r.DecidedAtLevel,
             OutcomeRecordedDate = r.OutcomeRecordedDate,
             OutcomeRecordedByName = r.OutcomeRecordedBy?.FullName,
+            AgreementSignedDate = r.AgreementSignedDate,
+            AgreementAcceptedDate = r.AgreementAcceptedDate,
+            AgreementAcceptedById = r.AgreementAcceptedById,
+            AgreementAcceptedByName = r.AgreementAcceptedBy?.FullName,
+            AgreementAcceptanceComment = r.AgreementAcceptanceComment,
         } : null,
+        Documents = g.Documents
+            .Where(d => !d.IsDeleted)
+            // Scope then upload date: the file must read the same way twice, and a case with
+            // evidence, a report and an agreement is unreadable in insertion order.
+            .OrderBy(d => d.Scope).ThenBy(d => d.UploadDate)
+            .Select(ToDocumentDto)
+            .ToList(),
         Steps = g.Steps.OrderBy(s => s.Sequence).Select(s => new StaffGrievanceStepDto
         {
             Id = s.Id,

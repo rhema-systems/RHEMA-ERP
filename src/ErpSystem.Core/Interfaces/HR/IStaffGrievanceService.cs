@@ -135,6 +135,63 @@ public interface IStaffGrievanceService
     /// case had no terminal state at all and sat <c>UnderReview</c> for ever.
     /// </remarks>
     Task<StaffGrievanceDto> CloseAsync(Guid grievanceId, CloseGrievanceDto dto, Guid closedByEmployeeId, CancellationToken cancellationToken = default);
+
+    // ── Area 9c slice 3 — documents and the signed agreement ──────────────────
+
+    /// <summary>
+    /// Checks that a document may be placed where the caller says, BEFORE the file is uploaded.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This exists because <c>HrAttachmentUpload.ExecuteAsync</c> wraps its <c>persist</c>
+    /// callback in a catch that rolls the stored document back and answers a generic <b>500</b>.
+    /// That is right for an unexpected failure and wrong for a business rule: every refusal raised
+    /// inside <see cref="AddDocumentAsync"/> reached the caller as "An error occurred while adding
+    /// the attachment", with no status and no message. Calling this first means a refused placement
+    /// never stores a file, never scans one, and never needs rolling back — and the rule's own
+    /// message and status reach the caller through the normal filter.
+    ///
+    /// <para>The same checks stay in <see cref="AddDocumentAsync"/> as well: this one is called by
+    /// the controller, that one is the last word.</para>
+    /// </remarks>
+    Task ValidateDocumentPlacementAsync(Guid grievanceId, GrievanceDocumentScope scope, Guid? stepId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes the attachment row for a file that has already been through the controlled upload
+    /// gate. Called from the controller's <c>persist</c> callback, never directly.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Takes the stored document's own values. Nothing here accepts a caller-supplied
+    /// <c>filePath</c> — that shape stores no file and is the defect the upload gate exists to
+    /// prevent.
+    /// </remarks>
+    Task<StaffGrievanceDocumentDto> AddDocumentAsync(
+        Guid grievanceId,
+        GrievanceDocumentScope scope,
+        Guid? stepId,
+        string? description,
+        DateTime? agreementSignedDate,
+        Guid uploadedByEmployeeId,
+        string fileName,
+        string filePath,
+        long fileSize,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One document, for the download endpoint to stream. Applies the case's own read rule — the
+    /// entitlement check is never the download helper's.
+    /// </summary>
+    Task<StaffGrievanceDocumentDto> GetDocumentAsync(Guid documentId, Guid? callerEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a document. HR only, and refused on a case that is no longer open.</summary>
+    Task<StaffGrievanceDto> DeleteDocumentAsync(Guid grievanceId, Guid documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The employee confirms the signed agreement. Theirs alone — refused to HR and to everyone else.
+    /// </summary>
+    Task<StaffGrievanceDto> AcceptAgreementAsync(Guid grievanceId, AcceptGrievanceAgreementDto dto, Guid employeeId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
