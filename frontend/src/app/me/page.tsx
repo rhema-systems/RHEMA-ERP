@@ -22,6 +22,7 @@ import {
   BookOpen,
   BookText,
   Briefcase,
+  Building2,
   CalendarDays,
   CheckCircle2,
   CheckSquare,
@@ -36,6 +37,7 @@ import {
   Mail,
   Megaphone,
   MessageSquare,
+  Network,
   Plane,
   Rocket,
   ShieldAlert,
@@ -84,6 +86,16 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
       { label: 'My Safety', hint: 'PPE, risk assessments, report a concern', href: '/me/safety', icon: ShieldAlert },
       { label: 'My Grievances', hint: 'Raise and follow a concern of your own', href: '/me/grievances', icon: MessageSquare },
       { label: 'Internal Job Board', hint: 'Openings you can apply for', href: '/hr/recruitment/job-board', icon: Briefcase },
+    ],
+  },
+  {
+    // Slice 13a. Outward-looking: the organisation and the people in it, rather than the
+    // caller's own record. Both tiles are useful to every employee, which is not true of most
+    // of the two sections above.
+    title: 'The organisation',
+    tiles: [
+      { label: 'Staff Directory', hint: 'Find a colleague, browse the org chart', href: '/me/directory', icon: Building2 },
+      { label: 'My Team', hint: 'Who you report to, and who reports to you', href: '/me/team', icon: Network },
     ],
   },
 ];

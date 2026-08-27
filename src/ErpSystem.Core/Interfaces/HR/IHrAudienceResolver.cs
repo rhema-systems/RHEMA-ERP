@@ -1,4 +1,4 @@
-using ErpSystem.Core.Enums;
+﻿using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -37,6 +37,18 @@ public interface IHrAudienceResolver
     /// </summary>
     Task<int> CountAsync(
         IEnumerable<HrAudienceRule> rules, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One organisation unit and every unit beneath it, in the caller's tenant.
+    /// </summary>
+    /// <remarks>
+    /// The descendant walk is this service's, and the staff directory (slice 13a) needs it as a
+    /// SQL predicate rather than as a resolved employee set: browsing a unit whose subtree holds
+    /// 7,716 people should page in the database, not materialise every id first. Exposing the
+    /// walk is cheaper than the alternative, which is the fourth private copy of it.
+    /// </remarks>
+    Task<IReadOnlyCollection<Guid>> UnitSubtreeAsync(
+        Guid unitId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Whether one employee is in the audience. Answers the portal's read without expanding the

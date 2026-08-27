@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR;
+﻿using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -116,6 +116,13 @@ public class HrAudienceResolver : IHrAudienceResolver
             if (await MatchesAsync(rule)) return false;
         }
         return true;
+    }
+
+    public async Task<IReadOnlyCollection<Guid>> UnitSubtreeAsync(
+        Guid unitId, CancellationToken cancellationToken = default)
+    {
+        if (unitId == Guid.Empty) return [];
+        return await DescendantsOfAsync(GetTenantId(), unitId, cancellationToken);
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────

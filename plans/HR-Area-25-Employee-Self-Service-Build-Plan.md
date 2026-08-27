@@ -1108,3 +1108,88 @@ and the reason it was built shared.
   already have the sweep pattern to copy, but it wants the notification decisions of a later
   slice rather than a fifth bespoke reminder.
 
+
+### Slice 13a — the staff directory and my team. CLOSED 2026-08-27.
+
+`run-slice13a.mjs` **76 assertions ×2 green**, plus the full no-regression ladder
+(111/33/36/68/47/85/72/75/80/35/98/88/80/61/117 = 1,086) → **1,162 total**. No migration — no
+schema change; the directory is a projection over columns that already existed.
+
+- **The slice exists because of what it does NOT serve.** `POST api/hr/employees/paged` was
+  already open to any internal caller — W3 slice 11 took that decision deliberately, so the one
+  shared `EmployeePicker` could work without a permission — and calling it here would have been
+  the whole feature for free. But the "lean" summary it returns carries **gender, employment
+  type, full/part-time, expatriate status, hire date, years of service and the personal mobile**.
+  A picker showing those to the handful of desk users who open one is a different proposition
+  from a browsable directory putting them in front of eight thousand colleagues. So
+  `StaffDirectoryEntryDto` projects name, role, unit, location and **work** contact, and §1 of
+  the harness asserts each of the fifteen unwanted columns is **absent by name** — without that
+  negative half, the cheap implementation and the right one are indistinguishable from the
+  outside, and the next refactor quietly reverts to the cheap one.
+- **`EmployeeSearchDto` could not have done the job anyway.** It filters `DepartmentId` /
+  `SectionId` — the axis slice 12c measured as retired (`SectionId` set on **0** of 8,131
+  employees, `DepartmentId` on 7,440) — and has **no `OrganizationUnitId` filter at all**, which
+  is the axis that is maintained (8,107 of 8,131). A directory that cannot browse by
+  organisation unit is not a directory, so the search is new code rather than a call inwards.
+- **Browsing a unit means the unit AND everything beneath it**, and on this tenant that is the
+  difference between working and looking broken: measured 2026-08-27, **"Finance Department"
+  browses to 7,897 people of whom 7,896 sit in its child "Financial Accounts" — exactly one is
+  a direct member.** A direct-membership browse of Finance would have found one person out of
+  nearly eight thousand. The walk is `IHrAudienceResolver`'s, now exposed as
+  **`UnitSubtreeAsync`** rather than copied: that service was extracted in 12c precisely to stop
+  a third private copy of the descendant walk, and this is its **third consumer**.
+- **The harness proves the walk by DELIVERY, not by arithmetic.** `parent >= child` passes on a
+  coincidence when the difference is one person, so §3 composes the unit filter with a search
+  that pins the fixture employee — who is a member of the CHILD unit and no other — and asserts
+  they are **found by browsing the PARENT**. The precondition (the fixture's unit *has* a
+  parent) is itself an assertion, so the leg can never pass by being skipped. Same shape as
+  12c's delivery proof.
+- **THE DEFECT the probe caught: a filter that lied.** `organizationUnitId=99999999-…` (a unit
+  that does not exist) correctly returned **0** rows, while `organizationUnitId=00000000-…`
+  returned **all 8,007** — the same question asked two ways, and the emptier-looking one
+  *widened* the read to the whole tenant instead of narrowing it. The codebase's `!= Guid.Empty`
+  idiom means "not supplied", which is right for a route segment and wrong for a browse filter.
+  A **supplied** empty guid is now a 400 (matching `EmployeesController`'s house style), and §5
+  asserts both arms so the two misses can never converge again.
+- **Measured, and it is why everything pages server-side:** 8,007 people on strength; 25 rows =
+  13 KB, 100 rows = 52 KB, **the whole tenant ≈ 4.1 MB**. `pageSize` clamps at 100, the totals
+  are computed over the whole result set rather than the page, and the screen holds nothing in
+  memory but the 48-node unit tree (~17 KB). The 12d lesson applied before it could bite.
+- **The browse tree is reused, not rebuilt.** `GET api/Organogram/units` is already open to any
+  authenticated user, returns the tenant's whole tree in one call, and carries
+  `totalEmployeeCount` — the subtree rollup, which is exactly the number a browse panel wants
+  beside a unit name (its *direct* `employeeCount` is 0 for most branches here, the same fact
+  that forces the descendant walk). §8 asserts it stays open **and** that
+  `Organogram/people` stays **403** for a plain employee: that endpoint is the personnel
+  register wearing a chart's clothes, W3 gated it, and this directory is the safe answer to the
+  same question. If it ever starts answering, the lean projection has been made pointless by the
+  back door — which is why the assertion is in the run rather than in a comment.
+- **A leaver is not in the directory.** Every read uses the organogram's own on-strength
+  predicate (active, not terminated), so a browse and a headcount agree. The reporting line gets
+  the same treatment in a place that is easy to miss: **nothing clears `ManagerId` on a
+  termination**, so a card would otherwise name a leaver as the person to go to. A manager who
+  is not on strength is reported as no manager.
+- **`my-team` is honestly empty for ~95% of staff and says so.** Only **416 of 8,131** live
+  employees carry a `ManagerId` (5.1%, up from 213 at slice 0). The manager half is what makes
+  the page worth opening for the rest: a page that tells you who you report to has said
+  something even with no reports of your own. The empty state names the cause — the reporting
+  line is missing from the record — rather than implying the screen is broken; the org-authority
+  model that would populate it is a deferred module. `managesAnyone` is computed server-side so
+  the screen states it rather than inferring it.
+- **Screens:** `/me/directory` (server-side search + unit-tree browse + paging),
+  `/me/directory/[id]` (the card: root-first unit path, reporting line both ways, work contact)
+  and `/me/team`. The card is **not** an employee profile — everything on it is organisational,
+  and the personal reads stay behind `HR.Employee.Read`. Manager-tool links appear only for
+  someone who actually manages people, and only to the two manager surfaces that genuinely
+  exist in the portal today (development plans' team scope, check-ins' conducting tab) — the D3
+  rule against links to places the user cannot reach.
+- **The portal nav gains its sixth group, "Company"** — the outward-looking one (the
+  organisation and the people in it), as distinct from the five about the caller's own record.
+  That brings the shell to the shape of the Blazor `PortalTopNav` the area is parity-targeting.
+  Two home tiles under a new "The organisation" section.
+- **Recorded, not built:** the directory is an **email directory** on this tenant. Measured
+  2026-08-27: 8,131/8,131 have an email address, **0 have a business number, 0 have an
+  extension, 0 have a photo**, and 14 have a mobile. The work-phone fields are projected and
+  render only when present, so the rows degrade honestly — but TDC owes office numbers before
+  this is a phone directory. The **personal mobile is deliberately not projected at all** (12a
+  made it self-maintained personal data, and a directory is not the place to publish it).

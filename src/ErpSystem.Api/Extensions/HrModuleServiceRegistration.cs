@@ -666,6 +666,11 @@ public static class HrModuleServiceRegistration
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
             ErpSystem.Core.Services.HR.Letters.HrLettersEmailEventCatalog>();
 
+        // Area 25 slice 13a — the staff directory and "my team". Third consumer of the audience
+        // resolver, for its unit-subtree walk: browsing a unit means the unit AND everything
+        // under it, and that walk already existed here rather than being copied a fourth time.
+        services.AddScoped<IStaffDirectoryService, StaffDirectoryService>();
+
         // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();

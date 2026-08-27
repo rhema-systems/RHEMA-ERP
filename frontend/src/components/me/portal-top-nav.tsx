@@ -31,6 +31,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import {
   Bell,
   Briefcase,
+  Building2,
   CheckSquare,
   ChevronDown,
   Clock,
@@ -127,6 +128,17 @@ const NAV_GROUPS: NavGroup[] = [
       // they are records about your employment, not benefits or safety.
       { label: 'My Disciplinary Record', href: '/me/discipline' },
       { label: 'My Grievances', href: '/me/grievances' },
+    ],
+  },
+  {
+    // Slice 13a: the sixth group, which brings the portal to the Blazor PortalTopNav's shape.
+    // "Company" is the outward-looking group — the organisation and the people in it — as
+    // distinct from the five that are about the caller's own record.
+    label: 'Company',
+    icon: Building2,
+    links: [
+      { label: 'Staff Directory', href: '/me/directory' },
+      { label: 'My Team', href: '/me/team' },
     ],
   },
   {
