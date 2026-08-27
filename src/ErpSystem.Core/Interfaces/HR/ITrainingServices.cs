@@ -282,6 +282,10 @@ public interface ITrainingNominationService
     /// <summary>Submits training feedback from an employee.</summary>
     Task<TrainingFeedbackDto> SubmitFeedbackAsync(SubmitTrainingFeedbackDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     /// <summary>Gets all feedback submitted for a schedule.</summary>
+    /// <summary>The caller's own training feedback. See the implementation for why it was owed.</summary>
+    Task<IEnumerable<TrainingFeedbackDto>> GetMyFeedbackAsync(
+        Guid employeeId, CancellationToken cancellationToken = default);
+
     Task<IEnumerable<TrainingFeedbackDto>> GetFeedbackForScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default);
 
     // Follow-up assessment sub-operations

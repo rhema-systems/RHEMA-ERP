@@ -7,6 +7,26 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Which shift an employee is on, and from when.
+/// </summary>
+/// <remarks>
+/// <para><b>The reads were missed by W3 and gated here in area 25 slice 14.</b> The writes were
+/// converted correctly — <c>AttendanceWritePolicy</c> on create and update,
+/// <c>AttendanceAdminPolicy</c> on delete — but every GET was left on the bare class-level
+/// <c>InternalOnly</c>, so any internal user could read any employee's shift pattern, and
+/// <c>active</c> returned the whole roster. This controller is one of the family that fell
+/// between the attendance sweep and the scheduling one.</para>
+///
+/// <para><b>The by-employee reads are self-or-permission</b>, the same split W3 applied across
+/// the rest of the attendance family: your own shift is yours to see, anyone else's needs
+/// <c>HR.Attendance.Read</c>. The refusal is a 403 rather than an empty list because the caller
+/// named a specific employee — there is no ambiguity about what they asked for.</para>
+///
+/// <para>The roster-shaped reads — by id, by shift definition, and <c>active</c> — are plain
+/// <c>AttendanceRead</c>: none of them is about one nameable person, so there is no "self" arm
+/// to offer.</para>
+/// </remarks>
 [ApiController]
 [Route("api/shift-assignments")]
 [Authorize(Policy = "InternalOnly")]
@@ -21,25 +41,42 @@ public class ShiftAssignmentsController : AttendanceControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<ShiftAssignmentDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));
 
+    /// <summary>The employee's shift right now. Theirs to read; anyone else's needs the permission.</summary>
     [HttpGet("employee/{employeeId:guid}/current")]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<ShiftAssignmentDto?>> GetCurrentAssignmentForEmployee(
         Guid employeeId, CancellationToken ct = default)
-        => Ok(await _service.GetCurrentAssignmentForEmployeeAsync(employeeId, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
 
+        return Ok(await _service.GetCurrentAssignmentForEmployeeAsync(employeeId, ct));
+    }
+
+    /// <summary>The employee's shift history. Same self-or-permission rule as the current one.</summary>
     [HttpGet("employee/{employeeId:guid}")]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<IEnumerable<ShiftAssignmentDto>>> GetByEmployeeId(
         Guid employeeId, CancellationToken ct = default)
-        => Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
+    {
+        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.AttendanceReadPolicy))
+            return Forbid();
+
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
+    }
 
     [HttpGet("shift/{shiftDefinitionId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ShiftAssignmentDto>>> GetByShiftDefinitionId(
         Guid shiftDefinitionId, CancellationToken ct = default)
         => Ok(await _service.GetByShiftDefinitionIdAsync(shiftDefinitionId, ct));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ShiftAssignmentDto>>> GetActiveAssignments(
         [FromQuery] DateTime? asOf = null, CancellationToken ct = default)
         => Ok(await _service.GetActiveAssignmentsAsync(asOf, ct));

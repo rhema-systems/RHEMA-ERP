@@ -27,6 +27,7 @@ import { CalendarPlus, CalendarRange, Coins, TreePalm } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
 import { LEAVE_STATUS_BADGE } from '@/components/me/leave/leave-status';
+import { PageHeader } from '@/components/hr/common/PageHeader';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -53,31 +54,30 @@ export default function MyLeavePage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">My Leave</h1>
-          <p className="text-sm text-muted-foreground">
-            Your balances and requests. Approvals travel through the configured workflow.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/me/leave/planner">
-              <CalendarRange className="mr-2 h-4 w-4" /> Planner
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link href="/me/leave/encashments">
-              <Coins className="mr-2 h-4 w-4" /> Encashments
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link href="/me/leave/new">
-              <CalendarPlus className="mr-2 h-4 w-4" /> New request
-            </Link>
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="My Leave"
+        description="Your balances and requests. Approvals travel through the configured workflow."
+        backHref="/me"
+        actions={
+          <>
+            <Button variant="outline" asChild>
+              <Link href="/me/leave/planner">
+                <CalendarRange className="mr-2 h-4 w-4" /> Planner
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/me/leave/encashments">
+                <Coins className="mr-2 h-4 w-4" /> Encashments
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/me/leave/new">
+                <CalendarPlus className="mr-2 h-4 w-4" /> New request
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
       {/* ── Balances ───────────────────────────────────────────────────── */}
       <section>

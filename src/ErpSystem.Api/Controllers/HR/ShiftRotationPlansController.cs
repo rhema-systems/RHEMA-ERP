@@ -135,7 +135,16 @@ public class ShiftRotationPlansController : AttendanceControllerBase
         return Ok(await _service.EnrollMemberAsync(dto, tenantId, employeeId, ct));
     }
 
+    /// <summary>Who is on this rotation.</summary>
+    /// <remarks>
+    /// Gated in area 25 slice 14, alongside the shift-assignment reads and for the same reason:
+    /// the plan's STAGES are its structure and stay open like the rest of the scheduling
+    /// registers, but its MEMBERS are named people and which pattern they work. Its own write
+    /// sibling (<c>PUT members/{memberId}</c>) was already on AttendanceWrite; only the read
+    /// was missed.
+    /// </remarks>
     [HttpGet("{id:guid}/members/list")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<ShiftRotationMemberDto>>> GetMembers(
         Guid id, CancellationToken ct = default)
         => Ok(await _service.GetMembersAsync(id, ct));

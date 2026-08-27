@@ -20,6 +20,7 @@ import {
   Award,
   CalendarClock,
   ShieldAlert,
+  MessageSquareQuote,
   Scale,
   Hourglass,
   Plus,
@@ -177,6 +178,11 @@ export default function MyTrainingPage() {
             <Button variant="outline" size="sm" asChild>
               <Link href="/me/training/bonds">
                 <Scale className="mr-2 h-4 w-4" /> Service Bonds
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/me/training/feedback">
+                <MessageSquareQuote className="mr-2 h-4 w-4" /> Course Feedback
               </Link>
             </Button>
             <Button size="sm" asChild>

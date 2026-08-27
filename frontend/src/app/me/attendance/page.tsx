@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { PageHeader } from '@/components/hr/common/PageHeader';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -130,12 +131,11 @@ export default function MyAttendancePage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">My attendance</h1>
-        <p className="text-sm text-muted-foreground">
-          Punch in and out, and see how your month is recorded.
-        </p>
-      </div>
+      <PageHeader
+        title="My attendance"
+        description="Punch in and out, and see how your month is recorded."
+        backHref="/me"
+      />
 
       {/* ── Today ──────────────────────────────────────────────────────── */}
       <Card>

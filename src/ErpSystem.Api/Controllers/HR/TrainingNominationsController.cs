@@ -308,6 +308,21 @@ public class TrainingNominationsController : ControllerBase
         return Ok(await _service.SubmitFeedbackAsync(dto, tenantId.Value, employeeId.Value, ct));
     }
 
+    /// <summary>The feedback the caller has given, newest first.</summary>
+    /// <remarks>
+    /// Token-actor, with no id-bearing twin: the sibling below is HR's aggregate over a whole
+    /// course. Without this an employee could file feedback and never see it again, and the form
+    /// could not tell them they had already answered.
+    /// </remarks>
+    [HttpGet("feedback/mine")]
+    [ProducesResponseType(typeof(IEnumerable<TrainingFeedbackDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyFeedback(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetMyFeedbackAsync(employeeId.Value, ct));
+    }
+
     [HttpGet("schedule/{scheduleId:guid}/feedback")]
     [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingFeedbackDto>>> GetFeedbackForSchedule(Guid scheduleId, CancellationToken ct)

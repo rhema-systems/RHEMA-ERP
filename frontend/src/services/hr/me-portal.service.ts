@@ -84,19 +84,6 @@ export interface PortalMovementsDashboard {
   activeTemporaryAssignments: StaffMovement[];
 }
 
-/** Computed at request time from the movement data — not persisted notifications. */
-export interface PortalMovementNotification {
-  id: string;
-  title: string;
-  message: string;
-  category: string;
-  isActionRequired: boolean;
-  createdAt: string;
-  movementId: string;
-  movementNumber: string;
-  actionUrl?: string | null;
-}
-
 // ── Payslips (slice 10) — the read-only adapter over payroll's frozen snapshots ────────────────
 // Shapes measured live (probe-slice10): the server deserializes the stored SnapshotJson and
 // returns it typed, so everything here is ordinary camelCase. `payslip` is null only when a
@@ -331,9 +318,11 @@ class MePortalService {
     return apiService.get<StaffMovement[]>(`${this.baseUrl}/secondments`);
   }
 
-  getMovementNotifications(): Promise<PortalMovementNotification[]> {
-    return apiService.get<PortalMovementNotification[]>(`${this.baseUrl}/notifications`);
-  }
+  // `getMovementNotifications` was deleted in slice 14: it had had no consumer since slice 11,
+  // whose unified feed merges these same rows server-side as Source="Movement". They are
+  // computed per request (their ids regenerate), which is why the portal marks them
+  // `isRead: null` / `canMarkRead: false` rather than pretending they are a persisted store —
+  // a second client reading them directly would have shown a "Live" list nobody could clear.
 
   // ── Payslips (slice 10) — newest PAY PERIOD first; empty until payroll publishes ──
 

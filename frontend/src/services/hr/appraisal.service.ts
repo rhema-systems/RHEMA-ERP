@@ -572,39 +572,13 @@ class AppraisalCycleTemplateService {
 }
 
 // ── Notifications ──────────────────────────────────────────────────────────────────
-
-/**
- * api/AppraisalNotifications — the in-app appraisal bell.
- *
- * The `/me` routes resolve the employee from the token; the by-id routes remain for looking
- * at someone else's queue. An account with no employee link gets 400 from `/me`, because it
- * has no notifications at all rather than none outstanding.
- */
-class AppraisalNotificationService {
-  private readonly baseUrl = '/AppraisalNotifications';
-
-  getMySummary(recentCount = 20): Promise<AppraisalNotificationSummary> {
-    return apiService.get<AppraisalNotificationSummary>(`${this.baseUrl}/me/summary`, {
-      recentCount,
-    });
-  }
-
-  getMine(page = 1, pageSize = 20): Promise<AppraisalNotification[]> {
-    return apiService.get<AppraisalNotification[]>(`${this.baseUrl}/me`, { page, pageSize });
-  }
-
-  getMyUnreadCount(): Promise<number> {
-    return apiService.get<number>(`${this.baseUrl}/me/unread-count`);
-  }
-
-  markAsRead(notificationId: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${notificationId}/read`);
-  }
-
-  markAllMineAsRead(): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/me/mark-all-read`);
-  }
-}
+//
+// `AppraisalNotificationService` lived here and was deleted in area 25 slice 14, having had no
+// consumer since slice 11. The portal's unified feed (`GET employee-portal/my-notifications`)
+// merges the appraisal store server-side alongside general, orientation and movement
+// notifications, and dispatches mark-read BY SOURCE — so a second client-side appraisal bell
+// would be a competing, partial view of the same rows. `api/AppraisalNotifications` still exists
+// and is still read: by the portal aggregate, in C#, not from here.
 
 export const appraisalSettingsService = new AppraisalSettingsService();
 export const appraisalCriteriaService = new AppraisalCriteriaService();
@@ -613,4 +587,3 @@ export const appraisalTemplateService = new AppraisalTemplateService();
 export const appraisalCycleService = new AppraisalCycleService();
 export const appraisalCycleTargetService = new AppraisalCycleTargetService();
 export const appraisalCycleTemplateService = new AppraisalCycleTemplateService();
-export const appraisalNotificationService = new AppraisalNotificationService();

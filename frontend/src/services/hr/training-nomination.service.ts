@@ -36,6 +36,19 @@ class TrainingNominationService {
   }
 
   /** The caller's own nominations — token-derived, so a self-service screen needs no employee id. */
+  /**
+   * The feedback this employee has given, newest first.
+   *
+   * ⚠ Added in slice 14. Until then the ONLY feedback read was
+   * `schedule/{id}/feedback` — HR's aggregate over everybody on a course, which answers 403 for a
+   * trainee. So feedback could be filed and never seen again, and a form had no way to know it
+   * had already been answered. That was the actual blocker on this form from slice 6, not the
+   * screen work.
+   */
+  getMyFeedback(): Promise<TrainingFeedback[]> {
+    return apiService.get<TrainingFeedback[]>(`${this.baseUrl}/feedback/mine`);
+  }
+
   getMine(): Promise<TrainingNominationSummary[]> {
     return apiService.get<TrainingNominationSummary[]>(`${this.baseUrl}/mine`);
   }
@@ -125,6 +138,15 @@ class TrainingNominationService {
   }
 
   /** trainerKnowledgeRating is what feeds the trainer's running average rating. */
+  /**
+   * ⚠ ONE PER COURSE, enforced server-side since area 25 slice 14 — a second attempt is a 422
+   * saying so. That guard matters more than it looks: the trainer's rating average is credited on
+   * EVERY submission, so before it one attendee could move a trainer's score by submitting twice.
+   * Call `getMyFeedback()` first and do not offer the form for a course already answered.
+   *
+   * `employeeId` must be the caller's own unless they hold `HR.Training.Write` — W3 made feedback
+   * the trainee's own voice, where it had previously been filable as anyone.
+   */
   submitFeedback(data: SubmitTrainingFeedbackRequest): Promise<TrainingFeedback> {
     return apiService.post<TrainingFeedback>(`${this.baseUrl}/feedback`, data);
   }

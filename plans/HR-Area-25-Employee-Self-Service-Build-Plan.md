@@ -12,6 +12,12 @@ cross-module #11b), then 27 (consultant client portal). Area 25 has **no blocker
 
 ## 1. How to use this document
 
+**✅ THIS AREA IS COMPLETE (2026-08-27).** Slices 0–14, 90 portal screens, 1,329 assertions
+across 18 harness runs, zero failures. §2 is the slice-by-slice tally and §8 the running log —
+read §8 first for anything you are about to touch, since most of what this area found was
+behaviour that had never worked rather than behaviour that broke. The only work knowingly left
+open is the pair of desk-side recruitment defects handed to that module's owner (§7).
+
 Read §2 for where we are, §3 for the measured ground truth, §5 for the decisions (four are
 already taken by the user, 2026-08-25), §7 for the slice plan. §8 is the running log — one
 entry per slice as it closes, in the area-16 style. The standing rules apply throughout:
@@ -39,9 +45,12 @@ API before asking for a rebuild (`stop-backend-before-user-builds`).
 | 12b | New capabilities: HR letter requests | **COMPLETE 2026-08-27** — 80 assertions ×2 + 827 ladder; D7 revised: letters are GENERATED (or uploaded), not upload-only |
 | 12c | New capabilities: announcements + the shared audience resolver | **COMPLETE 2026-08-27** — 61 assertions ×2 + 908 ladder; the slice-3 announcements stub wired |
 | 12d | New capabilities: the policy library + acknowledgements (D7) | **COMPLETE 2026-08-27** — 117 assertions ×2 + **1,086 ladder**; reuses 12c's resolver; the compliance roster paged after it measured 2.27 MB |
-| 12d | New capabilities: policy documents & acknowledgements | not started |
-| 13 | Directory, my team, recruitment (job board, my applications, my panel) | not started |
-| 14 | Closing audit: content audit, the two greps, route resolution, polish pass | not started |
+| 13a | The staff directory + my team | **COMPLETE 2026-08-27** — 76 assertions ×2 + 1,086 ladder; lean projection asserted column-by-column; unit browse walks the subtree; a filter that silently widened to the whole tenant fixed |
+| 13b | Recruitment self-service: internal job board, my applications, my panel | **COMPLETE 2026-08-27** — 134 assertions ×2 + 1,162 ladder; **the job board had never been usable** (country FK refused 8,072 of 8,077 staff); 69→23 keys; 2 migrations |
+| 14 | Closing audit: content audit, the two greps, route resolution, polish pass | **COMPLETE 2026-08-27** — 33 assertions ×2 + **1,296 ladder = 1,329 total**; the repeatable trainer vote closed; the shift read family gated; 4 dead clients removed |
+
+**✅ AREA 25 COMPLETE 2026-08-27 — 15 slices, 90 portal screens, 1,329 assertions across 18 runs,
+zero failures.** Every owed residual closed or explicitly handed on (see slice 14 in §8).
 
 ## 3. Ground truth — measured 2026-08-25 (survey re-verifies in slice 0)
 
@@ -96,12 +105,19 @@ self-contained `SnapshotJson`. Snapshots exist only where a run generated them
 (`POST runs/{id}/payslips/snapshots`). A read-only `/me` adapter over this table touches
 zero payroll code — the salary-projection-bridge pattern (`hr-salary-structure-bridge`).
 
-### 3.5 Owed residuals that land here (recorded in prior areas)
-1. **Bond self-accept screen** (training W3 slice 8 residual).
-2. **Asset acknowledge/respond employee surface** (area 16 — by-design absent from desk).
+### 3.5 Owed residuals that land here (recorded in prior areas) — ✅ ALL CLOSED
+1. **Bond self-accept screen** (training W3 slice 8 residual). — ✅ slice 6, `/me/training/bonds`.
+2. **Asset acknowledge/respond employee surface** (area 16 — by-design absent from desk). —
+   ✅ slice 9; the surface already existed and closing it surfaced four fixes.
 3. **Training requests page mine-fallback** (W3 slice 8 residual — desk read owed a
-   register tab; the employee-side page belongs here).
-4. Area 16 D4: portal consolidation of the 13 asset routes on `EmployeePortalController`.
+   register tab; the employee-side page belongs here). — ✅ slice 6.
+4. Area 16 D4: portal consolidation of the 13 asset routes on `EmployeePortalController`. —
+   ✅ slice 9.
+
+Residuals **raised during** the area and closed inside it: the portal feedback form (slice 6 →
+✅ slice 14, where it turned out to be a repeatable trainer vote rather than a missing screen),
+the consumer-less `appraisalNotificationService` (slice 11 → ✅ deleted in slice 14), and the
+`ShiftAssignmentsController` read gate (slice 12 survey → ✅ slice 14).
 
 ## 4. Requirements extraction
 
@@ -272,13 +288,19 @@ area-12 lessons).
   browse, lean DTO only); my-team for managers (direct reports via `ManagerId`,
   honestly-empty state); internal job board + my-applications + my-panel move-ins
   (the internal job board's service-side visibility model stays as W3 left it).
-- **HR-owned gap found in the slice-12 survey, to fix in slice 14 (ours, not another team's):**
-  `ShiftAssignmentsController`'s GET actions carry only `InternalOnly` — no attendance policy —
+  **SPLIT AT BUILD TIME into 13a (directory + my team) and 13b (recruitment)**, the same
+  way slice 12 split — see §8. The parenthesis above did NOT survive contact: the job
+  board's visibility model could not stay as W3 left it, because 13b found the board had
+  never been usable at all.
+- **HR-owned gap found in the slice-12 survey — ✅ CLOSED in slice 14, with one sibling the
+  sweep turned up (`ShiftRotationPlans/{id}/members/list`):**
+  `ShiftAssignmentsController`'s GET actions carried only `InternalOnly` — no attendance policy —
   so any internal user can read any employee's shift assignments. Writes are correctly
   `AttendanceWritePolicy` and delete `AttendanceAdminPolicy`; only the reads were missed. W3
   swept permissions area by area and this controller fell between attendance and scheduling.
-- **HR-owned recruitment defects found in the slice-13b probe, for slice 14 or the recruitment
-  owner (ours, not another team's):** (1) `POST job-vacancies/{id}/transition` applies its whole
+- **HR-owned recruitment defects found in the slice-13b probe — ⏳ STILL OPEN, handed to the
+  recruitment owner.** Slice 14 deliberately left these: both are desk-side, neither has a UI
+  caller, and an audit of the portal is not a licence to edit a neighbouring surface. (1) `POST job-vacancies/{id}/transition` applies its whole
   `UpdateJobVacancyDto`-shaped field block unconditionally, so a caller sending only
   `{id, newStatus}` BLANKS the advert title, positions, employment type, work mode, application
   deadline, the entire salary block, benefits, the experience requirement and the written-test
@@ -289,7 +311,7 @@ area-12 lessons).
   already documents. Consequence worth knowing: **0 of 101 vacancies carry an
   `ApplicationDeadline`**, so the job board's deadline filter is a no-op on this tenant.
 
-- **Slice 14 — closing audit.** The content audit run twice; **the two greps** (portal
+- **Slice 14 — closing audit. ✅ DONE; see §8 for what it actually found.** The content audit run twice; **the two greps** (portal
   service methods ↔ screens; non-GET portal routes ↔ services); route resolution over
   every portal page + every deleted route confirmed gone from all link sources; tsc +
   lint; a final design/consistency polish pass through every portal screen (empty
@@ -1313,3 +1335,102 @@ schema change; the directory is a projection over columns that already existed.
   is mapped — the same shape as the blind-screening bug that file already documents.
   Also noted: **0 of 101 vacancies carry an `ApplicationDeadline`**, so the board's deadline
   filter is a no-op on this tenant today.
+
+### Slice 14 — the closing audit. CLOSED 2026-08-27. **AREA 25 COMPLETE.**
+
+`run-slice14.mjs` **33 assertions ×2 green**, plus the full ladder
+(111/33/36/68/47/85/72/75/80/35/98/88/80/61/117/76/134 = 1,296) → **1,329 total across 18 runs,
+zero failures**. No migration.
+
+**The two greps — both now clean.**
+
+- *Non-GET portal routes ↔ services*: every one has a service method.
+- *Portal service methods ↔ screens*: found **four dead client methods** and removed them —
+  `appraisalNotificationService` (the whole five-method class, consumer-less since slice 11),
+  `me-portal.getMovementNotifications`, `asset-portal.getMyAssets`/`getMyAsset`, and
+  `my-profile.getChangeRequest`. Each deletion leaves a comment saying what replaced it, so the
+  next audit does not rediscover them. **Verified before deleting** that the unified feed really
+  does merge the Appraisal and Movement stores server-side — deleting the clients would otherwise
+  have opened a gap rather than closed one. The orphaned `PortalMovementNotification` type went
+  with them.
+
+**Route resolution — clean.** All three deleted routes (`/hr/performance/notifications` from
+slice 11, `/hr/recruitment/job-board` and `/hr/recruitment/my-panel` from 13b) are gone from every
+link source; no Blazor-era `/employee/*` links remain; and every `/me/*` link resolves against the
+90 portal pages.
+
+**Content audit, run twice.** 57 portal endpoints, **0 unexercised** — the second pass narrowed
+from "any harness file" to "the assertion RUNS only", on the grounds that a probe records a
+payload while a run defends behaviour, and an endpoint exercised only by a probe has no standing
+assertion.
+
+**⚠ THE RECURRING LESSON OF THIS SLICE: every static instrument cried wolf, three times.** A
+crude line-adjacency scan of the attendance family flagged 19 controllers; reading each action
+whole — including gates made *inside* the body — the real count was one. A `/me` substring test
+matched `/members`. A literal-prefix match against the harness reported five unexercised
+endpoints, all of which compose their URL from a base constant (`${MY}/outstanding`). **Every
+finding in this slice was hand-verified before being acted on**, and that is the only reason the
+diff is small. Same shape as the three instruments in areas 19–23.
+
+**`ShiftAssignmentsController` — the gap W3 left, closed.** Its writes were converted correctly
+(`AttendanceWrite` on create/update, `AttendanceAdmin` on delete) and **every GET was missed**, so
+any internal user could read any employee's shift pattern and `active` returned the whole roster.
+Now self-or-permission on the two by-employee reads (using W3's own `SelfOrPolicyAsync`), plain
+`AttendanceRead` on the roster-shaped ones — there is no "self" arm to offer a read that is not
+about one nameable person. The harness proves it two-sided: mine answers, a colleague's refuses,
+and HR still gets both — a gate that only refuses is indistinguishable from breakage.
+
+- The systematic sweep found **one sibling with the same shape**:
+  `ShiftRotationPlans/{id}/members/list`, which lists who is on a rotation while its own write
+  sibling was already gated. Now `AttendanceRead`. Its `{id}/stages` neighbour stays open, being
+  structure rather than people. The other 40 ungated reads are holiday calendars, shift
+  definitions, pay periods and work schedules — the foundation registers W3 deliberately left
+  open so the pickers keep working.
+
+**Course feedback — the area's last owed residual, and it was never the screen.** Parked since
+slice 6 because there was no self read: the only one, `schedule/{id}/feedback`, is HR's aggregate
+over everybody on a course and 403s a trainee, so a form could neither show what you said nor tell
+whether you had already said it. New `GET training-nominations/feedback/mine`, screen at
+`/me/training/feedback`.
+
+- **THE FIND, and it is worth more than the form: the vote was repeatable.**
+  `SubmitFeedbackAsync` deduped nothing, and `CreditTrainerRatingAsync` runs on **every**
+  submission — so one attendee could move a trainer's average simply by pressing submit again. A
+  missing dedupe on an opinion is untidy; a repeatable vote is a broken statistic. One feedback
+  per person per schedule now, refused with a message that says so. **The harness asserts the
+  trainer's numbers either side of the duplicate attempt**, because the number is the thing that
+  was wrong — asserting only the 422 would have proven the guard fired without proving it
+  protected anything.
+- **Caught in my own new endpoint by the probe:** `feedback/mine` returned `programName` and
+  `employeeName` as **empty strings** — present but blank — because the query Included `Schedule`
+  without `Schedule.Program` or `Employee`, while the POST response had both. A row naming neither
+  the course nor the person is useless to the form reading it back. Fixed, and the harness asserts
+  both `nonBlank` rather than merely present. This is exactly why the probe runs before the
+  TypeScript.
+- **Caught in myself:** I wrote a `MyTrainingFeedback` type and a second `submitFeedback` before
+  noticing that `TrainingFeedback` and `submitFeedback` already existed and matched the payload
+  exactly. Both removed. The portal reuses the existing type — and unlike slice 13b that is the
+  *right* call here, which the type now states: a job application carries the recruiter's
+  assessment OF the candidate, whereas training feedback is the employee's own words about a
+  course, so there is nothing to withhold.
+- `SubmitTrainingFeedbackRequest.feedbackDate` was typed as required while the server DTO defaults
+  it; relaxed to optional. Left **settable** rather than server-stamped, because HR with
+  `HR.Training.Write` may be entering feedback collected on paper at an earlier date — recorded in
+  the type rather than silently changed.
+
+**Design and consistency pass over all 90 portal screens.** The scan flagged 33; hand-checking
+reduced that to one real finding, and it is a satisfying one: **the portal's oldest screens
+predated its own header convention.** Leave and attendance were the first domains moved in
+(slice 4), before `PageHeader` settled, and the two hub screens carried **no way back** while the
+other 88 all did. Both converted. The five leave sub-screens already had back navigation and keep
+their raw `<h1>` — cosmetic, and not worth the churn or the JSX risk. The rest of the 33 were
+false positives: `w-[160px]` on a `TableHead` is a column width, and `/me/medical` renders nothing
+while loading on purpose rather than flashing a wrong empty state.
+
+**Owed residuals — all closed or explicitly handed on.** The portal feedback form: built. The
+consumer-less `appraisalNotificationService`: deleted. `ShiftAssignmentsController`: gated. The
+two recruitment defects 13b recorded (`transition` blanking omitted advert fields;
+`CreateJobVacancyDto.EmploymentType` dropped by `ToEntity`) stay recorded rather than fixed —
+they are desk-side recruitment, neither has a UI caller, and this slice is an audit of the portal,
+not a licence to edit a neighbouring surface. They are written up in §7 above for the recruitment
+owner.

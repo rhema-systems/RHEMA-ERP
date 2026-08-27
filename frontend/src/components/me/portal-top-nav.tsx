@@ -107,6 +107,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Learning Paths', href: '/me/learning' },
       { label: 'My Waitlist', href: '/me/training/waitlist' },
       { label: 'My Service Bonds', href: '/me/training/bonds' },
+      // Slice 14: the last owed residual — parked since slice 6 for want of a self read.
+      { label: 'Course Feedback', href: '/me/training/feedback' },
       { label: 'My Mentoring', href: '/me/mentoring' },
       // Slice 7: orientation lives in the portal.
       { label: 'My Orientations', href: '/me/orientation' },

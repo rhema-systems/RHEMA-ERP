@@ -429,6 +429,23 @@ export interface MarkAttendanceRequest {
   notes?: string | null;
 }
 
+/**
+ * One piece of training feedback.
+ *
+ * Verified against the live payload in area 25 slice 14 (`probe-slice14-feedback.mjs`, 27 keys) —
+ * the trainee's own `feedback/mine` returns exactly this, so the portal reuses it rather than
+ * growing a parallel type.
+ *
+ * ⚠ Unlike the recruitment self-reads of slice 13b, the portal deliberately gets the SAME shape
+ * the desk does, and the difference is worth stating: a job application carries the recruiter's
+ * assessment OF the candidate, which is not theirs to read; training feedback is the employee's
+ * own words about a course. Nothing here is written about them by anyone else, so there is
+ * nothing to withhold.
+ *
+ * ⚠ `programName` and `employeeName` arrive through navigations and came back EMPTY on the first
+ * slice-14 probe run — present but blank, because the new self-read Included `Schedule` without
+ * `Schedule.Program` or `Employee`. If they are ever blank again, that is the server, not this.
+ */
 export interface TrainingFeedback {
   id: string;
   scheduleId: string;
@@ -458,6 +475,7 @@ export interface TrainingFeedback {
 
 export interface SubmitTrainingFeedbackRequest {
   scheduleId: string;
+  /** Must be the caller's own unless they hold `HR.Training.Write` (W3). */
   employeeId: string;
   nominationId?: string | null;
   contentRelevanceRating?: number | null;
@@ -474,7 +492,13 @@ export interface SubmitTrainingFeedbackRequest {
   likelihoodToApply?: number | null;
   expectedApplicationOnJob?: string | null;
   barriersToApplication?: string | null;
-  feedbackDate: string;
+  /**
+   * Optional — the server DTO defaults it to the moment the request is handled, which is what the
+   * portal relies on. It is settable rather than server-stamped because HR (with
+   * `HR.Training.Write`) may be entering feedback collected on paper on an earlier date; a trainee
+   * filing their own has no reason to send it, and the portal does not.
+   */
+  feedbackDate?: string;
 }
 
 export interface TrainingFollowUpAssessment {

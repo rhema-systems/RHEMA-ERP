@@ -633,6 +633,21 @@ public class TrainingNominationService : ITrainingNominationService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        // One feedback per person per schedule. Without this a trainee could file twice, and
+        // because CreditTrainerRatingAsync runs on EVERY submission each one was counted into the
+        // trainer's average — so one attendee could move a trainer's score simply by pressing the
+        // button again. That is the half of this that matters: a missing dedupe on an opinion is
+        // untidy, a repeatable vote is a broken statistic.
+        var already = await _feedbackRepository.GetQueryable()
+            .AnyAsync(f => f.TenantId == current
+                        && f.ScheduleId == dto.ScheduleId
+                        && f.EmployeeId == dto.EmployeeId
+                        && !f.IsDeleted,
+                      cancellationToken);
+        if (already)
+            throw new InvalidOperationException(
+                "You have already given feedback for this course. It cannot be submitted twice.");
+
         var entity = dto.ToEntity(current, createdByUserId);
 
         await _feedbackRepository.AddAsync(entity);
@@ -646,6 +661,37 @@ public class TrainingNominationService : ITrainingNominationService
 
         var saved = await _feedbackRepository.GetByIdWithNavigationsAsync(entity.Id);
         return (saved ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// The feedback this employee has given, newest first.
+    /// </summary>
+    /// <remarks>
+    /// The only read before this was <c>GetFeedbackForScheduleAsync</c>, which is HR's aggregate
+    /// over everybody on a course. A trainee could therefore file feedback and never see it again
+    /// — and, more to the point, a form had no way to know whether they had already answered.
+    /// That is why the portal feedback form was parked from slice 6 until now: the write existed,
+    /// the read did not, and a form built on the write alone would invite the double submission
+    /// this slice also closed.
+    /// </remarks>
+    public async Task<IEnumerable<TrainingFeedbackDto>> GetMyFeedbackAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var list = (await _feedbackRepository.GetQueryable()
+                .Where(f => f.TenantId == tenantId && f.EmployeeId == employeeId && !f.IsDeleted)
+                // ⚠ `Schedule` alone is not enough. ToDto() reads ProgramName through
+                // Schedule.Program and EmployeeName through Employee, so a single Include leaves
+                // both as the empty string — present but blank, which the probe caught before
+                // this reached a screen. A row that names neither the course nor the person is
+                // useless to the form that reads it back.
+                .Include(f => f.Schedule).ThenInclude(sch => sch.Program)
+                .Include(f => f.Employee)
+                .OrderByDescending(f => f.CreatedAt)
+                .ToListAsync(cancellationToken))
+            .Select(f => f.ToDto())
+            .ToList();
+        return list;
     }
 
     public async Task<IEnumerable<TrainingFeedbackDto>> GetFeedbackForScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default)

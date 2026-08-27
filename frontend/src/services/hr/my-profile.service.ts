@@ -237,10 +237,9 @@ class MyProfileService {
     return apiService.get<ProfileChangeRequest[]>(`${this.baseUrl}/change-requests`);
   }
 
-  /** Somebody else's id is a 404 lookup miss — never a 403. */
-  getChangeRequest(id: string): Promise<ProfileChangeRequest> {
-    return apiService.get<ProfileChangeRequest>(`${this.baseUrl}/change-requests/${id}`);
-  }
+  // `getChangeRequest` (one request by id) was deleted in slice 14 — never called, because the
+  // list read already carries every field the screen renders, items included. The endpoint
+  // remains, and its self-arm is still asserted by run-slice12a.mjs.
 
   cancelChangeRequest(id: string): Promise<ProfileChangeRequest> {
     return apiService.post<ProfileChangeRequest>(`${this.baseUrl}/change-requests/${id}/cancel`, {});

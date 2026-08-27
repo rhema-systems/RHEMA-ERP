@@ -1,6 +1,5 @@
 import { apiService } from '../api.service';
 import type {
-  AssetAssignment,
   AssetAssignmentSummary,
   AssetRequisition,
   AssetRequisitionSummary,
@@ -32,10 +31,11 @@ class AssetPortalService {
 
   // ── What I hold ────────────────────────────────────────────────────────────
 
-  /** Assets currently in the employee's hands. */
-  getMyAssets(): Promise<AssetAssignmentSummary[]> {
-    return apiService.get<AssetAssignmentSummary[]>(`${this.baseUrl}/assets`);
-  }
+  // `getMyAssets` (the plain held list) and `getMyAsset` (one assignment by id) were deleted in
+  // slice 14. Both endpoints remain and both work; slice 9 decided they stay screen-less because
+  // their content is already the held table plus the terms letter, and neither had ever been
+  // called. Re-add a client method when a screen genuinely needs one, rather than keeping two
+  // that only look like coverage.
 
   /** Everything they have ever held, returned assets included. */
   getMyAssetHistory(): Promise<AssetAssignmentSummary[]> {
@@ -45,10 +45,6 @@ class AssetPortalService {
   /** The landing counters and the three short lists behind them, in one call. */
   getMyAssetSummary(): Promise<EmployeeAssetSummary> {
     return apiService.get<EmployeeAssetSummary>(`${this.baseUrl}/assets/summary`);
-  }
-
-  getMyAsset(assignmentId: string): Promise<AssetAssignment> {
-    return apiService.get<AssetAssignment>(`${this.baseUrl}/assets/${assignmentId}`);
   }
 
   /**
