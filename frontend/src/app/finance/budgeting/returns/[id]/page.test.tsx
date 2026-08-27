@@ -112,4 +112,57 @@ describe('Budget return fiscal-period grid', () => {
     expect(workspace).not.toHaveClass('h-[calc(100vh-4rem)]');
     expect(grid).toHaveClass('min-h-[24rem]');
   });
+
+  it('does not offer submission until the return has an assignee', async () => {
+    await act(async () => {
+      render(
+        <Suspense fallback={<div>Loading</div>}>
+          <BudgetReturnEditorPage
+            params={Promise.resolve({ id: 'return-1' })}
+          />
+        </Suspense>
+      );
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText(
+        'Assign this return from the scenario page before submission.'
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Submit Budget' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers submission to the assigned preparer', async () => {
+    vi.mocked(budgetDataService.getReturnById).mockResolvedValueOnce({
+      id: 'return-1',
+      budgetScenarioId: 'scenario-1',
+      segmentValueName: 'Finance',
+      assignedToUserId: 'admin-user',
+      status: 'Draft',
+      rowVersion: 'return-version',
+    } as never);
+
+    await act(async () => {
+      render(
+        <Suspense fallback={<div>Loading</div>}>
+          <BudgetReturnEditorPage
+            params={Promise.resolve({ id: 'return-1' })}
+          />
+        </Suspense>
+      );
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByRole('button', { name: 'Submit Budget' })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        'Assign this return from the scenario page before submission.'
+      )
+    ).not.toBeInTheDocument();
+  });
 });

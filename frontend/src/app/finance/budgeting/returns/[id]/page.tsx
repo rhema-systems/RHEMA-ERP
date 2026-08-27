@@ -302,6 +302,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         || normalizedRoles.has('tenantadmin')
         || normalizedRoles.has('superadmin');
     const isAssignedUser = budgetReturn.assignedToUserId === user?.id;
+    const hasAssignee = Boolean(budgetReturn.assignedToUserId);
     const isDraftLike = budgetReturn.status === 'Draft' || budgetReturn.status === 'Rejected';
     const scenarioIsCollecting = scenario.status === 'Collecting';
     const isEditable = isDraftLike
@@ -309,6 +310,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Edit')));
     const canSubmit = isDraftLike
         && scenarioIsCollecting
+        && hasAssignee
         && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Submit')));
     const canRecall = budgetReturn.status === 'Submitted'
         && scenarioIsCollecting
@@ -416,6 +418,11 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </p>
                     </div>
                     <div className="flex gap-2">
+                        {isDraftLike && scenarioIsCollecting && !hasAssignee && (
+                            <div className="flex max-w-xs items-center rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                Assign this return from the scenario page before submission.
+                            </div>
+                        )}
                         {(isEditable || canSubmit || canRecall) && (
                             <>
                                 {isEditable && (
