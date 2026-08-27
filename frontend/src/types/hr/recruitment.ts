@@ -599,3 +599,49 @@ export interface HrPagedResult<T> {
   hasPrevious: boolean;
   hasNext: boolean;
 }
+
+/**
+ * A published vacancy as an APPLICANT sees it — the internal job board and the public career
+ * portal share this projection.
+ *
+ * Transcribed from a live `GET api/job-vacancies/published` (`probe-slice13b.mjs`), 23 keys.
+ *
+ * ⚠ This is deliberately not {@link JobVacancy}. That type is the recruitment record: it carries
+ * the auto-shortlist threshold, the test-score weight, the internal-candidate boost points, the
+ * blind-screening flag, the shortlist approval notes and approver, the workflow instance id, the
+ * pipeline counts and the hiring manager and recruiter by name — the terms an applicant is about
+ * to be judged on. Until area 25 slice 13b the internal board served all of it, and served
+ * `salaryRangeMin`/`Max` even when `isSalaryVisible` was false, which the public projection has
+ * always withheld. Do not "upgrade" this back to `JobVacancy` to reach a field: if a board needs
+ * something more, add it to the server-side projection deliberately.
+ *
+ * ⚠ `salaryRangeMin`/`salaryRangeMax`/`salaryCurrencyCode` are **null unless `isSalaryVisible`**.
+ * The server nulls them; the screen must not assume a range exists.
+ */
+export interface PublicVacancy {
+  id: string;
+  vacancyNumber: string;
+  jobTitle: string;
+  positionTitle: string;
+  /** The requisition's organisation unit. Named "department" by the public contract. */
+  departmentName: string;
+  locationName: string;
+  employmentType: EmploymentType;
+  employmentTypeName: string;
+  workMode: WorkMode;
+  workModeName: string;
+  numberOfPositions: number;
+  requiredMinExperienceYears?: number | null;
+  keyBenefitsSummary?: string | null;
+  targetStartDate?: string | null;
+  isSalaryVisible: boolean;
+  salaryRangeMin?: number | null;
+  salaryRangeMax?: number | null;
+  salaryCurrencyCode?: string | null;
+  publishDate?: string | null;
+  applicationDeadline?: string | null;
+  requiresWrittenTest: boolean;
+  requiresPracticalTest: boolean;
+  /** The advert body, from the requisition's job description. The board's whole point. */
+  jobDescription?: string | null;
+}

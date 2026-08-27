@@ -152,11 +152,45 @@ public interface IJobApplicationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns all applications submitted by the given employee (via InternalEmployeeId).
-    /// Used on the Internal Job Board to show "Already Applied" status.
+    /// All applications submitted by the given employee (via InternalEmployeeId) — the internal
+    /// job board's "Already Applied" state, and the My Applications list.
     /// </summary>
-    Task<IEnumerable<JobApplicationSummaryDto>> GetByInternalEmployeeAsync(
+    /// <remarks>
+    /// Returns the LEAN <see cref="MyJobApplicationDto"/>, not the recruiter's summary: see the
+    /// implementation for the assessment fields that used to ride along.
+    /// </remarks>
+    Task<IEnumerable<MyJobApplicationDto>> GetByInternalEmployeeAsync(
         Guid employeeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One of the caller's OWN internal applications, or null when the id is not theirs.
+    /// </summary>
+    /// <remarks>
+    /// An internal applicant could apply and then never look at what they had sent: every read on
+    /// this controller other than <c>my-applications</c> is <c>RecruitmentRead</c>, so the detail
+    /// of your own application was HR's to see and not yours. Ownership is applied IN THE QUERY,
+    /// so somebody else's id is a lookup miss rather than a refusal — a 403 here would confirm
+    /// that an application exists, which is the enumeration oracle slice 12a fixed on the profile
+    /// change requests.
+    /// </remarks>
+    Task<MyJobApplicationDto?> GetMyApplicationAsync(
+        Guid applicationId,
+        Guid employeeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Withdraws one of the caller's OWN internal applications.
+    /// </summary>
+    /// <remarks>
+    /// The desk withdraw is <c>RecruitmentWrite</c>, so an employee could apply for an internal
+    /// job and then had no way to take it back — they had to ask the recruiter to do it for them.
+    /// A candidate withdrawing is the one act in the pipeline that is unambiguously theirs.
+    /// </remarks>
+    Task<bool> WithdrawMyApplicationAsync(
+        Guid applicationId,
+        Guid employeeId,
+        string? reason,
         CancellationToken cancellationToken = default);
 
     // ── External self-service portal ─────────────────────────────────────────

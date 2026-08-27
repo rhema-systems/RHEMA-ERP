@@ -10,6 +10,7 @@ import type {
   JobPostingStatus,
   JobPostingSummary,
   JobVacancy,
+  PublicVacancy,
   JobVacancyStatus,
   JobVacancyStatusHistoryEntry,
   JobVacancySummary,
@@ -258,8 +259,21 @@ class JobVacancyService {
   }
 
   /** Full DTOs (unlike the others here) — the internal job board filters on `allowInternalCandidates`. */
-  getPublished(): Promise<JobVacancy[]> {
-    return apiService.get<JobVacancy[]>(`${this.baseUrl}/published`);
+  /**
+   * The internal job board.
+   *
+   * ⚠ Returns `PublicVacancy`, NOT `JobVacancy`. Until area 25 slice 13b this served the full
+   * vacancy record to any internal caller — 69 keys against the anonymous public portal's 23 for
+   * the same row — including the auto-shortlist threshold, the test-score weight, the
+   * internal-candidate boost points, whether blind screening was on, the shortlist approval notes
+   * and approver, the pipeline counts, and the hiring manager and recruiter by name. It also
+   * served the salary range regardless of `isSalaryVisible`, which the public projection
+   * correctly withholds, and carried no job description at all. It is now the same lean
+   * projection the public portal uses, and the server (not this client) applies
+   * `allowInternalCandidates`.
+   */
+  getPublished(): Promise<PublicVacancy[]> {
+    return apiService.get<PublicVacancy[]>(`${this.baseUrl}/published`);
   }
 
   getByRequisition(requisitionId: string): Promise<JobVacancySummary[]> {

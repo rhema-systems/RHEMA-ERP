@@ -14,13 +14,21 @@ import { formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { jobInterviewService } from '@/services/hr/interviews.service';
 
 /**
- * A panelist's own diary.
+ * A panelist's own diary (moved into the portal by area 25 slice 13b).
  *
  * ⚠ This is the *only* interview list a non-HR employee can read. The schedule at
- * `/hr/recruitment/interviews` is HR's and answers 403 for a panelist, so their route into a session
- * has to start here. It is backed by `me/panelist-slots`, which takes the employee from the token —
- * the id-bearing twin would mean the client fetching its own employee id and passing it back, which
- * is the shape that produced this module's authorization holes.
+ * `/hr/recruitment/interviews` is HR's and answers 403 for a panelist — measured: "Only HR can list
+ * interviews by status" and "Only HR can list the interview schedule" — so their route into a
+ * session has to start here. It is backed by `me/panelist-slots`, which takes the employee from the
+ * token; the id-bearing twin would mean the client fetching its own employee id and passing it
+ * back, which is the shape that produced this module's authorization holes.
+ *
+ * ⚠ The session and scorecard screens it links to stay on the desk at `/hr/recruitment/interviews/
+ * {id}`. That is deliberate and is NOT a D3 violation: interview read access is enforced per
+ * RECORD, not per role — `JobInterviewService.EnsureCanReadInterviewAsync` admits "HR, or a
+ * panelist on THIS interview" — so a panelist following the link is authorised by the same rule
+ * that put them on the panel. Duplicating the session view into the portal would mean two
+ * scorecard forms against one upsert endpoint, which is how a scorecard gets silently replaced.
  *
  * An employee on no panels sees an empty list, not an error.
  */
@@ -46,11 +54,11 @@ export default function MyInterviewPanelPage() {
   const rows = slots.data ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="My interview panel"
         description="Sessions you are sitting on, and the scorecards you owe."
-        backHref="/hr/recruitment"
+        backHref="/me"
       />
 
       <Card>

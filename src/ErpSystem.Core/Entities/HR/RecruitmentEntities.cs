@@ -785,10 +785,24 @@ public class JobCandidate : TenantEntity
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
 
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// The candidate's country. <b>Optional</b> — an external applicant supplies it on the public
+    /// form, where it stays required, but an <i>internal</i> candidate is a shadow record minted
+    /// from an employee who may well have no country on file.
+    /// </summary>
+    /// <remarks>
+    /// This was a required FK, and it made the internal job board unusable (area 25 slice 13b).
+    /// Both <c>InternalApplyAsync</c> and <c>InternalSaveDraftAsync</c> had to refuse an employee
+    /// with no country to avoid writing <c>Guid.Empty</c> and taking an FK 547 — measured on
+    /// DEFAULT 2026-08-27, that was <b>8,072 of 8,077</b> live employees, and the refusal told
+    /// them to "complete the employee record first", which is a field only HR can change
+    /// (<c>EmployeeProfileField.CountryId</c>, slice 12a). A country is a requirement the foreign
+    /// key invented, not one the business asked for, so the key gives way.
+    /// </remarks>
+    public Guid? CountryId { get; set; }
 
     [ForeignKey(nameof(CountryId))]
-    public virtual Country Country { get; set; } = null!;
+    public virtual Country? Country { get; set; }
 	
     /// <summary>
     /// Whether this candidate is in the active talent pool for future vacancies.

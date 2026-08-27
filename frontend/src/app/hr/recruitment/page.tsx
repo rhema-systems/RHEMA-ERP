@@ -86,12 +86,6 @@ const HR_ITEMS: NavCardItem[] = [
     icon: CalendarClock,
   },
   {
-    title: 'My panel',
-    description: 'Interviews you are sitting on, and the scorecards you owe.',
-    href: '/hr/recruitment/my-panel',
-    icon: UserCheck,
-  },
-  {
     title: 'Offers',
     description: 'Terms raised against an application, through approval to the candidate’s response.',
     href: '/hr/recruitment/offers',
@@ -111,13 +105,25 @@ const HR_ITEMS: NavCardItem[] = [
   },
 ];
 
-/** Open to any authenticated employee, HR or not — see `/hr/recruitment/job-board`'s doc comment. */
+/**
+ * Self-service surfaces, open to any authenticated employee — HR or not.
+ *
+ * Area 25 slice 13b moved both into the portal at `/me/*`. They are still linked from here
+ * because a recruiter is also an employee and this is the page they are already on; the desk
+ * keeps no copy of either screen.
+ */
 const EVERYONE_ITEMS: NavCardItem[] = [
   {
     title: 'Internal job board',
     description: 'Open roles you can apply for, and the applications you have already made.',
-    href: '/hr/recruitment/job-board',
+    href: '/me/jobs',
     icon: Megaphone,
+  },
+  {
+    title: 'My panel',
+    description: 'Interviews you are sitting on, and the scorecards you owe.',
+    href: '/me/panel',
+    icon: UserCheck,
   },
 ];
 

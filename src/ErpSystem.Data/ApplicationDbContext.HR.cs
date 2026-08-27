@@ -7378,9 +7378,23 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.ApplicationDate).HasDatabaseName("IX_JobApplication_Date");
             entity.HasIndex(x => new { x.TenantId, x.ApplicationNumber })
                 .IsUnique().HasDatabaseName("IX_JobApplication_Tenant_Number");
-            // One application per candidate per vacancy
+            // One LIVE application per candidate per vacancy.
+            //
+            // The filter is load-bearing (area 25 slice 13b). Unfiltered, this index said "one
+            // application ever", which contradicted the service: InternalApplyAsync's duplicate
+            // guard deliberately excludes Withdrawn, so re-applying after withdrawing was intended
+            // and was unreachable — the insert died on this index with a 2601 before the guard's
+            // intent could matter, surfacing as a 500. The same trap the succession area hit from
+            // the other direction: a soft delete does not release a unique index either, so
+            // IsDeleted is excluded here too.
+            //
+            // Withdrawn (13) is the only terminal state released. Rejected and Hired are NOT: a
+            // candidate the organisation turned down should not be able to re-apply to the same
+            // vacancy by pressing the button again, and a hired one has nothing left to apply for.
             entity.HasIndex(x => new { x.JobVacancyId, x.JobCandidateId })
-                .IsUnique().HasDatabaseName("IX_JobApplication_Vacancy_Candidate");
+                .IsUnique()
+                .HasFilter("[Status] <> 13 AND [IsDeleted] = 0")
+                .HasDatabaseName("IX_JobApplication_Vacancy_Candidate");
 
             entity.Property(x => x.Status).HasConversion<int>();
             entity.Property(x => x.Source).HasConversion<int>();

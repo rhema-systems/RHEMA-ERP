@@ -277,6 +277,18 @@ area-12 lessons).
   so any internal user can read any employee's shift assignments. Writes are correctly
   `AttendanceWritePolicy` and delete `AttendanceAdminPolicy`; only the reads were missed. W3
   swept permissions area by area and this controller fell between attendance and scheduling.
+- **HR-owned recruitment defects found in the slice-13b probe, for slice 14 or the recruitment
+  owner (ours, not another team's):** (1) `POST job-vacancies/{id}/transition` applies its whole
+  `UpdateJobVacancyDto`-shaped field block unconditionally, so a caller sending only
+  `{id, newStatus}` BLANKS the advert title, positions, employment type, work mode, application
+  deadline, the entire salary block, benefits, the experience requirement and the written-test
+  flag — 12 of 12 measured, while `change-status` beside it preserves everything. Zero UI callers
+  today and the typed client signature already demands the full set, so it is a latent API trap
+  rather than live data loss. (2) `CreateJobVacancyDto.EmploymentType` is dropped by `ToEntity`
+  while `WorkMode` beside it is mapped — the same shape as the blind-screening bug that file
+  already documents. Consequence worth knowing: **0 of 101 vacancies carry an
+  `ApplicationDeadline`**, so the job board's deadline filter is a no-op on this tenant.
+
 - **Slice 14 — closing audit.** The content audit run twice; **the two greps** (portal
   service methods ↔ screens; non-GET portal routes ↔ services); route resolution over
   every portal page + every deleted route confirmed gone from all link sources; tsc +
@@ -1193,3 +1205,111 @@ schema change; the directory is a projection over columns that already existed.
   render only when present, so the rows degrade honestly — but TDC owes office numbers before
   this is a phone directory. The **personal mobile is deliberately not projected at all** (12a
   made it self-maintained personal data, and a directory is not the place to publish it).
+
+### Slice 13b — recruitment self-service. CLOSED 2026-08-27.
+
+`run-slice13b.mjs` **134 assertions ×2 green**, plus the full ladder
+(111/33/36/68/47/85/72/75/80/35/98/88/80/61/117/76 = 1,162) → **1,296 total**. Two migrations:
+`20260827115504_MakeJobCandidateCountryOptional` and
+`20260827132602_FilterJobApplicationVacancyCandidateIndex`, both guarded SQL and both registered.
+
+- **THE FIND: the internal job board had never been usable.** Applying mints a shadow
+  `JobCandidate` from the employee's record, and that entity's `CountryId` was a REQUIRED FK while
+  `Employee.CountryId` is optional — so both internal write paths refused outright rather than
+  take an FK 547 on `Guid.Empty`. Measured 2026-08-27: **8,072 of 8,077 live employees have no
+  country**, so the board refused **99.94% of the workforce**, and the refusal told them to
+  "complete the employee record first" — `EmployeeProfileField.CountryId` is in slice 12a's
+  HR-approved change-request set, so **the advice was as unavailable as the feature**. The country
+  was a requirement the foreign key invented, not one the business asked for, so the key gives
+  way. It stays REQUIRED on the public form, where an external applicant is asked directly and can
+  answer. The harness §5 asserts the fixture employee has no country **through the details read as
+  HR** — the lean `EmployeeDto` has no `countryId` property at all, so checking it there would
+  have passed whatever the database held (slice 11's vacuous-leg lesson, caught in my own harness
+  before it ran).
+- **The board served the recruitment record to everyone.** Measured on one vacancy: **69 keys to
+  an employee, 23 to an anonymous member of the public.** The internal board handed out the
+  auto-shortlist threshold, the test-score weight, the internal-candidate boost points, the
+  blind-screening flag, the shortlist approval notes and approver, the workflow instance id, the
+  pipeline counts, and the hiring manager and recruiter by name — **the terms the applicant is
+  about to be judged on**. It also served `SalaryRangeMin/Max` **regardless of `IsSalaryVisible`**,
+  which `ToPublicDto` has always withheld, so **the less-trusted audience was the better protected
+  one**. And `JobVacancyDto` carries no job description at all, so an employee could apply for a
+  job whose advert they could not read. One change fixes all three: the board now returns the same
+  lean `PublicVacancyDto` the public portal does. The lean projection **already existed and was
+  already correct** — the internal board simply never used it.
+- **`AllowInternalCandidates` was browser-deep.** The published query is the public portal's,
+  which has no reason to consider the flag; the screen compensated with a client-side
+  `.filter()`, so the API served vacancies closed to internal candidates and `apply-internal`
+  accepted an application against one. Proven, then fixed in the list AND on all three write paths
+  — apply, draft-save, and **again on draft-submit**, because the flag can be turned off while a
+  draft sits unsent and the draft is what would carry a stale permission into the pipeline. The
+  vacancy already modelled the rule properly (publishing creates an `InternalPortal` posting only
+  when the flag is set); nothing consulted it.
+- **You could apply and then neither read nor withdraw.** Every other read on the controller is
+  `RecruitmentRead` and withdraw is `RecruitmentWrite`, so your own application was HR's to see
+  and HR's to retract. New `my-applications/{id}` and `my-applications/{id}/withdraw`, with
+  ownership applied **in the query** so somebody else's id is a **404, not a 403** — a refusal
+  would confirm the row exists, the enumeration oracle slice 12a closed on profile change requests.
+- **THE SHAPE THAT KEPT RECURRING — a lean surface reusing a desk DTO, three times in one slice.**
+  First the vacancy (fixed), then I nearly shipped `JobApplicationDetailDto` on the new self-read
+  (`autoScore`, `autoScoreBreakdown`, `shortlistingNotes`, assessor names, the communications log,
+  the test results), then the probe caught `my-applications` — the **list** — still returning
+  `JobApplicationSummaryDto` with `autoScore` and `aggregatedReviewScore`. **Leaning only the
+  detail moves a leak rather than closing it.** Both now share one `ToMyApplicationDto`, and the
+  harness asserts the absent fields on the list row as well as the detail. `RejectionReason` IS
+  included, following slice 6's precedent that a rejection reason must reach the person rejected.
+- **THE DEFECT THE HARNESS CAUGHT: a withdrawal did not release the unique index.**
+  `IX_JobApplication_Vacancy_Candidate` was `UNIQUE (JobVacancyId, JobCandidateId)` unfiltered —
+  "one application ever" — while `InternalApplyAsync`'s duplicate guard **deliberately excludes
+  `Withdrawn`**. The insert died on a 2601 before the guard's intent could matter, so that
+  predicate was **unreachable code** and the user got a 500. This is the succession area's lesson
+  arriving from the other direction — *a soft delete does not release a unique index*, and neither
+  does a withdrawal — so `IsDeleted` is excluded now too. **Only `Withdrawn` (13) is released**:
+  `Rejected` and `Hired` still block, because somebody the organisation turned down should not
+  re-enter by pressing Apply again. **Fixed rather than recorded because I introduced the
+  hazard** — the withdraw dialog I wrote promises "you can apply again later while the vacancy is
+  still open", which the index was making false; one click would have barred that role forever.
+  The migration's `Down` can legitimately FAIL and says so: a vacancy holding a withdrawn plus a
+  later application from the same candidate cannot rebuild the unfiltered index without choosing
+  which real application to destroy.
+- **Screens:** `/me/jobs` (the board, rebuilt for the lean payload — it can finally render the
+  advert, and salary only when the vacancy permits), `/me/jobs/applications` (split out of the
+  board's second tab, because a draft on a tab nobody opens is a draft nobody finishes),
+  `/me/jobs/applications/[id]` (what I sent, where it got to, withdraw) and `/me/panel` (git mv).
+  Both `/hr/recruitment/*` routes deleted; every inbound link re-pointed, including the desk
+  interview schedule's escape hatch and the recruitment hub, whose "My panel" tile moved into the
+  everyone-section beside the job board.
+- **The panelist's session and scorecard stay on the desk — and that is now PROVEN, not argued.**
+  `/me/panel` links onward to `/hr/recruitment/interviews/{id}` and its score page, on the
+  grounds that interview access is enforced **per record**, not per role
+  (`EnsureCanReadInterviewAsync` admits "HR, or a panelist on THIS interview") and that a
+  scorecard is **upserted**, so a second form against one endpoint is how a scorecard gets
+  silently replaced. That was the one claim in the slice resting on reading rather than
+  execution: §8 proved only the NEGATIVE half (the HR-only schedule lists refuse), because the
+  fixture had no interview and the diary came back empty. **§9 drives the positive half** —
+  vacancy → internal application → interview → seat a non-HR employee on the panel → confirm →
+  open the session → read the panel, the interviewees and the question plan → **file a scorecard
+  as themselves** → finalize → read it back finalized. 31 assertions. Slice 6 is why: its
+  evidenced-completion leg ran as HR and missed a dead path for exactly this reason.
+  - The walls hold in both directions. A panelist **cannot** close or cancel the interview or
+    change the panel (403, each saying "Only HR can…"), and — the sharpest one — **the CANDIDATE
+    cannot open the session they are being interviewed for**, nor see who is on the panel:
+    per-record access cuts both ways or it is not a rule.
+  - Measured in passing: `applicationIds` on interview create **does** seat the interviewee (so
+    the explicit add is unnecessary), and the score-draft read is panelist-scoped on
+    **`internalPanelistId`** — omitting it is a 422, not an empty draft. The desk score screen
+    maps its `?panelistId=` query onto that parameter correctly, so the whole link chain
+    `/me/panel → session → Candidates tab → Scorecard` resolves for a panelist.
+- **Recorded, NOT fixed — two desk-side recruitment defects found in passing:**
+  (1) **`POST job-vacancies/{id}/transition` blanks every advert field the caller omits.** Proven
+  in `probe-slice13b-transition.mjs`: sending `{id, newStatus}` wiped **12 of 12** watched fields —
+  advert title, positions, employment type, work mode, application deadline, the whole salary
+  block, benefits, experience requirement and the written-test flag — while `change-status` beside
+  it preserved everything. Its field block "mirrors UpdateJobVacancyDto" and is applied
+  unconditionally. It has **zero UI callers** and its typed client signature is already
+  `UpdateJobVacancy & {newStatus}`, so it is a latent API trap rather than live data loss; the
+  harness echoes the full set back, which is what a correct caller does anyway.
+  (2) **`CreateJobVacancyDto.EmploymentType` is dropped by `ToEntity`** while `WorkMode` beside it
+  is mapped — the same shape as the blind-screening bug that file already documents.
+  Also noted: **0 of 101 vacancies carry an `ApplicationDeadline`**, so the board's deadline
+  filter is a no-op on this tenant today.

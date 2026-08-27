@@ -840,7 +840,8 @@ public class JobCandidateDto : BaseDto
     public string? DigitalAddress { get; set; }
     public string City { get; set; } = string.Empty;
     public string? Nationality { get; set; }
-    public Guid CountryId { get; set; }
+    /// <summary>Optional since slice 13b — an internal candidate may have no country on file.</summary>
+    public Guid? CountryId { get; set; }
     public string CountryName { get; set; } = string.Empty;
     public bool IsInTalentPool { get; set; }
     public DateTime? TalentPoolAddedDate { get; set; }
@@ -1551,6 +1552,65 @@ public class RejectApplicationDto
     [Required]
     [MaxLength(2000)]
     public string RejectionReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One internal application, as the APPLICANT sees it (area 25 slice 13b).
+/// </summary>
+/// <remarks>
+/// <para>Deliberately not <see cref="JobApplicationDetailDto"/>. That is the recruiter's view and
+/// carries the auto-score and its criterion-by-criterion breakdown, the shortlisting notes, the
+/// names of whoever shortlisted or rejected them, the applicant-communication log and the test
+/// results. Handing a candidate the scoring they were assessed under — and the internal notes
+/// written about them — is a different act from telling them where their application stands.</para>
+///
+/// <para>What IS here: their own submission back, the vacancy they applied to, the status and its
+/// dates, and the outcome reason when there is one. The rejection reason is included on purpose,
+/// following the module's own precedent from area 25 slice 6, where a training request's rejection
+/// reason was finally made to reach the person who asked.</para>
+/// </remarks>
+public class MyJobApplicationDto
+{
+    public Guid Id { get; set; }
+    public string ApplicationNumber { get; set; } = string.Empty;
+
+    public Guid JobVacancyId { get; set; }
+    public string VacancyNumber { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public string? OrgUnitName { get; set; }
+    public DateTime? ApplicationDeadline { get; set; }
+
+    public ApplicationStatus Status { get; set; }
+    public string StatusName => JobApplicationDto.FormatApplicationStatus(Status);
+    public DateTime ApplicationDate { get; set; }
+
+    // ── What the applicant themselves sent ───────────────────────────────────
+    public int? YearsOfExperience { get; set; }
+    public DateTime? AvailableFrom { get; set; }
+    public string? CoverLetter { get; set; }
+
+    // ── Where it got to ──────────────────────────────────────────────────────
+    public bool IsShortlisted { get; set; }
+    public DateTime? ShortlistedDate { get; set; }
+    public DateTime? WithdrawnDate { get; set; }
+    public string? WithdrawalReason { get; set; }
+    public DateTime? RejectedDate { get; set; }
+    public string? RejectionReason { get; set; }
+
+    /// <summary>Whether the applicant may still take it back — computed here so the screen need not guess.</summary>
+    public bool CanWithdraw { get; set; }
+}
+
+/// <summary>
+/// The applicant's own withdrawal. The reason is optional here — unlike the desk
+/// <see cref="WithdrawApplicationDto"/>, where a recruiter withdrawing on somebody's behalf must
+/// say why — because a candidate who no longer wants the job owes no explanation.
+/// </summary>
+public class WithdrawMyApplicationDto
+{
+    [MaxLength(1000)]
+    public string? WithdrawalReason { get; set; }
 }
 
 public class WithdrawApplicationDto
@@ -5093,8 +5153,9 @@ public class ExternalApplicationDto
     public string? City { get; set; }
 
     /// <summary>
-    /// Required: JobCandidate.CountryId is a non-nullable FK, so an omitted value would be written as
-    /// Guid.Empty and fail the foreign key with an opaque 500. The public portal exposes
+    /// Required on the PUBLIC form, and only there. <c>JobCandidate.CountryId</c> itself is optional
+    /// (slice 13b) so that an internal applicant with no country on file can still apply; an external
+    /// candidate, by contrast, is asked directly and can answer. The public portal exposes
     /// GET /api/public/countries specifically to populate this field.
     /// </summary>
     [Required(ErrorMessage = "Country is required.")]

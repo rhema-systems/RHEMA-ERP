@@ -220,3 +220,5 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260826235441_AddHrLetterRequests")] partial class AddHrLetterRequests { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827005934_AddHrAnnouncements")] partial class AddHrAnnouncements { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827015130_AddHrPolicyLibrary")] partial class AddHrPolicyLibrary { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827115504_MakeJobCandidateCountryOptional")] partial class MakeJobCandidateCountryOptional { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827132602_FilterJobApplicationVacancyCandidateIndex")] partial class FilterJobApplicationVacancyCandidateIndex { }

@@ -100,8 +100,17 @@ public class JobVacancyController : ControllerBase
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetActive()
         => Ok(await _service.GetActiveVacanciesAsync());
 
+    /// <summary>
+    /// The internal job board — published vacancies open to internal candidates.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not recruitment-gated: every employee may see what is open. That is exactly
+    /// why it serves the LEAN <see cref="PublicVacancyDto"/> rather than the full vacancy record,
+    /// and why <c>AllowInternalCandidates</c> is applied in the service rather than in the screen.
+    /// See <c>JobVacancyService.GetPublishedForJobBoardAsync</c>.
+    /// </remarks>
     [HttpGet("published")]
-    public async Task<ActionResult<IEnumerable<JobVacancyDto>>> GetPublished(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<PublicVacancyDto>>> GetPublished(CancellationToken ct)
     {
         var tenantId = _currentUser.TenantId;
         if (tenantId == null) return BadRequest("Tenant context could not be resolved.");

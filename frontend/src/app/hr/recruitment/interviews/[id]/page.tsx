@@ -149,7 +149,7 @@ export default function InterviewDetailPage() {
       <PageHeader
         title={`${data.interviewNumber} — ${data.jobTitle || 'Interview'}`}
         description={`Round ${data.round} · ${humanizeEnum(data.type)} · ${humanizeEnum(data.mode)}`}
-        backHref={canManage ? '/hr/recruitment/interviews' : '/hr/recruitment/my-panel'}
+        backHref={canManage ? '/hr/recruitment/interviews' : '/me/panel'}
         actions={
           canManage && !isTerminal ? (
             <div className="flex gap-2">

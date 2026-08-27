@@ -122,8 +122,10 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Probation', href: '/me/probation' },
       { label: 'My Oath of Secrecy', href: '/me/oath' },
       { label: 'My Competencies', href: '/hr/competencies/me' },
-      { label: 'Internal Job Board', href: '/hr/recruitment/job-board' },
-      { label: 'My Panel Interviews', href: '/hr/recruitment/my-panel' },
+      // Slice 13b: recruitment self-service lives in the portal.
+      { label: 'Internal Job Board', href: '/me/jobs' },
+      { label: 'My Applications', href: '/me/jobs/applications' },
+      { label: 'My Panel Interviews', href: '/me/panel' },
       // Slice 9: discipline + grievances live in the portal. They sit in this group because
       // they are records about your employment, not benefits or safety.
       { label: 'My Disciplinary Record', href: '/me/discipline' },

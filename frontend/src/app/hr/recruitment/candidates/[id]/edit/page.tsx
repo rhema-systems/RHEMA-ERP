@@ -52,7 +52,9 @@ export default function EditCandidatePage() {
       postalAddress: data.postalAddress ?? null,
       digitalAddress: data.digitalAddress ?? null,
       city: data.city,
-      countryId: data.countryId,
+      // Optional on the read since slice 13b (internal shadow candidates carry no country), but
+      // still required on this form — HR filling in a candidate record must name one.
+      countryId: data.countryId ?? '',
       linkedInProfile: data.linkedInProfile ?? null,
       portfolioUrl: data.portfolioUrl ?? null,
       gitHubUrl: data.gitHubUrl ?? null,

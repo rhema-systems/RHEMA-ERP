@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827115504_MakeJobCandidateCountryOptional")]
+    partial class MakeJobCandidateCountryOptional
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -51660,8 +51663,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("JobVacancyId", "JobCandidateId")
                         .IsUnique()
-                        .HasDatabaseName("IX_JobApplication_Vacancy_Candidate")
-                        .HasFilter("[Status] <> 13 AND [IsDeleted] = 0");
+                        .HasDatabaseName("IX_JobApplication_Vacancy_Candidate");
 
                     b.HasIndex("TenantId", "ApplicationNumber")
                         .IsUnique()

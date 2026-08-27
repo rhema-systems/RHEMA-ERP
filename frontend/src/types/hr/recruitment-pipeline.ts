@@ -303,7 +303,8 @@ export interface JobCandidate {
   digitalAddress?: string | null;
   city: string;
   nationality?: string | null;
-  countryId: string;
+  /** Optional since slice 13b: an internal candidate is a shadow record with no country on file. */
+  countryId?: string | null;
   countryName: string;
   isInTalentPool: boolean;
   talentPoolAddedDate?: string | null;
@@ -985,4 +986,50 @@ export function applicationStatusOrdinal(status: ApplicationStatus): number {
 
 export function applicationSourceOrdinal(source: ApplicationSource): number {
   return APPLICATION_SOURCES.indexOf(source) + 1;
+}
+
+/**
+ * One internal application as the APPLICANT sees it (area 25 slice 13b).
+ *
+ * Transcribed from a live `GET api/job-applications/my-applications/{id}` (`probe-slice13b.mjs`).
+ *
+ * ⚠ Deliberately not {@link JobApplicationDetail}. That is the recruiter's view: it carries
+ * `autoScore` and `autoScoreBreakdown`, `shortlistingNotes`, `shortlistedByName`,
+ * `rejectedByName`, the applicant-communication log and the test results. Telling candidates
+ * where they stand is not the same act as handing them the scoring they were assessed under, or
+ * the internal notes written about them. If a screen needs a field that is not here, add it to
+ * the server projection on purpose — do not reach for the detail type.
+ *
+ * `rejectionReason` IS here, following the module's precedent from slice 6 (a training request's
+ * rejection reason finally reaching the person who asked for it).
+ */
+export interface MyJobApplication {
+  id: string;
+  applicationNumber: string;
+
+  jobVacancyId: string;
+  vacancyNumber: string;
+  jobTitle: string;
+  positionTitle: string;
+  orgUnitName?: string | null;
+  applicationDeadline?: string | null;
+
+  status: ApplicationStatus;
+  statusName: string;
+  applicationDate: string;
+
+  /** What the applicant themselves sent. */
+  yearsOfExperience?: number | null;
+  availableFrom?: string | null;
+  coverLetter?: string | null;
+
+  isShortlisted: boolean;
+  shortlistedDate?: string | null;
+  withdrawnDate?: string | null;
+  withdrawalReason?: string | null;
+  rejectedDate?: string | null;
+  rejectionReason?: string | null;
+
+  /** Computed server-side, so the screen does not re-derive the terminal states. */
+  canWithdraw: boolean;
 }

@@ -679,7 +679,6 @@ export const navigationItems: NavItem[] = [
           { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock, permissions: ['HR.Recruitment.Read'] },
           // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The
           // interview schedule above answers 403 for them, so without this they have no way in.
-          { title: 'My Panel', href: '/hr/recruitment/my-panel', icon: UserCheck },
           { title: 'Offers', href: '/hr/recruitment/offers', icon: HandCoins, permissions: ['HR.Recruitment.Read'] },
           { title: 'Hires', href: '/hr/recruitment/hires', icon: UserCheck, permissions: ['HR.Recruitment.Read'] },
           {

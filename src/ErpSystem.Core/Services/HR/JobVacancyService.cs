@@ -195,14 +195,43 @@ public class JobVacancyService : IJobVacancyService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The internal job board: what an EMPLOYEE may see and apply for.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things were wrong here before area 25 slice 13b, and both were measured.</para>
+    ///
+    /// <para><b>It returned the full <c>JobVacancyDto</c> to any internal caller.</b> Measured on
+    /// the same vacancy: 69 keys to an employee versus 23 to an anonymous member of the public —
+    /// the internal board handed out the auto-shortlist threshold, the test-score weight, the
+    /// internal-candidate boost points, whether blind screening was on, the shortlist approval
+    /// notes and approver, the workflow instance id, the pipeline counts, and the hiring manager
+    /// and recruiter by name. Those are the terms an applicant is about to be judged on. Worse,
+    /// it served <c>SalaryRangeMin/Max</c> regardless of <c>IsSalaryVisible</c>, which
+    /// <c>ToPublicDto</c> correctly withholds — so the LESS trusted audience was better protected
+    /// than the internal one. And it carried no job description at all, so the one thing an
+    /// applicant actually needs was the one thing missing. It now uses the same lean projection
+    /// the public portal uses, which fixes all of that at once.</para>
+    ///
+    /// <para><b>It ignored <c>AllowInternalCandidates</c>.</b> The published query is the public
+    /// portal's, which has no reason to consider it; the job-board screen compensated with a
+    /// client-side <c>.filter()</c>, so a vacancy closed to internal candidates was still served
+    /// by the API and could still be applied to by anyone posting directly. The flag is enforced
+    /// here now, and again on the apply path — a rule that lives only in the browser is not a rule.
+    /// (The vacancy already models this properly: publishing creates an <c>InternalPortal</c>
+    /// posting only when the flag is set.)</para>
+    /// </remarks>
+    public async Task<IEnumerable<PublicVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         // Same query as the public portal (deadline filter applied in SQL, requisition/job-description
         // eagerly loaded so job titles actually render), scoped to the caller's tenant.
         var entities = await _vacancyRepository.GetPublishedForPublicPortalAsync(
             tenantId, DateTime.UtcNow.Date, cancellationToken: cancellationToken);
 
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities
+            .Where(e => e.AllowInternalCandidates)
+            .ToPublicDtoList()
+            .ToList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default)

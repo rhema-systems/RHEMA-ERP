@@ -1,6 +1,7 @@
 import { apiService } from '../api.service';
 import { hrDocumentService } from './hr-document.service';
 import type {
+  MyJobApplication,
   AggregatedReviewScore,
   ApplicantCommunication,
   ApplicantTestResult,
@@ -641,8 +642,17 @@ class JobApplicationService {
     return apiService.post<JobApplication>(`${this.baseUrl}/apply-internal`, payload);
   }
 
-  getMyApplications(): Promise<JobApplicationSummary[]> {
-    return apiService.get<JobApplicationSummary[]>(`${this.baseUrl}/my-applications`);
+  /**
+   * The caller's own applications.
+   *
+   * ⚠ Returns `MyJobApplication[]`, NOT `JobApplicationSummary[]`. The recruiter's summary carries
+   * `autoScore`, `scoredAt`, `scoreIsStale`, `aggregatedReviewScore` (the panel's verdict on
+   * them), `snapshotAvailable`, `jobCandidateId` and the pipeline stage — the assessment, not the
+   * answer. Leaning only the single read and leaving this list alone would have moved the leak
+   * rather than closed it.
+   */
+  getMyApplications(): Promise<MyJobApplication[]> {
+    return apiService.get<MyJobApplication[]>(`${this.baseUrl}/my-applications`);
   }
 
   saveInternalDraft(payload: InternalSaveDraft): Promise<JobApplication> {
@@ -651,6 +661,29 @@ class JobApplicationService {
 
   submitInternalDraft(id: string, payload: InternalSubmitDraft): Promise<JobApplication> {
     return apiService.put<JobApplication>(`${this.baseUrl}/internal/${id}/submit`, payload);
+  }
+
+  /**
+   * One of the caller's own applications.
+   *
+   * ⚠ Returns `MyJobApplication`, NOT `JobApplicationDetail`. The recruiter's detail carries the
+   * auto-score and its criterion breakdown, the shortlisting notes, the names of whoever
+   * shortlisted or rejected them, the communication log and the test results — the assessment,
+   * not the answer. Somebody else's id is a 404, never a 403.
+   */
+  getMyApplication(id: string): Promise<MyJobApplication> {
+    return apiService.get<MyJobApplication>(`${this.baseUrl}/my-applications/${id}`);
+  }
+
+  /**
+   * Withdraws the caller's own application. The reason is optional — a candidate who no longer
+   * wants the job owes no explanation, unlike a recruiter withdrawing on somebody's behalf.
+   */
+  withdrawMyApplication(id: string, withdrawalReason?: string | null): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(
+      `${this.baseUrl}/my-applications/${id}/withdraw`,
+      { withdrawalReason: withdrawalReason ?? null },
+    );
   }
 }
 

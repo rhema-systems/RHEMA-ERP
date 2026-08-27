@@ -85,7 +85,7 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
       { label: 'My Assets', hint: 'What you hold, and requests', href: '/me/assets', icon: Laptop },
       { label: 'My Safety', hint: 'PPE, risk assessments, report a concern', href: '/me/safety', icon: ShieldAlert },
       { label: 'My Grievances', hint: 'Raise and follow a concern of your own', href: '/me/grievances', icon: MessageSquare },
-      { label: 'Internal Job Board', hint: 'Openings you can apply for', href: '/hr/recruitment/job-board', icon: Briefcase },
+      { label: 'Internal Job Board', hint: 'Openings you can apply for', href: '/me/jobs', icon: Briefcase },
     ],
   },
   {

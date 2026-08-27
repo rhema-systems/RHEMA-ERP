@@ -1,4 +1,4 @@
-﻿using ErpSystem.Core.Enums;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
 

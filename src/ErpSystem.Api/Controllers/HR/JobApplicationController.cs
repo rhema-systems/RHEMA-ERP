@@ -613,7 +613,8 @@ public class JobApplicationController : ControllerBase
     /// through the Internal Job Board. Used to show "Already Applied" status.
     /// </summary>
     [HttpGet("my-applications")]
-    public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetMyApplications(CancellationToken ct)
+    [ProducesResponseType(typeof(IEnumerable<MyJobApplicationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<MyJobApplicationDto>>> GetMyApplications(CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
@@ -621,6 +622,49 @@ public class JobApplicationController : ControllerBase
 
         var results = await _service.GetByInternalEmployeeAsync(employeeId.Value, ct);
         return Ok(results);
+    }
+
+    /// <summary>
+    /// One of the caller's own internal applications, in full.
+    /// </summary>
+    /// <remarks>
+    /// Somebody else's id is a 404, not a 403 — ownership is applied in the query, so this route
+    /// cannot be used to discover which application ids exist.
+    /// </remarks>
+    [HttpGet("my-applications/{id:guid}")]
+    [ProducesResponseType(typeof(MyJobApplicationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMyApplication(Guid id, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        var result = await _service.GetMyApplicationAsync(id, employeeId.Value, ct);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    /// <summary>
+    /// Withdraws one of the caller's own internal applications.
+    /// </summary>
+    /// <remarks>
+    /// The desk withdraw is <c>RecruitmentWrite</c>. Without this, an employee could put their
+    /// name forward for an internal job and then had no way to take it back except by asking the
+    /// recruiter — which is the one decision in the whole pipeline that is unambiguously the
+    /// candidate's own.
+    /// </remarks>
+    [HttpPost("my-applications/{id:guid}/withdraw")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> WithdrawMyApplication(
+        Guid id, [FromBody] WithdrawMyApplicationDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        await _service.WithdrawMyApplicationAsync(id, employeeId.Value, dto?.WithdrawalReason, ct);
+        return Ok(new { message = "Application withdrawn." });
     }
 
     /// <summary>Saves or updates a draft internal application (status = Draft).</summary>

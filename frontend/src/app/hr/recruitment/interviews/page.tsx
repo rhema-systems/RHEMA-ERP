@@ -32,7 +32,8 @@ type Mode = 'range' | 'status';
  * by status, by vacancy, by round). The date range is the default because a schedule is a diary,
  * and `from`/`to` are required by the API rather than optional.
  *
- * A panelist gets a 403 from every read on this page; their sessions are at `/hr/recruitment/my-panel`.
+ * A panelist gets a 403 from every read on this page; their sessions are at `/me/panel` (moved into
+ * the portal by area 25 slice 13b).
  */
 export default function InterviewsPage() {
   const [mode, setMode] = useState<Mode>('range');
@@ -64,7 +65,7 @@ export default function InterviewsPage() {
         actions={
           <div className="flex gap-2">
             <Button variant="outline" asChild>
-              <Link href="/hr/recruitment/my-panel">
+              <Link href="/me/panel">
                 <Users className="mr-1.5 h-4 w-4" />
                 My panel
               </Link>
