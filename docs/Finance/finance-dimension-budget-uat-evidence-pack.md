@@ -178,6 +178,7 @@ commit, and run the automated baseline again before starting Phase A UAT.
 | Backend baseline after deployment | Pass — 32/32 |
 | Frontend dimension-grid baseline | Pass — 6/6 |
 | Safe API runtime | Zero product workers; `RhemaERP`; startup initialization skipped; loopback health HTTP 200 |
+| Frontend runtime | Clean reviewed UAT worktree on port 3000; `/login` HTTP 200 |
 
 ## Phase A — worksheet and immutable budget grain
 
