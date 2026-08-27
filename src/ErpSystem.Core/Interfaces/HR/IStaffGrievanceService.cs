@@ -97,6 +97,44 @@ public interface IStaffGrievanceService
 
     /// <summary>Stands a party down. Not a delete — the file must still read correctly. HR only.</summary>
     Task<StaffGrievanceDto> RemovePartyAsync(Guid grievanceId, Guid partyId, RemoveGrievancePartyDto dto, CancellationToken cancellationToken = default);
+
+    // ── Area 9c slice 2 — FR-HR-181's missing artefacts ───────────────────────
+
+    /// <summary>
+    /// Obligation 5. Records or amends HR's formal reading of the case. HR only, and refused once
+    /// the case is closed — an interpretation edited after the outcome is what makes it
+    /// indefensible.
+    /// </summary>
+    Task<StaffGrievanceDto> RecordHrInterpretationAsync(Guid grievanceId, RecordHrInterpretationDto dto, Guid recordedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Obligation 7. Opens the investigation. One per case. HR only.</summary>
+    Task<StaffGrievanceDto> OpenInvestigationAsync(Guid grievanceId, OpenGrievanceInvestigationDto dto, Guid openedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Updates an investigation that is still open. HR only.</summary>
+    Task<StaffGrievanceDto> UpdateInvestigationAsync(Guid grievanceId, UpdateGrievanceInvestigationDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>Concludes the investigation. Refused without findings. HR only.</summary>
+    Task<StaffGrievanceDto> CompleteInvestigationAsync(Guid grievanceId, CompleteGrievanceInvestigationDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Obligation 8. Resolves the case by recording what was decided — the act that
+    /// <c>respond(resolvesGrievance: true)</c> used to stand in for.
+    /// </summary>
+    /// <remarks>
+    /// Permitted to HR and to whoever the current step names, exactly as answering is. Used a second
+    /// time it fills in a <see cref="GrievanceResolutionOutcome.NotRecorded"/> outcome and does
+    /// nothing else — a recorded decision is never amended.
+    /// </remarks>
+    Task<StaffGrievanceDto> ResolveAsync(Guid grievanceId, ResolveGrievanceDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Closes a case that reached the Board and was answered without being resolved. HR only.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The first writer <see cref="GrievanceStatus.Closed"/> has ever had. Before slice 2 such a
+    /// case had no terminal state at all and sat <c>UnderReview</c> for ever.
+    /// </remarks>
+    Task<StaffGrievanceDto> CloseAsync(Guid grievanceId, CloseGrievanceDto dto, Guid closedByEmployeeId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -383,6 +383,12 @@ public partial class ApplicationDbContext
     // (a union official or a lawyer), which is why it is not an Employee FK alone.
     public DbSet<StaffGrievanceParty> StaffGrievanceParties { get; set; } = null!;
 
+    // Area 9c slice 2 — FR-HR-181 obligations 7 and 8, which had no field anywhere before:
+    // the investigation report, and the resolution decision as an artefact distinct from
+    // whatever the last responder happened to type.
+    public DbSet<StaffGrievanceInvestigation> StaffGrievanceInvestigations { get; set; } = null!;
+    public DbSet<StaffGrievanceResolution> StaffGrievanceResolutions { get; set; } = null!;
+
     // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
     // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
     // an HR officer to approve, and approval applies them.
@@ -9284,6 +9290,67 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Employee)
                 .WithMany()
                 .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 2 — the two attribution legs on the case itself.
+            entity.HasOne(x => x.HrInterpretationBy)
+                .WithMany()
+                .HasForeignKey(x => x.HrInterpretationById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ClosedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ClosedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceInvestigation (area 9c slice 2, FR-HR-181 obligation 7) ----
+        builder.Entity<StaffGrievanceInvestigation>(entity =>
+        {
+            // One per case. Filtered on the soft delete so that removing one and opening another
+            // is possible later without the index refusing it — the area-13 lesson, where a soft
+            // delete did not release a unique index and five faces broke.
+            entity.HasIndex(x => x.GrievanceId).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(x => x.InvestigatorId);
+
+            entity.HasOne(x => x.Grievance)
+                .WithOne(x => x.Investigation!)
+                .HasForeignKey<StaffGrievanceInvestigation>(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Investigator)
+                .WithMany()
+                .HasForeignKey(x => x.InvestigatorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OpenedBy)
+                .WithMany()
+                .HasForeignKey(x => x.OpenedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceResolution (area 9c slice 2, FR-HR-181 obligation 8) ----
+        builder.Entity<StaffGrievanceResolution>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(x => x.Outcome);
+
+            entity.Property(x => x.Outcome).HasConversion<int>();
+            entity.Property(x => x.DecidedAtLevel).HasConversion<int>();
+
+            entity.HasOne(x => x.Grievance)
+                .WithOne(x => x.Resolution!)
+                .HasForeignKey<StaffGrievanceResolution>(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.DecidedBy)
+                .WithMany()
+                .HasForeignKey(x => x.DecidedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OutcomeRecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.OutcomeRecordedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

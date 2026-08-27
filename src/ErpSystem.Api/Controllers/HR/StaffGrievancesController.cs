@@ -232,4 +232,102 @@ public class StaffGrievancesController : ControllerBase
         if (!ModelState.IsValid) return BadRequest(ModelState);
         return Ok(await _service.RemovePartyAsync(id, partyId, dto));
     }
+
+    // =========================================================================
+    // FR-HR-181's artefacts — area 9c slice 2
+    // =========================================================================
+
+    /// <summary>
+    /// Obligation 5 — HR's formal reading of the case, which the rungs above read on the way up.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from the HR rung's step response: that is HR answering the employee, this is HR's
+    /// position on the merits. Amendable while the case is open; frozen once it is not.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/hr-interpretation")]
+    public async Task<ActionResult<StaffGrievanceDto>> RecordHrInterpretation(
+        Guid id, [FromBody] RecordHrInterpretationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.RecordHrInterpretationAsync(id, dto, employeeId));
+    }
+
+    /// <summary>Obligation 7 — opens the investigation. One per case.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/investigation")]
+    public async Task<ActionResult<StaffGrievanceDto>> OpenInvestigation(
+        Guid id, [FromBody] OpenGrievanceInvestigationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.OpenInvestigationAsync(id, dto, employeeId));
+    }
+
+    /// <summary>Updates an investigation that is still open. A null field means "leave alone".</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPut("{id:guid}/investigation")]
+    public async Task<ActionResult<StaffGrievanceDto>> UpdateInvestigation(
+        Guid id, [FromBody] UpdateGrievanceInvestigationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.UpdateInvestigationAsync(id, dto));
+    }
+
+    /// <summary>Concludes the investigation. Refused without findings.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/investigation/complete")]
+    public async Task<ActionResult<StaffGrievanceDto>> CompleteInvestigation(
+        Guid id, [FromBody] CompleteGrievanceInvestigationDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.CompleteInvestigationAsync(id, dto));
+    }
+
+    /// <summary>
+    /// Obligation 8 — resolves the case by recording what was decided.
+    /// </summary>
+    /// <remarks>
+    /// Ungated here for the same reason <see cref="Respond"/> is: whoever decides at the supervisor
+    /// or HOD rung is not in HR. The service allows HR or whoever the step names, and refuses
+    /// everyone else including the griever — you cannot decide your own case.
+    ///
+    /// <para>This is the act <c>respond(resolvesGrievance: true)</c> used to stand in for. That path
+    /// still works and still resolves, but produces an outcome of <c>NotRecorded</c>; calling this
+    /// afterwards fills that in, and is the only change a recorded decision ever accepts.</para>
+    /// </remarks>
+    [HttpPost("{id:guid}/resolve")]
+    public async Task<ActionResult<StaffGrievanceDto>> Resolve(Guid id, [FromBody] ResolveGrievanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.ResolveAsync(id, dto, employeeId));
+    }
+
+    /// <summary>
+    /// Closes a case that reached the Board and was answered without being resolved.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The first writer <c>GrievanceStatus.Closed</c> has ever had. Before slice 2 every one of
+    /// its three references in the solution was a read filter, and a case in this position had no
+    /// terminal state at all — it sat <c>UnderReview</c> for ever and the reminder sweep chased it
+    /// for ever.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/close")]
+    public async Task<ActionResult<StaffGrievanceDto>> Close(Guid id, [FromBody] CloseGrievanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.CloseAsync(id, dto, employeeId));
+    }
 }

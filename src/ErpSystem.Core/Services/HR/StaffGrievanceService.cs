@@ -64,7 +64,15 @@ public class StaffGrievanceService : IStaffGrievanceService
             .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.Employee)
             .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.RepresentsEmployee)
             .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.Union)
-            .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.AddedBy);
+            .Include(g => g.Parties.Where(p => !p.IsDeleted)).ThenInclude(p => p.AddedBy)
+            // Area 9c slice 2 — FR-HR-181's artefacts. All on the case file read, none on the
+            // register: a register row must not drag an investigation report behind it.
+            .Include(g => g.HrInterpretationBy)
+            .Include(g => g.ClosedBy)
+            .Include(g => g.Investigation!).ThenInclude(i => i.Investigator)
+            .Include(g => g.Investigation!).ThenInclude(i => i.OpenedBy)
+            .Include(g => g.Resolution!).ThenInclude(r => r.DecidedBy)
+            .Include(g => g.Resolution!).ThenInclude(r => r.OutcomeRecordedBy);
 
     /// <summary>
     /// The register's query — tenant-scoped and soft-delete filtered, with NO includes.
@@ -391,6 +399,27 @@ public class StaffGrievanceService : IStaffGrievanceService
             grievance.Status = GrievanceStatus.Resolved;
             grievance.ResolvedDate = now;
             grievance.ResolutionSummary = dto.Response.Trim();
+
+            // Area 9c slice 2 — FR-HR-181 obligation 8. This shorthand is what used to BE the
+            // resolution: an answer copied into a summary field, with no decider distinct from the
+            // responder, no outcome and no remedy. It still works, because the portal screen calls
+            // it, but it now leaves a real artefact behind — marked NotRecorded, which honestly says
+            // "resolved, and nobody captured what was decided" rather than inventing an outcome.
+            // `ResolveAsync` records a real one, and can fill this one in afterwards.
+            if (grievance.Resolution == null)
+            {
+                await _unitOfWork.Repository<StaffGrievanceResolution>().AddAsync(new StaffGrievanceResolution
+                {
+                    TenantId = grievance.TenantId,
+                    GrievanceId = grievance.Id,
+                    Outcome = GrievanceResolutionOutcome.NotRecorded,
+                    Decision = dto.Response.Trim(),
+                    DecidedById = responderEmployeeId,
+                    DecidedDate = now,
+                    DecidedAtLevel = step.Level,
+                    CreatedBy = responderEmployeeId.ToString(),
+                });
+            }
         }
         else
         {
@@ -658,6 +687,251 @@ public class StaffGrievanceService : IStaffGrievanceService
         return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
     }
 
+    // ── Area 9c slice 2 — FR-HR-181's missing artefacts ───────────────────────
+
+    public async Task<StaffGrievanceDto> RecordHrInterpretationAsync(
+        Guid grievanceId, RecordHrInterpretationDto dto, Guid recordedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        var now = DateTime.UtcNow;
+        grievance.HrInterpretation = dto.Interpretation.Trim();
+        grievance.HrInterpretationById = recordedByEmployeeId;
+        grievance.HrInterpretationDate = now;
+        grievance.UpdatedAt = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> OpenInvestigationAsync(
+        Guid grievanceId, OpenGrievanceInvestigationDto dto, Guid openedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        if (grievance.Investigation != null)
+            throw new InvalidOperationException("This case already has an investigation.");
+
+        var hasInternal = dto.InvestigatorId.HasValue;
+        var hasExternal = !string.IsNullOrWhiteSpace(dto.ExternalInvestigatorName);
+        if (hasInternal == hasExternal)
+            throw new InvalidOperationException(
+                "An investigator is either a member of staff or an external person: supply exactly "
+                + "one of the investigator and the external name.");
+
+        if (hasInternal)
+        {
+            var investigator = await GetOwnedEmployeeAsync(dto.InvestigatorId!.Value, "investigating");
+
+            // The complainant cannot investigate their own complaint, and neither can anyone the
+            // case is about. Both are natural-justice failures the record would otherwise hide.
+            if (investigator.Id == grievance.EmployeeId)
+                throw new InvalidOperationException(
+                    "The employee this case belongs to cannot investigate it.");
+
+            var isRespondent = grievance.Parties.Any(p =>
+                !p.IsDeleted && p.RemovedDate == null
+                && p.EmployeeId == investigator.Id
+                && p.Role == GrievancePartyRole.Respondent);
+            if (isRespondent)
+                throw new InvalidOperationException(
+                    "A respondent on this case cannot investigate it.");
+        }
+
+        var now = DateTime.UtcNow;
+        await _unitOfWork.Repository<StaffGrievanceInvestigation>().AddAsync(new StaffGrievanceInvestigation
+        {
+            TenantId = grievance.TenantId,
+            GrievanceId = grievance.Id,
+            InvestigatorId = dto.InvestigatorId,
+            ExternalInvestigatorName = hasExternal ? dto.ExternalInvestigatorName!.Trim() : null,
+            ExternalInvestigatorOrganisation = string.IsNullOrWhiteSpace(dto.ExternalInvestigatorOrganisation)
+                ? null : dto.ExternalInvestigatorOrganisation.Trim(),
+            StartedDate = now,
+            TargetDate = dto.TargetDate,
+            OpenedById = openedByEmployeeId,
+            CreatedBy = openedByEmployeeId.ToString(),
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> UpdateInvestigationAsync(
+        Guid grievanceId, UpdateGrievanceInvestigationDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        var investigation = grievance.Investigation
+            ?? throw new ArgumentException("This case has no investigation to update.");
+
+        if (investigation.CompletedDate != null)
+            throw new InvalidOperationException(
+                "This investigation has been concluded and its report can no longer be changed.");
+
+        // Null means "leave alone", not "clear" — a partial update from a form that only edited the
+        // recommendation must not wipe the findings. (The replace-set convention elsewhere in this
+        // repo is the opposite; this is a field-level patch and says so.)
+        if (dto.Findings != null) investigation.Findings = dto.Findings.Trim();
+        if (dto.EvidenceCollected != null) investigation.EvidenceCollected = dto.EvidenceCollected.Trim();
+        if (dto.Recommendation != null) investigation.Recommendation = dto.Recommendation.Trim();
+        if (dto.TargetDate.HasValue) investigation.TargetDate = dto.TargetDate;
+        investigation.UpdatedAt = DateTime.UtcNow;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> CompleteInvestigationAsync(
+        Guid grievanceId, CompleteGrievanceInvestigationDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        var investigation = grievance.Investigation
+            ?? throw new ArgumentException("This case has no investigation to conclude.");
+
+        if (investigation.CompletedDate != null)
+            throw new InvalidOperationException("This investigation has already been concluded.");
+
+        var now = DateTime.UtcNow;
+        investigation.Findings = dto.Findings.Trim();
+        if (dto.EvidenceCollected != null) investigation.EvidenceCollected = dto.EvidenceCollected.Trim();
+        if (dto.Recommendation != null) investigation.Recommendation = dto.Recommendation.Trim();
+        investigation.CompletedDate = now;
+        investigation.UpdatedAt = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Grievance {Number}: investigation concluded", grievance.GrievanceNumber);
+
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> ResolveAsync(
+        Guid grievanceId, ResolveGrievanceDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+
+        if (dto.Outcome == GrievanceResolutionOutcome.NotRecorded)
+            throw new InvalidOperationException(
+                "Choose what was decided. 'Not Recorded' exists only to mark resolutions taken "
+                + "before an outcome could be captured; it cannot be chosen.");
+
+        // Answering is the responder's or HR's act, and so is deciding. The griever never decides
+        // their own case — the same rule, for the same reason, as not answering it.
+        if (grievance.EmployeeId == decidedByEmployeeId)
+            throw new UnauthorizedAccessException("You cannot decide your own case.");
+
+        var step = CurrentStep(grievance);
+        if (!IsHr && step.AssignedToId != decidedByEmployeeId)
+            throw new UnauthorizedAccessException(
+                "You are not the person asked to answer this case at this level.");
+
+        var now = DateTime.UtcNow;
+
+        // ── The fill-in path: a resolution recorded through the legacy shorthand, whose outcome
+        // was never captured. Completing the record is permitted; AMENDING a decision is not, so
+        // the supplied Decision is deliberately ignored here rather than silently overwriting one.
+        if (grievance.Resolution is { } existing)
+        {
+            if (existing.Outcome != GrievanceResolutionOutcome.NotRecorded)
+                throw new InvalidOperationException(
+                    "This case already has a recorded decision, and a decision is never amended.");
+
+            existing.Outcome = dto.Outcome;
+            if (string.IsNullOrWhiteSpace(existing.RemedyOrUndertakings)
+                && !string.IsNullOrWhiteSpace(dto.RemedyOrUndertakings))
+                existing.RemedyOrUndertakings = dto.RemedyOrUndertakings.Trim();
+            existing.OutcomeRecordedDate = now;
+            existing.OutcomeRecordedById = decidedByEmployeeId;
+            existing.UpdatedAt = now;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        }
+
+        EnsureOpen(grievance);
+
+        // Deciding also answers the rung it is decided at, if nobody has. Leaving the step
+        // AwaitingResponse beside a resolved case would make the ladder read as still owing an
+        // answer to a case that is over.
+        if (step.Outcome == GrievanceStepOutcome.AwaitingResponse)
+        {
+            step.Response = dto.Decision.Trim();
+            step.RespondedById = decidedByEmployeeId;
+            step.RespondedDate = now;
+            step.Outcome = GrievanceStepOutcome.Resolved;
+            step.UpdatedAt = now;
+        }
+
+        await _unitOfWork.Repository<StaffGrievanceResolution>().AddAsync(new StaffGrievanceResolution
+        {
+            TenantId = grievance.TenantId,
+            GrievanceId = grievance.Id,
+            Outcome = dto.Outcome,
+            Decision = dto.Decision.Trim(),
+            RemedyOrUndertakings = string.IsNullOrWhiteSpace(dto.RemedyOrUndertakings)
+                ? null : dto.RemedyOrUndertakings.Trim(),
+            DecidedById = decidedByEmployeeId,
+            DecidedDate = now,
+            // Stamped, not derived: the rung that DECIDED it, which stays correct whatever the case
+            // does afterwards.
+            DecidedAtLevel = grievance.CurrentLevel,
+            CreatedBy = decidedByEmployeeId.ToString(),
+        });
+
+        grievance.Status = GrievanceStatus.Resolved;
+        grievance.ResolvedDate = now;
+        // Kept as a mirror of the decision, not of the response — the portal screen renders it.
+        grievance.ResolutionSummary = dto.Decision.Trim();
+        grievance.UpdatedAt = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Grievance {Number} resolved: {Outcome}", grievance.GrievanceNumber, dto.Outcome);
+
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
+    public async Task<StaffGrievanceDto> CloseAsync(
+        Guid grievanceId, CloseGrievanceDto dto, Guid closedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+        EnsureOpen(grievance);
+
+        // Closing is for a case that has nowhere left to go: the ladder is exhausted. Anything
+        // still climbing has a rung that owes an answer, and closing it there would let the desk
+        // end a live grievance the employee is entitled to escalate.
+        if (grievance.CurrentLevel < TopLevel)
+            throw new InvalidOperationException(
+                $"This case is still at {grievance.CurrentLevel} and can be escalated further. "
+                + "Only a case that has exhausted the escalation route can be closed unresolved.");
+
+        var step = CurrentStep(grievance);
+        if (step.Outcome == GrievanceStepOutcome.AwaitingResponse)
+            throw new InvalidOperationException(
+                "The Board has not answered yet. A case cannot be closed unresolved before the "
+                + "final level has responded.");
+
+        var now = DateTime.UtcNow;
+        grievance.Status = GrievanceStatus.Closed;
+        grievance.ClosedDate = now;
+        grievance.ClosureReason = dto.Reason.Trim();
+        grievance.ClosedById = closedByEmployeeId;
+        grievance.UpdatedAt = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Grievance {Number} closed unresolved at {Level}",
+            grievance.GrievanceNumber, grievance.CurrentLevel);
+
+        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+    }
+
     private static void EnsureOpen(StaffGrievance grievance)
     {
         if (grievance.Status is GrievanceStatus.Resolved or GrievanceStatus.Withdrawn or GrievanceStatus.Closed)
@@ -731,6 +1005,46 @@ public class StaffGrievanceService : IStaffGrievanceService
         ResolutionSummary = g.ResolutionSummary,
         WithdrawnDate = g.WithdrawnDate,
         WithdrawalReason = g.WithdrawalReason,
+        // Area 9c slice 2 — FR-HR-181's artefacts.
+        HrInterpretation = g.HrInterpretation,
+        HrInterpretationById = g.HrInterpretationById,
+        HrInterpretationByName = g.HrInterpretationBy?.FullName,
+        HrInterpretationDate = g.HrInterpretationDate,
+        ClosedDate = g.ClosedDate,
+        ClosureReason = g.ClosureReason,
+        ClosedById = g.ClosedById,
+        ClosedByName = g.ClosedBy?.FullName,
+        Investigation = g.Investigation is { IsDeleted: false } i ? new StaffGrievanceInvestigationDto
+        {
+            Id = i.Id,
+            GrievanceId = i.GrievanceId,
+            InvestigatorId = i.InvestigatorId,
+            InvestigatorName = i.Investigator?.FullName,
+            ExternalInvestigatorName = i.ExternalInvestigatorName,
+            ExternalInvestigatorOrganisation = i.ExternalInvestigatorOrganisation,
+            StartedDate = i.StartedDate,
+            TargetDate = i.TargetDate,
+            CompletedDate = i.CompletedDate,
+            Findings = i.Findings,
+            EvidenceCollected = i.EvidenceCollected,
+            Recommendation = i.Recommendation,
+            OpenedById = i.OpenedById,
+            OpenedByName = i.OpenedBy?.FullName,
+        } : null,
+        Resolution = g.Resolution is { IsDeleted: false } r ? new StaffGrievanceResolutionDto
+        {
+            Id = r.Id,
+            GrievanceId = r.GrievanceId,
+            Outcome = r.Outcome,
+            Decision = r.Decision,
+            RemedyOrUndertakings = r.RemedyOrUndertakings,
+            DecidedById = r.DecidedById,
+            DecidedByName = r.DecidedBy?.FullName,
+            DecidedDate = r.DecidedDate,
+            DecidedAtLevel = r.DecidedAtLevel,
+            OutcomeRecordedDate = r.OutcomeRecordedDate,
+            OutcomeRecordedByName = r.OutcomeRecordedBy?.FullName,
+        } : null,
         Steps = g.Steps.OrderBy(s => s.Sequence).Select(s => new StaffGrievanceStepDto
         {
             Id = s.Id,

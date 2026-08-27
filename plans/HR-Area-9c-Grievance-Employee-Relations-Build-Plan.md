@@ -37,7 +37,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 |---|---|---|
 | 0 | Survey, fixtures, endpoint + payload census | **COMPLETE 2026-08-27** — 147 assertions ×2, zero failures; the ladder proven end to end, and `GrievanceStatus.Closed` found to have no writer |
 | 1 | The ER case register: case types, parties, representation | **COMPLETE 2026-08-27** — 119 assertions ×2 + the 147 slice-0 ladder = **266**; migration `AddEmployeeRelationsCaseTypeAndParties`; all 87 pre-existing rows correct with no back-fill |
-| 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | ⏳ |
+| 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | **COMPLETE 2026-08-27** — 111 ×2 + the 151/119 ladder = **381**; obligations 5, 7, 8 closed; `GrievanceStatus.Closed` given its first writer |
 | 3 | Documents on the controlled upload gate + the final signed agreement | ⏳ |
 | 4 | Case conferencing & mediation; union consultation | ⏳ |
 | 5 | The responder matrix (FR-HR-084) + rung resolution | ⏳ |
@@ -153,14 +153,15 @@ Nine obligations. Scored against what exists:
 | 2 | Retain the grievance statement | ✅ `StaffGrievance.Statement`, never overwritten | — |
 | 3 | Supervisor response | ✅ step response at `Level = Supervisor` | — |
 | 4 | HOD comments | ✅ step response at `Level = HeadOfDepartment` | — |
-| 5 | **HR interpretation** | ❌ no field. The HR rung's step response is a response, not the formal HR reading of the case the requirement names separately. | 2 |
+| 5 | **HR interpretation** | ✅ **slice 2** — `HrInterpretation` + author + date, amendable while open, frozen once closed | 2 |
 | 6 | **Union consultation notes** | ❌ nothing anywhere. `Unions` is empty and there is no membership link. | 4 |
-| 7 | **Investigation report** | ❌ no entity. Discipline has one; grievance has none. | 2 |
-| 8 | **Resolution decision** | ⚠ partial — `ResolutionSummary` is a free-text copy of whatever the last responder typed (`RespondAsync` assigns `dto.Response` straight into it). No decider, no date distinct from the response, no remedy or undertaking. | 2 |
+| 7 | **Investigation report** | ✅ **slice 2** — `StaffGrievanceInvestigation`, internal or external investigator, natural-justice gate, completion refused without findings | 2 |
+| 8 | **Resolution decision** | ✅ **slice 2** — `StaffGrievanceResolution` with outcome, decision, remedy, decider, date and the rung it was decided at; frozen on write | 2 |
 | 9 | **Final signed agreement** | ❌ no document surface on grievances at all. | 3 |
 
-**Four of nine absent, one partial.** A Mandatory requirement is roughly half delivered, and that
-— not the deferred wish-list — is the strongest evidence for building this area now.
+**As surveyed: four of nine absent, one partial** — a Mandatory requirement roughly half
+delivered, which is the strongest evidence for building this area, stronger than the deferred
+wish-list. **After slice 2: two absent** (obligations 6 and 9), owed to slices 4 and 3.
 
 Also in scope from the spec: **FR-HR-084** (`Pri. D`, source WN) — *"The system shall model a
 grievance hierarchy defining reporting lines."* Decision D-3 delivers this as an explicitly
@@ -464,3 +465,72 @@ it is a snapshot, and the run that proves it is the second one.**
 **Not a problem after all:** the D-6 route alias gives `GetById` two endpoints, and
 `CreatedAtAction` is used by both `File` and `OpenCase`. Link generation resolved it; both create
 paths return 201. No named route needed.
+
+---
+
+### Slice 2 — FR-HR-181's missing artefacts. CLOSED 2026-08-27.
+
+`run-slice2.mjs` **111 assertions ×2**, ladder re-run at 151 / 119 = **381 for the area**.
+Migration `20260827171146_AddGrievanceInterpretationInvestigationAndResolution` (guarded SQL,
+registered). **FR-HR-181 goes from four absent obligations to two** — 6 (union consultation) and
+9 (signed agreement), owed to slices 4 and 3.
+
+**Obligation 5 — HR interpretation.** A field on the case with author and date, and the harness
+asserts what makes it a *distinct* artefact rather than a duplicate: recording it does not touch
+the ladder and does not answer the rung. The step response is HR answering the employee; this is
+HR's position on the merits, which the GM, MD and Board read on the way up. Amendable while the
+case is open and re-stamped each time; refused once the case is terminal, because an
+interpretation edited after the outcome is what makes the outcome indefensible.
+
+**Obligation 7 — the investigation.** `StaffGrievanceInvestigation`, one per case. Three rules
+that are the substance rather than the shape:
+
+- **The investigator may be external.** A grievance about senior management is exactly the one
+  that gets an outside investigator; an `Employee` FK alone would have made the commonest serious
+  case unrecordable. Same reasoning as slice 1's external parties.
+- **Natural justice is enforced, and it was not before.** Neither the complainant nor a respondent
+  may investigate (422). Area 9 built this rule for the disciplinary case; the grievance half
+  never had it.
+- **Completion is a gate, not a flag.** Concluding without findings is refused, and a concluded
+  report can no longer be edited. An investigation reported complete with nothing in it is worse
+  than one still open, because every rung above it will rely on it.
+
+⚠ The update path is a **field-level patch**: a null field means "leave alone", not "clear", so a
+form that edited only the recommendation cannot wipe the findings. That is the *opposite* of this
+repo's `replace-set-payload-convention`, and it is commented at the call site for exactly that
+reason.
+
+**Obligation 8 — the resolution decision, and the judgment call in this slice.** The clean fix
+would have broken `/me/grievances/[id]`, which calls `respond(resolvesGrievance: true)`. So that
+path **still works and still resolves**, but now leaves a real `StaffGrievanceResolution` behind,
+marked `Outcome = NotRecorded`. That is an honest gap — *"resolved, and nobody captured what was
+decided"* — rather than an invented outcome, and it is measurable: HR can be asked to fill it in.
+
+- `POST resolve` records a real decision with outcome, remedy, decider, date and **the rung that
+  decided it, stamped rather than derived**, and is frozen on write.
+- Used a second time on a `NotRecorded` resolution it fills the outcome in and **deliberately
+  ignores the supplied decision text** — completing a record is not amending a decision. The
+  harness asserts the original decision survives that call verbatim.
+- `NotRecorded` is enum member 1 and **cannot be chosen** (422).
+- `ResolutionSummary` survives as a denormalised mirror of `Decision`, because the portal renders
+  it — so slice 0's assertion still matches text-for-text on that path, and its label was
+  rewritten to say why rather than deleted.
+
+**`GrievanceStatus.Closed` has a writer at last.** `POST close`, refused unless the case is at the
+Board **and** the Board has answered — otherwise the desk could end a live grievance the employee
+is still entitled to escalate. The harness proves the case is terminal in every direction
+afterwards (interpretation, investigation, escalate, withdraw, close again all 422) and that it
+drops out of the stuck queue, which is the whole point of having a terminal state.
+
+**Both of slice 0's `CURRENT POSITION` assertions were rewritten in this commit, not deleted.**
+That is the convention working as intended: the closed-status one now asserts what remains true
+(closing is a deliberate act, never automatic), and the resolution one now asserts the artefact
+exists and its outcome is honestly missing. ⚠ Slice 0's printed census also had a **stale key** —
+it looked for `resolutionDecision` where the field shipped as `resolution`, so it scored
+obligation 8 as absent after slice 2 delivered it. Corrected. *A census that names the field it
+expects is only as good as that name; re-read it after the slice that fills it.*
+
+**No back-fill, and none is possible.** Cases resolved through the old shorthand before this
+migration have no resolution row: what was actually *decided*, as opposed to what the responder
+wrote, was never captured. Manufacturing it in a migration would be worse than leaving the gap
+visible, and the migration's remarks say so, so nobody adds one later believing it was forgotten.

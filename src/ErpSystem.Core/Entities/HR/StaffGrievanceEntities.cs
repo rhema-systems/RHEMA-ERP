@@ -89,10 +89,193 @@ public class StaffGrievance : TenantEntity
     [MaxLength(1000)]
     public string? WithdrawalReason { get; set; }
 
+    // ── FR-HR-181 obligation 5: HR interpretation (area 9c slice 2) ───────────
+
+    /// <summary>
+    /// HR's formal reading of the case — what the policy, the Conditions of Service or the
+    /// Collective Bargaining Agreement say about it.
+    /// </summary>
+    /// <remarks>
+    /// FR-HR-181 names this as an artefact distinct from the HR rung's step response, and it is:
+    /// the step response is HR answering the employee, this is HR's position on the merits, which
+    /// the GM, the MD and the Board all read on the way up. Before slice 2 there was no field for
+    /// it anywhere.
+    ///
+    /// <para><b>Amendable while the case is open, and re-stamped each time.</b> It is HR's working
+    /// reading, not a decision, so it may legitimately change as facts emerge — but it is frozen the
+    /// moment the case reaches a terminal state, because an interpretation edited after the fact is
+    /// exactly what makes an outcome indefensible. The decision that must never change is the
+    /// <see cref="StaffGrievanceResolution"/>, which is frozen on write.</para>
+    /// </remarks>
+    [MaxLength(4000)]
+    public string? HrInterpretation { get; set; }
+
+    public Guid? HrInterpretationById { get; set; }
+
+    [ForeignKey(nameof(HrInterpretationById))]
+    public virtual Employee? HrInterpretationBy { get; set; }
+
+    public DateTime? HrInterpretationDate { get; set; }
+
+    // ── Closure without resolution (area 9c slice 2) ──────────────────────────
+
+    /// <summary>
+    /// When the case was closed without being resolved — the ladder exhausted at Board level.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <see cref="GrievanceStatus.Closed"/> existed from area 9 slice 7 and <b>had no writer
+    /// anywhere</b>: all three references to it in the solution were read filters, and 0 of 69 rows
+    /// carried it. A case the Board had answered without resolving therefore had no terminal state —
+    /// it sat <c>UnderReview</c> for ever and the reminder sweep counted it as open for ever.
+    /// Slice 2 gives it its first writer.
+    /// </remarks>
+    public DateTime? ClosedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClosureReason { get; set; }
+
+    public Guid? ClosedById { get; set; }
+
+    [ForeignKey(nameof(ClosedById))]
+    public virtual Employee? ClosedBy { get; set; }
+
+    /// <summary>FR-HR-181 obligation 7 — the investigation report. One per case, or none.</summary>
+    public virtual StaffGrievanceInvestigation? Investigation { get; set; }
+
+    /// <summary>FR-HR-181 obligation 8 — the resolution decision. One per case, or none.</summary>
+    public virtual StaffGrievanceResolution? Resolution { get; set; }
+
     public virtual ICollection<StaffGrievanceStep> Steps { get; set; } = new List<StaffGrievanceStep>();
 
     /// <summary>Everybody on the case other than the primary party — area 9c slice 1.</summary>
     public virtual ICollection<StaffGrievanceParty> Parties { get; set; } = new List<StaffGrievanceParty>();
+}
+
+/// <summary>
+/// FR-HR-181 obligation 7 — the investigation report. Area 9c slice 2. One per case.
+/// </summary>
+/// <remarks>
+/// <para>Modelled on <c>StaffDisciplineInvestigation</c>, which area 9 built for the disciplinary
+/// case and which the grievance half never got — so a grievance that needed investigating was
+/// investigated on paper and the system held nothing but the responder's eventual answer.</para>
+///
+/// <para><b>The investigator may be external</b>, for the same reason a party may be
+/// (<see cref="StaffGrievanceParty"/>): a grievance about senior management is exactly the one that
+/// gets an outside investigator, and requiring an <c>Employee</c> FK would have made that
+/// unrecordable. Exactly one of <see cref="InvestigatorId"/> and
+/// <see cref="ExternalInvestigatorName"/> is supplied.</para>
+///
+/// <para><b>Completion is a gate, not a flag.</b> <see cref="CompletedDate"/> is only set through
+/// the complete path, which refuses to run without findings — an investigation reported as complete
+/// with nothing in it is worse than one still open, because the ladder above it will rely on it.</para>
+/// </remarks>
+public class StaffGrievanceInvestigation : TenantEntity
+{
+    [Required]
+    public Guid GrievanceId { get; set; }
+
+    [ForeignKey(nameof(GrievanceId))]
+    public virtual StaffGrievance Grievance { get; set; } = null!;
+
+    /// <summary>An internal investigator. Mutually exclusive with <see cref="ExternalInvestigatorName"/>.</summary>
+    public Guid? InvestigatorId { get; set; }
+
+    [ForeignKey(nameof(InvestigatorId))]
+    public virtual Employee? Investigator { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalInvestigatorName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalInvestigatorOrganisation { get; set; }
+
+    public DateTime StartedDate { get; set; }
+
+    /// <summary>
+    /// When the investigation is due. Not a spec requirement for grievances — FR-HR-178's four
+    /// weeks is the DISCIPLINARY clock and must not be silently applied here — but a case being
+    /// investigated needs a date the reminder sweep can chase, and slice 7 chases this one.
+    /// </summary>
+    public DateTime? TargetDate { get; set; }
+
+    public DateTime? CompletedDate { get; set; }
+
+    [MaxLength(4000)]
+    public string? Findings { get; set; }
+
+    [MaxLength(4000)]
+    public string? EvidenceCollected { get; set; }
+
+    /// <summary>What the investigator advises. Advice only — deciding is the rung's act, not theirs.</summary>
+    [MaxLength(4000)]
+    public string? Recommendation { get; set; }
+
+    /// <summary>Who opened it, from their own token.</summary>
+    public Guid? OpenedById { get; set; }
+
+    [ForeignKey(nameof(OpenedById))]
+    public virtual Employee? OpenedBy { get; set; }
+}
+
+/// <summary>
+/// FR-HR-181 obligation 8 — the resolution decision. Area 9c slice 2. One per case.
+/// </summary>
+/// <remarks>
+/// <para><b>What this replaces.</b> Before slice 2 a resolution was
+/// <c>StaffGrievance.ResolutionSummary</c>, which <c>RespondAsync</c> filled with a verbatim copy of
+/// whatever the last responder typed. The system could not tell an ANSWER from a DECISION: there was
+/// no decider distinct from the responder, no decision date of its own, no rung it was taken at, no
+/// outcome, and no remedy. Slice 0 asserted that conflation as the current position so that this
+/// change would be visible.</para>
+///
+/// <para><b>Frozen on write.</b> A recorded decision is never amended — that is the whole point of
+/// FR-HR-181 retaining it. The single exception is filling in an outcome that was never captured:
+/// see <see cref="GrievanceResolutionOutcome.NotRecorded"/>.</para>
+///
+/// <para><b><see cref="DecidedAtLevel"/> is stamped, not derived.</b> The case's
+/// <c>CurrentLevel</c> is where it sits now; this is the rung that actually decided it, and a case
+/// resolved at the HOD rung must still read that way if anything later moves it.</para>
+/// </remarks>
+public class StaffGrievanceResolution : TenantEntity
+{
+    [Required]
+    public Guid GrievanceId { get; set; }
+
+    [ForeignKey(nameof(GrievanceId))]
+    public virtual StaffGrievance Grievance { get; set; } = null!;
+
+    public GrievanceResolutionOutcome Outcome { get; set; } = GrievanceResolutionOutcome.NotRecorded;
+
+    /// <summary>The decision, in the decider's words.</summary>
+    [Required]
+    [MaxLength(4000)]
+    public string Decision { get; set; } = string.Empty;
+
+    /// <summary>What either side undertook to do. The part a signed agreement is written from.</summary>
+    [MaxLength(4000)]
+    public string? RemedyOrUndertakings { get; set; }
+
+    [Required]
+    public Guid DecidedById { get; set; }
+
+    [ForeignKey(nameof(DecidedById))]
+    public virtual Employee DecidedBy { get; set; } = null!;
+
+    public DateTime DecidedDate { get; set; }
+
+    /// <summary>The rung that decided it, stamped at the time. See remarks.</summary>
+    public GrievanceEscalationLevel DecidedAtLevel { get; set; }
+
+    /// <summary>
+    /// Set when a <see cref="GrievanceResolutionOutcome.NotRecorded"/> outcome is filled in later,
+    /// so that completing the record is visibly a different act from taking the decision.
+    /// </summary>
+    public DateTime? OutcomeRecordedDate { get; set; }
+
+    public Guid? OutcomeRecordedById { get; set; }
+
+    [ForeignKey(nameof(OutcomeRecordedById))]
+    public virtual Employee? OutcomeRecordedBy { get; set; }
 }
 
 /// <summary>

@@ -223,3 +223,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827115504_MakeJobCandidateCountryOptional")] partial class MakeJobCandidateCountryOptional { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827132602_FilterJobApplicationVacancyCandidateIndex")] partial class FilterJobApplicationVacancyCandidateIndex { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827164241_AddEmployeeRelationsCaseTypeAndParties")] partial class AddEmployeeRelationsCaseTypeAndParties { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827171146_AddGrievanceInterpretationInvestigationAndResolution")] partial class AddGrievanceInterpretationInvestigationAndResolution { }

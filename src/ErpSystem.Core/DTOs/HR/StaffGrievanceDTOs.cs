@@ -111,6 +111,87 @@ public class StaffGrievanceDto : StaffGrievanceSummaryDto
     /// way twice.
     /// </summary>
     public List<StaffGrievancePartyDto> Parties { get; set; } = new();
+
+    // ── FR-HR-181's artefacts (area 9c slice 2) ──────────────────────────────
+
+    /// <summary>Obligation 5 — HR's formal reading of the case, distinct from the HR rung's answer.</summary>
+    public string? HrInterpretation { get; set; }
+    public Guid? HrInterpretationById { get; set; }
+    public string? HrInterpretationByName { get; set; }
+    public DateTime? HrInterpretationDate { get; set; }
+
+    /// <summary>Obligation 7 — the investigation report, if one was opened.</summary>
+    public StaffGrievanceInvestigationDto? Investigation { get; set; }
+
+    /// <summary>Obligation 8 — the resolution decision, if the case has been resolved.</summary>
+    public StaffGrievanceResolutionDto? Resolution { get; set; }
+
+    public DateTime? ClosedDate { get; set; }
+    public string? ClosureReason { get; set; }
+    public Guid? ClosedById { get; set; }
+    public string? ClosedByName { get; set; }
+}
+
+/// <summary>FR-HR-181 obligation 7 — the investigation report.</summary>
+public class StaffGrievanceInvestigationDto
+{
+    public Guid Id { get; set; }
+    public Guid GrievanceId { get; set; }
+
+    public Guid? InvestigatorId { get; set; }
+    public string? InvestigatorName { get; set; }
+    public string? ExternalInvestigatorName { get; set; }
+    public string? ExternalInvestigatorOrganisation { get; set; }
+
+    /// <summary>Resolved display name, internal or external. The screen renders this.</summary>
+    public string InvestigatorDisplayName => InvestigatorName ?? ExternalInvestigatorName ?? string.Empty;
+
+    public DateTime StartedDate { get; set; }
+    public DateTime? TargetDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+
+    public string? Findings { get; set; }
+    public string? EvidenceCollected { get; set; }
+    public string? Recommendation { get; set; }
+
+    public Guid? OpenedById { get; set; }
+    public string? OpenedByName { get; set; }
+
+    /// <summary>An investigation is complete when it has been concluded, never by a separate flag.</summary>
+    public bool IsComplete => CompletedDate != null;
+
+    /// <summary>True when it is past its target and still open. What the slice-7 sweep chases.</summary>
+    public bool IsOverdue => CompletedDate == null && TargetDate != null && TargetDate < DateTime.UtcNow;
+}
+
+/// <summary>FR-HR-181 obligation 8 — the resolution decision.</summary>
+public class StaffGrievanceResolutionDto
+{
+    public Guid Id { get; set; }
+    public Guid GrievanceId { get; set; }
+
+    public GrievanceResolutionOutcome Outcome { get; set; }
+    public string OutcomeName => Outcome.ToString();
+
+    /// <summary>
+    /// True while the case was resolved but nobody captured WHAT was decided — the legacy
+    /// <c>respond(resolvesGrievance: true)</c> path. HR can still fill it in; nothing else about a
+    /// recorded decision may be changed.
+    /// </summary>
+    public bool OutcomeIsMissing => Outcome == GrievanceResolutionOutcome.NotRecorded;
+
+    public string Decision { get; set; } = string.Empty;
+    public string? RemedyOrUndertakings { get; set; }
+
+    public Guid DecidedById { get; set; }
+    public string? DecidedByName { get; set; }
+    public DateTime DecidedDate { get; set; }
+
+    public GrievanceEscalationLevel DecidedAtLevel { get; set; }
+    public string DecidedAtLevelName => DecidedAtLevel.ToString();
+
+    public DateTime? OutcomeRecordedDate { get; set; }
+    public string? OutcomeRecordedByName { get; set; }
 }
 
 /// <summary>
@@ -241,6 +322,107 @@ public class RemoveGrievancePartyDto
     [Required]
     [MaxLength(500)]
     [MinLength(5)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+// ── Area 9c slice 2 — FR-HR-181's missing artefacts ──────────────────────────
+
+/// <summary>Records or amends HR's formal reading of the case. HR only, and only while it is open.</summary>
+public class RecordHrInterpretationDto
+{
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(20)]
+    public string Interpretation { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Opens an investigation. Exactly one of the investigator and the external name is supplied — a
+/// grievance about senior management is exactly the one that gets an outside investigator.
+/// </summary>
+public class OpenGrievanceInvestigationDto
+{
+    public Guid? InvestigatorId { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalInvestigatorName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalInvestigatorOrganisation { get; set; }
+
+    /// <summary>
+    /// When it is due. ⚠ There is no statutory grievance clock — FR-HR-178's four weeks is the
+    /// DISCIPLINARY investigation and must not be applied here by default. Left to the desk.
+    /// </summary>
+    public DateTime? TargetDate { get; set; }
+}
+
+/// <summary>Updates an open investigation's working notes.</summary>
+public class UpdateGrievanceInvestigationDto
+{
+    [MaxLength(4000)]
+    public string? Findings { get; set; }
+
+    [MaxLength(4000)]
+    public string? EvidenceCollected { get; set; }
+
+    [MaxLength(4000)]
+    public string? Recommendation { get; set; }
+
+    public DateTime? TargetDate { get; set; }
+}
+
+/// <summary>
+/// Concludes an investigation. Findings are required here and nowhere else: an investigation
+/// reported as complete with nothing in it is worse than one still open, because the rungs above
+/// will rely on it.
+/// </summary>
+public class CompleteGrievanceInvestigationDto
+{
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(20)]
+    public string Findings { get; set; } = string.Empty;
+
+    [MaxLength(4000)]
+    public string? EvidenceCollected { get; set; }
+
+    [MaxLength(4000)]
+    public string? Recommendation { get; set; }
+}
+
+/// <summary>
+/// Resolves the case by recording what was decided — FR-HR-181 obligation 8.
+/// </summary>
+/// <remarks>
+/// This is the act that <c>respond(resolvesGrievance: true)</c> used to stand in for. That path
+/// still works and still resolves, but it produces an outcome of
+/// <see cref="GrievanceResolutionOutcome.NotRecorded"/>; this one requires a real outcome, and may
+/// also be used once on an already-resolved case to fill that gap in.
+/// </remarks>
+public class ResolveGrievanceDto
+{
+    [Required]
+    public GrievanceResolutionOutcome Outcome { get; set; }
+
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(20)]
+    public string Decision { get; set; } = string.Empty;
+
+    [MaxLength(4000)]
+    public string? RemedyOrUndertakings { get; set; }
+}
+
+/// <summary>
+/// Closes a case that has exhausted the ladder without being resolved — the first writer
+/// <see cref="GrievanceStatus.Closed"/> has ever had.
+/// </summary>
+public class CloseGrievanceDto
+{
+    [Required]
+    [MaxLength(1000)]
+    [MinLength(10)]
     public string Reason { get; set; } = string.Empty;
 }
 

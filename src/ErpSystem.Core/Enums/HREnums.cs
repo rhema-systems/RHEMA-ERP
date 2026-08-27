@@ -2835,6 +2835,45 @@ public enum GrievanceStepOutcome
 }
 
 /// <summary>
+/// What a resolved employee-relations case actually decided — FR-HR-181's "resolution decision",
+/// area 9c slice 2.
+/// </summary>
+/// <remarks>
+/// <para><b>Why <see cref="NotRecorded"/> exists, and why it is member 1.</b> Before slice 2 the
+/// only way to resolve a case was <c>respond(resolvesGrievance: true)</c>, which copied the
+/// responder's answer into <c>ResolutionSummary</c> and captured no outcome at all — an answer and a
+/// decision were the same field. That path still works, so that the portal screen calling it does
+/// not break, but it now produces a resolution artefact marked <c>NotRecorded</c>.</para>
+///
+/// <para>That is deliberately an honest gap rather than an invented value: it says "this case was
+/// resolved and nobody captured what was decided", which HR can be asked to fill in — and
+/// <c>POST resolve</c> permits exactly that one transition, filling a <c>NotRecorded</c> outcome
+/// while refusing to amend a real one. A real decision, once recorded, is frozen.</para>
+/// </remarks>
+public enum GrievanceResolutionOutcome
+{
+    /// <summary>Resolved, but what was decided was never captured. ⚠ Not selectable — see remarks.</summary>
+    [Description("Not Recorded")]
+    NotRecorded = 1,
+
+    [Description("Upheld In Full")]
+    UpheldInFull = 2,
+
+    [Description("Upheld In Part")]
+    UpheldInPart = 3,
+
+    [Description("Not Upheld")]
+    NotUpheld = 4,
+
+    /// <summary>The parties reached an agreement rather than the case being adjudicated.</summary>
+    [Description("Settled By Agreement")]
+    SettledByAgreement = 5,
+
+    [Description("No Further Action")]
+    NoFurtherAction = 6
+}
+
+/// <summary>
 /// What kind of employee-relations case this is — area 9c slice 1, decision D-4.
 /// </summary>
 /// <remarks>
