@@ -644,6 +644,8 @@ public static class HrModuleServiceRegistration
         // Area 9c slice 5 — FR-HR-084's responder matrix. StaffGrievanceService depends on it
         // to name a rung's responder on file and on escalate.
         services.AddScoped<IEmployeeRelationsResponderService, EmployeeRelationsResponderService>();
+        // Area 9c slice 6 — anonymous / whistleblower intake.
+        services.AddScoped<IEmployeeRelationsConcernService, EmployeeRelationsConcernService>();
 
         // Area 25 slice 12 (D6) — the employee's own profile, and the approval path for the parts
         // of it that carry identity or payment consequences. Registered beside the grievance

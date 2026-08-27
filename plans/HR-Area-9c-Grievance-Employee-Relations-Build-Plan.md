@@ -41,7 +41,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 3 | Documents on the controlled upload gate + the final signed agreement | **COMPLETE 2026-08-27** — 70 ×2 + the 151/119/111 ladder = **451**; obligation 9 closed; D-10 judged — the agreement stays off the workflow engine |
 | 4 | Case conferencing & mediation; union consultation | **COMPLETE 2026-08-27** — 86 ×2 + the 151/119/111/70 ladder = **537**; obligation 6 closed. **FR-HR-181 IS NOW FULLY DELIVERED** |
 | 5 | The responder matrix (FR-HR-084) + rung resolution | **COMPLETE 2026-08-27** — 66 ×2 + the 151/119/111/70/86 ladder = **603**; migration `AddEmployeeRelationsResponderMatrix`; the org-authority gap stops being worked around |
-| 6 | Anonymous / whistleblower concern intake | ⏳ |
+| 6 | Anonymous / whistleblower concern intake | **COMPLETE 2026-08-27** — 56 ×2 + the ladder = **659**, plus **6 row-level SQL checks**; migration `AddEmployeeRelationsConcerns` |
 | 7 | Reminder-sweep extension + notifications | ⏳ |
 | 8 | ER analytics & reporting | ⏳ |
 | 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | ⏳ |
@@ -711,3 +711,61 @@ whoever reopens area 9.
 ⚠ *A recurring harness trap, now commented in the file: `fileCase()` leaves the token as the
 GRIEVER's. Every section that writes must re-authenticate as HR — forgetting it reads as a
 permissions defect in code that is correct, and cost one run here.*
+
+---
+
+### Slice 6 — anonymous / whistleblower intake. CLOSED 2026-08-27.
+
+`run-slice6.mjs` **56 assertions ×2**, ladder 151 / 119 / 111 / 70 / 86 / 66 / 56 = **659 for the
+area**, **plus 6 row-level SQL checks**. Migration `20260827223812_AddEmployeeRelationsConcerns`
+(guarded SQL, registered).
+
+**⚠ The harness cannot prove this slice's central claim, so it does not pretend to.** An API test
+can only show the endpoint does not *echo* the reporter back — a column could hold the id, never be
+mapped onto the DTO, and every assertion in that file would still pass.
+`verify-slice6-anonymity.sql` reads the stored rows instead: no reporter-bearing column,
+`CreatedBy`/`CreatedById` NULL on every concern and every reporter message, hashes at PBKDF2 length
+with a distinct salt per row — **and the converse, that HR's replies ARE attributed**, so check 3
+cannot pass merely because nothing was written. All six PASS. *Where a guarantee is an ABSENCE, the
+test must read the store, not the response.*
+
+**The foundation was verified before being relied on.** `ApplicationDbContext.UpdateAuditableEntities`
+stamps timestamps, the tenant and the soft-delete flag and **nothing else** — no actor. So leaving
+`CreatedBy` alone is sufficient, *and only while that stays true*. That conditional is written into
+the entity, the interface, the migration and the SQL check, because if anything ever starts stamping
+an actor centrally this breaks **silently**.
+
+**`ReportAsync` takes no actor parameter at all** — there is no argument through which a caller's
+identity could reach the row even by mistake. The comment says not to "fix" it by threading the
+caller through for consistency.
+
+**Decisions that are security properties, not preferences:**
+
+- **`track` gives the same refusal whichever half is wrong.** Distinguishing "no such concern" from
+  "wrong code" makes the endpoint an oracle for whether a given number exists — a slow but perfectly
+  good way to discover that somebody reported something. Fixed-time comparison; both endpoints carry
+  `SensitivePolicy`, because brute-forcing a retrieval code is the obvious attack here.
+- **The code is stored only as a PBKDF2 hash and can never be reissued.** A reporter who loses it has
+  lost their thread. That is the correct trade: a recoverable code would have to be recoverable BY
+  somebody, and that somebody could then read the thread.
+- **`IsFromReporter` is the discriminator, never the absence of an author** — otherwise the absence
+  becomes the tell.
+- **A concern can never become a grievance**, the same refusal as `OpenCaseAsync` for the same
+  reason. And the converted case carries the subject and statement **but not the thread**, which may
+  hold things the reporter said precisely because they were anonymous and which the case's primary
+  party could then read.
+- **Only the reporter is anonymous.** HR triaging, replying, closing and converting is attributed by
+  name — the desk is accountable for what it does with a report.
+
+⚠ **Anonymous means UNATTRIBUTED, not UNAUTHENTICATED (D-9), and the limit is stated rather than
+glossed:** request logs and the reverse proxy still see the caller. If TDC needs untraceable
+reporting that is a different build, and it should be raised as one rather than assumed to be what
+this is.
+
+⚠ **A harness lesson, and I walked into it having written the warning myself.** The file's header
+notes that `SensitivePolicy` allows 5 calls per minute *per caller* — and the first draft then made
+**seven** as one actor, so the last two returned 429 and read exactly like a broken feature. They
+are now spread across four actors with the budget written out in the header, which is a **better**
+test anyway: it demonstrates what the design actually claims — the *retrieval code* is the
+credential, not the identity of whoever holds it. *A rate limit is part of an endpoint's contract;
+a harness has to budget for it the way a client would.*

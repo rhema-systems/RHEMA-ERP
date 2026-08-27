@@ -800,3 +800,146 @@ public class DisciplineReminderDispatchLog : TenantEntity
     [MaxLength(300)]
     public string DedupeKey { get; set; } = string.Empty;
 }
+
+// =============================================================================
+// ANONYMOUS / WHISTLEBLOWER INTAKE (area 9c slice 6, decisions D-2 and D-9)
+//
+// ⚠ THIS IS THE ONE STORE IN THE MODULE THAT MUST NOT KNOW WHO WROTE IT.
+//
+// Kept as its own aggregate rather than as a nullable griever on StaffGrievance
+// (decision D-2). Making EmployeeId nullable there would have weakened the read
+// gate and the escalate/withdraw ownership rules for all 87 existing grievances
+// in order to serve a case none of them are — a bad trade, and one that would
+// have been invisible until somebody read a complaint they should not have.
+//
+// ⚠ Anonymous here means UNATTRIBUTED, not UNAUTHENTICATED (decision D-9). The
+// endpoint requires a valid internal token and simply never records who called.
+// A truly public intake would be only the second anonymous surface in the whole
+// application and needs its own security review. The honest limit, stated so
+// nobody over-promises to staff: request logs and the reverse proxy still see
+// the caller. If TDC needs untraceable reporting, that is a different build.
+// =============================================================================
+
+/// <summary>
+/// A concern reported without giving a name — area 9c slice 6.
+/// </summary>
+/// <remarks>
+/// <para><b>There is deliberately no employee foreign key, and none may be added.</b> Nor is
+/// <c>CreatedBy</c> or <c>CreatedById</c> ever set on this row: <c>UpdateAuditableEntities</c>
+/// stamps only timestamps, the tenant and the soft-delete flag, so leaving those alone is
+/// sufficient — <b>and it is only sufficient while that stays true</b>. Anything that starts
+/// stamping an actor centrally breaks this guarantee silently.</para>
+///
+/// <para><b>The retrieval code is how a nameless reporter comes back.</b> It is generated once,
+/// shown once, and stored only as a PBKDF2 hash with a per-row salt — HR cannot look it up, and a
+/// reporter who loses it has lost their thread. That is the correct trade: a recoverable code would
+/// have to be recoverable BY somebody, and that somebody could then read the thread.</para>
+///
+/// <para><b>Triage is attributed.</b> HR reading, answering, closing or converting a concern is
+/// recorded against them by name. Only the REPORTER is anonymous; the desk is accountable.</para>
+/// </remarks>
+public class EmployeeRelationsConcern : TenantEntity
+{
+    [Required]
+    [MaxLength(50)]
+    public string ConcernNumber { get; set; } = string.Empty;
+
+    public ConcernCategory Category { get; set; } = ConcernCategory.Other;
+
+    [Required]
+    [MaxLength(300)]
+    public string Subject { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(6000)]
+    public string Statement { get; set; } = string.Empty;
+
+    public ConcernStatus Status { get; set; } = ConcernStatus.New;
+
+    public DateTime ReportedAt { get; set; }
+
+    /// <summary>PBKDF2 hash of the retrieval code. ⚠ The code itself is never stored.</summary>
+    [Required]
+    [MaxLength(200)]
+    public string RetrievalCodeHash { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(100)]
+    public string RetrievalCodeSalt { get; set; } = string.Empty;
+
+    // ── HR's side, which IS attributed ───────────────────────────────────────
+
+    [MaxLength(4000)]
+    public string? TriageNotes { get; set; }
+
+    public DateTime? TriagedAt { get; set; }
+
+    public Guid? TriagedById { get; set; }
+
+    [ForeignKey(nameof(TriagedById))]
+    public virtual Employee? TriagedBy { get; set; }
+
+    public DateTime? ClosedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClosureReason { get; set; }
+
+    public Guid? ClosedById { get; set; }
+
+    [ForeignKey(nameof(ClosedById))]
+    public virtual Employee? ClosedBy { get; set; }
+
+    /// <summary>
+    /// The named case this became, if the reporter identified themselves or the concern named
+    /// somebody it could be opened about.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Never a <c>Grievance</c>. A grievance is the employee's own act and HR cannot raise one
+    /// for anybody — converting a concern into one would be exactly the raise-on-behalf-of that
+    /// <c>OpenCaseAsync</c> refuses, arrived at by a longer route.
+    /// </remarks>
+    public Guid? ConvertedCaseId { get; set; }
+
+    [ForeignKey(nameof(ConvertedCaseId))]
+    public virtual StaffGrievance? ConvertedCase { get; set; }
+
+    public virtual ICollection<EmployeeRelationsConcernUpdate> Updates { get; set; }
+        = new List<EmployeeRelationsConcernUpdate>();
+}
+
+/// <summary>
+/// One message on a concern's thread — area 9c slice 6. The two-way channel that makes anonymous
+/// intake useful rather than a suggestion box.
+/// </summary>
+/// <remarks>
+/// <para>A concern nobody can ask a question about is nearly worthless: the commonest outcome of
+/// anonymous reporting is that HR needs one more detail and has no way to ask for it. The reporter
+/// posts through their retrieval code and stays nameless; HR posts attributed.</para>
+///
+/// <para>⚠ <see cref="AuthorEmployeeId"/> is set <b>only</b> for HR's messages. On a reporter's
+/// message it must stay null, and <see cref="IsFromReporter"/> is what distinguishes the two —
+/// never the presence of an author, which would make the absence of one the tell.</para>
+/// </remarks>
+public class EmployeeRelationsConcernUpdate : TenantEntity
+{
+    [Required]
+    public Guid ConcernId { get; set; }
+
+    [ForeignKey(nameof(ConcernId))]
+    public virtual EmployeeRelationsConcern Concern { get; set; } = null!;
+
+    /// <summary>True for the reporter's messages, which carry no author.</summary>
+    public bool IsFromReporter { get; set; }
+
+    /// <summary>⚠ HR's messages only. Never set on a reporter's message.</summary>
+    public Guid? AuthorEmployeeId { get; set; }
+
+    [ForeignKey(nameof(AuthorEmployeeId))]
+    public virtual Employee? Author { get; set; }
+
+    [Required]
+    [MaxLength(4000)]
+    public string Body { get; set; } = string.Empty;
+
+    public DateTime PostedAt { get; set; }
+}

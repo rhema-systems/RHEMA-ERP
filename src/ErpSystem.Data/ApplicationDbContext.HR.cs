@@ -404,6 +404,12 @@ public partial class ApplicationDbContext
     // 5.8% and 2-of-48 respectively (measured 2026-08-27).
     public DbSet<EmployeeRelationsResponder> EmployeeRelationsResponders { get; set; } = null!;
 
+    // Area 9c slice 6 — anonymous / whistleblower intake. ⚠ The one store in the module that must
+    // not know who wrote it: no employee FK on the concern, and nothing sets CreatedBy on it or on
+    // a reporter's message.
+    public DbSet<EmployeeRelationsConcern> EmployeeRelationsConcerns { get; set; } = null!;
+    public DbSet<EmployeeRelationsConcernUpdate> EmployeeRelationsConcernUpdates { get; set; } = null!;
+
     // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
     // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
     // an HR officer to approve, and approval applies them.
@@ -9372,6 +9378,53 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.AgreementAcceptedBy)
                 .WithMany()
                 .HasForeignKey(x => x.AgreementAcceptedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeRelationsConcern (area 9c slice 6, anonymous intake) ----
+        builder.Entity<EmployeeRelationsConcern>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ConcernNumber }).IsUnique();
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Category);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            // ⚠ There is deliberately NO employee foreign key on this entity, and none may be
+            // added. The reporter is not recorded anywhere — that is the feature, not an omission.
+            // The two legs below are HR's, because only the reporter is anonymous.
+            entity.HasOne(x => x.TriagedBy)
+                .WithMany()
+                .HasForeignKey(x => x.TriagedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ClosedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ClosedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConvertedCase)
+                .WithMany()
+                .HasForeignKey(x => x.ConvertedCaseId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeRelationsConcernUpdate (area 9c slice 6) ----
+        builder.Entity<EmployeeRelationsConcernUpdate>(entity =>
+        {
+            entity.HasIndex(x => x.ConcernId);
+
+            entity.HasOne(x => x.Concern)
+                .WithMany(x => x.Updates)
+                .HasForeignKey(x => x.ConcernId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ Nullable, and null on every reporter message. IsFromReporter is the discriminator;
+            // the absence of an author must never be what identifies one.
+            entity.HasOne(x => x.Author)
+                .WithMany()
+                .HasForeignKey(x => x.AuthorEmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

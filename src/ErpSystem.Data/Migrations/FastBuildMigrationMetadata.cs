@@ -227,3 +227,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827174902_AddGrievanceDocumentsAndSignedAgreement")] partial class AddGrievanceDocumentsAndSignedAgreement { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827205357_AddGrievanceConferences")] partial class AddGrievanceConferences { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827215716_AddEmployeeRelationsResponderMatrix")] partial class AddEmployeeRelationsResponderMatrix { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827223812_AddEmployeeRelationsConcerns")] partial class AddEmployeeRelationsConcerns { }

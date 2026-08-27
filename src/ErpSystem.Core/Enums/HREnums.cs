@@ -2835,6 +2835,61 @@ public enum GrievanceStepOutcome
 }
 
 /// <summary>
+/// What an anonymously-reported concern is about — area 9c slice 6, decision D-2.
+/// </summary>
+/// <remarks>
+/// Kept deliberately coarse. A reporter choosing a category is telling HR how to triage, not
+/// classifying themselves out of anonymity — a fine-grained list would narrow the field of possible
+/// reporters, which is the opposite of the point.
+/// </remarks>
+public enum ConcernCategory
+{
+    [Description("Harassment")]
+    Harassment = 1,
+
+    [Description("Discrimination")]
+    Discrimination = 2,
+
+    [Description("Bullying")]
+    Bullying = 3,
+
+    [Description("Safety Risk")]
+    SafetyRisk = 4,
+
+    [Description("Fraud or Malpractice")]
+    FraudOrMalpractice = 5,
+
+    [Description("Misconduct")]
+    Misconduct = 6,
+
+    [Description("Other")]
+    Other = 7
+}
+
+/// <summary>Where an anonymously-reported concern has got to — area 9c slice 6.</summary>
+public enum ConcernStatus
+{
+    /// <summary>Reported, nobody has looked at it yet.</summary>
+    [Description("New")]
+    New = 1,
+
+    /// <summary>HR has read it and is deciding what to do.</summary>
+    [Description("Under Triage")]
+    UnderTriage = 2,
+
+    /// <summary>Being looked into, without a case having been opened.</summary>
+    [Description("Under Review")]
+    UnderReview = 3,
+
+    [Description("Closed")]
+    Closed = 4,
+
+    /// <summary>Became a named employee-relations case. Terminal for the concern itself.</summary>
+    [Description("Converted To Case")]
+    ConvertedToCase = 5
+}
+
+/// <summary>
 /// Which part of an employee-relations case a document belongs to — area 9c slice 3.
 /// </summary>
 /// <remarks>

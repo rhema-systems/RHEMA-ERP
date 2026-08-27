@@ -823,3 +823,169 @@ public class ResponderCoverageDto
 }
 
 #endregion
+
+// ============================================================================
+// ANONYMOUS / WHISTLEBLOWER INTAKE — area 9c slice 6, decisions D-2 and D-9
+// ============================================================================
+
+#region Anonymous concerns
+
+/// <summary>One message on a concern's thread.</summary>
+public class ConcernUpdateDto
+{
+    public Guid Id { get; set; }
+    public Guid ConcernId { get; set; }
+
+    /// <summary>True for the reporter's messages, which carry no author by design.</summary>
+    public bool IsFromReporter { get; set; }
+
+    /// <summary>⚠ HR's messages only. Null on a reporter's message, always.</summary>
+    public string? AuthorName { get; set; }
+
+    public string Body { get; set; } = string.Empty;
+    public DateTime PostedAt { get; set; }
+}
+
+/// <summary>
+/// A concern reported without a name. ⚠ Carries nothing that identifies the reporter, on any path.
+/// </summary>
+public class EmployeeRelationsConcernDto
+{
+    public Guid Id { get; set; }
+    public string ConcernNumber { get; set; } = string.Empty;
+
+    public ConcernCategory Category { get; set; }
+    public string CategoryName => Category.ToString();
+
+    public string Subject { get; set; } = string.Empty;
+    public string Statement { get; set; } = string.Empty;
+
+    public ConcernStatus Status { get; set; }
+    public ConcernStatus StatusValue => Status;
+    public string StatusName => Status.ToString();
+
+    public DateTime ReportedAt { get; set; }
+
+    // HR's side — attributed, because only the reporter is anonymous.
+    public string? TriageNotes { get; set; }
+    public DateTime? TriagedAt { get; set; }
+    public string? TriagedByName { get; set; }
+
+    public DateTime? ClosedAt { get; set; }
+    public string? ClosureReason { get; set; }
+    public string? ClosedByName { get; set; }
+
+    public Guid? ConvertedCaseId { get; set; }
+    public string? ConvertedCaseNumber { get; set; }
+
+    public List<ConcernUpdateDto> Updates { get; set; } = new();
+}
+
+/// <summary>
+/// The one and only response that carries the retrieval code.
+/// </summary>
+/// <remarks>
+/// ⚠ Shown once and never again: only a PBKDF2 hash is stored, so nobody — HR included — can look
+/// it up or reissue it. A reporter who loses it has lost their thread, and that is the correct
+/// trade: a recoverable code would have to be recoverable BY somebody, and that somebody could then
+/// read the thread.
+/// </remarks>
+public class ConcernReceiptDto
+{
+    public string ConcernNumber { get; set; } = string.Empty;
+
+    /// <summary>⚠ Returned exactly once, by the report endpoint. Never stored, never re-sent.</summary>
+    public string RetrievalCode { get; set; } = string.Empty;
+
+    public DateTime ReportedAt { get; set; }
+
+    public string Notice { get; set; } =
+        "Keep this code safe. It is the only way to follow up on this report, and it cannot be "
+        + "recovered or reissued — not even by HR.";
+}
+
+public class ReportConcernDto
+{
+    [Required]
+    public ConcernCategory Category { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string Subject { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(6000)]
+    [MinLength(20)]
+    public string Statement { get; set; } = string.Empty;
+}
+
+/// <summary>How a nameless reporter comes back to their own report.</summary>
+public class TrackConcernDto
+{
+    [Required]
+    [MaxLength(50)]
+    public string ConcernNumber { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(100)]
+    public string RetrievalCode { get; set; } = string.Empty;
+}
+
+/// <summary>The reporter adds to their own thread, still without giving a name.</summary>
+public class AddConcernUpdateDto : TrackConcernDto
+{
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(5)]
+    public string Body { get; set; } = string.Empty;
+}
+
+/// <summary>HR's reply on the thread. Attributed — the desk is accountable.</summary>
+public class ReplyToConcernDto
+{
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(5)]
+    public string Body { get; set; } = string.Empty;
+}
+
+public class TriageConcernDto
+{
+    [Required]
+    [MaxLength(4000)]
+    [MinLength(10)]
+    public string Notes { get; set; } = string.Empty;
+
+    /// <summary>Where triage leaves it — under review, or closed outright.</summary>
+    [Required]
+    public ConcernStatus Status { get; set; }
+}
+
+public class CloseConcernDto
+{
+    [Required]
+    [MaxLength(1000)]
+    [MinLength(10)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Converts a concern into a named employee-relations case.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="CaseType"/> may not be <c>Grievance</c>. A grievance is the employee's own act and
+/// HR cannot raise one for anybody — converting a concern into one would be the raise-on-behalf-of
+/// that <c>OpenCaseAsync</c> refuses, reached by a longer route.
+/// </remarks>
+public class ConvertConcernDto
+{
+    [Required]
+    public EmployeeRelationsCaseType CaseType { get; set; }
+
+    /// <summary>Whom the case is about — the reporter if they have identified themselves, or the
+    /// employee the concern names.</summary>
+    [Required]
+    public Guid EmployeeId { get; set; }
+}
+
+#endregion
