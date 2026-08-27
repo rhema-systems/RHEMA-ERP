@@ -110,6 +110,9 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
         var actor = UserId;
         ValidateMutationHeader(request.IdempotencyKey, request.CorrelationId);
         var requestHash = RequestHash(request);
+        if (_db.Database.CurrentTransaction is not null)
+            return await ReserveWithinTransactionAsync(tenantId, actor, request, requestHash, cancellationToken);
+
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
@@ -118,85 +121,11 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                 : null;
             try
             {
-                await AcquireReservationLockAsync(tenantId, cancellationToken);
-                var replay = await FindReplayAsync(tenantId, request.IdempotencyKey, requestHash, cancellationToken);
-                if (replay is not null)
-                    return await MapReserveReplayAsync(replay, cancellationToken);
-
-                var evaluation = await EvaluateCoreAsync(tenantId, request, cancellationToken);
-                EnsureAllowed(evaluation);
-                var existing = await _db.FinanceBudgetReservations
-                    .Where(x => x.TenantId == tenantId && !x.IsDeleted
-                        && x.SourceDocumentType == Normalize(request.SourceDocumentType, 50, "source document type")
-                        && x.SourceDocumentId == request.SourceDocumentId
-                        && x.Status == ReservedStatus)
-                    .ToListAsync(cancellationToken);
-
-                var now = DateTime.UtcNow;
-                List<FinanceBudgetReservation> reservations;
-                if (existing.Count > 0)
-                {
-                    EnsureExistingMatches(existing, evaluation, request);
-                    reservations = existing;
-                }
-                else
-                {
-                    reservations = evaluation.Lines.Select(line => new FinanceBudgetReservation
-                    {
-                        Id = Guid.NewGuid(),
-                        TenantId = tenantId,
-                        BudgetScenarioId = line.BudgetScenarioId,
-                        BudgetReturnId = line.BudgetReturnId,
-                        BudgetEntryId = line.BudgetEntryId,
-                        AccountId = line.AccountId,
-                        FiscalPeriodId = line.FiscalPeriodId,
-                        SegmentValueId = line.SegmentValueId,
-                        FinanceDimensionSetId = line.FinanceDimensionSetId,
-                        DimensionCombinationHashSnapshot = line.DimensionCombinationHash,
-                        CurrencyCode = evaluation.FunctionalCurrencyCode,
-                        SourceDocumentType = Normalize(request.SourceDocumentType, 50, "source document type"),
-                        SourceDocumentId = request.SourceDocumentId,
-                        SourceDocumentReference = Normalize(request.SourceDocumentReference, 100, "source document reference"),
-                        SourceVersion = Normalize(request.SourceVersion, 64, "source version"),
-                        BudgetDate = request.BudgetDate.Date,
-                        SourceLineIdsJson = JsonSerializer.Serialize(line.SourceLineIds),
-                        TransactionCurrencyCode = line.TransactionCurrencyCode,
-                        TransactionAmount = line.TransactionAmount,
-                        ExchangeRateId = line.ExchangeRateId,
-                        ExchangeRate = line.FunctionalConversionRate,
-                        ReservationVersion = 1,
-                        ReservedAmount = line.RequestedFunctionalAmount,
-                        BudgetAmountSnapshot = line.BudgetAmount,
-                        PostedActualSnapshot = line.PostedActualAmount,
-                        OtherReservationsSnapshot = line.OtherReservationsAmount,
-                        AvailableBeforeReservationSnapshot = line.AvailableAmount,
-                        Status = ReservedStatus,
-                        EvaluationHash = evaluation.EvaluationHash,
-                        ReservedByUserId = actor,
-                        ReservedAt = now,
-                        CreatedAt = now,
-                        CreatedById = actor,
-                        CreatedBy = _currentUser.UserName
-                    }).ToList();
-                    _db.FinanceBudgetReservations.AddRange(reservations);
-                }
-
-                var operation = NewOperation(
-                    tenantId, null, reservations.Select(x => x.Id), "Reserve", request.IdempotencyKey,
-                    requestHash, existing.Count > 0 ? ReservedStatus : "None", ReservedStatus,
-                    existing.Sum(x => x.ReservedAmount), reservations.Sum(x => x.ReservedAmount),
-                    request.CorrelationId, actor, now);
-                _db.FinanceBudgetReservationOperations.Add(operation);
-                await _db.SaveChangesAsync(cancellationToken);
+                var result = await ReserveWithinTransactionAsync(
+                    tenantId, actor, request, requestHash, cancellationToken);
                 if (transaction is not null)
                     await transaction.CommitAsync(cancellationToken);
-
-                return new FinanceBudgetCommitmentResultDto
-                {
-                    IdempotentReplay = existing.Count > 0,
-                    EvaluationHash = evaluation.EvaluationHash,
-                    Reservations = reservations.Select(x => MapReservation(x, existing.Count > 0)).ToList()
-                };
+                return result;
             }
             catch
             {
@@ -206,6 +135,90 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                 throw;
             }
         });
+    }
+
+    private async Task<FinanceBudgetCommitmentResultDto> ReserveWithinTransactionAsync(
+        Guid tenantId,
+        Guid actor,
+        FinanceBudgetCommitmentRequestDto request,
+        string requestHash,
+        CancellationToken cancellationToken)
+    {
+        await AcquireReservationLockAsync(tenantId, cancellationToken);
+        var replay = await FindReplayAsync(tenantId, request.IdempotencyKey, requestHash, cancellationToken);
+        if (replay is not null)
+            return await MapReserveReplayAsync(replay, cancellationToken);
+
+        var evaluation = await EvaluateCoreAsync(tenantId, request, cancellationToken);
+        EnsureAllowed(evaluation);
+        var existing = await _db.FinanceBudgetReservations
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                && x.SourceDocumentType == Normalize(request.SourceDocumentType, 50, "source document type")
+                && x.SourceDocumentId == request.SourceDocumentId
+                && x.Status == ReservedStatus)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        List<FinanceBudgetReservation> reservations;
+        if (existing.Count > 0)
+        {
+            EnsureExistingMatches(existing, evaluation, request);
+            reservations = existing;
+        }
+        else
+        {
+            reservations = evaluation.Lines.Select(line => new FinanceBudgetReservation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                BudgetScenarioId = line.BudgetScenarioId,
+                BudgetReturnId = line.BudgetReturnId,
+                BudgetEntryId = line.BudgetEntryId,
+                AccountId = line.AccountId,
+                FiscalPeriodId = line.FiscalPeriodId,
+                SegmentValueId = line.SegmentValueId,
+                FinanceDimensionSetId = line.FinanceDimensionSetId,
+                DimensionCombinationHashSnapshot = line.DimensionCombinationHash,
+                CurrencyCode = evaluation.FunctionalCurrencyCode,
+                SourceDocumentType = Normalize(request.SourceDocumentType, 50, "source document type"),
+                SourceDocumentId = request.SourceDocumentId,
+                SourceDocumentReference = Normalize(request.SourceDocumentReference, 100, "source document reference"),
+                SourceVersion = Normalize(request.SourceVersion, 64, "source version"),
+                BudgetDate = request.BudgetDate.Date,
+                SourceLineIdsJson = JsonSerializer.Serialize(line.SourceLineIds),
+                TransactionCurrencyCode = line.TransactionCurrencyCode,
+                TransactionAmount = line.TransactionAmount,
+                ExchangeRateId = line.ExchangeRateId,
+                ExchangeRate = line.FunctionalConversionRate,
+                ReservationVersion = 1,
+                ReservedAmount = line.RequestedFunctionalAmount,
+                BudgetAmountSnapshot = line.BudgetAmount,
+                PostedActualSnapshot = line.PostedActualAmount,
+                OtherReservationsSnapshot = line.OtherReservationsAmount,
+                AvailableBeforeReservationSnapshot = line.AvailableAmount,
+                Status = ReservedStatus,
+                EvaluationHash = evaluation.EvaluationHash,
+                ReservedByUserId = actor,
+                ReservedAt = now,
+                CreatedAt = now,
+                CreatedById = actor,
+                CreatedBy = _currentUser.UserName
+            }).ToList();
+            _db.FinanceBudgetReservations.AddRange(reservations);
+        }
+
+        _db.FinanceBudgetReservationOperations.Add(NewOperation(
+            tenantId, null, reservations.Select(x => x.Id), "Reserve", request.IdempotencyKey,
+            requestHash, existing.Count > 0 ? ReservedStatus : "None", ReservedStatus,
+            existing.Sum(x => x.ReservedAmount), reservations.Sum(x => x.ReservedAmount),
+            request.CorrelationId, actor, now));
+        await _db.SaveChangesAsync(cancellationToken);
+        return new FinanceBudgetCommitmentResultDto
+        {
+            IdempotentReplay = existing.Count > 0,
+            EvaluationHash = evaluation.EvaluationHash,
+            Reservations = reservations.Select(x => MapReservation(x, existing.Count > 0)).ToList()
+        };
     }
 
     public Task<FinanceBudgetReservationDto> SetReservationAmountAsync(
@@ -309,6 +322,84 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             }, cancellationToken, request.JournalEntryId, request.PostingEventId);
     }
 
+    public async Task ConsumeForPostingAsync(
+        Guid tenantId,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        IReadOnlyList<Guid> reservationIds,
+        Guid journalEntryId,
+        Guid postingEventId,
+        CancellationToken cancellationToken = default)
+    {
+        if (tenantId != TenantId)
+            throw new UnauthorizedAccessException("Finance budget reservations belong to another tenant.");
+        if (sourceDocumentId == Guid.Empty || journalEntryId == Guid.Empty || postingEventId == Guid.Empty)
+            throw Validation("BUDGET_POSTING_EVIDENCE_REQUIRED", "Source, journal and posting-event identities are required.");
+        if (!string.Equals(
+                _db.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.InMemory",
+                StringComparison.Ordinal) &&
+            _db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException(
+                "Finance budget reservations can be consumed only inside the central posting transaction.");
+        var normalizedSourceType = Normalize(sourceDocumentType, 50, "source document type");
+        var distinctIds = reservationIds.Distinct().ToArray();
+        if (distinctIds.Length == 0 || distinctIds.Length != reservationIds.Count)
+            throw Validation("BUDGET_RESERVATION_IDS_INVALID", "Budget reservation IDs must be non-empty and unique.");
+
+        var reservations = await _db.FinanceBudgetReservations
+            .Where(row => row.TenantId == tenantId && distinctIds.Contains(row.Id) && !row.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (reservations.Count != distinctIds.Length || reservations.Any(row =>
+                row.SourceDocumentType != normalizedSourceType
+                || row.SourceDocumentId != sourceDocumentId
+                || row.Status != ReservedStatus))
+            throw Conflict("BUDGET_POSTING_RESERVATION_MISMATCH",
+                "Finance budget reservation evidence is missing, stale, or belongs to another source document.");
+
+        var now = DateTime.UtcNow;
+        var priorReservedAmount = reservations.Sum(reservation => reservation.ReservedAmount);
+        foreach (var reservation in reservations)
+        {
+            reservation.Status = ConsumedStatus;
+            reservation.TransactionAmount = 0m;
+            reservation.ReservedAmount = 0m;
+            reservation.ConsumedAt = now;
+            reservation.ConsumedByUserId = UserId;
+            reservation.JournalEntryId = journalEntryId;
+            reservation.PostingEventId = postingEventId;
+            reservation.ReservationVersion += 1;
+            reservation.UpdatedAt = now;
+            reservation.LastModifiedById = UserId;
+        }
+
+        var operationKey = $"POST:{postingEventId:N}:BudgetConsume";
+        var operationHash = Hash(string.Join('|', new[]
+        {
+            normalizedSourceType,
+            sourceDocumentId.ToString("N"),
+            string.Join(',', distinctIds.OrderBy(id => id).Select(id => id.ToString("N"))),
+            journalEntryId.ToString("N"),
+            postingEventId.ToString("N")
+        }));
+        _db.FinanceBudgetReservationOperations.Add(NewOperation(
+            tenantId,
+            null,
+            distinctIds,
+            "ConsumeForPosting",
+            operationKey,
+            operationHash,
+            ReservedStatus,
+            ConsumedStatus,
+            priorReservedAmount,
+            0m,
+            $"POST:{normalizedSourceType}:{sourceDocumentId:N}",
+            UserId,
+            now,
+            journalEntryId,
+            postingEventId));
+    }
+
     private async Task<FinanceBudgetReservationDto> MutateReservationAsync(
         Guid reservationId,
         string operationType,
@@ -324,6 +415,11 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
         ValidateMutationHeader(idempotencyKey, correlationId);
         var tenantId = TenantId;
         var actor = UserId;
+        if (_db.Database.CurrentTransaction is not null)
+            return await MutateReservationWithinTransactionAsync(
+                reservationId, operationType, idempotencyKey, correlationId, payloadHash,
+                expectedVersion, mutate, tenantId, actor, cancellationToken, journalEntryId, postingEventId);
+
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
@@ -332,32 +428,12 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                 : null;
             try
             {
-                await AcquireReservationLockAsync(tenantId, cancellationToken);
-                var replay = await FindReplayAsync(tenantId, idempotencyKey, payloadHash, cancellationToken);
-                if (replay is not null)
-                {
-                    var replayReservationId = replay.FinanceBudgetReservationId
-                        ?? ReadReservationIds(replay).Single();
-                    var replayReservation = await RequireReservationAsync(tenantId, replayReservationId, cancellationToken);
-                    return MapReservation(replayReservation, true);
-                }
-
-                var reservation = await RequireReservationAsync(tenantId, reservationId, cancellationToken);
-                if (reservation.ReservationVersion != expectedVersion)
-                    throw Conflict("BUDGET_RESERVATION_VERSION_CONFLICT",
-                        "The Finance budget reservation changed. Reload its current position before retrying.");
-                var priorStatus = reservation.Status;
-                var priorAmount = reservation.ReservedAmount;
-                var now = DateTime.UtcNow;
-                await mutate(reservation, now, cancellationToken);
-                _db.FinanceBudgetReservationOperations.Add(NewOperation(
-                    tenantId, reservation.Id, new[] { reservation.Id }, operationType, idempotencyKey,
-                    payloadHash, priorStatus, reservation.Status, priorAmount, reservation.ReservedAmount,
-                    correlationId, actor, now, journalEntryId, postingEventId));
-                await _db.SaveChangesAsync(cancellationToken);
+                var result = await MutateReservationWithinTransactionAsync(
+                    reservationId, operationType, idempotencyKey, correlationId, payloadHash,
+                    expectedVersion, mutate, tenantId, actor, cancellationToken, journalEntryId, postingEventId);
                 if (transaction is not null)
                     await transaction.CommitAsync(cancellationToken);
-                return MapReservation(reservation, false);
+                return result;
             }
             catch
             {
@@ -367,6 +443,46 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
                 throw;
             }
         });
+    }
+
+    private async Task<FinanceBudgetReservationDto> MutateReservationWithinTransactionAsync(
+        Guid reservationId,
+        string operationType,
+        string idempotencyKey,
+        string correlationId,
+        string payloadHash,
+        int expectedVersion,
+        Func<FinanceBudgetReservation, DateTime, CancellationToken, Task> mutate,
+        Guid tenantId,
+        Guid actor,
+        CancellationToken cancellationToken,
+        Guid? journalEntryId,
+        Guid? postingEventId)
+    {
+        await AcquireReservationLockAsync(tenantId, cancellationToken);
+        var replay = await FindReplayAsync(tenantId, idempotencyKey, payloadHash, cancellationToken);
+        if (replay is not null)
+        {
+            var replayReservationId = replay.FinanceBudgetReservationId
+                ?? ReadReservationIds(replay).Single();
+            var replayReservation = await RequireReservationAsync(tenantId, replayReservationId, cancellationToken);
+            return MapReservation(replayReservation, true);
+        }
+
+        var reservation = await RequireReservationAsync(tenantId, reservationId, cancellationToken);
+        if (reservation.ReservationVersion != expectedVersion)
+            throw Conflict("BUDGET_RESERVATION_VERSION_CONFLICT",
+                "The Finance budget reservation changed. Reload its current position before retrying.");
+        var priorStatus = reservation.Status;
+        var priorAmount = reservation.ReservedAmount;
+        var now = DateTime.UtcNow;
+        await mutate(reservation, now, cancellationToken);
+        _db.FinanceBudgetReservationOperations.Add(NewOperation(
+            tenantId, reservation.Id, new[] { reservation.Id }, operationType, idempotencyKey,
+            payloadHash, priorStatus, reservation.Status, priorAmount, reservation.ReservedAmount,
+            correlationId, actor, now, journalEntryId, postingEventId));
+        await _db.SaveChangesAsync(cancellationToken);
+        return MapReservation(reservation, false);
     }
 
     private async Task<FinanceBudgetCommitmentEvaluationDto> EvaluateCoreAsync(

@@ -82,6 +82,22 @@ public sealed class FinanceIntegrationContractFoundationTests
         contract.Notes.Should().Contain("without writing Finance tables");
     }
 
+    [Fact]
+    public void DirectApExpenseBudgetContractShouldPreserveProcurementAndCutoverBoundaries()
+    {
+        var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-016");
+
+        contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
+        contract.Version.Should().Be("1.0");
+        contract.ProducerOwner.Should().Be("Finance / Accounts Payable");
+        contract.EntryPoint.Should().Contain("IVendorInvoiceService");
+        contract.EntryPoint.Should().Contain("IFinanceBudgetCommitmentService");
+        contract.SourceDocumentType.Should().Be("VendorInvoice");
+        contract.Notes.Should().Contain("reserve before");
+        contract.Notes.Should().Contain("Opening");
+        contract.Notes.Should().Contain("PO/GRV");
+    }
+
     [Theory]
     [InlineData("FIN-INT-012", "Procurement and Inventory", "SupplierReturnDispatch")]
     [InlineData("FIN-INT-013", "Procurement", "SupplierReturnCommercialResolution")]

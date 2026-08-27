@@ -20,19 +20,22 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
     private readonly ILogger<FinancePostingEngine> _logger;
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IFinanceBudgetControlService? _budgetControl;
+    private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
 
     public FinancePostingEngine(
         ApplicationDbContext context,
         ICurrentUserService currentUserService,
         ILogger<FinancePostingEngine> logger,
         IFinanceAuditService? financeAuditService = null,
-        IFinanceBudgetControlService? budgetControl = null)
+        IFinanceBudgetControlService? budgetControl = null,
+        IFinanceBudgetCommitmentService? budgetCommitments = null)
     {
         _context = context;
         _currentUserService = currentUserService;
         _logger = logger;
         _financeAuditService = financeAuditService;
         _budgetControl = budgetControl;
+        _budgetCommitments = budgetCommitments;
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
@@ -120,15 +123,31 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
 
         if (request.BudgetReservationIds.Count > 0)
         {
-            if (_budgetControl == null)
-                throw new InvalidOperationException("Finance budget control is not configured for this budget-controlled posting.");
-            await _budgetControl.ConsumeReservationsAsync(
-                tenantId,
-                validation.SourceDocumentId,
-                request.BudgetReservationIds,
-                journalEntry.Id,
-                postingEvent.Id,
-                cancellationToken);
+            if (string.IsNullOrWhiteSpace(request.BudgetReservationSourceDocumentType))
+            {
+                if (_budgetControl == null)
+                    throw new InvalidOperationException("Finance budget control is not configured for this budget-controlled posting.");
+                await _budgetControl.ConsumeReservationsAsync(
+                    tenantId,
+                    validation.SourceDocumentId,
+                    request.BudgetReservationIds,
+                    journalEntry.Id,
+                    postingEvent.Id,
+                    cancellationToken);
+            }
+            else
+            {
+                if (_budgetCommitments == null)
+                    throw new InvalidOperationException("Finance budget commitments are not configured for this producer posting.");
+                await _budgetCommitments.ConsumeForPostingAsync(
+                    tenantId,
+                    request.BudgetReservationSourceDocumentType,
+                    validation.SourceDocumentId,
+                    request.BudgetReservationIds,
+                    journalEntry.Id,
+                    postingEvent.Id,
+                    cancellationToken);
+            }
         }
 
         if (!validation.ExistingJournalEntryId.HasValue)

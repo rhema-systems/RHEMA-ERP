@@ -2,6 +2,7 @@ import { apiService } from './api.service';
 import { DOCUMENT_TYPES, documentOutputService } from './document-output.service';
 import type {
     VendorInvoice,
+    ApBudgetCell,
     VendorInvoiceCreateRequest,
     VendorInvoiceUpdateRequest,
     VendorPayment,
@@ -137,6 +138,11 @@ class AccountsPayableService {
     /** Returns canonical Supplier.Id values through a tenant-scoped Finance read model. */
     public async getInvoiceSuppliers(): Promise<ApInvoiceSupplier[]> {
         return apiService.get<ApInvoiceSupplier[]>(`${this.baseUrl}/invoices/suppliers`);
+    }
+
+    public async getInvoiceBudgetCells(budgetDate: string, accountId: string): Promise<ApBudgetCell[]> {
+        const query = new URLSearchParams({ budgetDate, accountId });
+        return apiService.get<ApBudgetCell[]>(`${this.baseUrl}/invoices/budget-cells?${query.toString()}`);
     }
 
     public async createInvoice(data: VendorInvoiceCreateRequest): Promise<VendorInvoice> {

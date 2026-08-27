@@ -24753,6 +24753,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("BudgetEntryId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("CapitalizationJournalEntryId")
                         .HasColumnType("uniqueidentifier");
 
@@ -24879,6 +24882,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BudgetEntryId");
+
                     b.HasIndex("FixedAssetId");
 
                     b.HasIndex("GLAccountId");
@@ -24894,6 +24899,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("VendorInvoiceId");
 
                     b.HasIndex("WarehouseId");
+
+                    b.HasIndex("TenantId", "BudgetEntryId");
 
                     b.HasIndex("TenantId", "CapitalizationPostingEventId");
 
@@ -162470,6 +162477,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorInvoiceLineItem", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.BudgetEntry", "BudgetEntry")
+                        .WithMany()
+                        .HasForeignKey("BudgetEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset", "FixedAsset")
                         .WithMany()
                         .HasForeignKey("FixedAssetId")
@@ -162516,6 +162528,8 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("WarehouseId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("BudgetEntry");
 
                     b.Navigation("FixedAsset");
 

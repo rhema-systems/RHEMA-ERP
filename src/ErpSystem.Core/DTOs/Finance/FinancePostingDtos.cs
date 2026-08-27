@@ -52,10 +52,17 @@ public sealed class FinancePostingRequestDto
     public bool AllowPostingToClosedPeriod { get; set; }
 
     /// <summary>
-    /// Exact Finance budget commitments validated for this manual journal. The central
+    /// Exact Finance budget commitments validated for this posting source. The central
     /// posting engine consumes them in the same transaction as the GL posting.
     /// </summary>
     public IReadOnlyList<Guid> BudgetReservationIds { get; set; } = Array.Empty<Guid>();
+
+    /// <summary>
+    /// Stable source type that owns generic commitment reservations. Blank retains the legacy
+    /// manual-journal control path; nonblank values are validated by the module-neutral Finance
+    /// commitment boundary before the same posting transaction commits.
+    /// </summary>
+    public string? BudgetReservationSourceDocumentType { get; set; }
 
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
     public IReadOnlyList<FinanceTaxCalculationSnapshotDto> TaxCalculationSnapshots { get; set; } = Array.Empty<FinanceTaxCalculationSnapshotDto>();
