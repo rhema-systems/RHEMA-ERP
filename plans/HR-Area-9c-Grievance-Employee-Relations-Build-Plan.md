@@ -1,0 +1,398 @@
+# HR Area 9c — Grievance & Employee Relations: Build Plan
+
+**Opened 2026-08-27.** The last functional gap in the internal HR module, and the second of the two
+modules [[hr-deferred-modules]] recorded as consciously deferred during area 9 planning
+(2026-08-16). Area 9 shipped a **first cut** — the FR-HR-181 ladder and the grievance record — and
+said so in its own doc comments. This area builds the module that first cut was a down-payment on.
+
+Third cut off area 9, after 9b (separation & exit). Numbered **9c** for the same reason 9b was:
+it inherits area 9's data and extends its store rather than starting empty.
+
+---
+
+## 1. How to use this document
+
+Section **3 is measured, not remembered** — every count came from a live query against
+`ErpSystemDB` on 2026-08-27, and every endpoint list came from reading the controller. Read it
+before writing a line of code. Section 4 is the requirement gap, quoted from the spec PDF rather
+than paraphrased. Section 5 holds the decisions (four are already taken by the user, 2026-08-27).
+Section 7 is the slice plan. Section 8 is the running log — one entry per slice as it closes, in
+the area-16 / area-25 style.
+
+**Standing conventions, not restated per slice:** the user runs all builds
+(`user-runs-builds`); I stage and hand over the commit message (`stage-user-commits`); migrations
+are scaffolded by the user, listed by me in `FastBuildMigrationMetadata`, and updated by the user
+(`migration-ownership-and-chain`); harnesses run against **Staging** with the JWT key passed
+(`hr-harness-run-environment`) and **run twice**; the API is killed before asking for a rebuild
+(`stop-backend-before-user-builds`); uploads need `clamd-stub.mjs`.
+
+**The two-actor rule applies throughout.** HR bypasses its own guards, so every ownership and
+refusal assertion must be probed as a *linked non-HR employee fixture*, never as HR.
+
+---
+
+## 2. Status at a glance
+
+| Slice | Title | Status |
+|---|---|---|
+| 0 | Survey, fixtures, endpoint + payload census | **COMPLETE 2026-08-27** — 147 assertions ×2, zero failures; the ladder proven end to end, and `GrievanceStatus.Closed` found to have no writer |
+| 1 | The ER case register: case types, parties, representation | ⏳ |
+| 2 | FR-HR-181's missing artefacts: HR interpretation, investigation, resolution decision | ⏳ |
+| 3 | Documents on the controlled upload gate + the final signed agreement | ⏳ |
+| 4 | Case conferencing & mediation; union consultation | ⏳ |
+| 5 | The responder matrix (FR-HR-084) + rung resolution | ⏳ |
+| 6 | Anonymous / whistleblower concern intake | ⏳ |
+| 7 | Reminder-sweep extension + notifications | ⏳ |
+| 8 | ER analytics & reporting | ⏳ |
+| 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | ⏳ |
+| 10 | Desk screens: the ER case register and case file | ⏳ |
+| 11 | Portal screens: the employee's side | ⏳ |
+| 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | ⏳ |
+
+---
+
+## 3. Measured ground truth (2026-08-27, DEFAULT tenant unless stated)
+
+### 3.1 What area 9 slice 7 actually built, and it works
+
+| Artefact | Where | Size |
+|---|---|---|
+| Entities | `Core/Entities/HR/StaffGrievanceEntities.cs` | 209 lines — `StaffGrievance`, `StaffGrievanceStep` (+ the shared discipline reminder engine) |
+| Enums | `Core/Enums/HREnums.cs:2781-2835` | `GrievanceEscalationLevel` (6 rungs), `GrievanceStatus` (6), `GrievanceStepOutcome` (3) |
+| DTOs | `Core/DTOs/HR/StaffGrievanceDTOs.cs` | 181 lines |
+| Interface | `Core/Interfaces/HR/IStaffGrievanceService.cs` | 84 lines |
+| Service | `Core/Services/HR/StaffGrievanceService.cs` | 420 lines |
+| Controller | `Api/Controllers/HR/StaffGrievancesController.cs` | 149 lines, **15 endpoints** on `api/grievances` |
+| Migration | `20260816225939_AddStaffGrievances` | applied |
+| Frontend | `services/hr/grievance.service.ts` (89), `types/hr/grievance.ts` (119) | 11 client methods |
+| Screens | `/hr/grievances`, `/me/grievances`, `/me/grievances/new`, `/me/grievances/[id]` | 4 |
+
+**This is not a dead path** — unlike several features earlier areas inherited. Live data:
+
+| | |
+|---|---|
+| `StaffGrievances` | **69** |
+| `StaffGrievanceSteps` | **112** |
+| distinct grievers | **41** |
+| date range | 2026-08-16 → 2026-08-27 |
+| statuses present | Filed 9, UnderReview 19, Escalated 18, Resolved 5, Withdrawn 18 |
+| rungs reached | all six — Supervisor 69, HOD 23, HR 5, GM F&A 5, MD 5, Board 5 |
+| steps assigned a responder | 62 of 112 |
+
+The ladder has been walked end to end. **Treat this area as harden-and-extend, not resurrect**
+— the opposite of area 11's starting position.
+
+### 3.2 The org-authority data, re-measured — it got worse
+
+The `ExpectedHeadcount` lesson says measure before designing on it. Measured today against the
+figures [[hr-deferred-modules]] recorded on 2026-08-16:
+
+| | 2026-08-16 | 2026-08-27 | |
+|---|---|---|---|
+| Active employees | 1,210 | **8,353** | the tenant was loaded in the interim |
+| `Employees.ManagerId` populated | 175 (14%) | **486 (5.8%)** | ⚠ **worse**, not better |
+| `Employees.OrganizationUnitId` populated | 1,186 (98%) | **8,329 (99.7%)** | the only usable one |
+| `OrganizationUnits.HeadEmployeeId` populated | 0 of 41 | **2 of 48** | |
+| `JobReportingRelationships` | — | **87** | job-level, not person-level |
+| `Departments` | — | **7** | too coarse to route on |
+
+**Conclusion, and it is now a measurement rather than a prediction:** deriving the Supervisor and
+HOD rungs from org data would resolve to nobody for **94% of staff**. This is the fourth
+requirement to hit this wall (FR-HR-080, FR-HR-173, FR-HR-181, now FR-HR-084). Decision D-3 below
+stops working around it and builds the explicit alternative we recommended to TDC in
+`docs/HR-OPEN-QUESTIONS-FOR-TDC.md` §4.
+
+### 3.3 Adjacent surfaces this area will read or extend
+
+| | Measured | Note |
+|---|---|---|
+| `Unions` | **0 rows** | area 21 built the register; nothing has been entered. There is **no employee↔union membership entity at all** — the only `UnionId` FKs are on `CollectiveBargainingAgreement` and `JobAnalysisEntities.cs:125`. |
+| `SafetyIncidents` | 76 | the SHE link target |
+| `PerformanceImprovementPlans` | — | the performance link target |
+| `StaffDisciplinaryActions` | 690 | the discipline link target; the grievance store already shares its permission family |
+| `StaffDisciplineInvestigations` | 36 | **the template** for the grievance investigation entity |
+| `StaffDisciplineDocuments` | — | **the template** for grievance documents: a `Scope` enum discriminating Case / ActionStep / Appeal |
+| `StaffDisciplineNotifications` | — | the template for ER notifications |
+| `DisciplineReminderService` | — | already sweeps `GrievanceUnanswered` at `GrievanceRungChaseDays = 5` (`:81`) |
+| `HrPermissions.CategoryDiscipline` | — | **already named "HR - Discipline & Grievance"**, and all three permission descriptions already mention grievance. No new permission family is needed. |
+| `ControlledFileUploadCategories` | 15 HR families | needs one new constant; every HR family is private + scan-mandatory |
+
+### 3.4 Three defects found during the survey, before any code was written
+
+1. **`frontend/src/app/hr/grievances/[id]/` is an empty, untracked directory.** `git ls-files`
+   returns only `page.tsx` for that folder. Somebody started HR's detail screen and it was never
+   written. Harmless today (Next.js ignores a folder with no `page.tsx`) but it must be either
+   filled or removed — slice 10 fills it.
+2. **HR's register links every row to the employee's portal screen.**
+   `frontend/src/app/hr/grievances/page.tsx:129` renders
+   `<Link href={`/me/grievances/${g.id}`}>`. So an HR officer browsing the register is sent into
+   `/me/...`. It happens to work — `/me/grievances/[id]` carries the assign and respond mutations
+   as well as escalate and withdraw — but the desk and the portal are sharing one screen by
+   accident, not design, and the portal shell is the wrong frame for HR's own work.
+3. **`getByStatus` has no caller.** One of eleven client methods and one of fifteen endpoints is
+   dead. Minor, but it is exactly the shape the area-16 two-greps check exists to surface, so it
+   is recorded here rather than discovered again in slice 12.
+
+---
+
+## 4. What FR-HR-181 actually requires — quoted, and scored
+
+The requirement is **Mandatory** (`Pri. M`, source `SRS1 3.15 / HR-REQ-093, 094`). Its full text,
+from `TDC_ERPS_HR_Payroll_SHE_Environment_Requirements_Specification_v0.3 - EDITED.pdf` p.25:
+
+> The system shall escalate grievances through Employee → Supervisor → HOD → HR → GM Finance &
+> Administration → Managing Director → Board, **retaining the grievance statement, supervisor
+> response, HOD comments, HR interpretation, union consultation notes, investigation report,
+> resolution decision and final signed agreement.**
+
+Nine obligations. Scored against what exists:
+
+| # | Obligation | Today | Slice |
+|---|---|---|---|
+| 1 | Escalate through the six rungs | ✅ `GrievanceEscalationLevel` + `EscalateAsync` | — |
+| 2 | Retain the grievance statement | ✅ `StaffGrievance.Statement`, never overwritten | — |
+| 3 | Supervisor response | ✅ step response at `Level = Supervisor` | — |
+| 4 | HOD comments | ✅ step response at `Level = HeadOfDepartment` | — |
+| 5 | **HR interpretation** | ❌ no field. The HR rung's step response is a response, not the formal HR reading of the case the requirement names separately. | 2 |
+| 6 | **Union consultation notes** | ❌ nothing anywhere. `Unions` is empty and there is no membership link. | 4 |
+| 7 | **Investigation report** | ❌ no entity. Discipline has one; grievance has none. | 2 |
+| 8 | **Resolution decision** | ⚠ partial — `ResolutionSummary` is a free-text copy of whatever the last responder typed (`RespondAsync` assigns `dto.Response` straight into it). No decider, no date distinct from the response, no remedy or undertaking. | 2 |
+| 9 | **Final signed agreement** | ❌ no document surface on grievances at all. | 3 |
+
+**Four of nine absent, one partial.** A Mandatory requirement is roughly half delivered, and that
+— not the deferred wish-list — is the strongest evidence for building this area now.
+
+Also in scope from the spec: **FR-HR-084** (`Pri. D`, source WN) — *"The system shall model a
+grievance hierarchy defining reporting lines."* Decision D-3 delivers this as an explicitly
+maintained matrix rather than a derived hierarchy, for the reason measured in §3.2.
+
+---
+
+## 5. Decisions
+
+### Taken by the user, 2026-08-27
+
+- **D-1 — Full ER module.** Complete FR-HR-181's five missing/partial artefacts **and** the
+  deferred list: case conferencing and mediation, representation and union handling, anonymous
+  intake, analytics, and the SHE/performance links.
+- **D-2 — Anonymous intake is a separate `EmployeeRelationsConcern` entity.** No employee FK; a
+  retrieval code lets the reporter follow up; HR triage may convert it into a named case if the
+  reporter identifies themselves. Chosen over a nullable griever on `StaffGrievance` so that the
+  read gate and the escalate/withdraw ownership rules stay intact for the 69 existing rows.
+- **D-3 — Rungs resolve from an explicit responder matrix**, per organisation unit with a
+  tenant-wide default, maintained by HR on an admin screen. HR's per-grievance `assign` stays as
+  the override. This is FR-HR-084, and it is the alternative already put to TDC in open question
+  §4 rather than a fifth work-around.
+- **D-4 — A general ER case register.** Grievance becomes one case type among several
+  (conflict/mediation, welfare/counselling, union consultation, other). Existing grievances
+  migrate in as `CaseType = Grievance`.
+
+### Proposed here — flag now if any of these is wrong
+
+- **D-5 — The store is extended in place; no table is renamed.** `StaffGrievances` /
+  `StaffGrievanceSteps` keep their names and their 69 + 112 rows, and gain `CaseType` defaulting
+  to `Grievance` so every existing row is correct without a data fix. Renaming to
+  `EmployeeRelationsCase` would mean a table rename, an EF-config rewrite, a snapshot
+  regeneration and a rename across entity/DTO/service/controller/types/service-client/4 screens,
+  for no functional gain and real regression risk on a working portal.
+- **D-6 — The route is renamed, with the old one kept as an alias.** The controller carries
+  **both** `[Route("api/hr/employee-relations")]` (the correct name for a register that holds
+  union consultations) and `[Route("api/grievances")]`, so nothing the portal calls breaks. The
+  frontend client migrates to the new route in slice 10/11 and the alias is dropped in slice 12
+  — *after* the two greps prove nothing still calls it.
+- **D-7 — `StaffGrievance.EmployeeId` stays required, as the case's primary party.** Multi-party
+  cases (respondent, representative, union rep, witness, mediator) are modelled by a new
+  `StaffGrievanceParty` child. Assumption worth stating: **every ER case at TDC concerns at least
+  one identifiable employee.** A union consultation that concerns a class of staff rather than a
+  person names the affected employee or the union representative as primary. If TDC has genuinely
+  employee-less ER cases, D-7 is wrong and `EmployeeId` must go nullable — say so now, because it
+  is cheap before slice 1 and expensive after.
+- **D-8 — One conference entity, typed.** Case conferencing, mediation and union consultation are
+  three uses of the same shape (a convened meeting: date, venue, chair, attendees, notes,
+  outcome), so they are one `StaffGrievanceConference` with a `ConferenceType` and a nullable
+  `UnionId`, not three tables. FR-HR-181's "union consultation notes" is a conference of that
+  type.
+- **D-9 — Anonymous means unattributed, not unauthenticated.** The concern endpoint requires a
+  valid internal token and simply never records who called it — no employee id, no user id, no
+  `CreatedBy`. A truly public unauthenticated intake would be only the second anonymous surface in
+  the whole application (the first, training certificate verification, is still awaiting TDC's
+  answer) and needs its own security review. ⚠ Note the honest limit: request logs and the
+  reverse proxy still see the caller. If TDC needs untraceable reporting, that is a different
+  build and should be raised as such.
+- **D-10 — This area stays OFF the workflow engine**, extending area 9 slice 7's recorded call
+  ([[goal-approval-stays-bespoke]] is the same class). The engine models approval; an ER case is
+  *answered*, and the decision to escalate belongs to the griever. The one place to re-examine is
+  the **final signed agreement** — a signature is closer to an approval — and slice 3 will judge
+  it on the evidence rather than assume.
+- **D-11 — No new permission family.** `HrPermissions.CategoryDiscipline` is already
+  *"HR - Discipline & Grievance"* and all three of its permission descriptions already name
+  grievance. New endpoints join `DisciplineRead/Write/Admin`. The employee's own acts (file,
+  escalate, withdraw, report a concern) stay ungated with the ownership check on the service, per
+  [[hr-area-authz-pattern]].
+
+### Open — for TDC, not for us to decide
+
+- **How long may a case sit at one rung?** Still `GrievanceRungChaseDays = 5`, still our number,
+  still unanswered (open question §2). Slice 7 makes it configurable rather than a `const` so the
+  answer costs a settings change, not a deploy.
+- **Union membership.** `Unions` has 0 rows and no employee link exists. Slice 4 builds the
+  consultation record against the union register as it stands; **who represents whom cannot be
+  derived** and the union rep is named per case. Raise with TDC whether union membership should
+  be maintained as employee data.
+- **Whether reporting lines will ever be maintained** — open question §4, now with a worse
+  number to quote. D-3 makes this area not care, but FR-HR-080 in discipline still does.
+
+---
+
+## 6. Scope
+
+**In:** the ER case register and its case types; parties and representation; FR-HR-181's five
+missing artefacts; the document surface on the controlled upload gate; conferencing, mediation
+and union consultation; the responder matrix; anonymous concern intake and its two-way thread;
+the reminder-sweep extension and notifications; ER analytics; cross-links to SHE incidents, PIPs
+and disciplinary cases; the desk screens and the portal screens; the closing audit.
+
+**Out:** anything that changes the disciplinary case itself (area 9 is closed — a defect found
+here is recorded, not fixed, unless it is in grievance code); payroll writes; GL/money events
+(none arise here — an ER settlement with money in it is a separation, which is 9b's); the
+**public** unauthenticated intake surface (D-9); union membership as employee master data;
+FR-HR-080's HOD sanction rule (discipline's, and still blocked on the gate not the matrix —
+though D-3's matrix is the thing that would unblock it, which slice 5 should note for whoever
+reopens area 9).
+
+---
+
+## 7. Slice plan
+
+Every slice: a harness at `dev-harness/hr-employee-relations/run-sliceN-*.mjs`, Staging + JWT key,
+run **twice from different DB states**, plus the cumulative no-regression ladder of this area's
+earlier runners. `npx tsc --noEmit` + lint after frontend work. A **UI-payload probe before any
+TypeScript** for every form (enums as strings, `datetime-local` wall-clock, `null` not `""` for an
+untouched optional date — the area-12 lessons), and the probe **covers writes, not only reads**
+(the area-16 lesson).
+
+- **Slice 0 — survey, fixtures, census.** Diagnostic only, no schema change. (a) Probe all 15
+  existing endpoints as each actor — HR, the griever, an assigned responder, an unrelated
+  employee — recording status **and body shape**; an empty read gives no shape, so seed a fixture
+  first. (b) Census every field of `StaffGrievanceDto` against what the four screens render.
+  (c) Fixtures: `er.griever` (linked, no HR role), `er.responder`, `er.unrelated`, `er.hruser`,
+  a unit with a head and one without. (d) Confirm the §3.4 template entities compile-read as
+  expected. (e) FRD grep for every ER-adjacent requirement so slice 12 has a checklist.
+- **Slice 1 — the register.** `CaseType` enum + column (default `Grievance`);
+  `StaffGrievanceParty` (employee, party role, is-primary, representation flag); the paged ER
+  register read with case-type/status/rung/unit filters; party CRUD with the ownership rules.
+  Migration. **Assert all 69 existing rows read back as `Grievance` and every existing endpoint
+  still answers identically** — the no-regression floor for the whole area.
+- **Slice 2 — FR-HR-181's missing artefacts.** `HrInterpretation` (+ author, date) on the case;
+  `StaffGrievanceInvestigation` modelled on `StaffDisciplineInvestigation`;
+  `StaffGrievanceResolution` one-to-one (decision, remedy/undertakings, decided-by, decided-date)
+  — and **fix the partial**: `RespondAsync` currently copies the last response into
+  `ResolutionSummary`, which conflates *an answer* with *the decision*. Migration.
+- **Slice 3 — documents + the signed agreement.** `StaffGrievanceDocument` with a `Scope`
+  discriminator (Case / Step / Investigation / Conference / Agreement) on the
+  `HrAttachmentUpload` → `HrDocumentDownload` gate, a new
+  `ControlledFileUploadCategories.HrGrievanceDocuments` constant; the signed agreement as a
+  scoped document plus its signature/acceptance stamps. ⚠ needs `clamd-stub.mjs`. Judge D-10's
+  open question here.
+- **Slice 4 — conferencing, mediation, union consultation.** `StaffGrievanceConference` +
+  `StaffGrievanceConferenceAttendee`, typed per D-8, nullable `UnionId`. Attendance and notes are
+  author-or-HR readable — the area-7 field-level rule, since conference notes name people who are
+  not the griever.
+- **Slice 5 — the responder matrix (FR-HR-084).** `EmployeeRelationsResponder`
+  (organisation unit nullable = tenant default, rung, responder, active window); resolution
+  order **matrix-for-unit → matrix-default → HR assigns by hand**; auto-assign on file and on
+  escalate, with HR's `assign` still overriding. Admin screen under
+  `/administration/hr/employee-relations/responders`. **Assert the fallback explicitly** — a
+  grievance in a unit with no matrix row must still be fileable and land unassigned, not 500.
+- **Slice 6 — anonymous concerns.** `EmployeeRelationsConcern` +
+  `EmployeeRelationsConcernUpdate` per D-2/D-9; retrieval code (hashed, shown once); HR triage
+  queue; convert-to-case. **The assertion that matters: nothing anywhere records the reporter** —
+  probe the row, `CreatedBy`, and the audit trail, not just the response body.
+- **Slice 7 — reminders + notifications.** Extend `DisciplineReminderService` with the new clocks
+  (investigation overdue, conference upcoming, concern untriaged, agreement unsigned);
+  `GrievanceRungChaseDays` moves from a `const` to policy settings. ⚠ Keep the existing rule that
+  **a reminder carries a case number and a date and nothing else** — an ER reminder travels
+  further than the record it is about.
+- **Slice 8 — analytics.** By type, rung, unit, outcome; time-to-resolution; escalation rate;
+  the where-is-it-stuck view. ⚠ The area-7 lesson is mandatory here: assert every number against
+  an independently-queried ground truth, and **never ship a rate without its denominator**.
+- **Slice 9 — cross-links.** Nullable `SafetyIncidentId`, `PerformanceImprovementPlanId`,
+  `StaffDisciplinaryActionId` on the case, with a raise-an-ER-case-from-here affordance on each
+  source. Read-only in both directions; no cascade.
+- **Slice 10 — desk screens.** `/hr/employee-relations` register + `[id]` case file (the tabs:
+  ladder, parties, investigation, conferences, documents, resolution, links). **Fills the empty
+  `[id]` folder** and **fixes §3.4 defect 2** — HR's rows link to the desk screen, not `/me/`.
+  Client migrates to the new route.
+- **Slice 11 — portal screens.** `/me/grievances` extended: report a concern, see conferences
+  they attend, their representative, the signed agreement to accept. The griever's rules are
+  unchanged — HR still cannot file, escalate or withdraw for them.
+- **Slice 12 — closing audit.** Content audit run **twice**; **the two greps** (every service
+  method ↔ the screens that call it; every non-GET route ↔ a service method) — this is the check
+  that catches a capability with no UI, which an endpoint audit cannot; route resolution over
+  every new screen; drop the `api/grievances` alias; the FR checklist from slice 0; kill
+  `getByStatus` or give it a caller.
+
+---
+
+## 8. Running log
+
+### Slice 0 — the survey. CLOSED 2026-08-27.
+
+`dev-harness/hr-employee-relations/run-slice0.mjs`, **147 assertions, run twice from different
+DB states, zero failures.** No schema change, no code change — diagnostic only.
+
+**The headline is that it all passed.** Area 9 slice 7's first cut is not a dead path and not a
+ported shell: all six FR-HR-181 rungs walk end to end, every ownership rule holds two-sided, and
+the numbering, validation and terminal-state guards are correct. **This area is harden-and-extend**
+— the opposite of area 11's starting position, and unlike area 8's movements or area 25's job
+board, nothing here has to be resurrected before it can be built on.
+
+Specifically proven, and now the no-regression floor for slices 1–12:
+
+- **The ladder.** Supervisor → HOD → HR → GM F&A → MD → Board, six rungs, each appended not
+  amended. The supervisor's original answer survives five escalations **verbatim and still
+  attributed to the original responder** — which is FR-HR-181's central obligation and the thing
+  every later slice writes near.
+- **Escalation belongs to the griever.** HR escalating → 403 *"Only the employee who raised…"*;
+  an unrelated employee → 403; skipping a rung that has not answered → 422; past the Board → 422
+  *"final level"*. Withdrawal likewise: HR → 403.
+- **HR genuinely cannot file on anyone's behalf.** Asserted by consequence rather than by
+  restating the doc comment: HR posting a grievance creates **HR's own**, because the caller's
+  token is the only source of the griever. The UI must never offer "raise on behalf of".
+- **The read gate is four-sided.** Griever ✅, HR ✅, an employee named on a step ✅ — *and only
+  after being named* (the same actor is refused beforehand, which is what makes `assign` the
+  admission mechanism rather than a label). Unrelated employee → 403 both on the record and by
+  absence from `mine`. The HR register itself → 403 to an ordinary employee.
+- **`status/{status}` binds both the enum name and the int** — worth knowing because it has no
+  UI caller (§3.4 defect 3) and its binding had therefore never been exercised.
+
+**Two defects found, both recorded as `CURRENT POSITION` assertions so the fix is visible when it
+lands** (the area-9 slice-2 convention):
+
+1. **`GrievanceStatus.Closed` has no writer anywhere.** `grep -rn GrievanceStatus.Closed src/`
+   returns three hits and **all three are read filters**; 0 of 69 rows carry it. Its own doc
+   comment says it means *"Closed without resolution — the ladder was exhausted at Board level"*.
+   So a grievance the Board has answered without resolving has **no terminal state** — it sits
+   `UnderReview` for ever, is counted as open by the reminder sweep for ever, and the one status
+   the enum defines for the end of the road is unreachable. The [[hr-dead-path-defects]] shape.
+   **Slice 2 gives it its first writer.**
+2. **`ResolutionSummary` is a verbatim copy of the last response.** `RespondAsync` assigns
+   `dto.Response` straight into it, so the system cannot distinguish *an answer* from *the
+   decision* — no decider, no decision date of its own, no remedy or undertaking. This is
+   FR-HR-181 obligation 8 scored as partial in §4, now measured rather than read.
+
+**The artefact census** (printed, not asserted — these keys arrive during slices 1–4 and an
+assertion on their absence would have to be deleted rather than updated): `StaffGrievanceDto`
+carries **19 keys**, `StaffGrievanceStepDto` **14**, and **8 of 8** owed artefact groups are
+absent — HR interpretation, union consultation notes, investigation report, resolution decision,
+signed agreement, parties, conferences, case type.
+
+⚠ **A harness bug worth remembering, because it will recur in every slice that walks the ladder:**
+the walk loop answers at the Board rung (it must, or the past-the-Board refusal returns *"has not
+answered yet"* instead of *"final level"* — `EscalateAsync` checks the unanswered-rung rule
+first). So the ladder grievance is **spent** by the end of §5 and any terminal-state test needs
+its own fresh grievance. Three of the four grievances this run files exist for that reason.
+
+**Owed to later slices from here:** fill or delete the empty untracked
+`frontend/src/app/hr/grievances/[id]/` folder and stop HR's register linking into `/me/`
+(both slice 10); give `getByStatus` a caller or remove it (slice 12).
