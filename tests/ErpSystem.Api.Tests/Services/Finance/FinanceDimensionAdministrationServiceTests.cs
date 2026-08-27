@@ -54,6 +54,28 @@ public sealed class FinanceDimensionAdministrationServiceTests
     }
 
     [Fact]
+    public async Task Top_level_lookup_value_can_be_created_without_a_parent()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var definition = SeedDefinition(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var created = await service.CreateValueAsync(definition.Id, new UpsertFinanceDimensionValueDto
+        {
+            Code = "fin",
+            Name = "Finance",
+            EffectiveDate = new DateTime(2026, 1, 1),
+            IsActive = true
+        });
+
+        created.Code.Should().Be("FIN");
+        created.ParentValueId.Should().BeNull();
+        db.FinanceDimensionValues.Should().ContainSingle(item => item.Id == created.Id);
+    }
+
+    [Fact]
     public async Task Required_manual_journal_rule_fails_closed_when_value_is_missing()
     {
         await using var fixture = await Fixture.CreateAsync("Required");

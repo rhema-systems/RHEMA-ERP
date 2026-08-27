@@ -473,7 +473,7 @@ public sealed class FinanceDimensionAdministrationService
         FinanceDimensionDefinition definition, UpsertFinanceDimensionValueDto dto, Guid? currentId,
         CancellationToken cancellationToken)
     {
-        if (dto.ParentValueId == currentId)
+        if (dto.ParentValueId.HasValue && currentId.HasValue && dto.ParentValueId.Value == currentId.Value)
             throw new InvalidOperationException("A dimension value cannot be its own parent.");
         if (dto.ParentValueId.HasValue && !await _context.FinanceDimensionValues.AnyAsync(item =>
                 item.Id == dto.ParentValueId.Value && item.TenantId == definition.TenantId && !item.IsDeleted
