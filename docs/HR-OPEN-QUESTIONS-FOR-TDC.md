@@ -359,3 +359,37 @@ work goes unrecognised when a supervisor simply never submits anything.
 **Question for TDC:** which awards in the catalogue should have self-nomination enabled? Our
 expectation is the Innovation award and any suggestion scheme, and nothing else — but it is a
 setting per award, so any answer is a configuration change rather than a development one.
+
+---
+
+## Who may read HR's interpretation and the investigation report on a grievance? *(raised 2026-08-28)*
+
+**Requirement:** FR-HR-181 requires a grievance to retain, among other things, the **HR
+interpretation** and the **investigation report**, and to carry them up the escalation route so that
+each level above can read what the levels below concluded.
+
+**What we assumed:** both are visible to **everyone who may read the case at all** — that is, the
+employee who raised it, HR, and whoever has been named to answer at a rung. Nobody else can open a
+grievance: a manager cannot, and *the person complained about cannot* unless they have been named to
+answer it.
+
+**Why we assumed it.** The people named on rungs *are* the escalation route, so withholding HR's
+reading of the case from the very person being asked to answer would defeat the requirement. And an
+employee reading the findings of an investigation into their own grievance, and HR's position on it,
+is ordinary natural justice rather than a disclosure.
+
+**Why it matters, and what we would need to know.** HR's interpretation is a legal-ish position —
+what the Conditions of Service and the collective agreement say about the case — written before the
+outcome is known. Some organisations treat that as an internal working note and share only the
+decision. If TDC's grievance procedure says either of these:
+
+- HR's interpretation is an internal note and is **not** shown to the employee, or
+- the investigation report is released only in **summary** to the employee,
+
+then this is a one-line change in each of two places and should be made before go-live. It is a
+policy question, not a technical one, and it is the only place in the employee-relations module
+where we chose transparency on TDC's behalf.
+
+**Not affected either way:** meeting notes are already restricted to HR and the meeting's chair, and
+cross-references to disciplinary cases, safety incidents and improvement plans are already visible to
+HR alone.

@@ -48,7 +48,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 10 | Desk screens: the ER case register and case file | **COMPLETE 2026-08-28** — 2 screens, 30-method client, types written from a payload PROBE; §3.4 defects 1 and 2 both fixed; tsc + lint clean, every desk method has a caller |
 | 10b | Desk screens: analytics, the responder matrix, the concern inbox | **COMPLETE 2026-08-28** — 3 screens + a 13-method admin client; tsc + lint clean, every method has a caller. The probe found the matrix EMPTY, so one type had to come from the DTO — flagged in place |
 | 11 | Portal screens: the employee's side | **COMPLETE 2026-08-28** — the anonymous channel gets a portal at last; the case view gains nine slices of content; the deprecated client and types file **deleted**, so the `api/grievances` alias now has no consumer anywhere |
-| 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | ⏳ |
+| 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | **COMPLETE 2026-08-28** — 76-assertion content audit + the ladder = **1,003 ×2, zero failures**; the alias dropped and asserted gone; **six summary reads found running on the detail graph** and rewired onto one projection; the slice-3 upload defect fixed after checking all twelve callers |
 
 ---
 
@@ -1245,3 +1245,121 @@ slice 12, where the harness re-run belongs.
 Every method on both clients has a caller except `getCasesForSource` — the reverse panel on the SHE,
 performance and discipline screens, which is a UI change into three closed areas and is slice 12's
 call. That is now the **only** orphan in the module.
+
+---
+
+### Slice 12 — the closing audit. CLOSED 2026-08-28. **AREA 9c COMPLETE.**
+
+`run-slice12-audit.mjs` — **76 assertions** over all 16 GET route templates, read for CONTENT rather
+than status. With the ladder: **1,003 assertions, run twice, identical, zero failures.**
+
+#### ⚠ Three instruments cried wolf, all three the same way
+
+Area 25 slice 14's warning arrived again, three times in one slice, and every time the cause was the
+same: **grepping for a literal when the code uses a constant.**
+
+1. `grep "responders/resolve"` returned **0 uses** and I nearly deleted the endpoint. It has **9**,
+   in `run-slice5.mjs`, written as `${MATRIX}/resolve` — and it is the precise instrument slice 5
+   used to prove the matrix's resolution order.
+2. After migrating the harness off the alias, `grep "api/grievances"` came back clean. Five
+   `${OLD}/…` call sites remained; slice 1 died on the first `post`.
+3. The href-resolution check over-matched import paths and prose, reporting four routes "MISSING"
+   that were never routes.
+
+**The lesson, stated plainly: when you rename a route, grep for the CONSTANT as well as the
+literal.** And hand-verify every static instrument before acting on it — which is exactly what the
+area-25 note said, and what it takes three misses to actually internalise.
+
+#### The two greps
+
+**Every non-GET route has a client method: 35 of 35.** No capability is unreachable from a screen.
+
+The GET side surfaced four endpoints with no UI caller — `GET api/hr/employee-relations`,
+`status/{status}`, `awaiting-response`, `responders/resolve`. The first instinct, recorded in slices
+10 and 10b as "deletion candidates", **was wrong**: all four are harness-covered, and *no UI caller*
+is not *dead*. What they actually shared was a defect.
+
+#### The real finding: six summary reads on the detail graph
+
+`GetAllAsync`, `GetByStatusAsync`, `GetAwaitingResponseAsync`, **`GetMineAsync`** and
+**`GetAwaitingMyResponseAsync`** all materialised the whole `Scoped()` include graph — steps,
+parties, documents, conferences, the investigation and the resolution, across a split query — to
+build a twelve-field summary. Slice 1 built `RegisterQuery` precisely to avoid that and the other
+five were never brought across. **Two of them are on an ordinary employee's own page load**, which is
+what makes this more than an unused-endpoint tidy-up.
+
+All six now go through one `ProjectSummary`, and `Scoped()` is down to a **single** caller — the
+case-file read, which is the only thing that needs the graph.
+
+#### It also finishes slice 8's job at the source
+
+Slice 8 found four readers of "an answer is owed" 53 cases apart and pointed them at one `IsOpen`.
+But the rule was still **written out three times**: as a SQL filter in the paged register, as a SQL
+projection ten lines below it, and in memory in `GetAwaitingResponseAsync` — with
+`GetAwaitingMyResponseAsync` spelling "open" a fifth way (`!= Resolved && != Withdrawn && != Closed`,
+correct only because the enum happens to have six members) and the entity-graph `ToSummary` a sixth.
+
+Now the filter is `Where(r => r.AwaitingResponse)` **composed over the projection that computes the
+flag**. A filter that disagrees with its own flag is no longer expressible. The entity-graph
+`ToSummary` was deleted rather than left as a second mapper for the next read to drift onto.
+
+`GetPagedAsync` gained a correctness fix on the way: the count now runs **after** the
+awaiting-an-answer filter. It ran before it, so `awaitingResponseOnly=true` returned a filtered page
+beside an unfiltered total — a paginator promising pages that do not exist.
+
+⚠ **One place still states the rule twice**: `ToDto` computes `AwaitingResponse` from the loaded
+graph because the case-file read already has it. Assertion **B6** exists solely to hold the two
+together, and it is the only thing that does.
+
+#### The slice-3 debt, paid — and the check is what made it safe
+
+`HrAttachmentUpload` mapped `ArgumentException` to 404 and **everything else to a bare 500**,
+including `InvalidOperationException` — this codebase's business-rule exception, which every other
+HR write surfaces as a 422 with its reason. Slice 3 met this head-on (twelve assertions failing as
+opaque 500s) and worked around it by validating before the gate.
+
+Before changing a helper shared by **17 controllers across closed areas**, all twelve persist
+callbacks were checked — appraisals, unit goals, check-ins, calibration, requisitions, vacancies,
+postings, movements, travel, schedules, assets. **None throws `InvalidOperationException`.** So the
+defect was latent everywhere but grievances and the corrected mapping cannot change any existing
+caller's behaviour. It removes the trap for the next author who puts a rule in a callback and cannot
+work out where their message went.
+
+#### The alias
+
+`api/grievances` is gone. Slice 11 had deleted the last client; a repo-wide grep found no consumer.
+`run-slice1.mjs` keeps the constant and **asserts the route now 404s** — an alias that merely stopped
+being mentioned in the tests is indistinguishable from one still serving traffic.
+
+#### FR-HR-181, as screens
+
+All nine obligations were ✅ in the API at slice 4. The closing check was different and worth doing:
+**each is reachable through a screen**, on both the desk and the portal. An obligation delivered in
+the API with no way to use it is half delivered.
+
+#### Decisions closed rather than left open
+
+- **`getCasesForSource` stays** as the module's one orphan client method, documented in three places.
+  Deleting a correct client for a shipped endpoint to satisfy a grep would be cargo cult; the reverse
+  panel on the SHE, performance and discipline screens is a UI change into three closed areas and is
+  a separate piece of work.
+- **The redaction question is closed as "no change", and raised with TDC instead.** HR's
+  interpretation and the investigation report are visible to everyone who may read the case — the
+  griever, HR, and whoever is named to answer. The people on rungs *are* the escalation route, so
+  withholding HR's reading from the person being asked to answer would defeat FR-HR-181; and a
+  respondent gets nothing, since being complained about confers no right to read. But whether HR's
+  interpretation is an internal note is **TDC's policy, not ours**, so it is now a numbered question
+  in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` — the only place in this module where we chose transparency
+  on their behalf.
+- **No Finance backlog entry is owed**: the area has no monetary field. A settlement's remedy is
+  free text.
+
+#### Area totals
+
+**14 slices** (0–12, plus 10b). **1,003 assertions ×2** plus 6 row-level SQL anonymity checks.
+**8 migrations** — `AddStaffGrievances` (2026-08-16) belongs to area 9, not here. **9 screens**
+(5 desk, 4 portal) plus a redirect, on 3 clients and one types file written from probed payloads.
+FR-HR-181 fully delivered and reachable; FR-HR-084 delivered as the responder matrix.
+
+*(Counted, not estimated: the first draft of this line said 7 migrations and 10 screens. Both were
+wrong — a glob had swept in area 9's migration, and the redirect had been counted as a screen.)*

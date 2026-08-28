@@ -23,15 +23,16 @@ namespace ErpSystem.Api.Controllers.HR;
 /// all. What HR owns is answering, assigning, the parties, and seeing the whole register.
 /// </summary>
 /// <remarks>
-/// <b>Two routes, one controller (area 9c decision D-6).</b> <c>api/hr/employee-relations</c> is the
-/// correct name for a register that holds union consultations and mediations as well as grievances.
-/// <c>api/grievances</c> is kept as an alias because the portal's four screens already call it, and
-/// it is dropped in slice 12 — <i>after</i> the two greps prove nothing still does. Do not add new
-/// clients against the old route.
+/// <b>One route (area 9c decision D-6, completed in slice 12).</b> <c>api/hr/employee-relations</c>
+/// is the correct name for a register that holds union consultations and mediations as well as
+/// grievances. <c>api/grievances</c> was kept as an alias while the portal's four screens still
+/// called it; slice 11 rewrote the last of them, a repo-wide grep found no consumer left anywhere,
+/// and the alias was dropped here. A second route with no consumer is a second surface to secure
+/// and a second thing to remember. <c>run-slice1.mjs</c> asserts it now 404s, because an alias that
+/// merely stopped being mentioned in the tests is indistinguishable from one still serving traffic.
 /// </remarks>
 [ApiController]
 [Route("api/hr/employee-relations")]
-[Route("api/grievances")]
 [Authorize(Policy = "InternalOnly")]
 [DisciplineBusinessRules]
 public class StaffGrievancesController : ControllerBase

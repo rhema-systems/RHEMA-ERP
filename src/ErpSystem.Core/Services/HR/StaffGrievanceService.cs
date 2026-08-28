@@ -110,6 +110,103 @@ public class StaffGrievanceService : IStaffGrievanceService
             .GetQueryable()
             .Where(g => g.TenantId == tenantId && !g.IsDeleted);
 
+    /// <summary>
+    /// A register row, projected in the database — area 9c slice 12.
+    /// </summary>
+    /// <remarks>
+    /// A CLASS with settable properties rather than a positional record, on purpose: EF Core
+    /// composes a <c>Where</c> over a member-init projection by inlining it into the same SQL
+    /// statement, which is what lets <see cref="ProjectSummary"/> be the single definition of
+    /// "awaits an answer" for both the filter and the flag.
+    /// </remarks>
+    private sealed class SummaryRow
+    {
+        public Guid Id { get; set; }
+        public string GrievanceNumber { get; set; } = string.Empty;
+        public EmployeeRelationsCaseType CaseType { get; set; }
+        public Guid EmployeeId { get; set; }
+        public string FirstName { get; set; } = string.Empty;
+        public string? MiddleName { get; set; }
+        public string LastName { get; set; } = string.Empty;
+        public string? EmployeeNumber { get; set; }
+        public Guid? OrganizationUnitId { get; set; }
+        public string Subject { get; set; } = string.Empty;
+        public DateTime FiledDate { get; set; }
+        public GrievanceStatus Status { get; set; }
+        public GrievanceEscalationLevel CurrentLevel { get; set; }
+        public bool AwaitingResponse { get; set; }
+        /// <summary>Who is named on the current rung. Not on the DTO — it exists to filter by.</summary>
+        public Guid? CurrentResponderId { get; set; }
+        public int ActivePartyCount { get; set; }
+    }
+
+    /// <summary>
+    /// The one definition of a register row, and the one definition of "an answer is owed".
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ Every summary read goes through this, and that is the point.</b> Before slice 12
+    /// there were FIVE unpaged reads — <c>GetAllAsync</c>, <c>GetByStatusAsync</c>,
+    /// <c>GetAwaitingResponseAsync</c>, <c>GetMineAsync</c> and <c>GetAwaitingMyResponseAsync</c> —
+    /// each materialising the whole <see cref="Scoped"/> graph (steps, parties, documents,
+    /// conferences, the investigation and the resolution, across a split query) in order to build a
+    /// twelve-field summary. Two of them are on an ordinary employee's own page load. The register
+    /// was given <see cref="RegisterQuery"/> in slice 1 for exactly this reason and the other five
+    /// were never brought across.</para>
+    ///
+    /// <para><b>And it closes slice 8's defect at the source.</b> That slice found four readers of
+    /// "an answer is owed" that had drifted — 227 cases against 174, the extra 53 all withdrawn —
+    /// and fixed them by pointing them at one <c>IsOpen</c>. But the rule was still WRITTEN OUT
+    /// three times: as a SQL filter in the paged register, as a SQL projection beside it, and in
+    /// memory in <c>GetAwaitingResponseAsync</c>. Here it is written once, and the callers that
+    /// need it as a filter compose <c>Where(r =&gt; r.AwaitingResponse)</c> over this very
+    /// projection — so a filter that disagreed with the flag is no longer expressible.</para>
+    /// </remarks>
+    private static IQueryable<SummaryRow> ProjectSummary(IQueryable<StaffGrievance> query) =>
+        query.Select(g => new SummaryRow
+        {
+            Id = g.Id,
+            GrievanceNumber = g.GrievanceNumber,
+            CaseType = g.CaseType,
+            EmployeeId = g.EmployeeId,
+            // ⚠ The name parts, not FullName: it is [NotMapped] and cannot cross into SQL. Asking
+            // for the whole Employee to read three strings would undo the point of projecting.
+            FirstName = g.Employee.FirstName,
+            MiddleName = g.Employee.MiddleName,
+            LastName = g.Employee.LastName,
+            EmployeeNumber = g.Employee.EmployeeNumber,
+            OrganizationUnitId = g.Employee.OrganizationUnitId,
+            Subject = g.Subject,
+            FiledDate = g.FiledDate,
+            Status = g.Status,
+            CurrentLevel = g.CurrentLevel,
+            // Open AND unanswered. The step fact alone reads "awaiting response" on a withdrawn
+            // case, which is true of nobody — the employee took it back.
+            AwaitingResponse = (g.Status == GrievanceStatus.Filed
+                                || g.Status == GrievanceStatus.UnderReview
+                                || g.Status == GrievanceStatus.Escalated)
+                               && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                  == GrievanceStepOutcome.AwaitingResponse,
+            CurrentResponderId = g.Steps.OrderByDescending(s => s.Sequence).First().AssignedToId,
+            ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
+        });
+
+    private static StaffGrievanceSummaryDto ToSummary(SummaryRow r) => new()
+    {
+        Id = r.Id,
+        GrievanceNumber = r.GrievanceNumber,
+        CaseType = r.CaseType,
+        EmployeeId = r.EmployeeId,
+        EmployeeName = string.IsNullOrEmpty(r.MiddleName)
+            ? $"{r.FirstName} {r.LastName}"
+            : $"{r.FirstName} {r.MiddleName} {r.LastName}",
+        Subject = r.Subject,
+        FiledDate = r.FiledDate,
+        Status = r.Status,
+        CurrentLevel = r.CurrentLevel,
+        AwaitingResponse = r.AwaitingResponse,
+        ActivePartyCount = r.ActivePartyCount,
+    };
+
     private async Task<StaffGrievance> GetOwnedAsync(Guid id, CancellationToken cancellationToken)
     {
         var grievance = await Scoped(GetTenantId()).FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
@@ -216,13 +313,19 @@ public class StaffGrievanceService : IStaffGrievanceService
 
     // ── Reads ─────────────────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// ⚠ UNBOUNDED, and kept that way because that is what it means — but lean since slice 12. It
+    /// used to materialise every case's whole graph to build a summary. Prefer
+    /// <see cref="GetPagedAsync"/>; this exists for a caller that genuinely wants the lot.
+    /// </remarks>
     public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
-        => (await Scoped(GetTenantId()).OrderByDescending(g => g.FiledDate).ToListAsync(cancellationToken))
+        => (await ProjectSummary(RegisterQuery(GetTenantId()))
+                .OrderByDescending(r => r.FiledDate).ToListAsync(cancellationToken))
             .Select(ToSummary).ToList();
 
     public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetByStatusAsync(GrievanceStatus status, CancellationToken cancellationToken = default)
-        => (await Scoped(GetTenantId()).Where(g => g.Status == status)
-                .OrderByDescending(g => g.FiledDate).ToListAsync(cancellationToken))
+        => (await ProjectSummary(RegisterQuery(GetTenantId()).Where(g => g.Status == status))
+                .OrderByDescending(r => r.FiledDate).ToListAsync(cancellationToken))
             .Select(ToSummary).ToList();
 
     public async Task<PagedResult<StaffGrievanceSummaryDto>> GetPagedAsync(
@@ -252,25 +355,6 @@ public class StaffGrievanceService : IStaffGrievanceService
         if (organizationUnitId.HasValue)
             query = query.Where(g => g.Employee.OrganizationUnitId == organizationUnitId.Value);
 
-        // "Stuck" means the rung it currently sits at has not answered. Expressed against the
-        // highest-sequence step so SQL can evaluate it, rather than the in-memory CurrentStep()
-        // the unpaged read uses — the two must agree, and slice 1's harness asserts that they do.
-        // ⚠ Open AND unanswered, matching GetAwaitingResponseAsync exactly. Before slice 8 this
-        // checked only the step, so `awaitingResponseOnly=true` returned 227 cases against that
-        // endpoint's 174 — the 53 extra were all WITHDRAWN, and none of them was waiting on anybody.
-        if (awaitingResponseOnly == true)
-            query = query.Where(g => (g.Status == GrievanceStatus.Filed
-                                      || g.Status == GrievanceStatus.UnderReview
-                                      || g.Status == GrievanceStatus.Escalated)
-                                     && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
-                                        == GrievanceStepOutcome.AwaitingResponse);
-        else if (awaitingResponseOnly == false)
-            query = query.Where(g => !((g.Status == GrievanceStatus.Filed
-                                        || g.Status == GrievanceStatus.UnderReview
-                                        || g.Status == GrievanceStatus.Escalated)
-                                       && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
-                                          == GrievanceStepOutcome.AwaitingResponse));
-
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
@@ -282,101 +366,65 @@ public class StaffGrievanceService : IStaffGrievanceService
                 || g.Employee.EmployeeNumber.Contains(term));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
+        // ⚠ The awaiting-an-answer filter is applied to the PROJECTION, not to the entity query,
+        // and that is slice 12's point: it composes `Where(r => r.AwaitingResponse)` over the same
+        // expression the flag is computed from. Written as its own SQL predicate — as it was until
+        // slice 12 — the filter and the flag were two statements of one rule sitting ten lines
+        // apart, which is exactly how slice 8's 227-versus-174 gap opened in the first place.
+        var projected = ProjectSummary(query);
+        if (awaitingResponseOnly == true) projected = projected.Where(r => r.AwaitingResponse);
+        else if (awaitingResponseOnly == false) projected = projected.Where(r => !r.AwaitingResponse);
 
-        // Projected lean and composed after materialisation: Employee.FullName is [NotMapped], so
-        // it cannot cross into SQL, and asking for the whole Employee to read three strings would
-        // undo the point of paging in the database.
-        var rows = await query
-            .OrderByDescending(g => g.FiledDate)
+        // Counted AFTER that filter. Counting the entity query would report the unfiltered total
+        // beside a filtered page — a paginator that promises pages which do not exist.
+        var totalCount = await projected.CountAsync(cancellationToken);
+
+        var rows = await projected
+            .OrderByDescending(r => r.FiledDate)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(g => new
-            {
-                g.Id,
-                g.GrievanceNumber,
-                g.CaseType,
-                g.EmployeeId,
-                g.Employee.FirstName,
-                g.Employee.MiddleName,
-                g.Employee.LastName,
-                g.Subject,
-                g.FiledDate,
-                g.Status,
-                g.CurrentLevel,
-                AwaitingResponse = (g.Status == GrievanceStatus.Filed
-                                    || g.Status == GrievanceStatus.UnderReview
-                                    || g.Status == GrievanceStatus.Escalated)
-                                   && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
-                                      == GrievanceStepOutcome.AwaitingResponse,
-                ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
-            })
             .ToListAsync(cancellationToken);
 
         return new PagedResult<StaffGrievanceSummaryDto>
         {
-            Items = rows.Select(r => new StaffGrievanceSummaryDto
-            {
-                Id = r.Id,
-                GrievanceNumber = r.GrievanceNumber,
-                CaseType = r.CaseType,
-                EmployeeId = r.EmployeeId,
-                EmployeeName = string.IsNullOrEmpty(r.MiddleName)
-                    ? $"{r.FirstName} {r.LastName}"
-                    : $"{r.FirstName} {r.MiddleName} {r.LastName}",
-                Subject = r.Subject,
-                FiledDate = r.FiledDate,
-                Status = r.Status,
-                CurrentLevel = r.CurrentLevel,
-                AwaitingResponse = r.AwaitingResponse,
-                ActivePartyCount = r.ActivePartyCount,
-            }).ToList(),
+            Items = rows.Select(ToSummary).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize,
         };
     }
 
+    /// <remarks>
+    /// ⚠ The filter is <c>Where(r =&gt; r.AwaitingResponse)</c> composed over
+    /// <see cref="ProjectSummary"/> — the same expression the flag is computed from, so this
+    /// endpoint and the register's <c>awaitingResponseOnly</c> filter cannot drift apart again.
+    /// Slice 8 found them 53 cases apart; slice 12 made the disagreement inexpressible.
+    /// </remarks>
     public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetAwaitingResponseAsync(GrievanceEscalationLevel? level = null, CancellationToken cancellationToken = default)
     {
-        var open = await Scoped(GetTenantId())
-            .Where(g => g.Status == GrievanceStatus.Filed
-                     || g.Status == GrievanceStatus.UnderReview
-                     || g.Status == GrievanceStatus.Escalated)
-            .OrderBy(g => g.FiledDate)
-            .ToListAsync(cancellationToken);
+        var query = ProjectSummary(RegisterQuery(GetTenantId())).Where(r => r.AwaitingResponse);
+        if (level.HasValue) query = query.Where(r => r.CurrentLevel == level.Value);
 
-        return open
-            .Where(g => CurrentStep(g).Outcome == GrievanceStepOutcome.AwaitingResponse)
-            .Where(g => level == null || g.CurrentLevel == level)
-            .Select(ToSummary)
-            .ToList();
-    }
-
-    public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetMineAsync(Guid me, CancellationToken cancellationToken = default)
-    {
-        return (await Scoped(GetTenantId()).Where(g => g.EmployeeId == me)
-                .OrderByDescending(g => g.FiledDate).ToListAsync(cancellationToken))
+        return (await query.OrderBy(r => r.FiledDate).ToListAsync(cancellationToken))
             .Select(ToSummary).ToList();
     }
 
-    public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetAwaitingMyResponseAsync(Guid me, CancellationToken cancellationToken = default)
-    {
-        var open = await Scoped(GetTenantId())
-            .Where(g => g.Status != GrievanceStatus.Resolved
-                     && g.Status != GrievanceStatus.Withdrawn
-                     && g.Status != GrievanceStatus.Closed)
-            .ToListAsync(cancellationToken);
+    public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetMineAsync(Guid me, CancellationToken cancellationToken = default)
+        => (await ProjectSummary(RegisterQuery(GetTenantId()).Where(g => g.EmployeeId == me))
+                .OrderByDescending(r => r.FiledDate).ToListAsync(cancellationToken))
+            .Select(ToSummary).ToList();
 
-        return open
-            .Where(g =>
-            {
-                var step = CurrentStep(g);
-                return step.Outcome == GrievanceStepOutcome.AwaitingResponse && step.AssignedToId == me;
-            })
-            .Select(ToSummary)
-            .ToList();
-    }
+    /// <remarks>
+    /// ⚠ Slice 12 also unified the OPEN test here. This read used to spell it as
+    /// <c>!= Resolved &amp;&amp; != Withdrawn &amp;&amp; != Closed</c> — a fifth statement of the
+    /// same rule, correct only because the enum happens to have exactly six members, and one more
+    /// place for the drift slice 8 found to reappear.
+    /// </remarks>
+    public async Task<IEnumerable<StaffGrievanceSummaryDto>> GetAwaitingMyResponseAsync(Guid me, CancellationToken cancellationToken = default)
+        => (await ProjectSummary(RegisterQuery(GetTenantId()))
+                .Where(r => r.AwaitingResponse && r.CurrentResponderId == me)
+                .OrderBy(r => r.FiledDate).ToListAsync(cancellationToken))
+            .Select(ToSummary).ToList();
 
     public async Task<StaffGrievanceDto> GetByIdAsync(Guid id, Guid? callerEmployeeId, CancellationToken cancellationToken = default)
     {
@@ -1832,24 +1880,10 @@ public class StaffGrievanceService : IStaffGrievanceService
 
     // ── Mapping ───────────────────────────────────────────────────────────────
 
-    private static StaffGrievanceSummaryDto ToSummary(StaffGrievance g) => new()
-    {
-        Id = g.Id,
-        GrievanceNumber = g.GrievanceNumber,
-        CaseType = g.CaseType,
-        EmployeeId = g.EmployeeId,
-        EmployeeName = g.Employee?.FullName ?? string.Empty,
-        Subject = g.Subject,
-        FiledDate = g.FiledDate,
-        Status = g.Status,
-        CurrentLevel = g.CurrentLevel,
-        // ⚠ Open AND unanswered. The step fact alone said "awaiting response" on a withdrawn case,
-        // which is not true of anybody: the employee took it back, so no rung owes an answer.
-        AwaitingResponse = IsOpen(g.Status)
-            && g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
-               == GrievanceStepOutcome.AwaitingResponse,
-        ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
-    };
+    // ⚠ The entity-graph `ToSummary(StaffGrievance)` was removed in slice 12. It was a SIXTH
+    // statement of "an answer is owed" — correct, but the whole point of routing every summary read
+    // through ProjectSummary is that there is now exactly one, and leaving a second mapper behind
+    // would invite the next read to use it and drift again.
 
     /// <summary>
     /// Who may read a meeting's notes: HR, and the person who chaired it.

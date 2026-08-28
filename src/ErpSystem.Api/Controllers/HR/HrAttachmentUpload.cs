@@ -93,6 +93,26 @@ internal static class HrAttachmentUpload
             if (ex is ArgumentException)
                 return controller.NotFound(new { message = ex.Message });
 
+            // ⚠ Area 9c slice 12. Until now EVERY non-ArgumentException from the persist callback
+            // became a bare 500 reading "An error occurred while adding the attachment" — including
+            // InvalidOperationException, which is this codebase's business-rule exception and which
+            // every other HR write surfaces as a 422 carrying its reason. Slice 3 met this head-on:
+            // twelve grievance-document assertions failed as opaque 500s, and were worked around by
+            // validating before the gate rather than fixing the gate.
+            //
+            // Checked across all twelve persist callbacks before changing it — appraisals, unit
+            // goals, check-ins, calibration, requisitions, vacancies, postings, movements, travel,
+            // schedules, assets — and NONE of them throws InvalidOperationException today. So the
+            // defect was latent everywhere but grievances, and correcting the mapping cannot change
+            // any existing caller's behaviour. It removes the trap for the next author who puts a
+            // rule in a callback and cannot understand why their message vanishes.
+            if (ex is InvalidOperationException)
+            {
+                logger.LogWarning(ex, "Attachment refused by a business rule on {SourceEntityType} {SourceRecordId}",
+                    sourceEntityType, sourceRecordId);
+                return controller.UnprocessableEntity(new { message = ex.Message });
+            }
+
             logger.LogError(ex, "Error attaching a file to {SourceEntityType} {SourceRecordId}",
                 sourceEntityType, sourceRecordId);
             return controller.StatusCode(500, "An error occurred while adding the attachment");
