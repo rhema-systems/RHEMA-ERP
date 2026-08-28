@@ -350,6 +350,70 @@ BEGIN
            AND CHARINDEX(N'TDC0502_RECEIPT_INSPECTION_WORKFLOW_ID', @inspectionTrigger) = 0)
         INSERT @R VALUES(N'INV-FU-004 receipt-inspection trigger baseline', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle')
+BEGIN
+    IF OBJECT_ID(N'dbo.ProcurementBudgetCommitments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Contracts', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.PurchaseOrders', N'U') IS NULL
+        INSERT @R VALUES(N'FR-PR-005 commitment lifecycle table prerequisites', 1);
+    ELSE
+    BEGIN
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 active contract exposure above reservation'', COUNT_BIG(*)
+            FROM (
+                SELECT c.Id
+                FROM dbo.ProcurementBudgetCommitments c
+                JOIN dbo.Tenders tender
+                  ON tender.SourcePurchaseRequisitionId = c.PurchaseRequisitionId
+                 AND tender.TenantId = c.TenantId AND tender.IsDeleted = 0
+                JOIN dbo.Contracts contract
+                  ON contract.TenderId = tender.Id
+                 AND contract.TenantId = c.TenantId AND contract.IsDeleted = 0
+                WHERE c.Status = 1 AND contract.Status = N''Active'' AND contract.ContractValue > 0
+                GROUP BY c.Id, c.ReservedAmount
+                HAVING SUM(contract.ContractValue) > c.ReservedAmount
+            ) violation');
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 child PO exposure above active contract'', COUNT_BIG(*)
+            FROM (
+                SELECT contract.Id
+                FROM dbo.Contracts contract
+                JOIN dbo.PurchaseOrders po
+                  ON po.ContractId = contract.Id
+                 AND po.TenantId = contract.TenantId AND po.IsDeleted = 0 AND po.TotalAmount > 0
+                 AND po.Status IN (N''Approved'', N''Open'', N''Sent'', N''Acknowledged'', N''Partially Received'', N''Received'')
+                WHERE contract.IsDeleted = 0 AND contract.Status = N''Active'' AND contract.ContractValue > 0
+                GROUP BY contract.Id, contract.ContractValue
+                HAVING SUM(po.TotalAmount) > contract.ContractValue
+            ) violation');
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 combined formal exposure above reservation'', COUNT_BIG(*)
+            FROM dbo.ProcurementBudgetCommitments c
+            OUTER APPLY (
+                SELECT COALESCE(SUM(contract.ContractValue), 0) ContractAmount
+                FROM dbo.Tenders tender
+                JOIN dbo.Contracts contract
+                  ON contract.TenderId = tender.Id
+                 AND contract.TenantId = tender.TenantId AND contract.IsDeleted = 0
+                WHERE tender.SourcePurchaseRequisitionId = c.PurchaseRequisitionId
+                  AND tender.TenantId = c.TenantId AND tender.IsDeleted = 0
+                  AND contract.Status = N''Active'' AND contract.ContractValue > 0
+            ) formal
+            OUTER APPLY (
+                SELECT COALESCE(SUM(po.TotalAmount), 0) DirectPurchaseOrderAmount
+                FROM dbo.PurchaseOrders po
+                WHERE po.TenantId = c.TenantId
+                  AND po.SourceRequisitionId = c.PurchaseRequisitionId
+                  AND po.IsDeleted = 0 AND po.TotalAmount > 0 AND po.ContractId IS NULL
+                  AND po.Status IN (N''Approved'', N''Open'', N''Sent'', N''Acknowledged'', N''Partially Received'', N''Received'')
+            ) purchaseOrders
+            WHERE c.Status = 1
+              AND formal.ContractAmount + purchaseOrders.DirectPurchaseOrderAmount > c.ReservedAmount');
+    END;
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -485,6 +549,10 @@ function Invoke-Preflight {
     Write-Output 'GUARD_COVERAGE|20260813171000_INVREQFU004RequireCleanTransferEvidence'
     Write-Output 'GUARD_COVERAGE|20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse'
     Write-Output 'GUARD_COVERAGE|20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind'
+    # FR-PR-005 backfills formal contract and direct-PO exposure into the new
+    # immutable ledger. The probes above mirror every legacy-data THROW in the
+    # migration so over-exposed reservations fail before any schema change.
+    Write-Output 'GUARD_COVERAGE|20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
