@@ -72,6 +72,7 @@ import {
   History,
   Gavel,
   Network,
+  ShieldQuestion,
   Users2,
   UserRoundCheck,
   Grid3x3,
@@ -900,6 +901,9 @@ export const navigationItems: NavItem[] = [
         icon: MessagesSquare,
         children: [
           { title: 'Case register', href: '/hr/employee-relations', icon: ClipboardList, permissions: ['HR.Discipline.Read'] },
+          { title: 'Anonymous concerns', href: '/hr/employee-relations/concerns', icon: ShieldQuestion, permissions: ['HR.Discipline.Read'] },
+          { title: 'Who answers each rung', href: '/hr/employee-relations/responders', icon: Network, permissions: ['HR.Discipline.Read'] },
+          { title: 'Analytics', href: '/hr/employee-relations/analytics', icon: BarChart3, permissions: ['HR.Discipline.Read'] },
         ],
       },
       {

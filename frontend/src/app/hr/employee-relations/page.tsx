@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Clock, Search, Users } from 'lucide-react';
+import { Loader2, Plus, Clock, Search, Users, ShieldQuestion, Network, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -116,7 +116,25 @@ export default function EmployeeRelationsRegisterPage() {
         description="Grievances and their progress up the escalation route — supervisor, head of department, HR, GM Finance & Administration, Managing Director, Board — alongside mediations, welfare matters and union consultations."
         backHref="/hr"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/hr/employee-relations/concerns">
+                <ShieldQuestion className="mr-2 h-4 w-4" />
+                Anonymous concerns
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/hr/employee-relations/responders">
+                <Network className="mr-2 h-4 w-4" />
+                Who answers each rung
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/hr/employee-relations/analytics">
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Analytics
+              </Link>
+            </Button>
             <Button onClick={() => setOpenCaseOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Open a case

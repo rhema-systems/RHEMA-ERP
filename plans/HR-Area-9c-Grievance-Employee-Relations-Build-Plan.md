@@ -46,7 +46,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 8 | ER analytics & reporting | **COMPLETE 2026-08-28** — 104 ×2 + the ladder = **811**; no migration. Found a live defect: four readers of "an answer is owed" had drifted, 227 vs 174 |
 | 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | **COMPLETE 2026-08-28** — 114 ×2 + the ladder = **925**; migration `AddEmployeeRelationsCaseCrossLinks`; the link rule (*about somebody already on the case*) is the leak fix and the meaning at once |
 | 10 | Desk screens: the ER case register and case file | **COMPLETE 2026-08-28** — 2 screens, 30-method client, types written from a payload PROBE; §3.4 defects 1 and 2 both fixed; tsc + lint clean, every desk method has a caller |
-| 10b | Desk screens: analytics, the responder matrix, the concern inbox | ⏳ **ADDED 2026-08-28** — three backend surfaces with no UI at all. Named here rather than left for slice 12's greps to discover |
+| 10b | Desk screens: analytics, the responder matrix, the concern inbox | **COMPLETE 2026-08-28** — 3 screens + a 13-method admin client; tsc + lint clean, every method has a caller. The probe found the matrix EMPTY, so one type had to come from the DTO — flagged in place |
 | 11 | Portal screens: the employee's side | ⏳ |
 | 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | ⏳ |
 
@@ -1093,3 +1093,82 @@ no consumer anywhere — the same dead-method shape, in area 9b. Recorded, not f
 **Slice 10b added.** Analytics, the responder matrix and the anonymous-concern inbox are three
 backend surfaces with **no UI at all**. Naming the gap now is better than having slice 12's
 service-to-screen grep report it as a discovery.
+
+---
+
+### Slice 10b — analytics, the responder matrix, the concern inbox. CLOSED 2026-08-28.
+
+Three screens under `/hr/employee-relations/` — `analytics`, `responders`, `concerns` — on a
+13-method admin client. `tsc` and `lint` clean; **every client method has a caller.** These were
+three backend surfaces with no UI at all, which is why 10b was split out of slice 10 rather than
+left for slice 12's greps to report as a discovery.
+
+#### ⚠ What the probe found, and why it changed the work
+
+`probe-slice10b.mjs` ran first, as in slice 10. It reported that **the responder matrix holds ZERO
+rows** — so `EmployeeRelationsResponder` is the **one interface in this module written from the C#
+DTO alone**, with nothing to check it against. That is flagged at the interface, in the types file's
+header, and here: it carries exactly the risk the probe exists to remove, and it should be re-read
+against a live row the first time one exists.
+
+The *shape* of a miss was probed, though, and that mattered more: `coverage` and `resolve` both
+answer **200 with `resolved: false`** and `resolvedBy: "None"`. Showing HR where the matrix answers
+nobody is the admin screen's whole job, and an endpoint that 404'd on a gap could not have been
+rendered as one.
+
+The probe also re-ran the anonymity greps at the API surface — no `reportedBy`, `reporterId`,
+`employeeId` or `createdBy` anywhere in the HR-side concern payload. **That is a supporting check,
+not the proof**: `verify-slice6-anonymity.sql` remains the real one, because a column could hold the
+reporter, go unmapped, and every API assertion would still pass.
+
+#### The screens say what the numbers mean
+
+- **A rate with no denominator renders "—", never 0%.** The server already refuses to send a bare
+  percentage; the only way to reintroduce area 7's defect here would be to coalesce the null, so the
+  card checks `noData` explicitly.
+- **Every breakdown states the denominator it is a share of** — which is not always the total. "Where
+  open cases are sitting" is a share of the *open* ones, and the page says so, because a reader who
+  assumes otherwise misreads it.
+- **Time-to-resolution carries its own caveat on the page**: resolved only, because counting
+  withdrawals would shorten the average every time somebody gave up — the figure would improve as
+  the process got worse.
+- **The concerns panel explains why there is no unit breakdown**, rather than just not having one.
+- **A rung with nobody named is styled as ordinary, not as an error.** It is the state of 100% of
+  the matrix today.
+- **The reporter's posts are labelled "The reporter (anonymous)"**, not left with an empty byline —
+  `authorName` is null by design and a blank there reads as missing data.
+
+#### Three orphan client methods, and three different right answers
+
+The service-to-screen check found three methods with no caller. Each needed a different fix, and
+lumping them together would have got two of them wrong:
+
+1. **`getForScope` — the screen was doing it wrong.** The responder page filtered `getAll()` in the
+   browser. That is not the same question: a client-side filter cannot tell a unit with no rows
+   apart from a unit nobody asked about. Now the scope selector drives a server-side read, and a new
+   "Every scope (the whole matrix)" option is what uses `getAll` — which also makes the screen
+   better, since HR can see the whole matrix at once.
+2. **`getById` — the screen had a latent bug.** The inbox kept the clicked list row as the selected
+   concern. The list row and the detail happen to be the same shape, so this looked fine — and it
+   meant that once anything refetched the list, the pane went on showing a thread that had moved on.
+   **A reply the reporter posted while HR had the concern open would simply not have appeared.** Now
+   the detail is read back by id.
+3. **`resolve` — the endpoint is redundant.** `coverage` returns a `ResponderResolution` for all six
+   rungs of a scope, so a single-rung resolve is a strict subset of a call the client already makes.
+   Wrapping it would have created a method with no caller purely for symmetry. Left unwrapped with
+   the reasoning in place, and recorded as a **slice-12 deletion candidate** — the same "two
+   endpoints that provably return the same row" shape areas 19–23 found.
+
+That brings slice 12's endpoint list to four: `GET api/hr/employee-relations`,
+`GET .../awaiting-response`, `GET .../responders/resolve`, and `getByStatus`.
+
+#### Still owed
+
+The reporter's own three calls — report, track, add-an-update — are **not** in this service. They
+belong to the portal and arrive with slice 11, and keeping them out of an HR-facing service keeps it
+obvious that they are the only endpoints in the module that take no actor at all.
+
+⚠ **The probe left one real row behind**: it reports a concern to capture the receipt shape, so
+`CON-2026-00014` ("Slice 10b probe — payload shape only") sits in the live inbox. Harness fixtures
+are left behind by convention in this area, but a whistleblower inbox is the one place that reads
+oddly, so it is named here.

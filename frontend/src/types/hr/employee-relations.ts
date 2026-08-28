@@ -5,17 +5,25 @@
  * mediations, welfare matters and union consultations as well as FR-HR-181 grievances, so
  * "grievance" was the wrong name for the module the moment slice 1 landed.
  *
- * ⚠ **Every interface below was written from a PROBED RESPONSE, not from the C# DTOs read by eye.**
- * `dev-harness/hr-employee-relations/probe-slice10.mjs` walked the whole register, found a
- * non-empty example of each collection and printed it. That mattered: the payloads carry computed
- * fields — `displayName`, `isActive`, `isComplete`, `isOverdue`, `outcomeIsMissing`,
- * `agreementAccepted`, `notesRedacted` — which are C# expression-bodied properties and are easy to
- * miss when transcribing a class. Area 12 shipped a type written from an endpoint's name; it
- * type-checked perfectly and described a response the server never sent.
+ * ⚠ **The READ shapes were written from PROBED RESPONSES, not from the C# DTOs read by eye.**
+ * `probe-slice10.mjs` and `probe-slice10b.mjs` in `dev-harness/hr-employee-relations` walk the
+ * whole register, find a non-empty example of every collection and print it. That mattered: the
+ * payloads carry computed fields — `displayName`, `isActive`, `isComplete`, `isOverdue`,
+ * `outcomeIsMissing`, `agreementAccepted`, `notesRedacted` — which are C# expression-bodied
+ * properties and are easy to miss transcribing a class. Area 12 shipped a type written from an
+ * endpoint's name; it type-checked perfectly and described a response the server never sent.
  *
- * ⚠ **The unions, by contrast, come from `HREnums.cs`** and list EVERY member — not just the ones
- * the probe happened to see. A union built from observed values silently excludes whatever the
- * seed data lacks.
+ * ⚠ **The WRITE shapes come from the DTOs, because no probe can show them.** That distinction is
+ * not academic: two of them were wrong when first written from memory — `HoldConferenceRequest`
+ * had an optional outcome and a `heldDate` that does not exist, and `UpdateConferenceRequest` was
+ * missing the chair.
+ *
+ * ⚠ **The unions come from `HREnums.cs`** and list EVERY member — not just the ones the probe
+ * happened to see. A union built from observed values silently excludes whatever the seed data
+ * lacks.
+ *
+ * ⚠ **One exception, and it is flagged where it sits: `EmployeeRelationsResponder`.** The matrix
+ * holds zero rows on this tenant, so there was nothing to probe and it came from the DTO alone.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -598,4 +606,282 @@ export interface ErRegisterQuery {
   organizationUnitId?: string;
   awaitingResponseOnly?: boolean;
   search?: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  The responder matrix — area 9c slice 5. Backend: `api/hr/employee-relations/responders`
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * One row of the matrix: who answers a given rung, for a given scope.
+ *
+ * ⚠ **Written from the C# DTO and NOT from a probe, because there was nothing to probe: the matrix
+ * holds ZERO rows on this tenant** — 0 of 48 org units covered. That is the normal state rather
+ * than a broken one; the matrix is opt-in, and a case in an uncovered unit simply arrives
+ * unassigned for HR to route by hand. It does mean this one interface carries exactly the risk the
+ * probe exists to remove, so re-check it against a live row the first time one exists.
+ */
+export interface EmployeeRelationsResponder {
+  id: string;
+  /** Null means the tenant-wide default — the fallback when no unit row matches. */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  /** Server-computed: the unit's name, or "All units (default)". */
+  scopeName: string;
+  level: GrievanceEscalationLevel;
+  levelName: string;
+  responderEmployeeId: string;
+  responderName?: string | null;
+  responderEmployeeNumber?: string | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  notes?: string | null;
+  /** Server-computed: in force today, by the effective dates. */
+  isCurrent: boolean;
+}
+
+export interface UpsertResponderRequest {
+  /** Omit for the tenant-wide default. */
+  organizationUnitId?: string | null;
+  level: GrievanceEscalationLevel;
+  responderEmployeeId: string;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * What the matrix answers for one unit and one rung.
+ *
+ * ⚠ A miss is a **200 with `resolved: false`**, never a 404 — showing HR where the matrix answers
+ * nobody is the admin screen's whole job, and a lookup that errored could not be rendered as a gap.
+ * `resolvedBy` reads `"None"` for a miss, and otherwise says which row won.
+ */
+export interface ResponderResolution {
+  organizationUnitId?: string | null;
+  level: GrievanceEscalationLevel;
+  levelName: string;
+  responderEmployeeId?: string | null;
+  responderName?: string | null;
+  resolvedBy: string;
+  resolved: boolean;
+}
+
+/** Every rung's answer for one scope — the coverage row the admin screen renders. */
+export interface ResponderCoverage {
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  levels: ResponderResolution[];
+  coveredLevels: number;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Anonymous concerns — area 9c slice 6. Backend: `.../employee-relations/concerns`
+// ═════════════════════════════════════════════════════════════════════════════
+
+export type ConcernCategory =
+  | 'Harassment' | 'Discrimination' | 'Bullying' | 'SafetyRisk'
+  | 'FraudOrMalpractice' | 'Misconduct' | 'Other';
+
+export type ConcernStatus = 'New' | 'UnderTriage' | 'UnderReview' | 'Closed' | 'ConvertedToCase';
+
+export const CONCERN_CATEGORY_OPTIONS: { value: ConcernCategory; label: string }[] = [
+  { value: 'Harassment', label: 'Harassment' },
+  { value: 'Discrimination', label: 'Discrimination' },
+  { value: 'Bullying', label: 'Bullying' },
+  { value: 'SafetyRisk', label: 'Safety risk' },
+  { value: 'FraudOrMalpractice', label: 'Fraud or malpractice' },
+  { value: 'Misconduct', label: 'Misconduct' },
+  { value: 'Other', label: 'Other' },
+];
+
+export const CONCERN_STATUS_OPTIONS: { value: ConcernStatus; label: string }[] = [
+  { value: 'New', label: 'New' },
+  { value: 'UnderTriage', label: 'Under triage' },
+  { value: 'UnderReview', label: 'Under review' },
+  { value: 'Closed', label: 'Closed' },
+  { value: 'ConvertedToCase', label: 'Converted to a case' },
+];
+
+/**
+ * The statuses triage may SET.
+ *
+ * ⚠ `New` and `ConvertedToCase` are absent, and the server refuses both. `New` is where a concern
+ * starts, and moving one back to it would erase that anybody ever looked; `ConvertedToCase` is set
+ * by the convert path, which also creates the case — setting it here would claim a case that does
+ * not exist.
+ */
+export const CONCERN_TRIAGE_STATUS_OPTIONS = CONCERN_STATUS_OPTIONS.filter(
+  (o) => o.value === 'UnderTriage' || o.value === 'UnderReview' || o.value === 'Closed',
+);
+
+/** One post on the thread. `authorName` is null for the reporter — that is the anonymity. */
+export interface ConcernUpdate {
+  id: string;
+  concernId: string;
+  isFromReporter: boolean;
+  /** Null whenever `isFromReporter` is true. HR's replies are attributed; the reporter's are not. */
+  authorName?: string | null;
+  body: string;
+  postedAt: string;
+}
+
+/**
+ * An anonymously-reported concern.
+ *
+ * ⚠ **There is no reporter on this type, and that is the feature.** No employee id, no created-by,
+ * nothing that could be joined back to a person. The guarantee is an ABSENCE, so it cannot be
+ * demonstrated by reading this file — `verify-slice6-anonymity.sql` checks the stored rows, because
+ * a column could hold the reporter, go unmapped, and every API assertion would still pass.
+ */
+export interface EmployeeRelationsConcern {
+  id: string;
+  concernNumber: string;
+  category: ConcernCategory;
+  categoryName: string;
+  subject: string;
+  statement: string;
+  status: ConcernStatus;
+  /** Duplicate of `status`; the server sends both. Prefer `status`. */
+  statusValue: ConcernStatus;
+  statusName: string;
+  reportedAt: string;
+  triageNotes?: string | null;
+  triagedAt?: string | null;
+  triagedByName?: string | null;
+  closedAt?: string | null;
+  closureReason?: string | null;
+  closedByName?: string | null;
+  convertedCaseId?: string | null;
+  convertedCaseNumber?: string | null;
+  updates: ConcernUpdate[];
+}
+
+/**
+ * Returned ONCE, when the concern is reported.
+ *
+ * ⚠ The retrieval code is hashed on the way in and cannot be recovered or reissued — not by HR, not
+ * by anyone. A screen that shows it must say so, and must never imply it can be looked up later.
+ */
+export interface ConcernReceipt {
+  concernNumber: string;
+  retrievalCode: string;
+  reportedAt: string;
+  notice: string;
+}
+
+export interface ReportConcernRequest {
+  category: ConcernCategory;
+  subject: string;
+  /** At least 20 characters. */
+  statement: string;
+}
+
+export interface TrackConcernRequest {
+  concernNumber: string;
+  retrievalCode: string;
+}
+
+export interface AddConcernUpdateRequest extends TrackConcernRequest {
+  /** At least 5 characters. */
+  body: string;
+}
+
+export interface ReplyToConcernRequest {
+  /** At least 5 characters. */
+  body: string;
+}
+
+export interface TriageConcernRequest {
+  /** At least 10 characters. */
+  notes: string;
+  status: 'UnderTriage' | 'UnderReview' | 'Closed';
+}
+
+export interface CloseConcernRequest {
+  /** At least 10 characters. */
+  reason: string;
+}
+
+/** ⚠ Never a grievance — that would be HR raising one on somebody's behalf by a longer route. */
+export interface ConvertConcernRequest {
+  caseType: Exclude<EmployeeRelationsCaseType, 'Grievance'>;
+  employeeId: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Analytics — area 9c slice 8
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** A count that always carries the total it is a share OF. */
+export interface ErCountSlice {
+  key: string;
+  label: string;
+  count: number;
+  total: number;
+  /** Null when `total` is 0. */
+  percent?: number | null;
+}
+
+/**
+ * A rate, carrying both its numbers.
+ *
+ * ⚠ `percent` is **null**, never 0, when the denominator is zero — "nobody complied" and "nobody was
+ * asked" must not render alike, and `noData` says which one you have. Do not coalesce it to 0 on
+ * the way into a chart: that is precisely the area-7 defect this type exists to make impossible.
+ */
+export interface ErRate {
+  label: string;
+  numerator: number;
+  denominator: number;
+  percent?: number | null;
+  noData: boolean;
+}
+
+export interface ErResolutionTime {
+  resolvedCount: number;
+  /** Null, not zero: "nothing has been resolved" is not "everything resolves instantly". */
+  averageDays?: number | null;
+  medianDays?: number | null;
+  longestDays?: number | null;
+}
+
+export interface ErStuckRung {
+  level: GrievanceEscalationLevel;
+  levelName: string;
+  count: number;
+  oldestWaitingDays: number;
+  /** Cases at this rung nobody has been named to answer — the matrix gap, expressed in cases. */
+  unassigned: number;
+}
+
+export interface EmployeeRelationsAnalytics {
+  from?: string | null;
+  to?: string | null;
+  totalCases: number;
+  openCases: number;
+  resolvedCases: number;
+  withdrawnCases: number;
+  closedUnresolvedCases: number;
+  byCaseType: ErCountSlice[];
+  byStatus: ErCountSlice[];
+  /** Open cases only — where a case SITS means nothing once it has ended. */
+  byCurrentLevel: ErCountSlice[];
+  /** Resolved cases only. Carries a "no resolution record" slice so the breakdown adds up. */
+  byOutcome: ErCountSlice[];
+  byOrganizationUnit: ErCountSlice[];
+  escalationRate: ErRate;
+  outcomeNotRecordedRate: ErRate;
+  agreementMissingRate: ErRate;
+  /** ⚠ Resolved only. A withdrawal is not a resolution, and counting one would shorten the average. */
+  resolutionTime: ErResolutionTime;
+  stuckAtRung: ErStuckRung[];
+  concernsReported: number;
+  concernsUntriaged: number;
+  concernsConverted: number;
+  /**
+   * ⚠ Counted, never cross-tabbed. There is deliberately no breakdown by unit or reporter: in a
+   * unit of four, "one fraud concern this quarter" is an identification, not a statistic.
+   */
+  concernsByCategory: ErCountSlice[];
 }
