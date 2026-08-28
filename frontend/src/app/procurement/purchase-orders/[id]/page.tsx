@@ -85,8 +85,8 @@ const POStatuses = [
 
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
-  const params = useParams();
   const { hasPermission } = useAuth();
+  const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
   const [order, setOrder] = useState<PurchaseOrderDetailDto | null>(null);
@@ -113,8 +113,9 @@ export default function PurchaseOrderDetailPage() {
       setLandedCostPlan(plan);
     } catch (err: any) {
       console.error('Error fetching purchase order:', err);
-      setError('Failed to load purchase order');
-      toast.error('Failed to load purchase order');
+      const message = err?.message || 'Failed to load purchase order';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

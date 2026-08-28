@@ -20,6 +20,12 @@ public sealed class ProcurementBudgetCommitment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal ReservedAmount { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal FormallyCommittedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UtilizedAmount { get; set; }
+
     [Required, StringLength(10)]
     public string Currency { get; set; } = "USD";
 
@@ -33,10 +39,16 @@ public sealed class ProcurementBudgetCommitment : TenantEntity
     public decimal BudgetCommittedBefore { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
+    public decimal BudgetReservedBefore { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
     public decimal BudgetAvailableBefore { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal BudgetCommittedAfter { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal BudgetReservedAfter { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal BudgetAvailableAfter { get; set; }
@@ -82,4 +94,47 @@ public sealed class ProcurementBudgetCommitment : TenantEntity
     public PurchaseRequisition PurchaseRequisition { get; set; } = null!;
     public ProcurementPolicyExceptionRule? OverrideRule { get; set; }
     public WorkflowInstance? OverrideWorkflowInstance { get; set; }
+    public ICollection<ProcurementBudgetCommitmentLedgerEntry> LedgerEntries { get; set; } = new List<ProcurementBudgetCommitmentLedgerEntry>();
+}
+
+[Table("ProcurementBudgetCommitmentLedgerEntries")]
+public sealed class ProcurementBudgetCommitmentLedgerEntry : TenantEntity
+{
+    public Guid ProcurementBudgetCommitmentId { get; set; }
+    public Guid ProcurementBudgetId { get; set; }
+    public Guid PurchaseRequisitionId { get; set; }
+    public ProcurementBudgetCommitmentLedgerEntryType EntryType { get; set; }
+    public Guid? FormalCommitmentEntryId { get; set; }
+
+    [Required, StringLength(30)]
+    public string SourceType { get; set; } = string.Empty;
+
+    public Guid SourceId { get; set; }
+
+    [Required, StringLength(100)]
+    public string SourceReference { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Amount { get; set; }
+
+    [Required, StringLength(10)]
+    public string Currency { get; set; } = string.Empty;
+
+    public DateTime OccurredAtUtc { get; set; }
+    public Guid ActorUserId { get; set; }
+
+    [Required, StringLength(300)]
+    public string ActorName { get; set; } = string.Empty;
+
+    [Required, StringLength(100)]
+    public string CorrelationId { get; set; } = string.Empty;
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public ProcurementBudgetCommitment ProcurementBudgetCommitment { get; set; } = null!;
+    public ProcurementBudget ProcurementBudget { get; set; } = null!;
+    public PurchaseRequisition PurchaseRequisition { get; set; } = null!;
+    public ProcurementBudgetCommitmentLedgerEntry? FormalCommitmentEntry { get; set; }
+    public ICollection<ProcurementBudgetCommitmentLedgerEntry> UtilizationEntries { get; set; } = new List<ProcurementBudgetCommitmentLedgerEntry>();
 }

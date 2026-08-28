@@ -33,6 +33,34 @@ export const validateProcurementAppExport = (
   return undefined;
 };
 
+export async function readProcurementAppExportFile(file: Blob & { name: string }) {
+  const bytes = typeof file.arrayBuffer === 'function'
+    ? await file.arrayBuffer()
+    : await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error('Unable to read export package.'));
+        reader.onload = () => {
+          if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+          else reject(new Error('Unable to read export package.'));
+        };
+        reader.readAsArrayBuffer(file);
+      });
+  const digest = await globalThis.crypto.subtle.digest(
+    'SHA-256',
+    new Uint8Array(bytes)
+  );
+  const exportChecksumSha256 = Array.from(new Uint8Array(digest), (value) =>
+    value.toString(16).padStart(2, '0')
+  ).join('');
+  const extension = file.name.split('.').pop()?.trim().toUpperCase();
+
+  return {
+    exportFileName: file.name,
+    exportFormat: extension || 'FILE',
+    exportChecksumSha256,
+  };
+}
+
 export const procurementAppSubmissionStatusTone = (
   status: ProcurementAppSubmissionStatus
 ) => {

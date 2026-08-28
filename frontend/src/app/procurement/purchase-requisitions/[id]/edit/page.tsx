@@ -11,7 +11,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
-import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Dialog,
   DialogContent,
@@ -55,6 +54,8 @@ import {
 } from '@/services/purchasingService';
 import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseRequisitionDocuments';
 import {
   EMPTY_REQUISITION_LINKAGE,
   normalizeRequisitionLinkage,
@@ -120,6 +121,7 @@ export default function EditPurchaseRequisitionPage() {
   const [showItemDialog, setShowItemDialog] = useState(false);
   const [itemIndexToDelete, setItemIndexToDelete] = useState<number | null>(null);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [deleteItemIndex, setDeleteItemIndex] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [availableUOMs, setAvailableUOMs] = useState<ItemUnitOfMeasureDto[]>([]);
@@ -266,12 +268,12 @@ export default function EditPurchaseRequisitionPage() {
   const totalAmount = items.reduce((sum, item) => 
     sum + calculateLineTotal(item.quantity, item.estimatedUnitPrice), 0
   );
-
   // Handle inventory item selection
   const handleInventoryItemSelect = async (itemId: string) => {
     const item = inventoryItems.find(i => i.id === itemId);
     if (item) {
       setSelectedInventoryItem(item);
+      setItemSearch('');
       
       // Determine the UOM to use - this will be preserved throughout the function
       let finalUOM = item.unitOfMeasure || 'EA';
@@ -774,6 +776,12 @@ export default function EditPurchaseRequisitionPage() {
           )}
         </CardContent>
       </Card>
+
+      <PurchaseRequisitionDocuments
+        requisitionId={id}
+        requisitionStatus="Draft"
+        editable
+      />
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-4">

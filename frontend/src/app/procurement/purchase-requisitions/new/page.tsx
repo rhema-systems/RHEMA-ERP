@@ -10,7 +10,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
-import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Dialog,
   DialogContent,
@@ -54,6 +53,12 @@ import {
 } from '@/services/purchasingService';
 import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  PendingPurchaseRequisitionDocument,
+  PurchaseRequisitionDocuments,
+  uploadPendingPurchaseRequisitionDocuments,
+} from '@/components/procurement/PurchaseRequisitionDocuments';
 import {
   EMPTY_REQUISITION_LINKAGE,
   applyPlanItemToRequisitionLinkage,
@@ -97,6 +102,7 @@ export default function NewPurchaseRequisitionPage() {
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PRItemFormData[]>([]);
+  const [pendingDocuments, setPendingDocuments] = useState<PendingPurchaseRequisitionDocument[]>([]);
   const [linkage, setLinkage] = useState<SavePurchaseRequisitionLinkageRequest>({ ...EMPTY_REQUISITION_LINKAGE });
   
   // Reference data
@@ -111,6 +117,7 @@ export default function NewPurchaseRequisitionPage() {
   const [showItemDialog, setShowItemDialog] = useState(false);
   const [itemIndexToDelete, setItemIndexToDelete] = useState<number | null>(null);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [deleteItemIndex, setDeleteItemIndex] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [availableUOMs, setAvailableUOMs] = useState<ItemUnitOfMeasureDto[]>([]);
@@ -219,12 +226,12 @@ export default function NewPurchaseRequisitionPage() {
   const totalAmount = items.reduce((sum, item) => 
     sum + calculateLineTotal(item.quantity, item.estimatedUnitPrice), 0
   );
-
   // Handle inventory item selection
   const handleInventoryItemSelect = async (itemId: string) => {
     const item = inventoryItems.find(i => i.id === itemId);
     if (item) {
       setSelectedInventoryItem(item);
+      setItemSearch('');
       
       try {
         // Load available UOMs
@@ -392,7 +399,14 @@ export default function NewPurchaseRequisitionPage() {
       };
 
       const result = await purchasingService.createPurchaseRequisition(createData);
-      toast.success('Purchase requisition saved as draft');
+      const documentResult = await uploadPendingPurchaseRequisitionDocuments(result.id, pendingDocuments);
+      if (documentResult.failed.length > 0) {
+        toast.error(
+          `Purchase requisition saved as draft, but ${documentResult.failed.length} supporting document(s) could not be uploaded. Open the requisition to retry.`
+        );
+      } else {
+        toast.success('Purchase requisition saved as draft');
+      }
       router.push(`/procurement/purchase-requisitions/${result.id}`);
     } catch (error: any) {
       console.error('Error saving purchase requisition:', error);
@@ -459,6 +473,15 @@ export default function NewPurchaseRequisitionPage() {
       };
 
       const result = await purchasingService.createPurchaseRequisition(createData);
+
+      const documentResult = await uploadPendingPurchaseRequisitionDocuments(result.id, pendingDocuments);
+      if (documentResult.failed.length > 0) {
+        toast.error(
+          `Purchase requisition was saved as draft because ${documentResult.failed.length} supporting document(s) could not be uploaded. Open it to retry before submission.`
+        );
+        router.push(`/procurement/purchase-requisitions/${result.id}`);
+        return;
+      }
       
       // Submit for approval
       await purchasingService.submitPurchaseRequisition(result.id);
@@ -773,6 +796,11 @@ export default function NewPurchaseRequisitionPage() {
           )}
         </CardContent>
       </Card>
+
+      <PurchaseRequisitionDocuments
+        pendingDocuments={pendingDocuments}
+        onPendingDocumentsChange={setPendingDocuments}
+      />
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-4">

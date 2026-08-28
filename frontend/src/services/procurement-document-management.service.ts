@@ -1,6 +1,7 @@
 import { apiService } from '@/services/api.service';
 
 export type ProcurementDocumentFamilyCode =
+  | 'Requisition'
   | 'Tender'
   | 'Evaluation'
   | 'Approval'
@@ -90,4 +91,7 @@ export const procurementDocumentManagementService = {
     apiService.downloadBlob(
       `${root}/records/${recordId}/versions/${versionId}/download`
     ),
+
+  removeRequisitionDocument: (recordId: string) =>
+    apiService.delete<void>(`${root}/records/${recordId}`),
 };

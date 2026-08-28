@@ -61,6 +61,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   procurementAppSubmissionActions,
   procurementAppSubmissionStatusTone,
+  readProcurementAppExportFile,
   validateProcurementAppExport,
 } from '@/lib/procurement-app-submission';
 import { procurementAppSubmissionService } from '@/services/procurement-app-submission.service';
@@ -215,6 +216,28 @@ export default function ProcurementAppSubmissionsPage() {
     setEvidenceMode('None');
     setEvidenceValue('');
     setEvidenceFile(undefined);
+  };
+
+  const selectExportPackage = async (
+    file: File | undefined,
+    target: 'export' | 'resubmit'
+  ) => {
+    if (!file) return;
+    try {
+      const metadata = await readProcurementAppExportFile(file);
+      if (target === 'export') {
+        setExportForm((current) => ({ ...current, ...metadata }));
+      } else {
+        setLifecycleForm((current) => ({ ...current, ...metadata }));
+      }
+    } catch (error) {
+      console.error('Unable to calculate APP export checksum:', error);
+      toast({
+        title: 'Unable to read export package',
+        description: 'Select the generated APP export file and try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const invalidate = async (id?: string) => {

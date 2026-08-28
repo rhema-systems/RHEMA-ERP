@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.DocumentManagement;
+using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Enums;
@@ -7,6 +8,9 @@ using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using Xunit;
@@ -85,7 +89,7 @@ public sealed class ProcurementCentralDmsAdoptionTests
     [Fact]
     public void ProcurementCatalogueUsesControlledSourcesAndClassificationsForEveryRequiredFamily()
     {
-        ProcurementDocumentManagementCatalog.Families.Should().HaveCount(9);
+        ProcurementDocumentManagementCatalog.Families.Should().HaveCount(10);
         ProcurementDocumentManagementCatalog.Families
             .Should().OnlyContain(item =>
                 !string.IsNullOrWhiteSpace(item.TemplateCode) &&
@@ -96,6 +100,62 @@ public sealed class ProcurementCentralDmsAdoptionTests
         ProcurementDocumentManagementCatalog.Families
             .Select(item => item.Code)
             .Should().OnlyHaveUniqueItems();
+
+        var requisition = ProcurementDocumentManagementCatalog.Find(
+            ErpSystem.Core.DTOs.Procurement.ProcurementDocumentFamily.Requisition);
+        requisition.Should().NotBeNull();
+        requisition!.SourceEntityType.Should().Be("PurchaseRequisition");
+        requisition.TemplateCode.Should().Be("TDC-PROC-REQUISITION");
+        requisition.UploadPermissions.Should().Contain("procurement.requisition.create");
+        requisition.Classifications.Should().Contain(["Specification", "Supporting document"]);
+    }
+
+    [Fact]
+    public async Task DraftRequisitionDocumentRemovalIsTenantScopedAndAudited()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        await using var db = Database();
+        SeedRequisitionDocument(db, tenantId, actorId, requisitionId, documentId, "Draft");
+        await db.SaveChangesAsync();
+        var centralDocuments = new Mock<ICentralDocumentRepositoryFileService>();
+        centralDocuments
+            .Setup(service => service.DeleteAsync(tenantId, documentId, actorId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var controller = DocumentController(db, tenantId, actorId, centralDocuments);
+
+        var result = await controller.RemoveRequisitionDocument(documentId, CancellationToken.None);
+
+        result.Should().BeOfType<NoContentResult>();
+        centralDocuments.Verify(service => service.DeleteAsync(
+            tenantId, documentId, actorId, It.IsAny<CancellationToken>()), Times.Once);
+        var audit = await db.AuditLogs.SingleAsync();
+        audit.Action.Should().Be("PurchaseRequisitionDocumentRemoved");
+        audit.Resource.Should().Be("PurchaseRequisition");
+        audit.ResourceId.Should().Be(requisitionId.ToString());
+    }
+
+    [Fact]
+    public async Task SubmittedRequisitionDocumentRemovalFailsClosed()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        await using var db = Database();
+        SeedRequisitionDocument(db, tenantId, actorId, Guid.NewGuid(), documentId, "Submitted");
+        await db.SaveChangesAsync();
+        var centralDocuments = new Mock<ICentralDocumentRepositoryFileService>(MockBehavior.Strict);
+        var controller = DocumentController(db, tenantId, actorId, centralDocuments);
+
+        var result = await controller.RemoveRequisitionDocument(documentId, CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should().Be("PR_DOCUMENTS_DRAFT_ONLY");
+        centralDocuments.Verify(service => service.DeleteAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -128,6 +188,89 @@ public sealed class ProcurementCentralDmsAdoptionTests
 
     private static CentralDocumentRepositoryFileService Service(ApplicationDbContext db) =>
         new(db, Mock.Of<IFileStorageService>(), Mock.Of<IControlledFileUploadService>());
+
+    private static ProcurementDocumentManagementController DocumentController(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid actorId,
+        Mock<ICentralDocumentRepositoryFileService> centralDocuments)
+    {
+        var currentUser = new Mock<ICurrentUserProvider>();
+        currentUser.SetupGet(provider => provider.TenantId).Returns(tenantId);
+        currentUser.SetupGet(provider => provider.UserId).Returns(actorId);
+        currentUser.SetupGet(provider => provider.Username).Returns("procurement.officer");
+        currentUser.SetupGet(provider => provider.FullName).Returns("Procurement Officer");
+        var authorization = new Mock<IAuthorizationService>();
+        authorization
+            .Setup(service => service.AuthorizeAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<object?>(),
+                It.IsAny<string>()))
+            .ReturnsAsync(AuthorizationResult.Success());
+
+        return new ProcurementDocumentManagementController(
+            db,
+            currentUser.Object,
+            authorization.Object,
+            Mock.Of<IControlledFileUploadService>(),
+            centralDocuments.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+    }
+
+    private static void SeedRequisitionDocument(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid actorId,
+        Guid requisitionId,
+        Guid documentId,
+        string status)
+    {
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "Test tenant",
+            Code = $"T{tenantId:N}"[..20]
+        });
+        var actor = new ApplicationUser
+        {
+            Id = actorId,
+            TenantId = tenantId,
+            UserName = "procurement.officer",
+            NormalizedUserName = "PROCUREMENT.OFFICER",
+            FirstName = "Procurement",
+            LastName = "Officer"
+        };
+        db.Users.Add(actor);
+        db.PurchaseRequisitions.Add(new ErpSystem.Core.Entities.Procurement.PurchaseRequisition
+        {
+            Id = requisitionId,
+            TenantId = tenantId,
+            RequisitionNumber = "PR-TEST-001",
+            RequestedById = actorId,
+            RequestedBy = actor,
+            Status = status
+        });
+        db.CentralDocumentRecords.Add(new CentralDocumentRecord
+        {
+            Id = documentId,
+            TenantId = tenantId,
+            DocumentReference = "DMS-PR-001",
+            Title = "Specification.pdf",
+            SourceModule = ProcurementDocumentManagementCatalog.SourceModule,
+            SourceLabel = "Purchase requisition supporting documents",
+            SourceEntityType = "PurchaseRequisition",
+            SourceRecordId = requisitionId,
+            SourceRecordReference = "PR-TEST-001",
+            MetadataTemplateCode = "TDC-PROC-REQUISITION",
+            AccessProfile = "Procurement requisition restricted",
+            RetentionStatus = "Current"
+        });
+    }
 
     private static CentralDocumentRepositoryRegistration Request(
         Guid tenantId,

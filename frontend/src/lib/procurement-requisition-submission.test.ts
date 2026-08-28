@@ -49,4 +49,12 @@ describe('getSubmissionControlPresentation', () => {
       basis: 'BusinessRequirements'
     }))).toMatchObject({ tone: 'blocked', title: 'Submission no longer available' });
   });
+
+  it('describes an incomplete draft as missing required details', () => {
+    expect(getSubmissionControlPresentation(readiness())).toMatchObject({
+      tone: 'blocked',
+      title: 'Required details incomplete',
+      basisLabel: 'Action required'
+    });
+  });
 });

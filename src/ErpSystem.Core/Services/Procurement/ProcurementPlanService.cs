@@ -1493,7 +1493,9 @@ public class ProcurementPlanService : IProcurementPlanService
             AllocatedAmount = budget.AllocatedAmount,
             UtilizedAmount = budget.UtilizedAmount,
             CommittedAmount = budget.CommittedAmount,
-            RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount,
+            ReservedAmount = budget.ReservedAmount,
+            RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount -
+                              budget.CommittedAmount - budget.ReservedAmount,
             Currency = budget.Currency,
             Status = budget.Status,
             ControlLevel = budget.ControlLevel,
@@ -1982,7 +1984,8 @@ public class ProcurementPlanService : IProcurementPlanService
         result.AllocatedAmount = budget.AllocatedAmount;
         result.UtilizedAmount = budget.UtilizedAmount;
         result.CommittedAmount = budget.CommittedAmount;
-        result.RemainingAmount = budget.RemainingAmount;
+        result.RemainingAmount = budget.AllocatedAmount - budget.UtilizedAmount -
+                                 budget.CommittedAmount - budget.ReservedAmount;
         result.Currency = budget.Currency;
         result.ControlLevel = budget.ControlLevel;
 
@@ -1991,7 +1994,8 @@ public class ProcurementPlanService : IProcurementPlanService
 
         // Check budget threshold warning
         var utilizationPercent = budget.AllocatedAmount > 0
-            ? ((budget.UtilizedAmount + budget.CommittedAmount) / budget.AllocatedAmount) * 100
+            ? ((budget.UtilizedAmount + budget.CommittedAmount + budget.ReservedAmount) /
+               budget.AllocatedAmount) * 100
             : 0;
 
         if (utilizationPercent >= budget.WarningThresholdPercent)

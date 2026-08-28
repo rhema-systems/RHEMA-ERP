@@ -670,6 +670,7 @@ public sealed class PurchaseRequisitionLinkageOptionDto
     public string Name { get; set; } = string.Empty;
     public string? Status { get; set; }
     public Guid? ParentId { get; set; }
+    public Guid? LinkedBudgetId { get; set; }
     public string? ParentReference { get; set; }
     public string? Category { get; set; }
     public decimal? Amount { get; set; }
@@ -793,6 +794,7 @@ public sealed class PurchaseRequisitionBudgetReadinessDto
     public decimal AllocatedAmount { get; set; }
     public decimal UtilizedAmount { get; set; }
     public decimal CommittedAmount { get; set; }
+    public decimal ReservedAmount { get; set; }
     public decimal AvailableAmount { get; set; }
     public decimal ShortfallAmount { get; set; }
     public Guid? CommitmentId { get; set; }

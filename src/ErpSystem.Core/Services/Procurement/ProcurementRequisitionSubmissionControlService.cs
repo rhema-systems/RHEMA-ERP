@@ -321,6 +321,10 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         var allowed = evaluation.Readiness.CanSubmit;
         var evidence = BuildEvidence(evaluation);
         var decisionKeys = new List<string> { "PR-001", "PR-002", "PR-003" };
+        if (evaluation.App.Attempted)
+            decisionKeys.Add("DEC-009");
+        if (evaluation.Exception.Attempted)
+            decisionKeys.Add(evaluation.Exception.Rule?.SourceDecisionKey ?? "DEC-006");
         var exceptionRule = evaluation.Exception.Rule;
         await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
         {

@@ -717,6 +717,7 @@ public class ProcurementBudgetDto
     public decimal AllocatedAmount { get; set; }
     public decimal UtilizedAmount { get; set; }
     public decimal CommittedAmount { get; set; }
+    public decimal ReservedAmount { get; set; }
     public decimal RemainingAmount { get; set; }
     public string Currency { get; set; } = "USD";
     public string Status { get; set; } = "Draft";

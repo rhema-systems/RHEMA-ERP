@@ -79,6 +79,7 @@ import { getAuthorityControlPresentation } from '@/lib/procurement-requisition-a
 import { getSubmissionControlPresentation } from '@/lib/procurement-requisition-submission';
 import { getSourcingReleasePresentation } from '@/lib/procurement-requisition-sourcing';
 import { PurchaseRequisitionSourcingReleaseControl } from '@/components/procurement/PurchaseRequisitionSourcingReleaseControl';
+import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseRequisitionDocuments';
 import { format } from 'date-fns';
 import Link from 'next/link';
 
@@ -1163,6 +1164,7 @@ export default function PurchaseRequisitionDetailPage() {
           <TabsTrigger value="items">
             Items ({requisition.itemCount})
           </TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="linkage">Planning &amp; Governance</TabsTrigger>
           <WorkflowTabTrigger value="approval" />
         </TabsList>
@@ -1493,6 +1495,14 @@ export default function PurchaseRequisitionDetailPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="documents" className="space-y-6">
+          <PurchaseRequisitionDocuments
+            requisitionId={id}
+            requisitionStatus={requisition.status}
+            editable={canEdit}
+          />
         </TabsContent>
 
         <TabsContent value="linkage" className="space-y-6">

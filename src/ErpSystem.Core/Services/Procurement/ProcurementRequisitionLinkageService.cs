@@ -69,6 +69,7 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
                 Name = item.ItemDescription,
                 Status = $"{item.ProcurementPlan.Status}/{item.Status}",
                 ParentId = item.ProcurementPlanId,
+                LinkedBudgetId = item.ProcurementBudgetId,
                 ParentReference = item.ProcurementPlan.Title,
                 Category = item.ItemCategory,
                 Amount = item.ApprovedBudgetAmount ?? item.EstimatedTotalCost,

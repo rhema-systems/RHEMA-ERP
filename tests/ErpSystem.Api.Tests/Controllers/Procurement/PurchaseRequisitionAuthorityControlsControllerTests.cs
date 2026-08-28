@@ -172,6 +172,24 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
             It.IsAny<PurchaseRequisition>()), Times.Never);
     }
 
+    [Fact]
+    public async Task DraftRequisitionCannotBeApprovedBeforeConfiguredWorkflowSubmission()
+    {
+        var fixture = new ControllerFixture(status: "Draft");
+
+        var result = (ObjectResult)await fixture.Controller.ApprovePurchaseRequisition(
+            fixture.Requisition.Id, new ApprovalDto { Approved = true });
+
+        result.StatusCode.Should().Be(400);
+        result.Value.Should().Be("Purchase requisition cannot be approved in current status: Draft");
+        fixture.Authority.Verify(service => service.EnforceApprovalAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Workflow.Verify(service => service.ProcessApprovalAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        fixture.Repository.Verify(service => service.UpdateRequisitionAsync(
+            It.IsAny<PurchaseRequisition>()), Times.Never);
+    }
+
     private sealed class ControllerFixture
     {
         public ControllerFixture(string status = "Draft")

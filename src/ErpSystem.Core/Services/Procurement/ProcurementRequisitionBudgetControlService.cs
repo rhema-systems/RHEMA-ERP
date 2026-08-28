@@ -256,17 +256,18 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
 
         var now = DateTime.UtcNow;
         var beforeCommitted = budget.CommittedAmount;
+        var beforeReserved = budget.ReservedAmount;
         var beforeAvailable = Available(budget);
         var previouslyReserved = commitment?.Status ==
             ProcurementBudgetCommitmentStatus.Reserved
                 ? commitment.ReservedAmount
                 : 0m;
-        var commitmentAdjustment = requestedAmount - previouslyReserved;
-        budget.CommittedAmount += commitmentAdjustment;
-        if (budget.CommittedAmount < 0m)
+        var reservationAdjustment = requestedAmount - previouslyReserved;
+        budget.ReservedAmount += reservationAdjustment;
+        if (budget.ReservedAmount < 0m)
             throw new ProcurementRequisitionBudgetConflictException(
                 "PR_BUDGET_LEDGER_INVALID",
-                "The procurement budget committed balance cannot be adjusted below zero.");
+                "The procurement budget reserved balance cannot be adjusted below zero.");
         budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = now;
 
@@ -305,8 +306,10 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
         commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
         commitment.BudgetCommittedBefore = beforeCommitted;
+        commitment.BudgetReservedBefore = beforeReserved;
         commitment.BudgetAvailableBefore = beforeAvailable;
         commitment.BudgetCommittedAfter = budget.CommittedAmount;
+        commitment.BudgetReservedAfter = budget.ReservedAmount;
         commitment.BudgetAvailableAfter = budget.RemainingAmount;
         commitment.IsOverride = readiness.IsOverride;
         commitment.OverrideRuleId = overrideRule?.Id;
@@ -395,7 +398,9 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
 
         var before = Snapshot(commitment);
         var now = DateTime.UtcNow;
-        budget.CommittedAmount = Math.Max(0, budget.CommittedAmount - commitment.ReservedAmount);
+        var outstandingReservation = Math.Max(0,
+            commitment.ReservedAmount - commitment.FormallyCommittedAmount);
+        budget.ReservedAmount = Math.Max(0, budget.ReservedAmount - outstandingReservation);
         budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = now;
         commitment.Status = ProcurementBudgetCommitmentStatus.Released;
@@ -428,7 +433,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             Released = true,
             CommitmentId = commitment.Id,
             CommitmentReference = commitment.ReservationReference,
-            ReleasedAmount = commitment.ReservedAmount,
+            ReleasedAmount = outstandingReservation,
             AvailableAmount = budget.RemainingAmount,
             Message = "The purchase-requisition budget commitment was released."
         };
@@ -798,6 +803,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         result.AllocatedAmount = budget.AllocatedAmount;
         result.UtilizedAmount = budget.UtilizedAmount;
         result.CommittedAmount = budget.CommittedAmount;
+        result.ReservedAmount = budget.ReservedAmount;
         result.AvailableAmount = Available(budget);
     }
 
@@ -835,10 +841,14 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         commitment.ReservationSequence,
         Status = commitment.Status.ToString(),
         commitment.ReservedAmount,
+        commitment.FormallyCommittedAmount,
+        commitment.UtilizedAmount,
         commitment.Currency,
         commitment.BudgetCommittedBefore,
+        commitment.BudgetReservedBefore,
         commitment.BudgetAvailableBefore,
         commitment.BudgetCommittedAfter,
+        commitment.BudgetReservedAfter,
         commitment.BudgetAvailableAfter,
         commitment.IsOverride,
         commitment.OverrideRuleCode,
@@ -897,7 +907,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName)
         ? _currentUser.Username : _currentUser.FullName, 300);
     private static decimal Available(ProcurementBudget budget) =>
-        budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount - budget.ReservedAmount;
     private static string BuildReference(PurchaseRequisition requisition) =>
         Truncate($"BCR-{requisition.RequisitionNumber}", 100);
     private static string NormalizeCorrelation(string correlationId) =>

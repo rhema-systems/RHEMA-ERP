@@ -35,9 +35,14 @@ async function getFriendlyErrorMessage(
   }
 
   let message = raw?.trim();
+  let code: string | undefined;
   if (message) {
     try {
       const parsed = JSON.parse(message);
+      code =
+        parsed?.code ||
+        parsed?.extensions?.code ||
+        parsed?.Extensions?.code;
       // common shapes: { error: string } or { message: string } or { success: false, error: string }
       message =
         parsed?.error ||
@@ -50,6 +55,9 @@ async function getFriendlyErrorMessage(
     }
   }
 
+  const includeCode = (value: string) =>
+    code && !value.includes(code) ? `${value} (${code})` : value;
+
   // Provide user-friendly guidance for known workflow-guard errors.
   if (
     response.status === 400 &&
@@ -58,7 +66,7 @@ async function getFriendlyErrorMessage(
       "No active workflow definition found for entity type 'PurchaseRequisition'"
     )
   ) {
-    return 'No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.';
+    return includeCode('No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.');
   }
 
   if (
@@ -80,10 +88,10 @@ async function getFriendlyErrorMessage(
       "No active workflow definition found for entity type 'PurchaseOrder'"
     )
   ) {
-    return 'No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.';
+    return includeCode('No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.');
   }
 
-  if (message) return message;
+  if (message) return includeCode(message);
   return `Request failed (${response.status} ${response.statusText})`;
 }
 
@@ -185,6 +193,7 @@ export interface PurchaseRequisitionLinkageOptionDto {
   name: string;
   status?: string;
   parentId?: string;
+  linkedBudgetId?: string;
   parentReference?: string;
   category?: string;
   amount?: number;
@@ -1451,7 +1460,7 @@ export const purchasingService = {
     );
 
     if (!response.ok)
-      throw new Error('Failed to convert requisition to purchase order');
+      throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1468,7 +1477,7 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error('Failed to fetch suggested suppliers');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1487,7 +1496,7 @@ export const purchasingService = {
     );
 
     if (!response.ok)
-      throw new Error('Failed to create RFQ from purchase requisition');
+      throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1524,7 +1533,7 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase orders');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1536,7 +1545,7 @@ export const purchasingService = {
       headers: getAuthHeaders(),
     });
 
-    if (!response.ok) throw new Error('Failed to fetch purchase order');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1552,10 +1561,7 @@ export const purchasingService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to create purchase order');
-    }
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1570,10 +1576,7 @@ export const purchasingService = {
       { headers: getAuthHeaders() }
     );
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(
-        error || 'Failed to load approved purchase-order sources'
-      );
+      throw new Error(await getFriendlyErrorMessage(response));
     }
     return response.json();
   },
@@ -1643,10 +1646,7 @@ export const purchasingService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update purchase order');
-    }
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 

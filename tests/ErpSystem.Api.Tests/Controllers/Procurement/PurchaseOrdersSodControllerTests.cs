@@ -39,4 +39,15 @@ public sealed class PurchaseOrdersSodControllerTests
             "UpdatePurchaseOrderStatus"
         ]);
     }
+
+    [Theory]
+    [InlineData("Pending Approval", true)]
+    [InlineData("pending approval", true)]
+    [InlineData("Draft", false)]
+    [InlineData("Approved", false)]
+    [InlineData(null, false)]
+    public void ApprovalDecisionRequiresPriorWorkflowSubmission(string? status, bool expected)
+    {
+        PurchaseOrdersController.CanRecordApprovalDecision(status).Should().Be(expected);
+    }
 }

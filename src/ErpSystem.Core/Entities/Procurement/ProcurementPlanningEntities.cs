@@ -321,6 +321,9 @@ public class ProcurementBudget : TenantEntity
     public decimal CommittedAmount { get; set; } // POs issued but not yet received
 
     [Column(TypeName = "decimal(18,2)")]
+    public decimal ReservedAmount { get; set; } // Approved PR demand not yet issued as a PO/contract
+
+    [Column(TypeName = "decimal(18,2)")]
     public decimal RemainingAmount { get; set; }
 
     [MaxLength(10)]

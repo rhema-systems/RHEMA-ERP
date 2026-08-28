@@ -43,7 +43,6 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IWarehouseRepository _warehouseRepository;
-    private readonly IProcurementBudgetService _budgetService;
     private readonly IInventoryValuationService _inventoryValuationService;
     private readonly IProjectService _projectService;
     private readonly IUnitOfWork _unitOfWork;
@@ -59,6 +58,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IProcurementReceiptInspectionService _receiptInspection;
     private readonly IProcurementReceiptDocumentService _receiptDocuments;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<PurchaseOrdersController> _logger;
 
     private const string SpreadToItemCost = "SpreadToItemCost";
@@ -75,7 +75,6 @@ public class PurchaseOrdersController : ControllerBase
         IBusinessPartnerRepository businessPartnerRepository,
         IInventoryItemRepository inventoryItemRepository,
         IWarehouseRepository warehouseRepository,
-        IProcurementBudgetService budgetService,
         IInventoryValuationService inventoryValuationService,
         IProjectService projectService,
         IUnitOfWork unitOfWork,
@@ -91,6 +90,7 @@ public class PurchaseOrdersController : ControllerBase
         IProcurementReceiptInspectionService receiptInspection,
         IProcurementReceiptDocumentService receiptDocuments,
         IProcurementControlEventService controlEvents,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         ILogger<PurchaseOrdersController> logger)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
@@ -100,7 +100,6 @@ public class PurchaseOrdersController : ControllerBase
         _businessPartnerRepository = businessPartnerRepository;
         _inventoryItemRepository = inventoryItemRepository;
         _warehouseRepository = warehouseRepository;
-        _budgetService = budgetService;
         _inventoryValuationService = inventoryValuationService;
         _projectService = projectService;
         _unitOfWork = unitOfWork;
@@ -116,6 +115,7 @@ public class PurchaseOrdersController : ControllerBase
         _receiptInspection = receiptInspection;
         _receiptDocuments = receiptDocuments;
         _controlEvents = controlEvents;
+        _budgetCommitments = budgetCommitments;
         _logger = logger;
     }
 
@@ -1483,7 +1483,7 @@ public class PurchaseOrdersController : ControllerBase
                 });
             }
 
-            if (purchaseOrder.Status != "Pending Approval" && purchaseOrder.Status != "Draft")
+            if (!CanRecordApprovalDecision(purchaseOrder.Status))
             {
                 return BadRequest($"Purchase order cannot be approved in current status: {purchaseOrder.Status}");
             }
@@ -1538,23 +1538,18 @@ public class PurchaseOrdersController : ControllerBase
                 action,
                 comments);
 
-            // A PR and a submitted PO establish budget readiness only. The firm
-            // Finance commitment is created atomically when the approval
-            // workflow reaches its final Approved outcome, using the actual
-            // cumulative PO value rather than the PR estimate.
-            if (workflowResult.Outcome == WorkflowOutcome.Approved)
-            {
-                await _purchaseOrderSources.EnsureBudgetCommitmentForIssueAsync(
-                    purchaseOrder,
-                    correlationId,
-                    HttpContext.RequestAborted);
-            }
-
             var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseOrder");
             statusAdapter.ApplyApprovalOutcome(purchaseOrder, workflowResult.Outcome, userId);
 
             purchaseOrder.UpdatedAt = DateTime.UtcNow;
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
+            if (approvalDto.Approved && workflowResult.Outcome == WorkflowOutcome.Approved)
+            {
+                await _budgetCommitments.CommitPurchaseOrderAsync(
+                    purchaseOrder,
+                    correlationId,
+                    HttpContext.RequestAborted);
+            }
             await _unitOfWork.SaveChangesAsync();
             if (ownsApprovalTransaction)
             {
@@ -1565,7 +1560,11 @@ public class PurchaseOrdersController : ControllerBase
             return Ok(new
             {
                 success = true,
-                message = "Purchase order submitted successfully",
+                message = workflowResult.Outcome == WorkflowOutcome.Approved
+                    ? "Purchase order approved successfully"
+                    : workflowResult.Outcome == WorkflowOutcome.Rejected
+                        ? "Purchase order rejected successfully"
+                        : "Purchase order approval decision recorded successfully",
                 purchaseOrderId = purchaseOrder.Id,
                 purchaseOrderNumber = purchaseOrder.OrderNumber,
                 purchaseOrderStatus = purchaseOrder.Status,
@@ -1618,6 +1617,15 @@ public class PurchaseOrdersController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementBudgetCommitmentLifecycleException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
                 message = ex.Message,
                 correlationId = CorrelationId()
             });
@@ -2270,8 +2278,6 @@ public class PurchaseOrdersController : ControllerBase
                 purchaseOrder.ReceivedDate = DateTime.UtcNow;
                 await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
 
-                // Move committed budget to utilized when PO is fully received
-                await UtilizeBudgetForPurchaseOrderAsync(purchaseOrder);
             }
             else
             {
@@ -3402,24 +3408,6 @@ public class PurchaseOrdersController : ControllerBase
     private static bool SameReceiptText(string? stored, string? requested) =>
         string.Equals(stored, requested, StringComparison.Ordinal);
 
-    /// <summary>
-    /// Moves committed budget to utilized when PO is fully received
-    /// </summary>
-    private async Task UtilizeBudgetForPurchaseOrderAsync(PurchaseOrder purchaseOrder)
-    {
-        try
-        {
-            await _budgetService.UtilizePurchaseOrderCommittedBudgetAsync(
-                purchaseOrder.Id,
-                purchaseOrder.TotalAmount);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to utilize budget for PO {PONumber}: {ErrorMessage}", purchaseOrder.OrderNumber, ex.Message);
-            // Don't fail the PO receiving if budget utilization fails
-        }
-    }
-
     private async Task PopulateCurrentStepNamesAsync(List<PurchaseOrderSummaryDto> purchaseOrderDtos)
     {
         // Only populate for records that are likely to be in an approval workflow.
@@ -3476,6 +3464,9 @@ public class PurchaseOrdersController : ControllerBase
             return null;
         }
     }
+
+    internal static bool CanRecordApprovalDecision(string? status) =>
+        string.Equals(status, "Pending Approval", StringComparison.OrdinalIgnoreCase);
 
     private Task<bool> IsFrameworkCallOffAsync(Guid purchaseOrderId) =>
         _unitOfWork.Repository<ProcurementFrameworkCallOff>()
