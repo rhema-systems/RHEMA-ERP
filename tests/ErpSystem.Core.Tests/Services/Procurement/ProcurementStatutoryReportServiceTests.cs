@@ -2,8 +2,10 @@ using System.Reflection;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
@@ -13,6 +15,7 @@ using ErpSystem.Data.Repositories;
 using ErpSystem.Data.Seeders;
 using ErpSystem.Data.Services;
 using FluentAssertions;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -27,9 +30,9 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementStatutoryReportServiceTests
 {
     [Fact]
-    public void CatalogueDefinesTheElevenProcurementReportsOnTheSharedReportProtocol()
+    public void CatalogueDefinesAllThirteenArchitectureProcurementReportsOnTheSharedReportProtocol()
     {
-        ProcurementStatutoryReportCatalogue.Definitions.Should().HaveCount(11);
+        ProcurementStatutoryReportCatalogue.Definitions.Should().HaveCount(13);
         ProcurementStatutoryReportCatalogue.Definitions.Select(item => item.Code).Should().OnlyHaveUniqueItems();
         ProcurementStatutoryReportCatalogue.Definitions.Should().OnlyContain(item =>
             item.Query.StartsWith(ProcurementStatutoryReportCatalogue.QueryPrefix, StringComparison.Ordinal) &&
@@ -91,55 +94,328 @@ public sealed class ProcurementStatutoryReportServiceTests
                     .Contains("FOREIGN", StringComparison.OrdinalIgnoreCase))
                 .Should().BeFalse();
         }
+
+        var commitments = await fixture.Service.ExecuteAsync(
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
+            new ExecuteReportDto { Page = 1, PageSize = 100 }, isAdministrator: true);
+        var commitment = commitments.Data.Single();
+        commitment["ReservedAmount"].Should().Be(100m);
+        commitment["OutstandingReservedAmount"].Should().Be(40m);
+        commitment["FormallyCommittedAmount"].Should().Be(60m);
+        commitment["UtilizedAmount"].Should().Be(25m);
+    }
+
+    [Fact]
+    public async Task ContractRegisterIncludesTheArchitectureRequiredCommercialLifecycleFields()
+    {
+        await using var fixture = new Fixture();
+        var partnerId = Guid.NewGuid();
+        var tenderId = Guid.NewGuid();
+        var contractId = Guid.NewGuid();
+        var purchaseOrderId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        fixture.Context.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = partnerId, TenantId = fixture.TenantId, PartnerCode = "SUP-ARCH",
+            PartnerName = "Architecture Supplier", PartnerType = "Supplier", RegistrationStatus = "Approved"
+        });
+        fixture.Context.Tenders.Add(new Tender
+        {
+            Id = tenderId, TenantId = fixture.TenantId, TenderNumber = "TD-ARCH",
+            Title = "Architecture Tender", Status = "Awarded", TenderType = "OpenTender",
+            SourcePurchaseRequisitionId = requisitionId
+        });
+        fixture.Context.Projects.Add(new Project
+        {
+            Id = projectId, TenantId = fixture.TenantId, ProjectCode = "PRJ-ARCH",
+            Title = "Architecture Project", Status = "Active"
+        });
+        fixture.Context.PurchaseRequisitions.Add(new PurchaseRequisition
+        {
+            Id = requisitionId, TenantId = fixture.TenantId, RequisitionNumber = "PR-ARCH",
+            RequisitionDate = new DateTime(2025, 12, 1), RequestedById = Guid.NewGuid(),
+            Status = "Approved", Currency = "GHS", ProjectId = projectId
+        });
+        fixture.Context.Contracts.Add(new Contract
+        {
+            Id = contractId, TenantId = fixture.TenantId, TenderId = tenderId,
+            TenderAwardId = Guid.NewGuid(), BusinessPartnerId = partnerId,
+            ContractNumber = "CTR-ARCH", ContractTitle = "Architecture Contract",
+            ContractType = "Works", Status = "Active", Currency = "GHS",
+            ContractValue = 1000m, RetentionPercentage = 10m,
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            SignedDate = new DateTime(2025, 12, 15), ActivatedAt = new DateTime(2026, 1, 2)
+        });
+        fixture.Context.ContractAmendments.Add(new ContractAmendment
+        {
+            TenantId = fixture.TenantId, ContractId = contractId, AmendmentNumber = "VAR-001",
+            Status = "Approved", ValueChange = 100m
+        });
+        fixture.Context.PurchaseOrders.Add(new PurchaseOrder
+        {
+            Id = purchaseOrderId, TenantId = fixture.TenantId, ContractId = contractId,
+            OrderNumber = "PO-ARCH", BusinessPartnerId = partnerId, Status = "Approved",
+            Currency = "GHS", TotalAmount = 1000m, OrderDate = new DateTime(2026, 1, 3)
+        });
+        fixture.Context.VendorInvoices.Add(new VendorInvoice
+        {
+            TenantId = fixture.TenantId, PurchaseOrderId = purchaseOrderId,
+            InvoiceNumber = "INV-ARCH", SupplierId = partnerId, SupplierName = "Architecture Supplier",
+            InvoiceDate = new DateTime(2026, 2, 1), CurrencyCode = "GHS",
+            SubTotal = 600m, TotalAmount = 600m, PaidAmount = 400m, Status = VendorInvoiceStatus.PartiallyPaid
+        });
+        fixture.Context.ProjectPaymentCertificates.Add(new ProjectPaymentCertificate
+        {
+            TenantId = fixture.TenantId, ProjectId = projectId, ContractId = contractId,
+            ClientRequestId = Guid.NewGuid(), CertificateNumber = "CERT-ARCH",
+            Title = "Architecture Certificate", Status = ProjectPaymentCertificateStatuses.Approved,
+            IssueDate = new DateTime(2026, 1, 31), PreparedAt = new DateTime(2026, 1, 30),
+            Currency = "GHS", NetCertifiedAmount = 550m
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.ExecuteAsync(
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.ContractRegisterCode,
+            new ExecuteReportDto { Page = 1, PageSize = 100 },
+            isAdministrator: true);
+
+        result.Data.Should().ContainSingle();
+        var row = result.Data.Single();
+        row["ProjectCode"].Should().Be("PRJ-ARCH");
+        row["ApprovalDate"].Should().Be(new DateTime(2026, 1, 2));
+        row["RetentionPercentage"].Should().Be(10m);
+        row["ApprovedVariationCount"].Should().Be(1);
+        row["ApprovedAmendmentValue"].Should().Be(100m);
+        row["CertificateCount"].Should().Be(1);
+        row["CertifiedAmount"].Should().Be(550m);
+        row["InvoiceCount"].Should().Be(1);
+        row["InvoicedAmount"].Should().Be(600m);
+        row["PaidAmount"].Should().Be(400m);
+        row["Balance"].Should().Be(700m);
+    }
+
+    [Fact]
+    public async Task ExceptionAndProcurementToPaymentRegistersRetainEndToEndArchitectureLineage()
+    {
+        await using var fixture = new Fixture();
+        var partnerId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        var sourcingCaseId = Guid.NewGuid();
+        var tenderId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var receiptId = Guid.NewGuid();
+        var invoiceId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var draftPaymentId = Guid.NewGuid();
+        fixture.Context.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = partnerId, TenantId = fixture.TenantId, PartnerCode = "SUP-E2E",
+            PartnerName = "End-to-End Supplier", PartnerType = "Supplier", RegistrationStatus = "Approved"
+        });
+        fixture.Context.PurchaseRequisitions.Add(new PurchaseRequisition
+        {
+            Id = requisitionId, TenantId = fixture.TenantId, RequisitionNumber = "PR-E2E",
+            RequisitionDate = new DateTime(2026, 3, 1), RequestedById = Guid.NewGuid(),
+            Status = "Approved", Currency = "GHS"
+        });
+        fixture.Context.ProcurementSourcingCases.Add(new ProcurementSourcingCase
+        {
+            Id = sourcingCaseId, TenantId = fixture.TenantId, PurchaseRequisitionId = requisitionId,
+            SourcingReleaseId = Guid.NewGuid(), CaseSequence = 1, CaseNumber = "SRC-E2E",
+            SourcePlanId = Guid.NewGuid(), SourcePlanItemId = Guid.NewGuid(), Category = ProcurementCategoryClass.Goods,
+            RecommendedMethod = ProcurementMethodType.RestrictedTendering,
+            SelectedMethod = ProcurementMethodType.RestrictedTendering,
+            CurrencyCode = "GHS", PolicyCode = "POL", PolicyVersion = 1,
+            MethodRuleCode = "METHOD-EX", ThresholdRuleCode = "THRESHOLD-EX",
+            AuthorityRouteReference = "AUTH-EX", Justification = "Urgent statutory supply",
+            CreatedByName = "Procurement Officer", SourceControlFingerprint = new string('a', 64),
+            CaseFingerprint = new string('b', 64), IntegrityHash = new string('c', 64)
+        });
+        fixture.Context.Tenders.Add(new Tender
+        {
+            Id = tenderId, TenantId = fixture.TenantId, TenderNumber = "TD-E2E", Title = "Exceptional supply",
+            TenderType = "RestrictedTendering", Status = "Awarded", SourcePurchaseRequisitionId = requisitionId
+        });
+        fixture.Context.ProcurementExceptionalSourcingControls.Add(new ProcurementExceptionalSourcingControl
+        {
+            TenantId = fixture.TenantId, TenderId = tenderId, SourcingCaseId = sourcingCaseId,
+            MethodRuleId = Guid.NewGuid(), ExceptionRuleId = Guid.NewGuid(), AuthorityRouteId = Guid.NewGuid(),
+            Method = ProcurementMethodType.RestrictedTendering, MethodRuleCode = "METHOD-EX",
+            ExceptionRuleCode = "EX-001", AuthorityRouteReference = "AUTH-EX",
+            Status = ProcurementExceptionalSourcingControlStatus.Filed,
+            Justification = "Urgent statutory supply", JustificationEvidenceReference = "DMS-JUST-001",
+            SupplierSelectionEvidenceReference = "DMS-SEL-001", PreparedAtUtc = new DateTime(2026, 3, 2),
+            PreparedById = Guid.NewGuid(), ManagingDirectorApprovalRequired = true,
+            ManagingDirectorApprovalReference = "MD-APP-001", PpaApprovalRequired = false,
+            WorkflowDefinitionId = Guid.NewGuid(), ApprovedAtUtc = new DateTime(2026, 3, 3),
+            AwardReference = "AWD-001", ContractReference = "CTR-001",
+            ExceptionReportReference = "EXR-001", PostAwardFilingReference = "FILE-001",
+            FiledAtUtc = new DateTime(2026, 3, 10), IntegrityHash = new string('d', 64)
+        });
+        fixture.Context.PurchaseOrders.Add(new PurchaseOrder
+        {
+            Id = orderId, TenantId = fixture.TenantId, OrderNumber = "PO-E2E", BusinessPartnerId = partnerId,
+            SourceRequisitionId = requisitionId, SourceRequisitionNumber = "PR-E2E", Status = "Approved",
+            Currency = "GHS", TotalAmount = 1000m, OrderDate = new DateTime(2026, 3, 4)
+        });
+        fixture.Context.PurchaseOrderReceipts.Add(new PurchaseOrderReceipt
+        {
+            Id = receiptId, TenantId = fixture.TenantId, PurchaseOrderId = orderId,
+            ReceiptNumber = "REC-E2E", ReceiptDate = new DateTime(2026, 3, 5), Status = "Accepted"
+        });
+        fixture.Context.PurchaseOrderReceiptItems.Add(new PurchaseOrderReceiptItem
+        {
+            TenantId = fixture.TenantId, ReceiptId = receiptId, PurchaseOrderItemId = Guid.NewGuid(),
+            ReceivedQuantity = 10m, AcceptedQuantity = 10m
+        });
+        fixture.Context.VendorInvoices.Add(new VendorInvoice
+        {
+            Id = invoiceId, TenantId = fixture.TenantId, PurchaseOrderId = orderId,
+            InvoiceNumber = "INV-E2E", SupplierId = partnerId, SupplierName = "End-to-End Supplier",
+            InvoiceDate = new DateTime(2026, 3, 6), CurrencyCode = "GHS", TotalAmount = 950m,
+            Status = VendorInvoiceStatus.PartiallyPaid, MatchingType = InvoiceMatchingType.ThreeWay,
+            MatchingStatus = InvoiceMatchingStatus.ThreeWayMatched
+        });
+        fixture.Context.Set<VendorPayment>().Add(new VendorPayment
+        {
+            Id = paymentId, TenantId = fixture.TenantId, PaymentNumber = "PAY-E2E", SupplierId = partnerId,
+            PaymentDate = new DateTime(2026, 3, 8), TotalAmount = 600m, AllocatedAmount = 600m,
+            CurrencyCode = "GHS", Status = VendorPaymentStatus.Processed
+        });
+        fixture.Context.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+        {
+            TenantId = fixture.TenantId, VendorPaymentId = paymentId, VendorInvoiceId = invoiceId,
+            AllocatedAmount = 600m, InvoiceCurrencyCode = "GHS", PaymentCurrencyCode = "GHS",
+            AllocationDate = new DateTime(2026, 3, 8)
+        });
+        fixture.Context.Set<VendorPayment>().Add(new VendorPayment
+        {
+            Id = draftPaymentId, TenantId = fixture.TenantId, PaymentNumber = "PAY-E2E-DRAFT", SupplierId = partnerId,
+            PaymentDate = new DateTime(2026, 3, 9), TotalAmount = 100m, AllocatedAmount = 100m,
+            CurrencyCode = "GHS", Status = VendorPaymentStatus.Draft
+        });
+        fixture.Context.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+        {
+            TenantId = fixture.TenantId, VendorPaymentId = draftPaymentId, VendorInvoiceId = invoiceId,
+            AllocatedAmount = 100m, InvoiceCurrencyCode = "GHS", PaymentCurrencyCode = "GHS",
+            AllocationDate = new DateTime(2026, 3, 9)
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var exceptions = await fixture.Service.ExecuteAsync(
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.ExceptionRegisterCode,
+            new ExecuteReportDto { Page = 1, PageSize = 100 }, isAdministrator: true);
+        exceptions.Data.Should().ContainSingle();
+        exceptions.Data.Single()["ExceptionRuleCode"].Should().Be("EX-001");
+        exceptions.Data.Single()["ManagingDirectorApprovalReference"].Should().Be("MD-APP-001");
+        exceptions.Data.Single()["PostAwardFilingReference"].Should().Be("FILE-001");
+
+        var endToEnd = await fixture.Service.ExecuteAsync(
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.ProcurementToPaymentCode,
+            new ExecuteReportDto { Page = 1, PageSize = 100 }, isAdministrator: true);
+        endToEnd.Data.Should().ContainSingle();
+        var row = endToEnd.Data.Single();
+        row["RequisitionNumber"].Should().Be("PR-E2E");
+        row["OrderNumber"].Should().Be("PO-E2E");
+        row["AcceptedQuantity"].Should().Be(10m);
+        row["MatchedInvoiceCount"].Should().Be(1);
+        // A draft allocation is not a payment and must not reduce the reported outstanding amount.
+        row["PaidAmount"].Should().Be(600m);
+        row["OutstandingAmount"].Should().Be(350m);
     }
 
     [SqlServerFact]
     [Trait("Category", "SqlServerIntegration")]
-    public async Task OperationalRegistersTranslateAndExecuteAgainstConfiguredSqlServer()
+    public async Task OperationalRegistersTranslateAndExecuteAgainstDisposableCurrentSchemaSqlServer()
     {
-        var connection = Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")
+        var baseConnection = Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")
             ?? throw new InvalidOperationException("RHEMA_TEST_SQLSERVER is required.");
-        var tenantId = Guid.Parse("10000000-0000-0000-0000-000000000004");
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(connection).Options;
-        await using var context = new ApplicationDbContext(options);
-        using var unitOfWork = new UnitOfWork(context);
-        var currentUser = new Mock<ICurrentUserProvider>();
-        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
-        currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid());
-        currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
-        var access = new Mock<IProcurementAccessControlService>();
-        access.Setup(item => item.EnforceCapabilityAsync(
-                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true, Code = "ACCESS_ALLOWED" });
-        var service = new ProcurementStatutoryReportService(unitOfWork, access.Object, currentUser.Object);
-
-        foreach (var code in new[]
-                 {
-                     ProcurementStatutoryReportCatalogue.RequisitionStatusCode,
-                     ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode,
-                     ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
-                     ProcurementStatutoryReportCatalogue.CertificateTrackingCode
-                 })
+        var databaseName = $"RhemaERP_ProcReport_{Guid.NewGuid():N}";
+        var masterBuilder = new SqlConnectionStringBuilder(baseConnection)
         {
-            var result = await service.ExecuteAsync(
-                ProcurementStatutoryReportCatalogue.QueryPrefix + code,
-                new ExecuteReportDto { Page = 1, PageSize = 100 },
-                isAdministrator: true);
-            result.TotalRows.Should().Be(0);
-            result.Columns.Should().NotBeEmpty();
+            InitialCatalog = "master",
+            TrustServerCertificate = true
+        };
+        var databaseBuilder = new SqlConnectionStringBuilder(baseConnection)
+        {
+            InitialCatalog = databaseName,
+            TrustServerCertificate = true
+        };
+
+        await using (var master = new SqlConnection(masterBuilder.ConnectionString))
+        {
+            await master.OpenAsync();
+            await using var create = master.CreateCommand();
+            create.CommandText = $"CREATE DATABASE [{databaseName}];";
+            await create.ExecuteNonQueryAsync();
         }
 
-        var seededQueries = await context.Reports.IgnoreQueryFilters().AsNoTracking()
-            .Where(item => item.TenantId == tenantId && item.Type == ProcurementStatutoryReportCatalogue.ReportType)
-            .Select(item => item.Query)
-            .ToListAsync();
-        seededQueries.Should().Contain(new[]
+        try
         {
-            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.RequisitionStatusCode,
-            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode,
-            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
-            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.CertificateTrackingCode
-        });
+            var tenantId = Guid.NewGuid();
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlServer(databaseBuilder.ConnectionString)
+                .Options;
+            await using var context = new ApplicationDbContext(options);
+            await context.Database.EnsureCreatedAsync();
+            context.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Procurement Report SQL Tenant",
+                Code = $"PROC-RPT-{tenantId:N}"[..32],
+                BaseCurrency = "GHS"
+            });
+            await context.SaveChangesAsync();
+
+            var seeder = new ProcurementStatutoryReportSeeder(
+                context, NullLogger<ProcurementStatutoryReportSeeder>.Instance);
+            (await seeder.SeedTenantAsync(tenantId)).Should().Be(13);
+
+            using var unitOfWork = new UnitOfWork(context);
+            var currentUser = new Mock<ICurrentUserProvider>();
+            currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+            currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid());
+            currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
+            var access = new Mock<IProcurementAccessControlService>();
+            access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true, Code = "ACCESS_ALLOWED" });
+            var service = new ProcurementStatutoryReportService(unitOfWork, access.Object, currentUser.Object);
+
+            var requiredCodes = new[]
+            {
+                ProcurementStatutoryReportCatalogue.RequisitionStatusCode,
+                ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode,
+                ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
+                ProcurementStatutoryReportCatalogue.CertificateTrackingCode
+            };
+            foreach (var code in requiredCodes)
+            {
+                var result = await service.ExecuteAsync(
+                    ProcurementStatutoryReportCatalogue.QueryPrefix + code,
+                    new ExecuteReportDto { Page = 1, PageSize = 100 },
+                    isAdministrator: true);
+                result.TotalRows.Should().Be(0);
+                result.Columns.Should().NotBeEmpty();
+            }
+
+            var seededQueries = await context.Reports.IgnoreQueryFilters().AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.Type == ProcurementStatutoryReportCatalogue.ReportType)
+                .Select(item => item.Query)
+                .ToListAsync();
+            seededQueries.Should().Contain(requiredCodes.Select(code =>
+                ProcurementStatutoryReportCatalogue.QueryPrefix + code));
+        }
+        finally
+        {
+            await using var master = new SqlConnection(masterBuilder.ConnectionString);
+            await master.OpenAsync();
+            await using var drop = master.CreateCommand();
+            drop.CommandText =
+                $"IF DB_ID(N'{databaseName}') IS NOT NULL BEGIN ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{databaseName}]; END;";
+            await drop.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]
@@ -229,10 +505,10 @@ public sealed class ProcurementStatutoryReportServiceTests
         await seeder.SeedAsync();
         await seeder.SeedAsync();
 
-        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(22);
+        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(26);
         (await context.Reports.IgnoreQueryFilters()
                 .CountAsync(item => item.TenantId == firstTenantId && item.ModuleId != null))
-            .Should().Be(11);
+            .Should().Be(13);
 
         var deleted = await context.Reports.IgnoreQueryFilters()
             .FirstAsync(item => item.TenantId == firstTenantId);
@@ -244,7 +520,7 @@ public sealed class ProcurementStatutoryReportServiceTests
 
         deleted.IsDeleted.Should().BeFalse();
         deleted.DeletedAt.Should().BeNull();
-        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(22);
+        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(26);
     }
 
     private static void AddOperationalRegisterRows(ApplicationDbContext context, Guid tenantId, string suffix)
@@ -291,6 +567,7 @@ public sealed class ProcurementStatutoryReportServiceTests
             Id = Guid.NewGuid(), TenantId = tenantId, ProcurementBudgetId = budget.Id,
             PurchaseRequisitionId = requisition.Id, ReservationReference = $"COM-{suffix}",
             ReservedAmount = 100m, Currency = "GHS", ReservedAtUtc = new DateTime(2026, 8, 1),
+            FormallyCommittedAmount = 60m, UtilizedAmount = 25m,
             ReservedById = user.Id, ReservedByName = $"{suffix} Requester", CorrelationId = $"corr-{suffix}"
         });
         context.BusinessPartners.Add(partner);

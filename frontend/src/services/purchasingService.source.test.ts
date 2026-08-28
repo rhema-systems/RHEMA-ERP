@@ -61,4 +61,43 @@ describe('purchase-order approved source client', () => {
       supplierId: 'supplier-1'
     });
   });
+
+  it('preserves RFQ ProblemDetails detail and code for the user', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        title: 'Request could not be completed',
+        status: 422,
+        detail: 'The approved requisition is missing required specifications.',
+        code: 'RFQ_SPECIFICATION_REQUIRED'
+      }), { status: 422, headers: { 'Content-Type': 'application/problem+json' } })
+    ));
+
+    await expect(
+      purchasingService.createRfqFromPurchaseRequisition('pr-1')
+    ).rejects.toThrow(
+      'The approved requisition is missing required specifications. (RFQ_SPECIFICATION_REQUIRED)'
+    );
+  });
+
+  it('does not show requisition-specific guidance for a PO permission failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        status: 403,
+        detail: 'The current actor has no Security role granting this procurement privilege.',
+        extensions: { code: 'PO_COMPLIANCE_FORBIDDEN' }
+      }), { status: 403, headers: { 'Content-Type': 'application/problem+json' } })
+    ));
+
+    await expect(
+      purchasingService.createPurchaseOrder({
+        sourceType: 'PurchaseRequisition',
+        sourceId: 'pr-1',
+        supplierId: 'supplier-1',
+        requestedById: 'user-1',
+        items: []
+      })
+    ).rejects.toThrow(
+      'Your assigned Security roles do not authorize this procurement action. Ask a Security administrator to assign the permission required for the action and try again. (PO_COMPLIANCE_FORBIDDEN)'
+    );
+  });
 });

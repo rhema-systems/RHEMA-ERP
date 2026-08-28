@@ -1,5 +1,6 @@
 import type {
   PurchaseRequisitionLinkageDto,
+  PurchaseRequisitionLinkageOptionsDto,
   PurchaseRequisitionType,
   SavePurchaseRequisitionLinkageRequest,
 } from '@/services/purchasingService';
@@ -53,4 +54,64 @@ export function validateExceptionLinkage(linkage: SavePurchaseRequisitionLinkage
     return 'Select the completed shared exception workflow that approved this exception.';
   }
   return null;
+}
+
+const PROCUREMENT_CATEGORIES = new Set([
+  'Goods',
+  'Works',
+  'TechnicalServices',
+  'ConsultancyServices',
+  'GeneralServices',
+]);
+
+export function deriveRequisitionLinkageFromPlanItem(
+  linkage: SavePurchaseRequisitionLinkageRequest,
+  sourcePlanItemId: string,
+  options?: PurchaseRequisitionLinkageOptionsDto
+): SavePurchaseRequisitionLinkageRequest {
+  const planItem = options?.planItems.find((item) => item.id === sourcePlanItemId);
+  if (!planItem) return { ...linkage, sourcePlanItemId };
+
+  const category = PROCUREMENT_CATEGORIES.has(planItem.category ?? '')
+    ? (planItem.category as SavePurchaseRequisitionLinkageRequest['procurementCategory'])
+    : linkage.procurementCategory;
+
+  return {
+    ...linkage,
+    sourcePlanItemId,
+    // Use the plan item's explicit budget relationship. Do not infer it from a
+    // shared plan parent, because a plan may have several budgets.
+    budgetId: planItem.linkedBudgetId,
+    procurementCategory: category,
+  };
+}
+
+export function getRequisitionCurrency(
+  linkage: SavePurchaseRequisitionLinkageRequest,
+  options?: PurchaseRequisitionLinkageOptionsDto,
+  baseCurrencyCode?: string
+) {
+  return (
+    options?.budgets.find((item) => item.id === linkage.budgetId)?.currency ||
+    options?.planItems.find((item) => item.id === linkage.sourcePlanItemId)?.currency ||
+    baseCurrencyCode ||
+    'XXX'
+  );
+}
+
+export function formatRequisitionMoney(amount: number, currency: string) {
+  try {
+    return new Intl.NumberFormat('en-GH', {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'code',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
 }

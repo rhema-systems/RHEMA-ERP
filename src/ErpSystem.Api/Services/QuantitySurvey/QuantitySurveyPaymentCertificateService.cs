@@ -19,6 +19,7 @@ using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Documents;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Core.Services.Workflow;
@@ -37,7 +38,8 @@ public sealed class QuantitySurveyPaymentCertificateService(
     ITaxCalculationEngine taxEngine,
     IDocumentOutputService documentOutput,
     IControlledFileUploadService controlledFiles,
-    ICentralDocumentRepositoryFileService centralDocuments) : IQuantitySurveyPaymentCertificateService
+    ICentralDocumentRepositoryFileService centralDocuments,
+    IProcurementBudgetCommitmentLifecycleService budgetCommitments) : IQuantitySurveyPaymentCertificateService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -369,6 +371,15 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 entity.ApHandoffStatus = approve ? ProjectPaymentCertificateApHandoffStatuses.Ready : ProjectPaymentCertificateApHandoffStatuses.NotReady;
                 if (approve)
                 {
+                    if (!entity.ContractId.HasValue)
+                        throw Conflict("The approved payment certificate has no procurement contract lineage.");
+                    await budgetCommitments.UtilizeContractCertificateAsync(
+                        entity.ContractId.Value,
+                        entity.Id,
+                        entity.CertificateNumber ?? entity.Id.ToString("N"),
+                        entity.GrossCertifiedAmount,
+                        correlationId,
+                        token);
                     // QS owns certification; Finance owns the resulting AP invoice and every
                     // approval, posting, payment and reversal after it. Creating the draft AP
                     // invoice inside this serializable approval transaction removes the former

@@ -185,7 +185,8 @@ public sealed class ProcurementRequisitionLinkageServiceTests
         options.SpecificationTemplates.Should().ContainSingle(item => item.Id == references.Template.Id);
         options.SpecificationTemplates.Should().NotContain(item => item.Code == "DRAFT");
         options.ApprovedExceptionWorkflows.Should().ContainSingle(item => item.Id == references.ExceptionWorkflow.Id);
-        options.PlanItems.Should().ContainSingle(item => item.Id == references.PlanItem.Id);
+        options.PlanItems.Should().ContainSingle(item =>
+            item.Id == references.PlanItem.Id && item.LinkedBudgetId == references.Budget.Id);
     }
 
     private sealed class Fixture : IAsyncDisposable

@@ -70,8 +70,14 @@ public sealed class ProcurementAccessControlSeeder
 
         foreach (var template in ProcurementAccessControlRegistry.Workflows)
         {
+            // Workflow entity types are shared across Finance, Inventory and Procurement.
+            // Prefer the TDC code where it exists, but reuse the already-governed entity
+            // type when another module owns the canonical code for the same business name
+            // (for example, Finance's SupplierReturn). Creating a second entity type with
+            // the same tenant/name violates the central workflow uniqueness constraint.
             var entityType = await _context.WorkflowEntityTypes.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
-                item.TenantId == tenantId && !item.IsDeleted && item.Code == template.EntityTypeCode,
+                item.TenantId == tenantId && !item.IsDeleted &&
+                (item.Code == template.EntityTypeCode || item.Name == template.EntityTypeName),
                 cancellationToken);
             if (entityType is null)
             {

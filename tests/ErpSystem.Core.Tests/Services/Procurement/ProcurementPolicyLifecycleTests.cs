@@ -359,6 +359,29 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
+    public async Task EvidenceAndExceptionFamiliesAreOptionalWhileSodRemainsRequired()
+    {
+        await using var fixture = new ServiceFixture("TenantAdmin");
+        var source = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Retired, published: true);
+        var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-optional-families");
+
+        fixture.Context.ProcurementPolicyEvidenceRules.RemoveRange(
+            fixture.Context.ProcurementPolicyEvidenceRules.Where(item => item.PolicySetId == created.Id));
+        fixture.Context.ProcurementPolicyExceptionRules.RemoveRange(
+            fixture.Context.ProcurementPolicyExceptionRules.Where(item => item.PolicySetId == created.Id));
+        await fixture.Context.SaveChangesAsync();
+
+        var validation = await fixture.Service.ValidatePolicySetAsync(created.Id, "validate-optional-families");
+
+        validation.Errors.Should().NotContain(item =>
+            item.Code == "RULE_FAMILY_MISSING" &&
+            (item.RuleKind == ProcurementPolicyRuleKind.Evidence ||
+             item.RuleKind == ProcurementPolicyRuleKind.Exception));
+        validation.Errors.Should().Contain(item =>
+            item.Code == "RULE_FAMILY_MISSING" && item.RuleKind == ProcurementPolicyRuleKind.SegregationOfDuties);
+    }
+
+    [Fact]
     public async Task RfqPolicyCannotPublishWithoutPositiveCompetitionAndSharedApprovalWorkflow()
     {
         await using var fixture = new ServiceFixture("SuperAdmin");

@@ -21,6 +21,11 @@ public static class ProcurementDocumentManagementCatalog
 
     public static IReadOnlyList<ProcurementDocumentFamilyDefinition> Families { get; } =
     [
+        Family(ProcurementDocumentFamily.Requisition, "Purchase requisition documents",
+            "Specifications, scope, drawings, estimates and other supporting records for the internal request.",
+            "PurchaseRequisition", "TDC-PROC-REQUISITION", "PurchaseRequisitionEvidence", "Procurement requisition restricted",
+            "procurement.records.read", ["procurement.requisition.create"],
+            ["Specification", "Scope of work", "Drawing", "Cost estimate", "Budget support", "Justification", "Supporting document", "Other"]),
         Family(ProcurementDocumentFamily.Tender, "Tender documents",
             "Specifications, terms, notices, drawings and controlled addenda.",
             "Tender", "TDC-PROC-TENDER", "TenderDocument", "Procurement tender restricted",

@@ -52,13 +52,22 @@ import {
 } from '@/services/purchasingService';
 import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  PendingPurchaseRequisitionDocument,
+  PurchaseRequisitionDocuments,
+  uploadPendingPurchaseRequisitionDocuments,
+} from '@/components/procurement/PurchaseRequisitionDocuments';
 import {
   EMPTY_REQUISITION_LINKAGE,
+  formatRequisitionMoney,
+  getRequisitionCurrency,
   normalizeRequisitionLinkage,
   validateExceptionLinkage,
 } from '@/lib/procurement-requisition-linkage';
 import { inventoryManagementService, InventoryItemDto, ItemUnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
+import { currencyService } from '@/services/financeCommonService';
 import { format } from 'date-fns';
 
 interface PRItemFormData extends CreatePurchaseRequisitionItemDto {
@@ -87,6 +96,7 @@ export default function NewPurchaseRequisitionPage() {
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PRItemFormData[]>([]);
+  const [pendingDocuments, setPendingDocuments] = useState<PendingPurchaseRequisitionDocument[]>([]);
   const [linkage, setLinkage] = useState<SavePurchaseRequisitionLinkageRequest>({ ...EMPTY_REQUISITION_LINKAGE });
   
   // Reference data
@@ -94,11 +104,13 @@ export default function NewPurchaseRequisitionPage() {
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
   const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [baseCurrencyCode, setBaseCurrencyCode] = useState('');
   const [loadingData, setLoadingData] = useState(true);
   
   // Item dialog
   const [showItemDialog, setShowItemDialog] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [deleteItemIndex, setDeleteItemIndex] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [availableUOMs, setAvailableUOMs] = useState<ItemUnitOfMeasureDto[]>([]);
@@ -121,11 +133,12 @@ export default function NewPurchaseRequisitionPage() {
     const loadData = async () => {
       try {
         setLoadingData(true);
-        const [itemsData, suppliersData, linkageData, departmentsData] = await Promise.all([
+        const [itemsData, suppliersData, linkageData, departmentsData, baseCurrency] = await Promise.all([
           inventoryManagementService.getInventoryItems({ isActive: true }),
           businessPartnerService.getActivePartners(),
           purchasingService.getPurchaseRequisitionLinkageOptions(),
           commonService.getDepartments(),
+          currencyService.getBaseCurrency(),
         ]);
         
         setInventoryItems(itemsData || []);
@@ -135,6 +148,7 @@ export default function NewPurchaseRequisitionPage() {
         ));
         setLinkageOptions(linkageData);
         setDepartments((departmentsData || []).filter((department) => department.isActive));
+        setBaseCurrencyCode(baseCurrency?.code || '');
       } catch (error) {
         console.error('Error loading reference data:', error);
         toast.error('Failed to load reference data');
@@ -154,12 +168,14 @@ export default function NewPurchaseRequisitionPage() {
   const totalAmount = items.reduce((sum, item) => 
     sum + calculateLineTotal(item.quantity, item.estimatedUnitPrice), 0
   );
+  const displayCurrency = getRequisitionCurrency(linkage, linkageOptions, baseCurrencyCode);
 
   // Handle inventory item selection
   const handleInventoryItemSelect = async (itemId: string) => {
     const item = inventoryItems.find(i => i.id === itemId);
     if (item) {
       setSelectedInventoryItem(item);
+      setItemSearch('');
       
       try {
         // Load available UOMs
@@ -265,11 +281,15 @@ export default function NewPurchaseRequisitionPage() {
 
   // Delete item
   const handleDeleteItem = (index: number) => {
-    if (confirm('Are you sure you want to remove this item?')) {
-      const updatedItems = items.filter((_, i) => i !== index);
-      setItems(updatedItems);
-      toast.success('Item removed');
-    }
+    setDeleteItemIndex(index);
+  };
+
+  const confirmDeleteItem = () => {
+    if (deleteItemIndex === null) return false;
+    setItems((current) => current.filter((_, index) => index !== deleteItemIndex));
+    setDeleteItemIndex(null);
+    toast.success('Item removed');
+    return true;
   };
 
   // Save as draft
@@ -324,7 +344,14 @@ export default function NewPurchaseRequisitionPage() {
       };
 
       const result = await purchasingService.createPurchaseRequisition(createData);
-      toast.success('Purchase requisition saved as draft');
+      const documentResult = await uploadPendingPurchaseRequisitionDocuments(result.id, pendingDocuments);
+      if (documentResult.failed.length > 0) {
+        toast.error(
+          `Purchase requisition saved as draft, but ${documentResult.failed.length} supporting document(s) could not be uploaded. Open the requisition to retry.`
+        );
+      } else {
+        toast.success('Purchase requisition saved as draft');
+      }
       router.push(`/procurement/purchase-requisitions/${result.id}`);
     } catch (error: any) {
       console.error('Error saving purchase requisition:', error);
@@ -391,6 +418,15 @@ export default function NewPurchaseRequisitionPage() {
       };
 
       const result = await purchasingService.createPurchaseRequisition(createData);
+
+      const documentResult = await uploadPendingPurchaseRequisitionDocuments(result.id, pendingDocuments);
+      if (documentResult.failed.length > 0) {
+        toast.error(
+          `Purchase requisition was saved as draft because ${documentResult.failed.length} supporting document(s) could not be uploaded. Open it to retry before submission.`
+        );
+        router.push(`/procurement/purchase-requisitions/${result.id}`);
+        return;
+      }
       
       // Submit for approval
       await purchasingService.submitPurchaseRequisition(result.id);
@@ -618,10 +654,10 @@ export default function NewPurchaseRequisitionPage() {
                         <TableCell className="text-right">{item.quantity}</TableCell>
                         <TableCell>{item.unitOfMeasure || '-'}</TableCell>
                         <TableCell className="text-right">
-                          ${item.estimatedUnitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatRequisitionMoney(item.estimatedUnitPrice, displayCurrency)}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${calculateLineTotal(item.quantity, item.estimatedUnitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatRequisitionMoney(calculateLineTotal(item.quantity, item.estimatedUnitPrice), displayCurrency)}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">{item.preferredSupplierName || '-'}</div>
@@ -667,7 +703,7 @@ export default function NewPurchaseRequisitionPage() {
                           Total Amount:
                         </span>
                         <span className="text-xl font-bold text-primary">
-                          ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatRequisitionMoney(totalAmount, displayCurrency)}
                         </span>
                       </div>
                     </div>
@@ -678,6 +714,11 @@ export default function NewPurchaseRequisitionPage() {
           )}
         </CardContent>
       </Card>
+
+      <PurchaseRequisitionDocuments
+        pendingDocuments={pendingDocuments}
+        onPendingDocumentsChange={setPendingDocuments}
+      />
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-4">
@@ -769,7 +810,14 @@ export default function NewPurchaseRequisitionPage() {
                               <div className="text-sm text-muted-foreground">{item.description}</div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Stock: {item.currentStock} {item.unitOfMeasure} • 
-                                Managed cost: ${(item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0).toFixed(2)}
+                                Managed cost: {formatRequisitionMoney(
+                                  item.lastPurchaseCost > 0
+                                    ? item.lastPurchaseCost
+                                    : item.standardCost > 0
+                                      ? item.standardCost
+                                      : item.averageCost || 0,
+                                  displayCurrency
+                                )}
                               </div>
                             </div>
                             {selectedInventoryItem?.id === item.id && (
@@ -970,6 +1018,16 @@ export default function NewPurchaseRequisitionPage() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmationDialog
+        open={deleteItemIndex !== null}
+        onOpenChange={(open) => { if (!open) setDeleteItemIndex(null); }}
+        title="Remove requisition item?"
+        description="The item will be removed from this draft requisition."
+        confirmText="Remove item"
+        variant="destructive"
+        onConfirm={confirmDeleteItem}
+      />
     </div>
   );
 }

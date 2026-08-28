@@ -35,7 +35,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         readiness.DecisionCode.Should().Be("PR_BUDGET_AVAILABLE");
         readiness.CommitmentStatus.Should().Be("Reserved");
         readiness.AvailableAmount.Should().Be(600m);
-        budget.CommittedAmount.Should().Be(400m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(400m);
         budget.RemainingAmount.Should().Be(600m);
         requisition.BudgetValidated.Should().BeTrue();
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
@@ -81,7 +82,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
 
         retry.Basis.Should().Be("ExistingCommitment");
         retry.CommitmentStatus.Should().Be("Reserved");
-        budget.CommittedAmount.Should().Be(200m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(200m);
         (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
         (await fixture.Service.GetHistoryAsync(requisition.Id)).Should()
             .Contain(item => item.Action == "BudgetReservationReused");
@@ -103,7 +105,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         firstResult.CanReserve.Should().BeTrue();
         secondResult.CanReserve.Should().BeFalse();
         secondResult.ShortfallAmount.Should().Be(20m);
-        budget.CommittedAmount.Should().Be(70m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(70m);
         (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
     }
 
@@ -124,7 +127,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         release.Released.Should().BeTrue();
         release.ReleasedAmount.Should().Be(120m);
         reserveAgain.ReservationSequence.Should().Be(2);
-        budget.CommittedAmount.Should().Be(120m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(120m);
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
         commitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Reserved);
         commitment.ReleaseReason.Should().BeNull();

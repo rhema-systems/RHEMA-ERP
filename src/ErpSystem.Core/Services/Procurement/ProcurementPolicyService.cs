@@ -497,7 +497,17 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             AddError(errors, "BASE_POLICY_REQUIRED", "A tenant override requires an immutable base policy.");
 
         var rules = await GetRuleEntitiesAsync(policySet.Id, tracked: false, cancellationToken);
-        foreach (var kind in Enum.GetValues<ProcurementPolicyRuleKind>())
+        // Evidence and exception requirements are workflow/method-specific. They remain validated
+        // when configured, but are not universal policy-family publication prerequisites.
+        var requiredRuleFamilies = new[]
+        {
+            ProcurementPolicyRuleKind.Category,
+            ProcurementPolicyRuleKind.Method,
+            ProcurementPolicyRuleKind.Threshold,
+            ProcurementPolicyRuleKind.Authority,
+            ProcurementPolicyRuleKind.SegregationOfDuties
+        };
+        foreach (var kind in requiredRuleFamilies)
         {
             if (!rules.Any(item => item.Kind == kind && GetRuleEnabled(item.Entity)))
                 AddError(errors, "RULE_FAMILY_MISSING", $"At least one enabled {RuleKindLabel(kind)} rule is required.", kind);

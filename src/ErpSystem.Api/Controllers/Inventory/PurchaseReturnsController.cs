@@ -129,11 +129,20 @@ public sealed class PurchaseReturnsController : ControllerBase
         return new ActionResult<T>(ProblemFrom(exception, fallbackCode, fallbackDetail));
     }
 
-    private ProblemDetails Problem(string code, string detail, int status) => new()
+    private ProblemDetails Problem(string code, string detail, int status)
     {
-        Type = $"https://tdc.gov.gh/problems/{code.ToLowerInvariant()}", Title = "Supplier return request failed",
-        Status = status, Detail = detail, Instance = HttpContext.Request.Path
-    }.Also(problem => problem.Extensions["code"] = code).Also(problem => problem.Extensions["correlationId"] = HttpContext.TraceIdentifier);
+        var problem = new ProblemDetails
+        {
+            Type = $"https://tdc.gov.gh/problems/{code.ToLowerInvariant()}",
+            Title = "Supplier return request failed",
+            Status = status,
+            Detail = detail,
+            Instance = HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+        return problem;
+    }
 
     private Guid CurrentUserId()
     {
@@ -146,8 +155,3 @@ public sealed class PurchaseReturnsController : ControllerBase
 public sealed class SupplierReturnReasonRequest { public string? Reason { get; set; } }
 public sealed class SupplierReturnShipmentRequest { public string? TrackingNumber { get; set; } }
 public sealed class SupplierReturnCreditRequest { public string? CreditNoteNumber { get; set; } public decimal Amount { get; set; } }
-
-internal static class PurchaseReturnProblemDetailsExtensions
-{
-    public static T Also<T>(this T value, Action<T> action) { action(value); return value; }
-}
