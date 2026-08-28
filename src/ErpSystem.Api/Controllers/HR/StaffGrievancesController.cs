@@ -37,6 +37,7 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffGrievancesController : ControllerBase
 {
     private readonly IStaffGrievanceService _service;
+    private readonly IEmployeeRelationsAnalyticsService _analytics;
     private readonly ICurrentUserService _currentUser;
 
     // Area 9c slice 3 — the controlled upload gate and its counterpart for reading a file back.
@@ -48,6 +49,7 @@ public class StaffGrievancesController : ControllerBase
 
     public StaffGrievancesController(
         IStaffGrievanceService service,
+        IEmployeeRelationsAnalyticsService analytics,
         ICurrentUserService currentUser,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
@@ -56,6 +58,7 @@ public class StaffGrievancesController : ControllerBase
         ILogger<StaffGrievancesController> logger)
     {
         _service = service;
+        _analytics = analytics;
         _currentUser = currentUser;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
@@ -99,6 +102,27 @@ public class StaffGrievancesController : ControllerBase
         [FromQuery] string? search = null)
         => Ok(await _service.GetPagedAsync(
             page, pageSize, caseType, status, level, organizationUnitId, awaitingResponseOnly, search));
+
+    /// <summary>
+    /// Employee-relations analytics — area 9c slice 8.
+    /// </summary>
+    /// <remarks>
+    /// <para>One endpoint for the whole page, on purpose. Every figure is computed from a single
+    /// materialised set, so the page cannot contradict itself — and a caller cannot build a screen
+    /// out of figures taken over different windows, which is how area 7's dashboard and analytics
+    /// page came to disagree about the same number.</para>
+    ///
+    /// <para>⚠ Every breakdown carries its own denominator and every rate carries both its numbers,
+    /// with a <b>null</b> percentage where the denominator is zero. "Nobody complied" and "nobody
+    /// was asked" must not both render as 0%.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
+    [HttpGet("analytics")]
+    public async Task<ActionResult<EmployeeRelationsAnalyticsDto>> GetAnalytics(
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        CancellationToken cancellationToken = default)
+        => Ok(await _analytics.GetAsync(from, to, cancellationToken));
 
     /// <summary>Where the ladder is stuck — grievances whose current rung has not answered.</summary>
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]

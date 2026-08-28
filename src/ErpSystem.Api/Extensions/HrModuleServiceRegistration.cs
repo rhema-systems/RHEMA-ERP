@@ -646,6 +646,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmployeeRelationsResponderService, EmployeeRelationsResponderService>();
         // Area 9c slice 6 — anonymous / whistleblower intake.
         services.AddScoped<IEmployeeRelationsConcernService, EmployeeRelationsConcernService>();
+        // Area 9c slice 8 — ER analytics.
+        services.AddScoped<IEmployeeRelationsAnalyticsService, EmployeeRelationsAnalyticsService>();
 
         // Area 25 slice 12 (D6) — the employee's own profile, and the approval path for the parts
         // of it that carry identity or payment consequences. Registered beside the grievance

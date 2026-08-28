@@ -146,6 +146,19 @@ public class StaffGrievanceService : IStaffGrievanceService
         return $"{prefix}{(highest + 1):D5}";
     }
 
+    /// <summary>
+    /// A case somebody can still act on. The single definition of "open" in this service.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Extracted in slice 8 because three readers of "is an answer owed" had drifted apart: the
+    /// summary DTO's <c>AwaitingResponse</c> and the register's <c>awaitingResponseOnly</c> filter
+    /// both looked only at the STEP, while <c>GetAwaitingResponseAsync</c> also required the case to
+    /// be open. On live data that was 227 versus 174 — a 53-case gap, every one of them WITHDRAWN.
+    /// Nobody owes an answer on a case the employee withdrew.
+    /// </remarks>
+    private static bool IsOpen(GrievanceStatus status)
+        => status is GrievanceStatus.Filed or GrievanceStatus.UnderReview or GrievanceStatus.Escalated;
+
     private StaffGrievanceStep CurrentStep(StaffGrievance grievance)
         => grievance.Steps.OrderBy(s => s.Sequence).LastOrDefault()
            ?? throw new InvalidOperationException("This grievance has no escalation step, which should not be possible.");
@@ -242,12 +255,21 @@ public class StaffGrievanceService : IStaffGrievanceService
         // "Stuck" means the rung it currently sits at has not answered. Expressed against the
         // highest-sequence step so SQL can evaluate it, rather than the in-memory CurrentStep()
         // the unpaged read uses — the two must agree, and slice 1's harness asserts that they do.
+        // ⚠ Open AND unanswered, matching GetAwaitingResponseAsync exactly. Before slice 8 this
+        // checked only the step, so `awaitingResponseOnly=true` returned 227 cases against that
+        // endpoint's 174 — the 53 extra were all WITHDRAWN, and none of them was waiting on anybody.
         if (awaitingResponseOnly == true)
-            query = query.Where(g => g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
-                                     == GrievanceStepOutcome.AwaitingResponse);
+            query = query.Where(g => (g.Status == GrievanceStatus.Filed
+                                      || g.Status == GrievanceStatus.UnderReview
+                                      || g.Status == GrievanceStatus.Escalated)
+                                     && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                        == GrievanceStepOutcome.AwaitingResponse);
         else if (awaitingResponseOnly == false)
-            query = query.Where(g => g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
-                                     != GrievanceStepOutcome.AwaitingResponse);
+            query = query.Where(g => !((g.Status == GrievanceStatus.Filed
+                                        || g.Status == GrievanceStatus.UnderReview
+                                        || g.Status == GrievanceStatus.Escalated)
+                                       && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                          == GrievanceStepOutcome.AwaitingResponse));
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -282,8 +304,11 @@ public class StaffGrievanceService : IStaffGrievanceService
                 g.FiledDate,
                 g.Status,
                 g.CurrentLevel,
-                AwaitingResponse = g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
-                                   == GrievanceStepOutcome.AwaitingResponse,
+                AwaitingResponse = (g.Status == GrievanceStatus.Filed
+                                    || g.Status == GrievanceStatus.UnderReview
+                                    || g.Status == GrievanceStatus.Escalated)
+                                   && g.Steps.OrderByDescending(s => s.Sequence).First().Outcome
+                                      == GrievanceStepOutcome.AwaitingResponse,
                 ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
             })
             .ToListAsync(cancellationToken);
@@ -1468,8 +1493,11 @@ public class StaffGrievanceService : IStaffGrievanceService
         FiledDate = g.FiledDate,
         Status = g.Status,
         CurrentLevel = g.CurrentLevel,
-        AwaitingResponse = g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
-            == GrievanceStepOutcome.AwaitingResponse,
+        // ⚠ Open AND unanswered. The step fact alone said "awaiting response" on a withdrawn case,
+        // which is not true of anybody: the employee took it back, so no rung owes an answer.
+        AwaitingResponse = IsOpen(g.Status)
+            && g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
+               == GrievanceStepOutcome.AwaitingResponse,
         ActivePartyCount = g.Parties.Count(p => !p.IsDeleted && p.RemovedDate == null),
     };
 
@@ -1603,8 +1631,9 @@ public class StaffGrievanceService : IStaffGrievanceService
         FiledDate = g.FiledDate,
         Status = g.Status,
         CurrentLevel = g.CurrentLevel,
-        AwaitingResponse = g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
-            == GrievanceStepOutcome.AwaitingResponse,
+        AwaitingResponse = IsOpen(g.Status)
+            && g.Steps.OrderBy(s => s.Sequence).LastOrDefault()?.Outcome
+               == GrievanceStepOutcome.AwaitingResponse,
         ResolvedDate = g.ResolvedDate,
         ResolutionSummary = g.ResolutionSummary,
         WithdrawnDate = g.WithdrawnDate,

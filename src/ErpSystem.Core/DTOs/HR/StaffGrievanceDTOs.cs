@@ -989,3 +989,176 @@ public class ConvertConcernDto
 }
 
 #endregion
+
+// ============================================================================
+// EMPLOYEE-RELATIONS ANALYTICS — area 9c slice 8
+// ============================================================================
+
+#region Analytics
+
+/// <summary>
+/// One count in a breakdown, with the total it is a part of.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Total"/> travels WITH every slice, and that is the point. A count of 12 means
+/// nothing on its own — 12 of 15 is a crisis and 12 of 4,000 is background noise — and a screen
+/// that has to fetch the denominator separately will eventually render one without it.
+/// </remarks>
+public class ErCountSliceDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int Count { get; set; }
+
+    /// <summary>The denominator this count is a part of. Never omitted.</summary>
+    public int Total { get; set; }
+
+    /// <summary>
+    /// The share, or <c>null</c> when there is nothing to take a share OF.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Null, not zero.</b> 0% means "none of them"; a total of zero means "there were none",
+    /// which is a different fact and must not be rendered as compliance. The area-7 lesson: a
+    /// compliance rate shipped without its denominator read 0% whether nobody complied or nobody
+    /// was asked.
+    /// </remarks>
+    public decimal? Percent => Total == 0 ? null : Math.Round(Count * 100m / Total, 1);
+}
+
+/// <summary>
+/// A rate, carried with both the numbers that produced it.
+/// </summary>
+/// <remarks>
+/// ⚠ There is deliberately no constructor that takes only a percentage. A rate whose numerator and
+/// denominator are not on the same object is a rate somebody will eventually render alone.
+/// </remarks>
+public class ErRateDto
+{
+    public string Label { get; set; } = string.Empty;
+    public int Numerator { get; set; }
+    public int Denominator { get; set; }
+
+    /// <summary>⚠ Null when the denominator is zero. See <see cref="ErCountSliceDto.Percent"/>.</summary>
+    public decimal? Percent => Denominator == 0 ? null : Math.Round(Numerator * 100m / Denominator, 1);
+
+    /// <summary>True when there was nothing to measure. The screen shows "no data", not "0%".</summary>
+    public bool NoData => Denominator == 0;
+}
+
+/// <summary>How long cases take to settle. Every figure null when nothing has been resolved.</summary>
+public class ErResolutionTimeDto
+{
+    /// <summary>
+    /// Cases counted here — resolved only.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Withdrawn cases are excluded, and that is a judgement worth knowing.</b> A withdrawal is
+    /// not a resolution: including them would shorten the average every time somebody gave up, so
+    /// the number would improve as the process got worse. They stay in <c>TotalCases</c>.
+    /// </remarks>
+    public int ResolvedCount { get; set; }
+
+    public decimal? AverageDays { get; set; }
+
+    /// <summary>Reported beside the mean because one case stuck for a year drags the mean and not this.</summary>
+    public decimal? MedianDays { get; set; }
+
+    public int? LongestDays { get; set; }
+}
+
+/// <summary>A rung with cases sitting on it unanswered — HR's operational view.</summary>
+public class ErStuckRungDto
+{
+    public GrievanceEscalationLevel Level { get; set; }
+    public string LevelName => Level.ToString();
+    public int Count { get; set; }
+
+    /// <summary>How long the oldest has been waiting. The number that makes this list actionable.</summary>
+    public int? OldestWaitingDays { get; set; }
+
+    /// <summary>How many of them have nobody named to answer — the responder-matrix gap, in cases.</summary>
+    public int Unassigned { get; set; }
+}
+
+/// <summary>
+/// Employee-relations analytics — area 9c slice 8.
+/// </summary>
+/// <remarks>
+/// ⚠ Every breakdown carries its own denominator and every rate carries both its numbers. The
+/// area-7 lesson that produced this shape: a dashboard and its analytics page disagreed about the
+/// same figure because each counted a slightly different set, and a compliance rate shipped without
+/// a denominator read 0% whether nobody complied or nobody was asked.
+/// </remarks>
+public class EmployeeRelationsAnalyticsDto
+{
+    public DateTime? From { get; set; }
+    public DateTime? To { get; set; }
+
+    /// <summary>
+    /// Every case in the window. <b>The denominator for the whole page</b> — all breakdowns below
+    /// are subsets of this, so a screen can never mix two different totals.
+    /// </summary>
+    public int TotalCases { get; set; }
+
+    public int OpenCases { get; set; }
+    public int ResolvedCases { get; set; }
+    public int WithdrawnCases { get; set; }
+    public int ClosedUnresolvedCases { get; set; }
+
+    public List<ErCountSliceDto> ByCaseType { get; set; } = new();
+    public List<ErCountSliceDto> ByStatus { get; set; } = new();
+
+    /// <summary>Where OPEN cases currently sit. Denominator is <see cref="OpenCases"/>, not the total.</summary>
+    public List<ErCountSliceDto> ByCurrentLevel { get; set; } = new();
+
+    /// <summary>What RESOLVED cases decided. Denominator is <see cref="ResolvedCases"/>.</summary>
+    public List<ErCountSliceDto> ByOutcome { get; set; } = new();
+
+    /// <summary>Cases per organisation unit, busiest first.</summary>
+    public List<ErCountSliceDto> ByOrganizationUnit { get; set; } = new();
+
+    /// <summary>
+    /// Cases that were escalated at least once, over cases filed.
+    /// </summary>
+    /// <remarks>
+    /// The management figure rather than the operational one: a unit whose cases nearly all escalate
+    /// has a problem at the rung below, not a grievance problem.
+    /// </remarks>
+    public ErRateDto EscalationRate { get; set; } = new();
+
+    /// <summary>
+    /// Resolved cases whose outcome was never captured, over resolved cases.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This is slice 2's <c>NotRecorded</c> made visible and countable. It exists so the honest
+    /// gap can be worked off rather than forgotten — a number HR can drive to zero.
+    /// </remarks>
+    public ErRateDto OutcomeNotRecordedRate { get; set; } = new();
+
+    /// <summary>
+    /// Settlements with no signed agreement on file, over settlements.
+    /// </summary>
+    /// <remarks>FR-HR-181 obligation 9, measured. See also the slice-7 sweep that chases it.</remarks>
+    public ErRateDto AgreementMissingRate { get; set; } = new();
+
+    public ErResolutionTimeDto ResolutionTime { get; set; } = new();
+
+    public List<ErStuckRungDto> StuckAtRung { get; set; } = new();
+
+    // ── Anonymous intake (area 9c slice 6) ───────────────────────────────────
+
+    /// <summary>
+    /// Concerns reported in the window.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Counts only. Nothing here is broken down by anything that could narrow who reported —
+    /// no unit, no reporter, no cross-tab. A concern count by unit in a small unit is an
+    /// identification, not a statistic.
+    /// </remarks>
+    public int ConcernsReported { get; set; }
+    public int ConcernsUntriaged { get; set; }
+    public int ConcernsConverted { get; set; }
+    public List<ErCountSliceDto> ConcernsByCategory { get; set; } = new();
+}
+
+#endregion

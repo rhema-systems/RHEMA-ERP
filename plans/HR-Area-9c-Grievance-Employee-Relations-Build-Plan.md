@@ -43,7 +43,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 5 | The responder matrix (FR-HR-084) + rung resolution | **COMPLETE 2026-08-27** — 66 ×2 + the 151/119/111/70/86 ladder = **603**; migration `AddEmployeeRelationsResponderMatrix`; the org-authority gap stops being worked around |
 | 6 | Anonymous / whistleblower concern intake | **COMPLETE 2026-08-27** — 56 ×2 + the ladder = **659**, plus **6 row-level SQL checks**; migration `AddEmployeeRelationsConcerns` |
 | 7 | Reminder-sweep extension + notifications | **COMPLETE 2026-08-27** — 46 ×2 + the ladder = **705**; migration `AddEmployeeRelationsReminderSettings`; the rung clock is a setting at last, and 3 defects were caught by the harness |
-| 8 | ER analytics & reporting | ⏳ |
+| 8 | ER analytics & reporting | **COMPLETE 2026-08-28** — 104 ×2 + the ladder = **811**; no migration. Found a live defect: four readers of "an answer is owed" had drifted, 227 vs 174 |
 | 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | ⏳ |
 | 10 | Desk screens: the ER case register and case file | ⏳ |
 | 11 | Portal screens: the employee's side | ⏳ |
@@ -842,3 +842,56 @@ non-nullable property that is not listed there does not take its C# default — 
 `DbContext` unbuildable at design time (*"the seed entity cannot be added because no value was
 provided for the required property"*), and `dotnet ef migrations add` fails before it writes
 anything. Commented at the seed.
+
+---
+
+### Slice 8 — employee-relations analytics. CLOSED 2026-08-28.
+
+`run-slice8.mjs` **104 assertions ×2**, ladder 151 / 121 / 111 / 70 / 86 / 66 / 56 / 46 / 104 =
+**811 for the area**. No migration — analytics is read-only.
+
+**Two of area 7's lessons are structural here rather than remembered.**
+
+1. **One endpoint, one window, one materialised set.** Not a family of per-figure methods. Area 7
+   shipped a dashboard and an analytics page that disagreed about the same number because each ran
+   its own query over a slightly different set. This service loads the window once and computes
+   every figure from that list — slower in principle, impossible to make internally inconsistent,
+   which matters more on a page whose only job is to be believed.
+2. **A rate is a TYPE, not a number.** `ErRateDto` carries numerator and denominator, and its
+   percentage is **null** — never 0 — when the denominator is zero; `ErCountSliceDto` carries the
+   total every count is a share of. There is deliberately no way to construct a bare percentage.
+   Area 7's compliance figure read 0% whether nobody complied or nobody was asked; that cannot be
+   expressed here.
+
+**Two judgements worth keeping.** Withdrawn cases are **excluded from time-to-resolution but counted
+in the total** — a withdrawal is not a resolution, and including them would shorten the average
+every time somebody gave up, so the figure would *improve as the process got worse*. And **concerns
+are counted, never cross-tabbed**: no breakdown by unit or reporter, asserted by their absence,
+because in a unit of four "one fraud concern this quarter" is an identification, not a statistic.
+
+## ⚠ The defect this slice found, and why it hid for eight slices
+
+**Four readers of "an answer is owed" had drifted apart.** `GetAwaitingResponseAsync` required the
+case to be OPEN; the summary DTO's `AwaitingResponse`, the register's `awaitingResponseOnly` filter
+and the lean projection all checked only the STEP. On live data: **227 versus 174 — and every one of
+the 53 extra was WITHDRAWN.** Nobody owes an answer on a case the employee took back. Fixed with a
+single `IsOpen` used by all four.
+
+**Slice 1's harness claimed to check exactly this, and could not have caught it.** Two independent
+weaknesses, either of which alone was fatal:
+
+- It asked for **one page of 200 — the service's own cap** — and treated that as the whole set. *A
+  single capped page compares a truncated set against a complete one.*
+- It asserted **subset**, not set equality. *A subset check passes happily while one side silently
+  carries more.*
+
+It now pages to exhaustion, compares both directions, and separately asserts that no terminal case
+appears in the stuck queue. **The dataset growing past 200 is what exposed this, not any code
+change** — which is the general lesson: an assertion that fits inside one page today is a snapshot
+of today's data volume, not a check.
+
+⚠ **And a near miss worth recording.** Slice 8's own ground truth was written as
+`cases.filter(c => c.awaitingResponse && isOpen(c))` — I added the `&&` because I already sensed the
+field alone was not trustworthy. **That instinct should have been a question, not a workaround.**
+Writing a defensive clause around a field is evidence the field is wrong; the clause hides it
+instead of reporting it.
