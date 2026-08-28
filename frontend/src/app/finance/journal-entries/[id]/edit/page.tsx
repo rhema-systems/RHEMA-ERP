@@ -10,6 +10,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { ArrowLeft, Save, Plus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ManualJournalDimensionCell, ManualJournalDimensionDefaults } from '@/components/finance/journal-entries/manual-journal-dimension-editor';
 import type {
     Account,
     AccountCurrencyLink,
@@ -43,9 +44,9 @@ import {
     requireFunctionalCurrency,
 } from '@/lib/finance/manual-journal-fx';
 import {
-    getApplicableManualDimensionRules,
-    getDefaultManualDimensionValues,
+    getCommonManualDimensionValues,
     getMissingRequiredManualDimension,
+    resolveManualDimensionValues,
 } from '@/lib/finance/manual-journal-dimensions';
 
 interface JournalLine {
@@ -119,6 +120,7 @@ export default function EditJournalEntryPage() {
     const [currencyReferenceError, setCurrencyReferenceError] = useState<string | null>(null);
     const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
     const [dimensionRules, setDimensionRules] = useState<FinanceDimensionAccountRule[]>([]);
+    const [defaultDimensions, setDefaultDimensions] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const functionalCurrency = financeSettings ? normalizeCurrencyCode(financeSettings.baseCurrency) : '';
@@ -211,6 +213,7 @@ export default function EditJournalEntryPage() {
                     bookClassification: journalEntry.bookClassification || 'IFRS',
                 });
                 setLines(hydratedLines);
+                setDefaultDimensions(getCommonManualDimensionValues(hydratedLines.map(line => line.dimensions)));
                 if (books.length > 0) {
                     setAccountingBooks(books);
                 }
@@ -274,7 +277,7 @@ export default function EditJournalEntryPage() {
                 debit: 0,
                 credit: 0,
                 rateStatus: functionalCurrency ? 'ready' : 'idle',
-                dimensions: {},
+                dimensions: { ...defaultDimensions },
             },
         ]);
     };
@@ -283,6 +286,15 @@ export default function EditJournalEntryPage() {
         if (lines.length > 2) {
             setLines(lines.filter(line => line.id !== id));
         }
+    };
+
+    const applyDimensionsToAllLines = (preferredValues: Record<string, string>) => {
+        setLines(current => current.map(line => ({
+            ...line,
+            dimensions: line.accountId
+                ? resolveManualDimensionValues(financeDimensions, dimensionRules, line.accountId, header.entryDate, preferredValues)
+                : { ...preferredValues },
+        })));
     };
 
     const loadAccountCurrencyLinks = async (account: Account): Promise<AccountCurrencyLink[]> => {
@@ -401,7 +413,9 @@ export default function EditJournalEntryPage() {
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
                 debit: currency === functionalCurrency ? line.debit : 0,
                 credit: currency === functionalCurrency ? line.credit : 0,
-                dimensions: getDefaultManualDimensionValues(dimensionRules, accountId, header.entryDate),
+                dimensions: resolveManualDimensionValues(
+                    financeDimensions, dimensionRules, accountId, header.entryDate, defaultDimensions,
+                ),
                 rateStatus: currency === functionalCurrency ? 'ready' : 'idle',
                 rateError: undefined,
             } : line));
@@ -710,8 +724,15 @@ export default function EditJournalEntryPage() {
                     </Button>
                 </CardHeader>
                 <CardContent>
+                    <ManualJournalDimensionDefaults
+                        definitions={financeDimensions}
+                        effectiveDate={header.entryDate}
+                        values={defaultDimensions}
+                        onChange={setDefaultDimensions}
+                        onApplyToAll={() => applyDimensionsToAllLines(defaultDimensions)}
+                    />
                     <div className="rounded-md border overflow-x-auto">
-                        <table className="w-full min-w-[1250px]">
+                        <table className="w-full min-w-[1120px]">
                             <thead>
                                 <tr className="border-b bg-muted/50">
                                     <th className="p-3 text-left font-medium w-[20%]">Account</th>
@@ -722,12 +743,12 @@ export default function EditJournalEntryPage() {
                                     <th className="p-3 text-right font-medium w-[10%]">F. Credit</th>
                                     <th className="p-3 text-right font-medium w-[10%]">Debit ({functionalCurrency || '—'})</th>
                                     <th className="p-3 text-right font-medium w-[10%]">Credit ({functionalCurrency || '—'})</th>
-                                    <th className="p-3 text-left font-medium min-w-[220px]">Coding dimensions</th>
+                                    <th className="p-3 text-left font-medium min-w-[170px]">Coding</th>
                                     <th className="p-3 text-center w-[2%]"></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {lines.map((line) => {
+                                {lines.map((line, lineIndex) => {
                                     const isForeign = normalizeCurrencyCode(line.currencyCode) !== functionalCurrency;
                                     const account = accounts.find(a => a.id === line.accountId);
                                     const allowedCurrencies = getAllowedJournalCurrencies(
@@ -810,32 +831,20 @@ export default function EditJournalEntryPage() {
                                                 <Input type="number" min="0" step="0.01" value={line.credit || ''} onChange={(event) => updateLine(line.id, 'credit', parseFloat(event.target.value) || 0)} className="text-right" disabled={isForeign || line.debit > 0} readOnly={isForeign} />
                                             </td>
                                             <td className="p-3 align-top">
-                                                {financeDimensions.length === 0 ? <span className="text-xs text-muted-foreground">None configured</span> : (
-                                                    <div className="space-y-2">
-                                                        {financeDimensions.map(dimension => {
-                                                            const rule = getApplicableManualDimensionRules(
-                                                                dimensionRules, line.accountId, header.entryDate,
-                                                            ).find(item => item.financeDimensionDefinitionId === dimension.id);
-                                                            if (rule?.ruleType === 'Prohibited') return null;
-                                                            const activeValues = dimension.values.filter(value => value.isActive
-                                                                && value.effectiveDate.slice(0, 10) <= header.entryDate
-                                                                && (!value.expiryDate || value.expiryDate.slice(0, 10) >= header.entryDate));
-                                                            return <div key={dimension.id}>
-                                                                <Label className="text-xs">{dimension.name}{rule?.ruleType === 'Required' ? ' *' : ''}{rule?.ruleType === 'Fixed' ? ' (fixed)' : ''}</Label>
-                                                                <Select
-                                                                    value={line.dimensions[dimension.code] || '__none__'}
-                                                                    disabled={rule?.ruleType === 'Fixed'}
-                                                                    onValueChange={value => setLines(current => current.map(item => item.id === line.id
-                                                                        ? { ...item, dimensions: { ...item.dimensions, [dimension.code]: value === '__none__' ? '' : value } }
-                                                                        : item))}
-                                                                >
-                                                                    <SelectTrigger className="h-8"><SelectValue placeholder="Not assigned" /></SelectTrigger>
-                                                                    <SelectContent><SelectItem value="__none__">Not assigned</SelectItem>{activeValues.map(value => <SelectItem key={value.id} value={value.code}>{value.code} — {value.name}</SelectItem>)}</SelectContent>
-                                                                </Select>
-                                                            </div>;
-                                                        })}
-                                                    </div>
-                                                )}
+                                                <ManualJournalDimensionCell
+                                                    definitions={financeDimensions}
+                                                    rules={dimensionRules}
+                                                    effectiveDate={header.entryDate}
+                                                    lineNumber={lineIndex + 1}
+                                                    accountId={line.accountId}
+                                                    accountLabel={account ? `${account.accountNumber || account.accountCode} - ${account.accountName}` : undefined}
+                                                    values={line.dimensions}
+                                                    defaults={defaultDimensions}
+                                                    previousValues={lineIndex > 0 ? lines[lineIndex - 1].dimensions : undefined}
+                                                    onChange={dimensions => setLines(current => current.map(item =>
+                                                        item.id === line.id ? { ...item, dimensions } : item))}
+                                                    onApplyToAll={applyDimensionsToAllLines}
+                                                />
                                             </td>
                                             <td className="p-3 text-center">
                                                 <Button variant="ghost" size="sm" onClick={() => handleRemoveLine(line.id)} disabled={lines.length <= 2} className="text-destructive hover:text-destructive">
