@@ -219,6 +219,34 @@ public interface IStaffGrievanceService
 
     /// <summary>Removes somebody from a meeting that has not happened yet. HR only.</summary>
     Task<StaffGrievanceDto> RemoveConferenceAttendeeAsync(Guid grievanceId, Guid conferenceId, Guid attendeeId, CancellationToken cancellationToken = default);
+
+    // ── Cross-links (area 9c slice 9) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Cross-references a case to a safety incident, a PIP or a disciplinary case. HR only.
+    /// </summary>
+    /// <remarks>
+    /// Refused unless the source record is about somebody already named on the case — the primary
+    /// party or an active party. That rule is what stops a cross-reference introducing a person the
+    /// file does not name, and it is why the link block is meaningful rather than decorative.
+    ///
+    /// <para>⚠ Not state-gated, unlike every other write here: filing a cross-reference against a
+    /// closed case is a normal and useful act. See the implementation for the reasoning.</para>
+    /// </remarks>
+    Task<StaffGrievanceDto> LinkSourceAsync(Guid grievanceId, LinkErCaseSourceDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes one cross-reference. HR only. Nothing in the source record changes.</summary>
+    Task<StaffGrievanceDto> UnlinkSourceAsync(Guid grievanceId, EmployeeRelationsLinkSource source, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The reverse read: the employee-relations cases pointing at one source record.
+    /// </summary>
+    /// <remarks>
+    /// For the "this incident has employee-relations cases" affordance on the source module's
+    /// screen. Deliberately a subset of what the register already shows the same caller, so it
+    /// grants nothing new — no statement, no artefacts.
+    /// </remarks>
+    Task<IEnumerable<ErLinkedCaseDto>> GetCasesForSourceAsync(EmployeeRelationsLinkSource source, Guid recordId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

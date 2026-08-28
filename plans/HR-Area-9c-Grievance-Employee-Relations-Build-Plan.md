@@ -44,7 +44,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 6 | Anonymous / whistleblower concern intake | **COMPLETE 2026-08-27** — 56 ×2 + the ladder = **659**, plus **6 row-level SQL checks**; migration `AddEmployeeRelationsConcerns` |
 | 7 | Reminder-sweep extension + notifications | **COMPLETE 2026-08-27** — 46 ×2 + the ladder = **705**; migration `AddEmployeeRelationsReminderSettings`; the rung clock is a setting at last, and 3 defects were caught by the harness |
 | 8 | ER analytics & reporting | **COMPLETE 2026-08-28** — 104 ×2 + the ladder = **811**; no migration. Found a live defect: four readers of "an answer is owed" had drifted, 227 vs 174 |
-| 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | ⏳ |
+| 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | **COMPLETE 2026-08-28** — 114 ×2 + the ladder = **925**; migration `AddEmployeeRelationsCaseCrossLinks`; the link rule (*about somebody already on the case*) is the leak fix and the meaning at once |
 | 10 | Desk screens: the ER case register and case file | ⏳ |
 | 11 | Portal screens: the employee's side | ⏳ |
 | 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | ⏳ |
@@ -895,3 +895,101 @@ of today's data volume, not a check.
 field alone was not trustworthy. **That instinct should have been a question, not a workaround.**
 Writing a defensive clause around a field is evidence the field is wrong; the clause hides it
 instead of reporting it.
+
+---
+
+### Slice 9 — cross-links to SHE incidents, PIPs and disciplinary cases. CLOSED 2026-08-28.
+
+**114 assertions ×2, zero failures; the full ladder re-run green at 925.** Migration
+`AddEmployeeRelationsCaseCrossLinks` — three nullable FKs on `StaffGrievances`, three filtered
+indexes, three `NO ACTION` constraints. No new entities and no new permissions.
+
+**Three real foreign keys, not a polymorphic link table.** A `(type-name, id)` pair cannot be
+enforced by the database, so it rots the first time a source row is deleted and nothing complains.
+A case has at most one origin of each kind, so a link table would buy nothing but a join — while
+giving up the only thing worth having, which is the database refusing a dangling reference.
+
+#### The rule that shapes the whole slice
+
+**A case may only be linked to a record about somebody already named on it** — the primary party, or
+an active `StaffGrievanceParty` with an employee. It does two jobs at once, and neither would have
+justified it alone:
+
+- It gives the link a **checkable meaning** — *this case and this record are about the same person* —
+  instead of "somebody thought these were related", which no rule can ever police.
+- It makes it **impossible for a cross-reference to introduce a person the case file does not
+  already name**, which is the entire leak surface of the feature.
+
+It is not a hardship: a union consultation about a pattern of incidents links the moment the
+affected employee is added as a party — and a case file that names who it is about is *more* correct
+than one that does not. The refusal says exactly that. **Stood-down parties do not count**: linking
+is a present-tense act by the desk, and a party who withdrew from the case is not a reason to start
+cross-referencing records about them.
+
+#### Four further decisions
+
+1. **The link is a POINTER, never a window.** Number, date, status, subject name — no offence, no
+   findings, no injury, no improvement actions. A reader who needs the substance follows the link
+   into the owning module, where *that* module's permission decides what they see. Copying a summary
+   onto the case file would quietly turn a cross-reference into a way around SHE's, performance's and
+   discipline's read rules. The harness asserts the link's **key set exactly**, so a future "just add
+   the outcome" fails a test rather than shipping.
+2. **The link block is HR-only**, redacted like the conference notes. Every link is to somebody
+   already on the case — but "on the case" includes a **respondent**, and telling a complainant by
+   way of a cross-reference field that the person they complained about has a disciplinary case is
+   not HR's to leak.
+3. **Not state-gated**, and it is the only write in the service that is not. Every other write
+   changes what the case *says*, and freezing those on a terminal case is what makes the outcome
+   defensible; a cross-reference says nothing about the merits — it is filing. The moment you most
+   want to file one is precisely when reviewing a closed case against the disciplinary action that
+   followed it, which an `EnsureOpen` here would have made impossible.
+4. **Re-pointing is refused, not silently applied.** A link that quietly moves leaves no record of
+   what it used to say, so changing one is unlink-then-link: two acts, two log lines. The slot check
+   runs **before** the existence check, which is the right way round — with the slot occupied the
+   caller learns nothing about whether the record they named exists, so the endpoint cannot be used
+   to probe another module's data.
+
+#### The 8060-byte trap, avoided rather than re-hit
+
+The links are **not** an `Include` on `Scoped`. A `SafetyIncident` alone carries a 4000-character
+description, three 2000-character cause fields, a 4000-character root-cause analysis and 4000
+characters of findings; joining it onto a case root that already holds the statement, the
+interpretation, the investigation report and the resolution is **the same row-size failure that made
+`FileAsync` save a grievance and then die reading it back in slice 3**. They load as thin
+projections instead, and only for HR.
+
+That is why all **25 `ToDto` call sites moved to `ToDtoAsync`**. Loading links only on the link and
+unlink paths would have been the stale-navigation defect this module has hit before: a client
+re-rendering from the response of `respond` would watch the desk's cross-references disappear. The
+harness asserts an *unrelated* write still returns them — an untested conversion is not a conversion.
+
+#### The raise-a-case-from-here affordance
+
+`OpenEmployeeRelationsCaseDto` takes an optional `(source, sourceRecordId)` pair, validated and set
+**before** the case is saved. One call rather than open-then-link, because the two-call version fails
+halfway: the case opens, the link is refused, and the desk is left with an orphan it did not mean to
+create. The harness proves the negative directly — after a refused open-with-source it searches the
+register for the case that would have been created and asserts a count of **zero**.
+
+#### ⚠ What the harness caught, and what it did not
+
+**No product defects in this slice** — the two failures on the first run were both mine, and both
+worth recording because they are the same shape:
+
+- Section G probed "unknown record → 404" on cases whose slots section B had already filled, and got
+  the re-point refusal. **A negative assertion is only as good as the state it runs against**; the
+  fix was a fresh case, and the ordering it exposed is now asserted deliberately rather than avoided.
+- Section K assumed a case could simply be closed. `close` is reachable only once the ladder has been
+  exhausted at Board level (slice 2's rule), and escalating is the *griever's* act. Resolved is
+  terminal for the same purpose and is HR-reachable.
+
+**What this harness deliberately does NOT do is create its source records.** It discovers a real
+disciplinary case, a real PIP and a real safety incident out of the tenant, and **fails loudly** if
+a kind has no rows. A skipped source type would be a green run that proved nothing about a third of
+the slice.
+
+#### Owed to slice 10
+
+The API supports the reverse affordance (`GET by-source/{source}/{recordId}`), but the **buttons on
+the SHE, performance and discipline screens** are a cross-area UI change into three closed areas.
+Decide there whether they land in this area or go on the cross-module list.

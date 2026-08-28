@@ -139,6 +139,45 @@ public class StaffGrievance : TenantEntity
     [ForeignKey(nameof(ClosedById))]
     public virtual Employee? ClosedBy { get; set; }
 
+    // ── Cross-links to the records a case arose from (area 9c slice 9) ────────
+
+    /// <summary>
+    /// The SHE incident, performance improvement plan and disciplinary case this employee-relations
+    /// case is cross-referenced to. All optional; at most one of each.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Read-only in both directions, and no cascade.</b> Linking never writes to the source
+    /// record, and deleting a source never touches the case: the FKs are optional so EF's default
+    /// for them is <c>NO ACTION</c>, which is what we want — a case must not silently lose its
+    /// provenance because the SHE desk tidied up, and it must certainly not be deleted along with
+    /// the incident.</para>
+    ///
+    /// <para><b>A link may only be made to a record about somebody already on the case</b> — the
+    /// primary party, or an active <see cref="StaffGrievanceParty"/> with an employee. That rule is
+    /// enforced in the service, and it does two jobs at once: it gives the link a precise meaning
+    /// (<i>this case and this record are about the same person</i>) instead of "somebody thought
+    /// these were related", and it makes it impossible for a cross-reference to introduce a person
+    /// the case file does not already name.</para>
+    ///
+    /// <para><b>Why three columns rather than a link table.</b> A case has at most one origin of
+    /// each kind, so a table would buy nothing but a join — and three real FKs let the database
+    /// refuse a dangling id, which a polymorphic (type, id) pair never can.</para>
+    /// </remarks>
+    public Guid? SafetyIncidentId { get; set; }
+
+    [ForeignKey(nameof(SafetyIncidentId))]
+    public virtual ErpSystem.Core.Entities.HR.Safety.SafetyIncident? SafetyIncident { get; set; }
+
+    public Guid? PerformanceImprovementPlanId { get; set; }
+
+    [ForeignKey(nameof(PerformanceImprovementPlanId))]
+    public virtual ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan? PerformanceImprovementPlan { get; set; }
+
+    public Guid? StaffDisciplinaryActionId { get; set; }
+
+    [ForeignKey(nameof(StaffDisciplinaryActionId))]
+    public virtual ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction? StaffDisciplinaryAction { get; set; }
+
     /// <summary>FR-HR-181 obligation 7 — the investigation report. One per case, or none.</summary>
     public virtual StaffGrievanceInvestigation? Investigation { get; set; }
 

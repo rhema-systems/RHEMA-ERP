@@ -9338,6 +9338,35 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.ClosedById)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 9 — cross-links to the records a case arose from.
+            //
+            // ⚠ Restrict on all three, and it is the point rather than a default: a case must not
+            // be deleted because the SHE desk retired an incident, and it must not silently lose
+            // its provenance either. Deleting a linked source is refused at the database, which is
+            // the only place that refusal cannot be forgotten.
+            //
+            // The indexes are FILTERED to non-null. Almost every case links to nothing, so an
+            // unfiltered index would be three index rows per case to serve a lookup that only ever
+            // asks for the rows that DO link.
+            entity.HasIndex(x => x.SafetyIncidentId).HasFilter("[SafetyIncidentId] IS NOT NULL");
+            entity.HasIndex(x => x.PerformanceImprovementPlanId).HasFilter("[PerformanceImprovementPlanId] IS NOT NULL");
+            entity.HasIndex(x => x.StaffDisciplinaryActionId).HasFilter("[StaffDisciplinaryActionId] IS NOT NULL");
+
+            entity.HasOne(x => x.SafetyIncident)
+                .WithMany()
+                .HasForeignKey(x => x.SafetyIncidentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.PerformanceImprovementPlan)
+                .WithMany()
+                .HasForeignKey(x => x.PerformanceImprovementPlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.StaffDisciplinaryAction)
+                .WithMany()
+                .HasForeignKey(x => x.StaffDisciplinaryActionId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---- StaffGrievanceInvestigation (area 9c slice 2, FR-HR-181 obligation 7) ----

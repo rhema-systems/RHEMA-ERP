@@ -577,4 +577,42 @@ public class StaffGrievancesController : ControllerBase
 
         return Ok(await _service.AcceptAgreementAsync(id, dto ?? new AcceptGrievanceAgreementDto(), employeeId));
     }
+
+    // =========================================================================
+    // Cross-links to other modules' records — area 9c slice 9
+    // =========================================================================
+
+    /// <summary>
+    /// Cross-references this case to a safety incident, a PIP or a disciplinary case.
+    /// </summary>
+    /// <remarks>
+    /// <b>HR's act, and HR's alone.</b> Neither the griever nor the responder may link: a
+    /// cross-reference is the desk's reading of how two records relate, and letting the subject of a
+    /// case attach other people's records to it is the leak this whole slice is shaped around.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpPost("{id:guid}/links")]
+    public async Task<ActionResult<StaffGrievanceDto>> LinkSource(Guid id, [FromBody] LinkErCaseSourceDto dto)
+        => Ok(await _service.LinkSourceAsync(id, dto));
+
+    /// <summary>Removes one cross-reference. Nothing in the source record changes.</summary>
+    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    [HttpDelete("{id:guid}/links/{source}")]
+    public async Task<ActionResult<StaffGrievanceDto>> UnlinkSource(Guid id, EmployeeRelationsLinkSource source)
+        => Ok(await _service.UnlinkSourceAsync(id, source));
+
+    /// <summary>
+    /// The reverse read: which employee-relations cases point at this record.
+    /// </summary>
+    /// <remarks>
+    /// Gated on the employee-relations READ permission, not on the source module's — because the
+    /// answer is about employee-relations cases, not about the incident. A caller who holds it can
+    /// already see every one of these rows on the register; this endpoint only saves them filtering
+    /// it by hand from the source module's screen.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
+    [HttpGet("by-source/{source}/{recordId:guid}")]
+    public async Task<ActionResult<IEnumerable<ErLinkedCaseDto>>> GetCasesForSource(
+        EmployeeRelationsLinkSource source, Guid recordId)
+        => Ok(await _service.GetCasesForSourceAsync(source, recordId));
 }

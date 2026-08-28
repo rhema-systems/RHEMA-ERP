@@ -382,7 +382,7 @@ public class StaffGrievanceService : IStaffGrievanceService
     {
         var grievance = await GetOwnedAsync(id, cancellationToken);
         EnsureMayRead(grievance, callerEmployeeId);
-        return ToDto(grievance, callerEmployeeId);
+        return await ToDtoAsync(grievance, callerEmployeeId, cancellationToken);
     }
 
     // ── Writes ────────────────────────────────────────────────────────────────
@@ -430,7 +430,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         _logger.LogInformation("Grievance filed: {Number}", grievance.GrievanceNumber);
 
-        return ToDto(await GetOwnedAsync(grievance.Id, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievance.Id, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> AssignCurrentStepAsync(Guid grievanceId, AssignGrievanceStepDto dto, CancellationToken cancellationToken = default)
@@ -456,7 +456,7 @@ public class StaffGrievanceService : IStaffGrievanceService
             grievance.Status = GrievanceStatus.UnderReview;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> RespondAsync(Guid grievanceId, RespondToGrievanceDto dto, Guid responderEmployeeId, CancellationToken cancellationToken = default)
@@ -523,7 +523,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         _logger.LogInformation("Grievance {Number} answered at {Level}", grievance.GrievanceNumber, step.Level);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> EscalateAsync(Guid grievanceId, EscalateGrievanceDto dto, Guid grieverEmployeeId, CancellationToken cancellationToken = default)
@@ -586,7 +586,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         _logger.LogInformation("Grievance {Number} escalated to {Level}", grievance.GrievanceNumber, nextLevel);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> WithdrawAsync(Guid grievanceId, WithdrawGrievanceDto dto, Guid grieverEmployeeId, CancellationToken cancellationToken = default)
@@ -604,7 +604,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         grievance.UpdatedAt = now;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     // ── Area 9c slice 1 — the wider employee-relations register ───────────────
@@ -650,6 +650,23 @@ public class StaffGrievanceService : IStaffGrievanceService
             CreatedBy = openedByEmployeeId.ToString(),
         });
 
+
+        // ── The raise-an-ER-case-from-here affordance (area 9c slice 9) ───────
+        // Validated and set BEFORE the case is saved, so a refused link means no case at all. The
+        // two-call alternative — open, then link — fails halfway and leaves the desk an orphan.
+        if (dto.Source.HasValue != dto.SourceRecordId.HasValue)
+            throw new InvalidOperationException(
+                "Supply both the source and the source record id, or neither.");
+
+        if (dto.Source is EmployeeRelationsLinkSource openSource)
+        {
+            // At open time the case has exactly one person on it — the primary party — so the
+            // "about somebody on the case" rule is checked against that one id.
+            await EnsureSourceIsAboutSomebodyOnCaseAsync(
+                openSource, dto.SourceRecordId!.Value, new HashSet<Guid> { subject.Id }, cancellationToken);
+            SetLink(grievance, openSource, dto.SourceRecordId!.Value);
+        }
+
         await _unitOfWork.Repository<StaffGrievance>().AddAsync(grievance);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -660,7 +677,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         _logger.LogInformation("Employee-relations case opened: {Number} ({Type})",
             grievance.GrievanceNumber, grievance.CaseType);
 
-        return ToDto(await GetOwnedAsync(grievance.Id, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievance.Id, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> AddPartyAsync(
@@ -744,7 +761,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         await _unitOfWork.Repository<StaffGrievanceParty>().AddAsync(party);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> RemovePartyAsync(
@@ -785,7 +802,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     // ── Area 9c slice 2 — FR-HR-181's missing artefacts ───────────────────────
@@ -803,7 +820,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         grievance.UpdatedAt = now;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> OpenInvestigationAsync(
@@ -857,7 +874,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> UpdateInvestigationAsync(
@@ -883,7 +900,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         investigation.UpdatedAt = DateTime.UtcNow;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> CompleteInvestigationAsync(
@@ -909,7 +926,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         _logger.LogInformation("Grievance {Number}: investigation concluded", grievance.GrievanceNumber);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> ResolveAsync(
@@ -952,7 +969,7 @@ public class StaffGrievanceService : IStaffGrievanceService
             existing.UpdatedAt = now;
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+            return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
         }
 
         EnsureOpen(grievance);
@@ -995,7 +1012,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         _logger.LogInformation("Grievance {Number} resolved: {Outcome}", grievance.GrievanceNumber, dto.Outcome);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> CloseAsync(
@@ -1030,7 +1047,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         _logger.LogInformation("Grievance {Number} closed unresolved at {Level}",
             grievance.GrievanceNumber, grievance.CurrentLevel);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     // ── Area 9c slice 3 — documents and the signed agreement ──────────────────
@@ -1206,7 +1223,7 @@ public class StaffGrievanceService : IStaffGrievanceService
             resolution.AgreementSignedDate = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> AcceptAgreementAsync(
@@ -1244,7 +1261,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         _logger.LogInformation("Grievance {Number}: agreement accepted by the employee", grievance.GrievanceNumber);
 
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     // ── Area 9c slice 4 — conferencing, mediation, union consultation ─────────
@@ -1299,7 +1316,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> UpdateConferenceAsync(
@@ -1329,7 +1346,7 @@ public class StaffGrievanceService : IStaffGrievanceService
 
         conference.UpdatedAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> HoldConferenceAsync(
@@ -1368,7 +1385,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         _logger.LogInformation("Grievance {Number}: {Type} held", grievance.GrievanceNumber, conference.ConferenceType);
 
         // Passed so a non-HR chair is not handed back a redacted copy of the notes they just wrote.
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken), recordedByEmployeeId);
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), recordedByEmployeeId, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> CancelConferenceAsync(
@@ -1385,7 +1402,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         conference.UpdatedAt = now;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> AddConferenceAttendeeAsync(
@@ -1421,7 +1438,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     public async Task<StaffGrievanceDto> RemoveConferenceAttendeeAsync(
@@ -1440,7 +1457,7 @@ public class StaffGrievanceService : IStaffGrievanceService
         attendee.UpdatedAt = now;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return ToDto(await GetOwnedAsync(grievanceId, cancellationToken));
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
     }
 
     /// <summary>
@@ -1479,6 +1496,339 @@ public class StaffGrievanceService : IStaffGrievanceService
         if (grievance.Status is GrievanceStatus.Withdrawn or GrievanceStatus.Closed)
             throw new InvalidOperationException($"This grievance is {grievance.Status} and cannot be changed.");
     }
+
+    // ── Cross-links to other modules' records (area 9c slice 9) ───────────────
+
+    /// <summary>
+    /// Cross-references this case to a safety incident, a PIP or a disciplinary case.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ Deliberately NOT state-gated</b>, and it is the only write in this service that
+    /// is not. Every other write changes what the case SAYS — a response, a decision, an
+    /// interpretation — and freezing those on a terminal case is what makes the outcome defensible.
+    /// A cross-reference says nothing about the merits; it is filing. And the moment you most want
+    /// to file a cross-reference is precisely when reviewing a closed case against the disciplinary
+    /// action that followed it, which an <c>EnsureOpen</c> here would have made impossible.</para>
+    ///
+    /// <para><b>Re-pointing is refused, not silently applied.</b> A link that quietly moves leaves
+    /// no record of what it used to say, so changing one is unlink-then-link: two acts, two log
+    /// lines.</para>
+    /// </remarks>
+    public async Task<StaffGrievanceDto> LinkSourceAsync(
+        Guid grievanceId, LinkErCaseSourceDto dto, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+
+        var existing = ExistingLinkId(grievance, dto.Source);
+        if (existing == dto.RecordId)
+            throw new InvalidOperationException($"This case is already linked to that {Label(dto.Source)}.");
+        if (existing.HasValue)
+            throw new InvalidOperationException(
+                $"This case is already linked to a different {Label(dto.Source)}. Remove that link first — "
+                + "re-pointing a cross-reference would lose the record of what it used to say.");
+
+        await EnsureSourceIsAboutSomebodyOnCaseAsync(
+            dto.Source, dto.RecordId, OnCaseEmployeeIds(grievance), cancellationToken);
+
+        SetLink(grievance, dto.Source, dto.RecordId);
+        grievance.UpdatedAt = DateTime.UtcNow;
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employee-relations case {Number} linked to {Source} {RecordId}.",
+            grievance.GrievanceNumber, dto.Source, dto.RecordId);
+
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
+    }
+
+    public async Task<StaffGrievanceDto> UnlinkSourceAsync(
+        Guid grievanceId, EmployeeRelationsLinkSource source, CancellationToken cancellationToken = default)
+    {
+        var grievance = await GetOwnedAsync(grievanceId, cancellationToken);
+
+        if (ExistingLinkId(grievance, source) is null)
+            throw new InvalidOperationException($"This case has no {Label(source)} link to remove.");
+
+        SetLink(grievance, source, null);
+        grievance.UpdatedAt = DateTime.UtcNow;
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employee-relations case {Number} unlinked from {Source}.",
+            grievance.GrievanceNumber, source);
+
+        return await ToDtoAsync(await GetOwnedAsync(grievanceId, cancellationToken), null, cancellationToken);
+    }
+
+    /// <summary>
+    /// The reverse read — which employee-relations cases point at this record.
+    /// </summary>
+    /// <remarks>
+    /// Runs off <see cref="RegisterQuery"/> and projects in the database: this is what a source
+    /// module's screen calls to render "2 employee-relations cases", and dragging whole case graphs
+    /// across to count them is the shape slice 1 already avoided on the register itself.
+    /// </remarks>
+    public async Task<IEnumerable<ErLinkedCaseDto>> GetCasesForSourceAsync(
+        EmployeeRelationsLinkSource source, Guid recordId, CancellationToken cancellationToken = default)
+    {
+        var query = RegisterQuery(GetTenantId());
+
+        query = source switch
+        {
+            EmployeeRelationsLinkSource.SafetyIncident => query.Where(g => g.SafetyIncidentId == recordId),
+            EmployeeRelationsLinkSource.PerformanceImprovementPlan => query.Where(g => g.PerformanceImprovementPlanId == recordId),
+            EmployeeRelationsLinkSource.DisciplinaryCase => query.Where(g => g.StaffDisciplinaryActionId == recordId),
+            _ => throw new ArgumentException($"'{source}' is not a linkable record type."),
+        };
+
+        return await query
+            .OrderByDescending(g => g.FiledDate)
+            .Select(g => new ErLinkedCaseDto
+            {
+                Id = g.Id,
+                GrievanceNumber = g.GrievanceNumber,
+                CaseType = g.CaseType,
+                Subject = g.Subject,
+                Status = g.Status,
+                FiledDate = g.FiledDate,
+                EmployeeId = g.EmployeeId,
+                EmployeeName = g.Employee.FullName,
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The rule: a case may only be linked to a record about somebody already named on it.
+    /// </summary>
+    /// <remarks>
+    /// <para>It does two jobs at once. It gives the link a checkable meaning — <i>this case and
+    /// this record are about the same person</i> — rather than "somebody thought these were
+    /// related", which no rule can ever police. And it makes it impossible for a cross-reference to
+    /// introduce a person the case file does not already name, which is the whole of its leak
+    /// surface.</para>
+    ///
+    /// <para><b>It is not a hardship.</b> A union consultation about a pattern of incidents links
+    /// once the affected employee is on the case as a party — and a case file that names who it is
+    /// about is more correct than one that does not. The refusal says exactly that.</para>
+    ///
+    /// <para><b>Stood-down parties do not count.</b> Linking is a present-tense act by the desk; a
+    /// party who has withdrawn from the case is not a reason to start cross-referencing records
+    /// about them.</para>
+    /// </remarks>
+    private async Task EnsureSourceIsAboutSomebodyOnCaseAsync(
+        EmployeeRelationsLinkSource source, Guid recordId, ISet<Guid> onCase, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        var summary = await LoadSourceSummaryAsync(source, recordId, tenantId, cancellationToken);
+        // A soft-deleted source is "not found" for the purpose of MAKING a link. An existing link
+        // to one is kept and rendered dead — see ErCaseSourceLinkDto.Available — but nobody may
+        // create a new reference to a record its own module has retired.
+        if (summary is null || summary.Deleted)
+            throw new ArgumentException($"The {Label(source)} with ID '{recordId}' was not found.");
+
+        var about = await LoadSourceAboutEmployeesAsync(source, recordId, tenantId, cancellationToken);
+        if (!about.Any(onCase.Contains))
+            throw new InvalidOperationException(
+                $"That {Label(source)} is not about anybody on this case. A cross-reference must be to a record "
+                + "concerning the primary party or one of the case's parties — add the person to the case first, "
+                + "then link.");
+    }
+
+    /// <summary>The thin pointer a link renders as. Number, date, status — never substance.</summary>
+    private sealed record SourceSummary(
+        string Number, DateTime Date, string Status, Guid? SubjectId, string? SubjectName, bool Deleted);
+
+    private async Task<SourceSummary?> LoadSourceSummaryAsync(
+        EmployeeRelationsLinkSource source, Guid recordId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        // GetQueryableIncludingDeleted throughout: a link to a retired record must still RENDER,
+        // carrying Available = false, rather than silently disappearing off the case file.
+        switch (source)
+        {
+            case EmployeeRelationsLinkSource.SafetyIncident:
+            {
+                var row = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Safety.SafetyIncident>()
+                    .GetQueryableIncludingDeleted(x => x.Id == recordId && x.TenantId == tenantId)
+                    .Select(x => new { x.IncidentNumber, x.IncidentDate, x.Status, x.IsDeleted })
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                // ⚠ SubjectEmployeeId is deliberately null for an incident. An incident has no ONE
+                // subject — it has involved persons, witnesses and a reporter — and naming any one
+                // of them here would be a guess presented as a fact.
+                return row is null ? null : new SourceSummary(
+                    row.IncidentNumber, row.IncidentDate, Humanise(row.Status.ToString()), null, null, row.IsDeleted);
+            }
+
+            case EmployeeRelationsLinkSource.PerformanceImprovementPlan:
+            {
+                var row = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
+                    .GetQueryableIncludingDeleted(x => x.Id == recordId && x.TenantId == tenantId)
+                    .Select(x => new { x.PipNumber, x.StartDate, x.Status, x.IsDeleted, x.EmployeeId, Name = x.Employee.FullName })
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                return row is null ? null : new SourceSummary(
+                    row.PipNumber, row.StartDate, Humanise(row.Status.ToString()), row.EmployeeId, row.Name, row.IsDeleted);
+            }
+
+            case EmployeeRelationsLinkSource.DisciplinaryCase:
+            {
+                var row = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()
+                    .GetQueryableIncludingDeleted(x => x.Id == recordId && x.TenantId == tenantId)
+                    .Select(x => new { x.CaseNumber, x.IncidentDate, x.Status, x.IsDeleted, x.EmployeeId, Name = x.Employee.FullName })
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                return row is null ? null : new SourceSummary(
+                    row.CaseNumber, row.IncidentDate, Humanise(row.Status.ToString()), row.EmployeeId, row.Name, row.IsDeleted);
+            }
+
+            default:
+                throw new ArgumentException($"'{source}' is not a linkable record type.");
+        }
+    }
+
+    /// <summary>
+    /// Whom a source record is about — the set the case must intersect for a link to be allowed.
+    /// </summary>
+    /// <remarks>
+    /// Split from <see cref="LoadSourceSummaryAsync"/> rather than folded into it because reading a
+    /// case file does not need it: an incident's involved-person query would otherwise run on every
+    /// case read that happens to carry an incident link, to answer a question only the WRITE asks.
+    ///
+    /// <para>For an incident the set is its involved persons who are employees, plus the reporter.
+    /// The reporter is included on purpose: an employee-relations case about how somebody was
+    /// treated <i>for having reported</i> an incident is about that incident, and excluding them
+    /// would have made the clearest victimisation case in the module unrecordable.</para>
+    /// </remarks>
+    private async Task<IReadOnlyCollection<Guid>> LoadSourceAboutEmployeesAsync(
+        EmployeeRelationsLinkSource source, Guid recordId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        switch (source)
+        {
+            case EmployeeRelationsLinkSource.SafetyIncident:
+            {
+                var involved = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Safety.SafetyIncidentInvolvedPerson>()
+                    .GetQueryable(p => p.IncidentId == recordId && p.TenantId == tenantId && p.EmployeeId != null)
+                    .Select(p => p.EmployeeId!.Value)
+                    .ToListAsync(cancellationToken);
+
+                var reporter = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Safety.SafetyIncident>()
+                    .GetQueryableIncludingDeleted(x => x.Id == recordId && x.TenantId == tenantId)
+                    .Select(x => (Guid?)x.ReportedById)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (reporter is Guid reporterId) involved.Add(reporterId);
+                return involved;
+            }
+
+            case EmployeeRelationsLinkSource.PerformanceImprovementPlan:
+            {
+                // The subject only. A PIP's supervisor and HR owner run it; they are not what it is
+                // about, and counting them would let any case about a manager link to every plan
+                // they happen to supervise.
+                var id = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
+                    .GetQueryableIncludingDeleted(x => x.Id == recordId && x.TenantId == tenantId)
+                    .Select(x => (Guid?)x.EmployeeId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                return id is Guid pipEmployee ? new[] { pipEmployee } : Array.Empty<Guid>();
+            }
+
+            case EmployeeRelationsLinkSource.DisciplinaryCase:
+            {
+                // Likewise: the accused, not the reporter or the decision-maker.
+                var id = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()
+                    .GetQueryableIncludingDeleted(x => x.Id == recordId && x.TenantId == tenantId)
+                    .Select(x => (Guid?)x.EmployeeId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                return id is Guid accused ? new[] { accused } : Array.Empty<Guid>();
+            }
+
+            default:
+                throw new ArgumentException($"'{source}' is not a linkable record type.");
+        }
+    }
+
+    /// <summary>The primary party plus every ACTIVE party who is an employee.</summary>
+    private static HashSet<Guid> OnCaseEmployeeIds(StaffGrievance grievance)
+    {
+        var ids = new HashSet<Guid> { grievance.EmployeeId };
+        foreach (var party in grievance.Parties)
+        {
+            if (party.IsDeleted || party.RemovedDate != null) continue;
+            if (party.EmployeeId is Guid employeeId) ids.Add(employeeId);
+        }
+        return ids;
+    }
+
+    private static Guid? ExistingLinkId(StaffGrievance g, EmployeeRelationsLinkSource source) => source switch
+    {
+        EmployeeRelationsLinkSource.SafetyIncident => g.SafetyIncidentId,
+        EmployeeRelationsLinkSource.PerformanceImprovementPlan => g.PerformanceImprovementPlanId,
+        EmployeeRelationsLinkSource.DisciplinaryCase => g.StaffDisciplinaryActionId,
+        _ => throw new ArgumentException($"'{source}' is not a linkable record type."),
+    };
+
+    private static void SetLink(StaffGrievance g, EmployeeRelationsLinkSource source, Guid? recordId)
+    {
+        switch (source)
+        {
+            case EmployeeRelationsLinkSource.SafetyIncident: g.SafetyIncidentId = recordId; break;
+            case EmployeeRelationsLinkSource.PerformanceImprovementPlan: g.PerformanceImprovementPlanId = recordId; break;
+            case EmployeeRelationsLinkSource.DisciplinaryCase: g.StaffDisciplinaryActionId = recordId; break;
+            default: throw new ArgumentException($"'{source}' is not a linkable record type.");
+        }
+    }
+
+    private static string Label(EmployeeRelationsLinkSource source) => source switch
+    {
+        EmployeeRelationsLinkSource.SafetyIncident => "safety incident",
+        EmployeeRelationsLinkSource.PerformanceImprovementPlan => "performance improvement plan",
+        EmployeeRelationsLinkSource.DisciplinaryCase => "disciplinary case",
+        _ => "record",
+    };
+
+    /// <summary>
+    /// The case file's link block. <b>HR only</b> — see <see cref="StaffGrievanceDto.Links"/>.
+    /// </summary>
+    private async Task<List<ErCaseSourceLinkDto>> BuildLinksAsync(
+        StaffGrievance g, CancellationToken cancellationToken)
+    {
+        var links = new List<ErCaseSourceLinkDto>();
+        if (!IsHr) return links;
+
+        var tenantId = GetTenantId();
+
+        // Assembled in enum order, so the block reads the same way twice.
+        var present = new List<(EmployeeRelationsLinkSource Source, Guid RecordId)>();
+        if (g.SafetyIncidentId is Guid incident) present.Add((EmployeeRelationsLinkSource.SafetyIncident, incident));
+        if (g.PerformanceImprovementPlanId is Guid pip) present.Add((EmployeeRelationsLinkSource.PerformanceImprovementPlan, pip));
+        if (g.StaffDisciplinaryActionId is Guid discipline) present.Add((EmployeeRelationsLinkSource.DisciplinaryCase, discipline));
+
+        foreach (var (source, recordId) in present)
+        {
+            var summary = await LoadSourceSummaryAsync(source, recordId, tenantId, cancellationToken);
+
+            links.Add(new ErCaseSourceLinkDto
+            {
+                Source = source,
+                SourceLabel = Humanise(source.ToString()),
+                RecordId = recordId,
+                // A row that has vanished entirely — a hard delete in the source module, which the
+                // FK should prevent — still renders as a dead reference rather than throwing. A case
+                // file must not become unreadable because another module broke its own rules.
+                Number = summary?.Number ?? "(record unavailable)",
+                Date = summary?.Date ?? default,
+                Status = summary?.Status ?? string.Empty,
+                SubjectEmployeeId = summary?.SubjectId,
+                SubjectEmployeeName = summary?.SubjectName,
+                Available = summary is { Deleted: false },
+            });
+        }
+
+        return links;
+    }
+
+    /// <summary>"HeadOfDepartment" → "Head Of Department". Enum names are not labels.</summary>
+    private static string Humanise(string pascal)
+        => string.Concat(pascal.Select((ch, i) => i > 0 && char.IsUpper(ch) ? " " + ch : ch.ToString()));
 
     // ── Mapping ───────────────────────────────────────────────────────────────
 
@@ -1597,6 +1947,31 @@ public class StaffGrievanceService : IStaffGrievanceService
         RemovedDate = p.RemovedDate,
         RemovalReason = p.RemovalReason,
     };
+
+    /// <summary>
+    /// The case file, with its cross-links loaded — area 9c slice 9.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this exists at all, rather than an Include in <see cref="Scoped"/>.</b> A
+    /// <c>SafetyIncident</c> alone carries a 4000-character Description, three 2000-character cause
+    /// fields, a 4000-character root-cause analysis and 4000 characters of findings. Joining it onto
+    /// the case root — where the statement, the interpretation, the investigation report and the
+    /// resolution already live — is the same 8060-byte row that made <c>FileAsync</c> save a
+    /// grievance and then die reading it back in slice 3. The links are loaded as thin projections
+    /// instead, and only for HR.</para>
+    ///
+    /// <para><b>And why EVERY write path goes through it</b>, not just link and unlink. A write
+    /// response that returns the case file with an empty <c>Links</c> is the stale-navigation defect
+    /// this module has hit before: a client that re-renders from the response of <c>respond</c>
+    /// would watch the desk's cross-references disappear.</para>
+    /// </remarks>
+    private async Task<StaffGrievanceDto> ToDtoAsync(
+        StaffGrievance g, Guid? callerEmployeeId, CancellationToken cancellationToken)
+    {
+        var dto = ToDto(g, callerEmployeeId);
+        dto.Links = await BuildLinksAsync(g, cancellationToken);
+        return dto;
+    }
 
     /// <summary>
     /// The case file. <paramref name="callerEmployeeId"/> decides only ONE thing: whether conference

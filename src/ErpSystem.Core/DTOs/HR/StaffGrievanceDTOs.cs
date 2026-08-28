@@ -142,6 +142,20 @@ public class StaffGrievanceDto : StaffGrievanceSummaryDto
     /// scheduled. Their notes are redacted per reader; see <see cref="StaffGrievanceConferenceDto"/>.
     /// </summary>
     public List<StaffGrievanceConferenceDto> Conferences { get; set; } = new();
+
+    /// <summary>
+    /// Cross-references to the SHE incident, PIP or disciplinary case this case arose from — area
+    /// 9c slice 9. <b>HR only: empty for every other reader</b>, including the griever.
+    /// </summary>
+    /// <remarks>
+    /// A link is a case-management aid for the desk, and it is the one part of the file that names
+    /// a record belonging to another module. Every link is to a record about somebody already on
+    /// this case — that is enforced on write — but "already on the case" includes a respondent, and
+    /// telling a complainant by way of a cross-reference field that the person they complained
+    /// about has a disciplinary case is not HR's to leak. The desk sees the links; nobody else does.
+    /// Same shape as the conference notes redaction two fields up.
+    /// </remarks>
+    public List<ErCaseSourceLinkDto> Links { get; set; } = new();
 }
 
 /// <summary>FR-HR-181 obligation 7 — the investigation report.</summary>
@@ -416,6 +430,25 @@ public class OpenEmployeeRelationsCaseDto
     [MaxLength(6000)]
     [MinLength(20)]
     public string Statement { get; set; } = string.Empty;
+
+    // ── The raise-an-ER-case-from-here affordance (area 9c slice 9) ───────────
+
+    /// <summary>
+    /// Optionally, the record this case is being opened FROM — a safety incident, a PIP or a
+    /// disciplinary case. Supply both fields or neither.
+    /// </summary>
+    /// <remarks>
+    /// One call rather than open-then-link, because the two-call version fails halfway: the case
+    /// opens, the link is refused, and the desk is left with an orphan case it did not mean to
+    /// create. Here the link is validated and written in the same transaction as the case, so a
+    /// refused link means no case.
+    ///
+    /// <para>The same rule applies as to <c>POST .../links</c>: the source record must be about the
+    /// employee named above.</para>
+    /// </remarks>
+    public EmployeeRelationsLinkSource? Source { get; set; }
+
+    public Guid? SourceRecordId { get; set; }
 }
 
 /// <summary>Adds somebody to a case. HR's act.</summary>
@@ -1162,3 +1195,87 @@ public class EmployeeRelationsAnalyticsDto
 }
 
 #endregion
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Cross-links — area 9c slice 9
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// One cross-reference from an employee-relations case to the record it arose from.
+/// </summary>
+/// <remarks>
+/// <para><b>This is a pointer, and it is kept deliberately thin.</b> Number, date, status, and the
+/// employee the source record is about — nothing else. No offence, no findings, no injury, no
+/// improvement actions. A reader who needs the substance follows the link into the owning module,
+/// where that module's own permission decides what they may see; copying a summary onto the case
+/// file would quietly turn a cross-reference into a way around SHE's, performance's and
+/// discipline's read rules.</para>
+///
+/// <para>The temptation to add "just the category" or "just the outcome" here is exactly the drift
+/// this remark exists to refuse. If a future screen needs more, it should call the source module.</para>
+/// </remarks>
+public class ErCaseSourceLinkDto
+{
+    public EmployeeRelationsLinkSource Source { get; set; }
+
+    /// <summary>Human label for <see cref="Source"/> — "Safety Incident", "Disciplinary Case".</summary>
+    public string SourceLabel { get; set; } = string.Empty;
+
+    public Guid RecordId { get; set; }
+
+    /// <summary>The source's own reference — incident number, PIP number, disciplinary case number.</summary>
+    public string Number { get; set; } = string.Empty;
+
+    /// <summary>The date the source record is filed under: incident date, PIP start, incident date.</summary>
+    public DateTime Date { get; set; }
+
+    /// <summary>The source's status, humanised. A word, not a payload.</summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>Whom the source record is about. Always somebody already named on this case.</summary>
+    public Guid? SubjectEmployeeId { get; set; }
+    public string? SubjectEmployeeName { get; set; }
+
+    /// <summary>
+    /// False when the source row has since been soft-deleted by its owning module.
+    /// </summary>
+    /// <remarks>
+    /// The link is kept rather than cleared: a case that was cross-referenced to an incident should
+    /// still say so after the SHE desk retires the incident, because the fact that it WAS linked is
+    /// part of how the case was handled. The flag tells the screen to render it as a dead reference
+    /// instead of a live one.
+    /// </remarks>
+    public bool Available { get; set; } = true;
+}
+
+/// <summary>Cross-reference an employee-relations case to a source record — area 9c slice 9.</summary>
+public class LinkErCaseSourceDto
+{
+    [Required]
+    public EmployeeRelationsLinkSource Source { get; set; }
+
+    [Required]
+    public Guid RecordId { get; set; }
+}
+
+/// <summary>
+/// A case that links to a given source record — the reverse read, for a "this incident has
+/// employee-relations cases against it" affordance on the source module's screen.
+/// </summary>
+/// <remarks>
+/// Lean by construction: this is strictly a subset of what the employee-relations register already
+/// shows the same caller, so it grants nothing new. It carries no statement and no artefacts.
+/// </remarks>
+public class ErLinkedCaseDto
+{
+    public Guid Id { get; set; }
+    public string GrievanceNumber { get; set; } = string.Empty;
+    public EmployeeRelationsCaseType CaseType { get; set; }
+    public string CaseTypeName => CaseType.ToString();
+    public string Subject { get; set; } = string.Empty;
+    public GrievanceStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+    public DateTime FiledDate { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+}

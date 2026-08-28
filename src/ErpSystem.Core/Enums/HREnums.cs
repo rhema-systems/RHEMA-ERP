@@ -3046,6 +3046,35 @@ public enum EmployeeRelationsCaseType
 }
 
 /// <summary>
+/// The kinds of record an employee-relations case can be cross-referenced to — area 9c slice 9.
+/// </summary>
+/// <remarks>
+/// <para>Deliberately a CLOSED enum with one real foreign key behind each member, not a
+/// polymorphic (type-name, id) pair. A polymorphic link cannot be enforced by the database, so it
+/// rots the first time a source row is deleted and nothing complains; these three have real FKs,
+/// real referential integrity, and no way to point at a table that does not exist.</para>
+///
+/// <para><b>The link is a POINTER, never a window.</b> Following it takes the reader into the
+/// source module, where that module's own permission decides what they see. Nothing about the
+/// source's substance — an offence, a set of findings, an injury — is copied onto the
+/// employee-relations case file.</para>
+/// </remarks>
+public enum EmployeeRelationsLinkSource
+{
+    /// <summary>A SHE incident the case arose from or concerns.</summary>
+    [Description("Safety Incident")]
+    SafetyIncident = 1,
+
+    /// <summary>A performance improvement plan the case arose from or concerns.</summary>
+    [Description("Performance Improvement Plan")]
+    PerformanceImprovementPlan = 2,
+
+    /// <summary>A disciplinary case the case arose from or concerns.</summary>
+    [Description("Disciplinary Case")]
+    DisciplinaryCase = 3
+}
+
+/// <summary>
 /// The part somebody plays in an employee-relations case, beyond the primary party — area 9c
 /// slice 1, decision D-7.
 /// </summary>
