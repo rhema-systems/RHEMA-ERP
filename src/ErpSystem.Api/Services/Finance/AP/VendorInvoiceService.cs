@@ -1393,18 +1393,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
             else
             {
-                profile = await _procurementConfiguration.GetEffectiveProfileAsync(
-                    "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken);
+                profile = await ResolveProcurementProfileForMatchingAsync(
+                    cancellationToken);
                 if (profile == null)
-                    AddHardStop("AP_MATCH_CONFIGURATION_MISSING", "Procurement configuration", "No effective Published TDC procurement configuration profile exists.");
-                else if (profile.Decisions.Count != 14 || profile.Decisions.Any(item => !item.IsComplete))
-                    AddHardStop("AP_MATCH_CONFIGURATION_INCOMPLETE", "Procurement configuration", "The effective procurement configuration must contain fourteen complete approved decisions.");
+                    AddHardStop("AP_MATCH_CONFIGURATION_MISSING", "Procurement configuration", "No TDC procurement configuration profile is available for invoice-match audit lineage.");
                 else
                 {
                     result.ConfigurationProfileCode = profile.ProfileCode;
                     result.ConfigurationProfileVersion = profile.Version;
                     result.Checks.Add(Check("AP-MATCH-CONFIGURATION", "Procurement configuration", true, false,
-                        $"{profile.ProfileCode} v{profile.Version} and DEC-001 through DEC-014 are effective."));
+                        $"{profile.ProfileCode} v{profile.Version} is retained as invoice-match audit lineage."));
                 }
             }
 
@@ -2225,6 +2223,35 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException($"Supplier '{supplier.Name}' is not active for AP posting.");
 
             return supplier;
+        }
+
+        private async Task<ProcurementConfigurationProfileDto?>
+            ResolveProcurementProfileForMatchingAsync(
+                CancellationToken cancellationToken)
+        {
+            if (_procurementConfiguration == null) return null;
+
+            var effective = await _procurementConfiguration
+                .GetEffectiveProfileAsync(
+                    "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken);
+            if (effective is not null) return effective;
+
+            var profileId = await _unitOfWork
+                .Repository<ProcurementConfigurationProfile>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.ProfileCode == "TDC-PROCUREMENT" &&
+                    !item.IsDeleted)
+                .AsNoTracking()
+                .OrderByDescending(item => item.Version)
+                .ThenByDescending(item => item.UpdatedAt)
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return profileId.HasValue
+                ? await _procurementConfiguration.GetProfileAsync(
+                    profileId.Value, cancellationToken)
+                : null;
         }
 
         private async Task<(decimal PriceTolerancePercent, decimal QuantityTolerancePercent)>

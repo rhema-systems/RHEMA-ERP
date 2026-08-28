@@ -361,6 +361,60 @@ BEGIN
        AND COL_LENGTH(N'dbo.StockAdjustments', N'BookClassification') IS NOT NULL
         INSERT @R VALUES(N'Inventory opening-stock book partial migration state', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260826170000_AllowReleaseOnlyRfqAwardTransition')
+BEGIN
+    IF OBJECT_ID(N'dbo.RequestForQuotations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.RequestForQuotationAwardLines', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcePurchaseRequisitionId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingReleaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingCaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SubmissionDeadline') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'AwardedAt') IS NULL
+        INSERT @R VALUES(N'Release-only RFQ award transition prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes')
+BEGIN
+    DECLARE @purchaseOrderSourceTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrders_ApprovedSourceProtected', N'TR'));
+    IF @purchaseOrderSourceTrigger IS NULL
+       OR CHARINDEX(N'TDC0406_PO_AMENDMENT_ID', @purchaseOrderSourceTrigger) = 0
+       OR CHARINDEX(N'THROW 51202', @purchaseOrderSourceTrigger) = 0
+       OR CHARINDEX(N'THROW 51205', @purchaseOrderSourceTrigger) = 0
+        INSERT @R VALUES(N'Purchase-order source trigger alignment prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260827090000_AlignSupplierOnboardingPartnerCategories')
+BEGIN
+    IF OBJECT_ID(N'dbo.PartnerCategories', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartnerCategories', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartnerRegistrations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartners', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenants', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.PartnerCategories', N'TenantId') IS NULL
+       OR COL_LENGTH(N'dbo.PartnerCategories', N'CategoryCode') IS NULL
+       OR COL_LENGTH(N'dbo.BusinessPartnerRegistrations', N'RegistrationCategory') IS NULL
+       OR COL_LENGTH(N'dbo.BusinessPartnerRegistrations', N'BusinessPartnerId') IS NULL
+       OR NOT EXISTS
+          (
+              SELECT 1
+              FROM sys.indexes
+              WHERE object_id = OBJECT_ID(N'dbo.PartnerCategories')
+                AND name = N'IX_PartnerCategories_CategoryCode'
+          )
+       OR EXISTS
+          (
+              SELECT 1
+              FROM sys.indexes
+              WHERE object_id = OBJECT_ID(N'dbo.PartnerCategories')
+                AND name = N'IX_PartnerCategories_TenantId_CategoryCode'
+          )
+        INSERT @R VALUES(N'Supplier onboarding category alignment prerequisites', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -508,6 +562,25 @@ function Invoke-Preflight {
     # Up THROW statements are contained in the replacement lifecycle trigger;
     # the stored-row guard belongs to Down and is not executed during deploy.
     Write-Output 'GUARD_COVERAGE|20260825120000_SimplifyProcurementSourcingCaseLineage'
+    # This migration replaces the RFQ and tender lineage triggers. Its THROW
+    # statements protect future writes and do not evaluate stored rows in Up.
+    Write-Output 'GUARD_COVERAGE|20260825170000_AllowReleaseOnlyProcurementSourceEntry'
+    # This migration replaces only the RFQ lifecycle trigger. The read-only
+    # prerequisite probe above verifies the tables and columns used by the new
+    # release-only transition; existing RFQ rows are not updated during Up.
+    Write-Output 'GUARD_COVERAGE|20260826170000_AllowReleaseOnlyRfqAwardTransition'
+    # This migration only replaces the purchase-order commitment trigger. Its
+    # THROW protects future writes and existing rows are not updated in Up.
+    Write-Output 'GUARD_COVERAGE|20260826190000_AlignPurchaseOrderCommitmentWithRequisition'
+    # This migration patches two guarded blocks in the installed PO source
+    # trigger without updating stored rows. The prerequisite probe above checks
+    # the exact baseline markers before startup is allowed to apply it.
+    Write-Output 'GUARD_COVERAGE|20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes'
+    # This migration replaces the global category-code index with a tenant-safe
+    # composite index, provisions canonical supplier categories, and repairs
+    # approved supplier assignments. The probe above rejects missing tables,
+    # columns, and partially applied index state before any data is changed.
+    Write-Output 'GUARD_COVERAGE|20260827090000_AlignSupplierOnboardingPartnerCategories'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"

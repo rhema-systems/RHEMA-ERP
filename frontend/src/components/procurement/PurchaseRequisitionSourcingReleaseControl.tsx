@@ -1,8 +1,6 @@
 'use client';
 
-import { useState } from 'react';
 import {
-  AlertCircle,
   CheckCircle2,
   Clock,
   Loader2,
@@ -11,7 +9,6 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -19,16 +16,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import type {
   PurchaseRequisitionSourcingReadinessDto,
   PurchaseRequisitionSourcingReleaseDto,
@@ -42,8 +29,6 @@ interface Props {
   readiness?: PurchaseRequisitionSourcingReadinessDto;
   history: PurchaseRequisitionSourcingReleaseDto[];
   loading: boolean;
-  releasing: boolean;
-  onRelease: (reason: string) => Promise<void>;
 }
 
 const toneClass = {
@@ -58,19 +43,8 @@ export function PurchaseRequisitionSourcingReleaseControl({
   readiness,
   history,
   loading,
-  releasing,
-  onRelease,
 }: Props) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [reason, setReason] = useState(
-    'All pre-sourcing controls reviewed and confirmed.'
-  );
   const presentation = getSourcingReleasePresentation(readiness, loading);
-
-  const release = async () => {
-    await onRelease(reason.trim());
-    setDialogOpen(false);
-  };
 
   return (
     <Card
@@ -116,11 +90,6 @@ export function PurchaseRequisitionSourcingReleaseControl({
               )}
             </p>
           )}
-          {readiness?.controlFingerprint && (
-            <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
-              Control fingerprint: {readiness.controlFingerprint}
-            </p>
-          )}
         </div>
 
         {loading ? (
@@ -132,7 +101,9 @@ export function PurchaseRequisitionSourcingReleaseControl({
           <div className="grid gap-2 md:grid-cols-2">
             {(readiness?.requirements || []).map((requirement) => {
               const requirementPresentation =
-                getSourcingRequirementPresentation(readiness!, requirement);
+                readiness == null
+                  ? { state: 'actionRequired' as const, message: requirement.message }
+                  : getSourcingRequirementPresentation(readiness, requirement);
               return (
                 <div
                   key={requirement.key}
@@ -200,33 +171,20 @@ export function PurchaseRequisitionSourcingReleaseControl({
               Released by {readiness.currentRelease.releasedByName}:{' '}
               {readiness.currentRelease.releaseReason}
             </p>
-            <p className="mt-2 break-all font-mono text-[11px] text-emerald-900">
-              Integrity: {readiness.currentRelease.integrityHash}
-            </p>
           </div>
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            {readiness?.hasStaleRelease ? (
-              <AlertCircle className="h-4 w-4" />
-            ) : (
-              <Clock className="h-4 w-4" />
-            )}
+            <Clock className="h-4 w-4" />
             {history.length} immutable release attempt
             {history.length === 1 ? '' : 's'} retained
           </p>
-          <Button
-            onClick={() => setDialogOpen(true)}
-            disabled={!presentation.canRelease || releasing}
-          >
-            {releasing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldCheck className="mr-2 h-4 w-4" />
-            )}
-            Record sourcing release
-          </Button>
+          {presentation.canEnterSourcing && !readiness?.isReleased && (
+            <p className="text-xs font-medium text-blue-800">
+              The release audit record is created automatically when sourcing starts.
+            </p>
+          )}
         </div>
 
         {history.length > 0 && (
@@ -247,9 +205,6 @@ export function PurchaseRequisitionSourcingReleaseControl({
                   <p>
                     {format(new Date(item.releasedAtUtc), 'MMM dd, yyyy HH:mm')}
                   </p>
-                  <p className="font-mono">
-                    {item.integrityHash.slice(0, 16)}…
-                  </p>
                 </div>
               </div>
             ))}
@@ -257,46 +212,6 @@ export function PurchaseRequisitionSourcingReleaseControl({
         )}
       </CardContent>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Record immutable sourcing release</DialogTitle>
-            <DialogDescription>
-              This appends a release for the current control fingerprint. It
-              cannot be edited or deleted.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="sourcing-release-reason">Release reason</Label>
-            <Textarea
-              id="sourcing-release-reason"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              maxLength={500}
-              rows={4}
-            />
-            <p className="text-xs text-muted-foreground">
-              Minimum 5 characters · {reason.length}/500
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={releasing}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={release}
-              disabled={reason.trim().length < 5 || releasing}
-            >
-              {releasing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Confirm release
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }

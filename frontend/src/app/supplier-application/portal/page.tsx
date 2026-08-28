@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { FileText, LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { FileText, LogOut, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supplierApplicantAccessService as service } from '@/services/procurement-supplier-applicant-access.service';
 import type {
@@ -100,6 +101,10 @@ export default function SupplierApplicantPortalPage() {
   const [expiryDate, setExpiryDate] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [documentToDelete, setDocumentToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [savedRegistrationData, setSavedRegistrationData] =
     useState<RegistrationDataRecord>({});
 
@@ -330,6 +335,27 @@ export default function SupplierApplicantPortalPage() {
     }
   };
 
+  const deleteDocument = async () => {
+    if (!documentToDelete) return false;
+    setBusy(true);
+    try {
+      await service.deleteDocument(documentToDelete.id);
+      setDocumentToDelete(null);
+      await load();
+      toast.success('Document deleted.');
+      return true;
+    } catch (deleteError) {
+      toast.error(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Document deletion failed.'
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const exit = () => {
     service.clearSession();
     router.replace('/supplier-application');
@@ -413,12 +439,6 @@ export default function SupplierApplicantPortalPage() {
             </AlertDescription>
           </Alert>
         )}
-
-        <div className="flex justify-end">
-          <Button disabled={busy || !portal?.canSubmit} onClick={submit}>
-            Submit for review
-          </Button>
-        </div>
 
         <Tabs defaultValue="payment">
           <TabsList className="grid w-full grid-cols-4 md:w-[620px]">
@@ -747,15 +767,34 @@ export default function SupplierApplicantPortalPage() {
                         </div>
                       </div>
                     </div>
-                    <Badge
-                      variant={document.isVerified ? 'default' : 'outline'}
-                    >
-                      {document.isRejected
-                        ? 'Rejected'
-                        : document.isVerified
-                          ? 'Verified'
-                          : 'Submitted'}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant={document.isVerified ? 'default' : 'outline'}
+                      >
+                        {document.isRejected
+                          ? 'Rejected'
+                          : document.isVerified
+                            ? 'Verified'
+                            : 'Submitted'}
+                      </Badge>
+                      {portal?.canEdit && (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Delete ${document.documentName}`}
+                          disabled={busy}
+                          onClick={() =>
+                            setDocumentToDelete({
+                              id: document.id,
+                              name: document.documentName,
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {!portal?.documents?.length && (
@@ -855,6 +894,22 @@ export default function SupplierApplicantPortalPage() {
           </TabsContent>
         </Tabs>
       </div>
+      <ConfirmationDialog
+        open={documentToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setDocumentToDelete(null);
+        }}
+        title="Delete uploaded document?"
+        description={
+          documentToDelete
+            ? `${documentToDelete.name} will be removed from this supplier application.`
+            : undefined
+        }
+        confirmText="Delete document"
+        variant="destructive"
+        isLoading={busy}
+        onConfirm={deleteDocument}
+      />
     </main>
   );
 }

@@ -48,8 +48,8 @@ export interface ProcurementSourcingCaseSourceOption {
   requisitionId: string;
   requisitionNumber: string;
   requisitionStatus: string;
-  sourcingReleaseId: string;
-  releaseReference: string;
+  sourcingReleaseId?: string;
+  releaseReference?: string;
   sourcePlanId?: string;
   sourcePlanItemId?: string;
   sourcePlanNumber?: string;

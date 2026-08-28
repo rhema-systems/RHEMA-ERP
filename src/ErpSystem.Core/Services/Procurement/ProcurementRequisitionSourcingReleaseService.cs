@@ -15,7 +15,6 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
 {
     private const string SourceType = "PurchaseRequisition";
     private const string EventType = "PurchaseRequisitionSourcingRelease";
-    private const string ProcessPermission = "procurement.requisition.process";
     private const string SourcingPermission = "procurement.sourcing.manage";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -100,7 +99,6 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
                 "PR_SOURCING_RELEASE_REASON_REQUIRED", "A sourcing-release reason of at least five characters is required.");
         EnsureAuthenticatedTenant();
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
-        await EnsureCapabilityAsync(ProcessPermission, requisitionId.ToString("N"), normalizedCorrelation, cancellationToken);
         await EnsureCapabilityAsync(SourcingPermission, requisitionId.ToString("N"), normalizedCorrelation, cancellationToken);
 
         PurchaseRequisitionSourcingReleaseDto? result = null;
@@ -184,6 +182,16 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         await EnsureCapabilityAsync(SourcingPermission, sourceReference, normalizedCorrelation, cancellationToken);
         var requisition = await LoadRequisitionAsync(requisitionId, false, cancellationToken);
         var readiness = await EvaluateAsync(requisition, cancellationToken);
+        if (readiness.IsCompliant && readiness.CanRelease)
+        {
+            await ReleaseAsync(
+                requisitionId,
+                $"System-generated release for {sourceType} {sourceReference}.",
+                normalizedCorrelation,
+                cancellationToken);
+            requisition = await LoadRequisitionAsync(requisitionId, false, cancellationToken);
+            readiness = await EvaluateAsync(requisition, cancellationToken);
+        }
         var action = readiness.IsReleased ? "SourcingEntryAllowed" : "SourcingEntryBlocked";
         await RecordAsync(requisition, readiness, action,
             readiness.IsReleased ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Denied,
@@ -204,6 +212,16 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         var budget = linkedControl
             ? await _budgetControl.GetLinkedControlReadinessAsync(requisition.Id, cancellationToken)
             : await _budgetControl.GetReadinessAsync(requisition.Id, cancellationToken);
+        budget ??= new PurchaseRequisitionBudgetReadinessDto
+        {
+            RequisitionId = requisition.Id,
+            RequisitionNumber = requisition.RequisitionNumber,
+            Status = requisition.Status,
+            IsCompliant = false,
+            CanReserve = false,
+            DecisionCode = "PR_BUDGET_CONTROL_UNAVAILABLE",
+            Message = "Budget availability could not be evaluated. Refresh the requisition or contact Finance configuration support."
+        };
         var items = await RequisitionItems.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                 item.RequisitionId == requisition.Id && !item.IsDeleted && item.Status != "Cancelled")
             .AsNoTracking().OrderBy(item => item.CreatedAt).ToListAsync(cancellationToken);
@@ -249,6 +267,12 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             requisition.ApprovedAt,
             requisition.SourcePlanId,
             requisition.SourcePlanItemId,
+            requisition.ApprovedExceptionRuleId,
+            requisition.ExceptionWorkflowInstanceId,
+            requisition.ExceptionApprovalReference,
+            requisition.ExceptionEvidenceReference,
+            requisition.ExceptionApprovedById,
+            requisition.ExceptionApprovedAtUtc,
             requisition.SpecificationTemplateId,
             requisition.BudgetId,
             WorkflowInstanceId = workflow?.Id,
@@ -291,11 +315,14 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
                 ? "PR_SOURCING_RELEASE_CURRENT" : "PR_SOURCING_READY",
             Message = !isCompliant ? requirements.First(item => !item.Satisfied).Message : current
                 ? $"Sourcing release {latest!.ReleaseReference} matches the approved requisition."
-                : "The approved requisition is ready to be released for the selected sourcing process.",
+                : "The approved requisition is ready for sourcing. The release audit record will be created automatically when sourcing starts.",
             EvaluatedAtUtc = evaluatedAtUtc,
             ControlFingerprint = fingerprint,
             SourcePlanId = requisition.SourcePlanId,
             SourcePlanItemId = requisition.SourcePlanItemId,
+            ApprovedExceptionRuleId = requisition.ApprovedExceptionRuleId,
+            ExceptionWorkflowInstanceId = requisition.ExceptionWorkflowInstanceId,
+            ExceptionApprovalReference = requisition.ExceptionApprovalReference,
             SpecificationTemplateId = requisition.SpecificationTemplateId,
             SpecificationTemplateCode = requisition.SpecificationTemplateCode,
             SpecificationTemplateVersion = requisition.SpecificationTemplateVersion,
@@ -528,7 +555,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         var releaseReference = Truncate($"SRL-{requisition.RequisitionNumber}-A{attempt}", 100);
         var snapshot = new
         {
-            schemaVersion = "tdc.pr-sourcing-release.v1",
+            schemaVersion = "tdc.pr-sourcing-release.v2",
             id,
             purchaseRequisitionId = requisition.Id,
             requisition.RequisitionNumber,

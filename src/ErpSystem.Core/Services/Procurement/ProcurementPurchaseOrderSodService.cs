@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -106,18 +107,23 @@ public sealed class ProcurementPurchaseOrderSodService :
             PurchaseOrder purchaseOrder,
             string receiptAction,
             string correlationId,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            Guid? warehouseId = null)
     {
         EnsurePurchaseOrder(purchaseOrder);
         var action = ProcurementPurchaseOrderSodRules.NormalizeReceiptAction(
             receiptAction);
         var correlation = NormalizeCorrelation(correlationId);
+        var effectiveWarehouseId = await ResolveReceiptWarehouseIdAsync(
+            purchaseOrder,
+            warehouseId,
+            cancellationToken);
         await EnsureCapabilityAsync(
             ProcurementPurchaseOrderSodRules.RequiredPermissionForReceiptAction(action),
             purchaseOrder.OrderNumber,
             correlation,
             cancellationToken,
-            purchaseOrder.DeliveryWarehouseId);
+            effectiveWarehouseId);
         var readiness = await EvaluateAsync(
             purchaseOrder,
             "Receive",
@@ -133,6 +139,52 @@ public sealed class ProcurementPurchaseOrderSodService :
                 readiness);
         }
         return readiness;
+    }
+
+    private async Task<Guid?> ResolveReceiptWarehouseIdAsync(
+        PurchaseOrder purchaseOrder,
+        Guid? requestedWarehouseId,
+        CancellationToken cancellationToken)
+    {
+        if (requestedWarehouseId.HasValue && requestedWarehouseId.Value != Guid.Empty)
+            return requestedWarehouseId;
+        if (purchaseOrder.DeliveryWarehouseId.HasValue &&
+            purchaseOrder.DeliveryWarehouseId.Value != Guid.Empty)
+            return purchaseOrder.DeliveryWarehouseId;
+
+        var lineWarehouseId = await _unitOfWork.Repository<PurchaseOrderItem>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.PurchaseOrderId == purchaseOrder.Id &&
+                !item.IsDeleted &&
+                item.WarehouseId.HasValue &&
+                item.WarehouseId.Value != Guid.Empty)
+            .Select(item => item.WarehouseId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (lineWarehouseId.HasValue && lineWarehouseId.Value != Guid.Empty)
+            return lineWarehouseId;
+
+        var receiptLocationId = await _unitOfWork
+            .Repository<PurchaseOrderReceiptItem>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.Receipt.PurchaseOrderId == purchaseOrder.Id &&
+                !item.IsDeleted &&
+                item.LocationId.HasValue &&
+                item.LocationId.Value != Guid.Empty)
+            .Select(item => item.LocationId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!receiptLocationId.HasValue || receiptLocationId.Value == Guid.Empty)
+            return null;
+
+        var location = await _unitOfWork.Repository<WarehouseLocation>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.Id == receiptLocationId.Value &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        return location?.InventoryWarehouseId;
     }
 
     public async Task RejectApprovalBypassAsync(

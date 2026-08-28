@@ -293,7 +293,7 @@ public class TenderAwardService : ITenderAwardService
                 AwardedAmount = awardAmount,
                 NegotiationId = null, // Will be set when negotiation is completed
                 IsNegotiated = false, // Will be set to true when negotiation is completed
-                Currency = dto.Currency ?? "USD",
+                Currency = NormalizeCurrency(dto.Currency, tender.Currency),
                 AwardedById = _currentUserProvider.UserId,
                 AwardJustification = dto.AwardJustification,
                 Status = "Awarded",
@@ -357,7 +357,7 @@ public class TenderAwardService : ITenderAwardService
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
             award.AwardedAmount = dto.AwardedAmount;
-            award.Currency = dto.Currency ?? "USD";
+            award.Currency = NormalizeCurrency(dto.Currency, tender.Currency);
             award.AwardDate = dto.AwardDate ?? award.AwardDate;
             award.AwardJustification = dto.AwardJustification;
             award.Notes = dto.Notes;
@@ -537,7 +537,7 @@ public class TenderAwardService : ITenderAwardService
                 approvedSource,
                 sourceOrderLines,
                 award.AwardedAmount,
-                award.Currency ?? tender.Currency ?? "USD",
+                approvedSource.CurrencyCode,
                 sourceCorrelationId);
 
             // Generate PO number
@@ -562,7 +562,7 @@ public class TenderAwardService : ITenderAwardService
                 ShippingCost = 0,
                 DiscountAmount = 0,
                 TotalAmount = award.AwardedAmount,
-                Currency = award.Currency ?? "USD",
+                Currency = approvedSource.CurrencyCode,
                 ExchangeRate = 1,
                 
                 // Terms
@@ -606,7 +606,7 @@ public class TenderAwardService : ITenderAwardService
                 approvedSource,
                 sourceOrderLines,
                 award.AwardedAmount,
-                award.Currency ?? tender.Currency ?? "USD",
+                approvedSource.CurrencyCode,
                 purchaseOrder.Id,
                 sourceCorrelationId);
 
@@ -757,6 +757,13 @@ public class TenderAwardService : ITenderAwardService
             CreatedAt = award.CreatedAt
         };
     }
+
+    private static string NormalizeCurrency(string? preferred, string? fallback) =>
+        !string.IsNullOrWhiteSpace(preferred)
+            ? preferred.Trim().ToUpperInvariant()
+            : !string.IsNullOrWhiteSpace(fallback)
+                ? fallback.Trim().ToUpperInvariant()
+                : "GHS";
 
     private async Task EnsureLegacyAwardAllowedAsync(Guid tenderId)
     {

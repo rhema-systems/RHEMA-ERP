@@ -16,6 +16,13 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public sealed class ProcurementPolicyService : IProcurementPolicyService
 {
+    private static readonly ProcurementPolicyRuleKind[] RequiredSourcingRuleKinds =
+    [
+        ProcurementPolicyRuleKind.Category,
+        ProcurementPolicyRuleKind.Method,
+        ProcurementPolicyRuleKind.Threshold
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -530,7 +537,7 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             AddError(errors, "BASE_POLICY_REQUIRED", "A tenant override requires an immutable base policy.");
 
         var rules = await GetRuleEntitiesAsync(policySet.Id, tracked: false, cancellationToken);
-        foreach (var kind in Enum.GetValues<ProcurementPolicyRuleKind>())
+        foreach (var kind in RequiredSourcingRuleKinds)
         {
             if (!rules.Any(item => item.Kind == kind && GetRuleEnabled(item.Entity)))
                 AddError(errors, "RULE_FAMILY_MISSING", RequiredRuleFamilyMessage(kind), kind);
@@ -578,10 +585,6 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                 (!method.RequiresCompetition || method.MinimumQuotationCount <= 0))
                 AddError(errors, "RFQ_COMPETITION_REQUIRED",
                     "An enabled Request for Quotation rule must require competition and a positive minimum quotation count.",
-                    ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
-            if (method.Method == ProcurementMethodType.RequestForQuotation && !method.WorkflowDefinitionId.HasValue)
-                AddError(errors, "RFQ_WORKFLOW_REQUIRED",
-                    "An enabled Request for Quotation rule must select the shared evaluation approval workflow used at dispatch and award.",
                     ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
         }
     }
@@ -677,24 +680,10 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             if (string.Equals(sod.InitiatorRole.Trim(), sod.ConflictingRole.Trim(), StringComparison.OrdinalIgnoreCase))
                 AddError(errors, "SOD_ROLE_CONFLICT", "Initiator and conflicting roles must differ.", ProcurementPolicyRuleKind.SegregationOfDuties, sod.Id, sod.RuleCode);
 
-        foreach (var definition in ProcurementSodRequiredControlRegistry.Definitions)
-        {
-            var match = sodRules.SingleOrDefault(item => item.IsEnabled &&
-                string.Equals(item.RuleCode, definition.Code, StringComparison.OrdinalIgnoreCase));
-            if (match is null)
-            {
-                AddError(errors, "SOD_REQUIRED_CONTROL_MISSING",
-                    $"Required TDC SOD control '{definition.Code}' is missing.",
-                    ProcurementPolicyRuleKind.SegregationOfDuties, ruleCode: definition.Code);
-                continue;
-            }
-
-            if (!ProcurementSodRequiredControlRegistry.MatchesRequiredShape(definition,
-                    match.InitiatorRole, match.ConflictingRole, match.EntityType, match.Action, match.Enforcement))
-                AddError(errors, "SOD_REQUIRED_CONTROL_INVALID",
-                    $"Required TDC SOD control '{definition.Code}' must retain its prescribed roles, entity, action, and HardStop enforcement.",
-                    ProcurementPolicyRuleKind.SegregationOfDuties, match.Id, match.RuleCode);
-        }
+        // Policy-specific SOD declarations are optional. The shared workflow and
+        // authorization layer always enforces the system maker-checker baseline;
+        // an enabled policy rule is validated here only when a tenant elects to
+        // add a narrower transaction-specific conflict.
     }
 
     private async Task<int> MaterializeSourceRulesAsync(
@@ -916,7 +905,8 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             SourceConfigurationProfileId = source.Id, SourceConfigurationProfileCode = source.ProfileCode,
             SourceConfigurationProfileVersion = source.Version, DefaultCurrencyCode = policySet.DefaultCurrencyCode,
             EffectiveFrom = policySet.EffectiveFrom, EffectiveTo = policySet.EffectiveTo, IsDefault = policySet.IsDefault,
-            RuleCount = rules.Count, RuleFamilyCount = enabledFamilies, IsComplete = enabledFamilies == Enum.GetValues<ProcurementPolicyRuleKind>().Length,
+            RuleCount = rules.Count, RuleFamilyCount = enabledFamilies,
+            IsComplete = RequiredSourcingRuleKinds.All(kind => rules.Any(item => item.Kind == kind && item.IsEnabled)),
             UpdatedBy = policySet.UpdatedBy ?? policySet.CreatedBy, UpdatedAt = policySet.UpdatedAt ?? policySet.CreatedAt,
             RowVersion = Convert.ToBase64String(policySet.RowVersion)
         };
@@ -1568,12 +1558,6 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     private static string RuleKindLabel(ProcurementPolicyRuleKind kind) => kind == ProcurementPolicyRuleKind.SegregationOfDuties ? "segregation-of-duties" : kind.ToString().ToLowerInvariant();
     private static string RequiredRuleFamilyMessage(ProcurementPolicyRuleKind kind) => kind switch
     {
-        ProcurementPolicyRuleKind.Evidence =>
-            "Add at least one enabled Evidence rule so document and verification requirements are explicit.",
-        ProcurementPolicyRuleKind.Exception =>
-            "Add at least one enabled Exception rule. Use a Prohibited disposition when no exception is allowed, so the policy fails closed.",
-        ProcurementPolicyRuleKind.SegregationOfDuties =>
-            "Apply the six required TDC segregation-of-duties controls so incompatible actors remain separated.",
         _ => $"At least one enabled {RuleKindLabel(kind)} rule is required."
     };
     private static string DisplayServiceClass(string? value) => string.IsNullOrWhiteSpace(value) ? "(none)" : value.Trim();

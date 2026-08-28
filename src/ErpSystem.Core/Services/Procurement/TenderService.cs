@@ -539,17 +539,25 @@ public class TenderService : ITenderService
                     "Restricted Tendering, Single Source, and Petty Purchase cases must be prepared, approved, and released through the dedicated noncompetitive-sourcing control.");
             }
 
-            var documentCorrelationId = Guid.NewGuid().ToString("N");
-            await _tenderDocumentControlService.EnsurePublicationReadyAsync(
-                ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
-                documentCorrelationId);
-            await _tenderDocumentControlService.EnsureDispatchReadyAsync(
-                ProcurementTenderDocumentSourceType.Tender, tender.Id,
-                dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
-                dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
-                documentCorrelationId);
-            if (gate.SelectedMethod is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering or
-                ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection)
+            if (UsesAdvancedSourcingControls(gate))
+            {
+                var documentCorrelationId = Guid.NewGuid().ToString("N");
+                await _tenderDocumentControlService.EnsurePublicationReadyAsync(
+                    ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
+                    documentCorrelationId);
+                await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                    ProcurementTenderDocumentSourceType.Tender, tender.Id,
+                    dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
+                    dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                    documentCorrelationId);
+            }
+            else
+            {
+                ValidateReleaseOnlyPublication(tender, dto, DateTime.UtcNow);
+            }
+            if (UsesAdvancedSourcingControls(gate) &&
+                gate.SelectedMethod is (ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering or
+                    ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection))
             {
                 if (!dto.OpeningDate.HasValue)
                     throw new ProcurementTenderControlValidationException("TENDER_OPENING_REQUIRED", "Controlled tender publication requires an opening date.");
@@ -1548,6 +1556,28 @@ public class TenderService : ITenderService
 
     private static bool IsRequestForQuotation(string? tenderType) =>
         string.Equals(tenderType?.Trim(), "RFQ", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool UsesAdvancedSourcingControls(ProcurementSourcingCaseEntryGateDto gate) =>
+        gate.SourcingCaseId.HasValue && gate.SourcingCaseId.Value != Guid.Empty;
+
+    internal static void ValidateReleaseOnlyPublication(
+        Tender tender,
+        PublishTenderDto request,
+        DateTime nowUtc)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue || !tender.SourcingReleaseId.HasValue)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_SOURCE_LINEAGE_REQUIRED",
+                "The tender must retain its approved requisition and immutable sourcing-release lineage before publication.");
+        if (request.SubmissionDeadline <= nowUtc)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_DEADLINE_PASSED",
+                "The tender submission deadline must be in the future when it is published.");
+        if (request.OpeningDate.HasValue && request.OpeningDate.Value < request.SubmissionDeadline)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_OPENING_BEFORE_DEADLINE",
+                "The scheduled tender opening cannot be before the submission deadline.");
+    }
 
     private static void EnsureSourceLineage(Guid? releaseId, Guid? caseId, ProcurementSourcingCaseEntryGateDto gate)
     {

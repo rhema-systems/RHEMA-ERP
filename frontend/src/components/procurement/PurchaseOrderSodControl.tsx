@@ -6,8 +6,7 @@ import {
   CheckCircle2,
   Loader2,
   RefreshCw,
-  ShieldAlert,
-  XCircle,
+  ShieldCheck,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -83,7 +82,7 @@ export function PurchaseOrderSodControl({
       <Card>
         <CardContent className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
-          Checking requester, creator, approver, and receiver independence…
+          Checking approval and receiving responsibilities…
         </CardContent>
       </Card>
     );
@@ -95,11 +94,10 @@ export function PurchaseOrderSodControl({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-red-950">
             <AlertCircle className="h-5 w-5" />
-            PO role-separation control unavailable
+            Approval and receipt controls unavailable
           </CardTitle>
           <CardDescription className="text-red-800">
-            Positive approval and goods receipt fail closed until the server can
-            evaluate this control.
+            Approval and receiving actions are temporarily unavailable.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-between gap-4">
@@ -121,25 +119,21 @@ export function PurchaseOrderSodControl({
   return (
     <Card
       data-testid="purchase-order-sod-control"
-      className={
-        allAllowed
-          ? 'border-emerald-300 bg-emerald-50/40'
-          : 'border-amber-300 bg-amber-50/50'
-      }
+      className="border-slate-200 bg-white"
     >
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <ShieldAlert className="h-5 w-5" />
+              <ShieldCheck className="h-5 w-5 text-slate-700" />
               {scope === 'receipt'
-                ? 'Receipt segregation of duties'
-                : 'PO segregation of duties'}
+                ? 'Receiving responsibility'
+                : 'Approval and receiving responsibilities'}
             </CardTitle>
             <CardDescription className="mt-1">
               {scope === 'receipt'
-                ? 'The PO creator cannot create, inspect, accept, replace, close, or post the purchase receipt.'
-                : 'The source requester and PO creator cannot approve; the PO creator cannot confirm any governed receipt action.'}
+                ? 'Receipt must be recorded by an authorised user other than the purchase-order creator.'
+                : 'This purchase order must be approved and received by authorised users other than its creator.'}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -147,10 +141,10 @@ export function PurchaseOrderSodControl({
               className={
                 allAllowed
                   ? 'bg-emerald-100 text-emerald-900'
-                  : 'bg-amber-100 text-amber-950'
+                  : 'bg-slate-100 text-slate-800'
               }
             >
-              {allAllowed ? 'Independent actor' : 'Restricted action(s)'}
+              {allAllowed ? 'Available to you' : 'Independent user required'}
             </Badge>
             <Button
               variant="ghost"
@@ -162,62 +156,42 @@ export function PurchaseOrderSodControl({
             </Button>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Current actor · evaluated{' '}
-          {new Date(readiness.evaluatedAtUtc).toLocaleString()}
-        </p>
-        <div className="flex flex-wrap gap-1" aria-label="SOD decision register">
-          {readiness.decisionKeys.map((decisionKey) => (
-            <Badge
-              key={decisionKey}
-              variant="outline"
-              className="font-mono text-[10px]"
-            >
-              {decisionKey}
-            </Badge>
-          ))}
-        </div>
       </CardHeader>
       <CardContent
         className={scope === 'receipt' ? 'grid gap-3' : 'grid gap-3 md:grid-cols-2'}
       >
         {visibleChecks.map((check) => {
-          const Icon = check.allowed ? CheckCircle2 : XCircle;
+          const isApproval = check.key === 'approval';
+          const label = isApproval ? 'Approval' : 'Goods receipt';
+          const message = check.allowed
+            ? isApproval
+              ? 'You may approve this purchase order.'
+              : 'You may record receipt for this purchase order.'
+            : isApproval
+              ? 'A different authorised user must approve this purchase order.'
+              : 'A different authorised stores user must record receipt for this purchase order.';
+          const Icon = check.allowed ? CheckCircle2 : ShieldCheck;
           return (
             <div
               key={check.key}
               data-testid="purchase-order-sod-check"
-              className={`rounded-md border p-3 ${
+              className={`rounded-md border p-4 ${
                 check.allowed
                   ? 'border-emerald-200 bg-white/80'
-                  : 'border-amber-300 bg-white/90'
+                  : 'border-slate-200 bg-slate-50/60'
               }`}
             >
               <div className="flex items-start gap-2">
                 <Icon
                   className={`mt-0.5 h-4 w-4 shrink-0 ${
-                    check.allowed ? 'text-emerald-700' : 'text-amber-700'
+                    check.allowed ? 'text-emerald-700' : 'text-slate-600'
                   }`}
                 />
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold">{check.label}</p>
-                    <Badge variant="outline" className="font-mono text-[10px]">
-                      {check.controlCode}
-                    </Badge>
-                  </div>
+                  <p className="text-sm font-semibold">{label}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {check.message}
+                    {message}
                   </p>
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    Protected lineage: {check.participantRoles.join(', ')}
-                  </p>
-                  {check.key === 'receipt' &&
-                    readiness.receiptActionCoverage?.length > 0 && (
-                    <p className="mt-2 text-[10px] text-muted-foreground">
-                      Enforced actions: {readiness.receiptActionCoverage.join(', ')}
-                    </p>
-                  )}
                 </div>
               </div>
             </div>

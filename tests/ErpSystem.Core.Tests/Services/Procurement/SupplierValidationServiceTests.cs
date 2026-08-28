@@ -43,6 +43,28 @@ public sealed class SupplierValidationServiceTests
     }
 
     [Fact]
+    public async Task MissingDec011ConfigurationIsAdvisoryAtAward()
+    {
+        await using var fixture = new Fixture();
+        var supplier = fixture.AddSupplier();
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateEligibilityAsync(
+            new SupplierEligibilityEvaluationRequest
+            {
+                BusinessPartnerId = supplier.Id,
+                Boundary = SupplierEligibilityBoundary.Award
+            });
+
+        result.IsValid.Should().BeTrue(string.Join("; ",
+            result.Findings.Select(item => $"{item.Code}: {item.Message}")));
+        result.Findings.Should().Contain(item =>
+            item.Code == "SUPPLIER_RISK_POLICY_UNAVAILABLE" && !item.Blocking);
+        result.Findings.Should().Contain(item =>
+            item.Code == "SUPPLIER_PERFORMANCE_POLICY_UNAVAILABLE" && !item.Blocking);
+    }
+
+    [Fact]
     public async Task RequiredPrequalificationUsesCurrentQualifiedListAndRetainsPolicyLineage()
     {
         await using var fixture = new Fixture();

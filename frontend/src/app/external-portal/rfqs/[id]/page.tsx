@@ -8,10 +8,12 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { rfqService, type RfqDetailDto } from '@/services/rfqService';
+import { getQuoteSubmitLabel, isQuoteSubmissionOpen } from '@/lib/rfq-quote-state';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, MailCheck, Send, FileText } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock3, FileText, History, Loader2, MailCheck, Send } from 'lucide-react';
 
 export default function SupplierRfqDetailPage() {
   const params = useParams();
@@ -88,7 +90,10 @@ export default function SupplierRfqDetailPage() {
     return { total, missing };
   }, [rfq, unitPriceByItemId]);
 
-  const canSubmit = !!rfq && rfq.status === 'Sent';
+  const submissionOpen = isQuoteSubmissionOpen(rfq?.status, rfq?.submissionDeadline);
+  const hasSubmittedQuote = !!myQuote && myQuote.status.toLowerCase() === 'submitted';
+  const canSubmit = submissionOpen && myQuote?.status.toLowerCase() !== 'laterejected';
+  const submitLabel = getQuoteSubmitLabel(hasSubmittedQuote, canSubmit);
 
   const handleSubmit = async () => {
     if (!rfq) return;
@@ -107,7 +112,7 @@ export default function SupplierRfqDetailPage() {
       }
 
       await rfqService.submitQuote(rfq.id, { notes: notes || undefined, items });
-      toast.success('Quote submitted successfully');
+      toast.success(hasSubmittedQuote ? 'Quote updated and resubmitted successfully' : 'Quote submitted successfully');
 
       const refreshed = await rfqService.getMyRfqDetail(rfq.id);
       setRfq(refreshed);
@@ -177,7 +182,7 @@ export default function SupplierRfqDetailPage() {
             disabled={!canSubmit || submitting}
           >
             {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-            Submit Quote
+            {submitLabel}
           </Button>
         </div>
       </div>
@@ -212,7 +217,55 @@ export default function SupplierRfqDetailPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {myQuote && (
+        <Card className={myQuote.status === 'LateRejected' ? 'border-red-200' : 'border-green-200'}>
+          <CardContent className="pt-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                {myQuote.status === 'LateRejected' ? (
+                  <Clock3 className="mt-0.5 h-5 w-5 text-red-600" />
+                ) : (
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 text-green-600" />
+                )}
+                <div className="space-y-1">
+                  <div className="font-medium">Your quotation has been recorded</div>
+                  <div className="text-sm text-muted-foreground">
+                    Reference {myQuote.id} · Revision {Math.max(1, myQuote.revisionNumber || 1)}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Latest submission: {myQuote.submittedAt ? new Date(myQuote.submittedAt).toLocaleString() : 'Not available'}
+                  </div>
+                  {canSubmit ? (
+                    <div className="text-sm text-muted-foreground">
+                      You may update and resubmit this same quotation before the deadline. Earlier revisions remain in History.
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Submission is closed. This quotation is retained as the final recorded version.
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Badge variant={myQuote.status === 'LateRejected' ? 'destructive' : 'default'}>{myQuote.status}</Badge>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Tabs defaultValue="quote" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="quote">
+            <FileText className="mr-2 h-4 w-4" />
+            Quote
+          </TabsTrigger>
+          <TabsTrigger value="history">
+            <History className="mr-2 h-4 w-4" />
+            History ({myQuote?.history?.length || 0})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="quote" className="mt-0">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Items</CardTitle>
@@ -304,14 +357,66 @@ export default function SupplierRfqDetailPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Quotation history</CardTitle>
+              <CardDescription>
+                Each submission and pre-deadline revision is retained with its actor, date, time, status, and value.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!myQuote || !myQuote.history?.length ? (
+                <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  No quotation has been submitted yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {myQuote.history.map((entry) => (
+                    <div key={entry.id} className="rounded-md border p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">Revision {entry.revisionNumber}</span>
+                            <Badge variant="outline">{entry.action}</Badge>
+                            <Badge variant={entry.status === 'LateRejected' ? 'destructive' : 'secondary'}>
+                              {entry.status}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {entry.performedBy} · {new Date(entry.timestamp).toLocaleString()}
+                          </div>
+                          {entry.description && (
+                            <div className="text-sm text-muted-foreground">{entry.description}</div>
+                          )}
+                        </div>
+                        <div className="font-medium">
+                          {rfq.currency} {Number(entry.totalAmount).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <ConfirmationDialog
         open={confirmSubmitOpen}
         onOpenChange={setConfirmSubmitOpen}
-        title="Submit Quote?"
-        description="Once submitted, your quote will be recorded. You can submit again to replace your previous quote if the RFQ is still open."
-        confirmText="Submit"
+        title={hasSubmittedQuote ? 'Update and resubmit quotation?' : 'Submit quotation?'}
+        description={hasSubmittedQuote
+          ? 'This updates the same quotation and line records. The previous version remains available in History. Revisions are accepted only before the RFQ deadline.'
+          : 'This records your quotation. You may revise the same quotation before the RFQ deadline, and every revision will be retained in History.'}
+        confirmText={hasSubmittedQuote ? 'Update & Resubmit' : 'Submit'}
         onConfirm={handleSubmit}
       />
     </div>

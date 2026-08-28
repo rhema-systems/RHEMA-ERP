@@ -99,6 +99,11 @@ const errorMessage = (error: unknown) => {
 };
 const formatKind = (kind: ProcurementPolicyRuleKind) =>
   procurementPolicyRuleRegistry[kind].label;
+const corePolicyRuleKinds = new Set<ProcurementPolicyRuleKind>([
+  'Category',
+  'Method',
+  'Threshold',
+]);
 
 export default function ProcurementPolicySetDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -159,7 +164,7 @@ export default function ProcurementPolicySetDetailPage() {
           ? 'Policy validation passed'
           : 'Policy needs attention',
         description: result.isValid
-          ? 'All mandatory rule families, relationships, and governance controls passed.'
+          ? 'Core sourcing rules and every enabled rule relationship passed.'
           : `${result.errors.length} blocking issue(s) remain.`,
         variant: result.isValid ? 'success' : 'destructive',
       });
@@ -179,7 +184,7 @@ export default function ProcurementPolicySetDetailPage() {
       setSodDialogOpen(false);
       setSodReason('');
       toast({
-        title: 'Required SOD controls applied',
+        title: 'Recommended SOD templates applied',
         description: `${result.createdCount} control(s) created; ${result.existingCount} already existed.`,
         variant: 'success',
       });
@@ -410,11 +415,8 @@ export default function ProcurementPolicySetDetailPage() {
     count: policy.rules.filter((rule) => rule.kind === kind && rule.isEnabled)
       .length,
   }));
-  const missingRequiredSod = policy.validation.errors.some(
-    (issue) =>
-      issue.code === 'SOD_REQUIRED_CONTROL_MISSING' ||
-      (issue.code === 'RULE_FAMILY_MISSING' &&
-        issue.ruleKind === 'SegregationOfDuties')
+  const hasNoPolicySodRules = !familyCounts.some(
+    (item) => item.kind === 'SegregationOfDuties' && item.count > 0
   );
   const resolveValidationIssue = (issue: ProcurementPolicyValidationIssue) => {
     if (
@@ -563,16 +565,15 @@ export default function ProcurementPolicySetDetailPage() {
           </AlertDescription>
         </Alert>
       )}
-      {editable && missingRequiredSod && (
+      {editable && hasNoPolicySodRules && (
         <Alert>
           <ShieldCheck className="h-4 w-4" />
-          <AlertTitle>Required maker-checker controls are missing</AlertTitle>
+          <AlertTitle>Optional SOD policy templates</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              SOD prevents the same actor from performing incompatible actions
-              such as initiating and approving, creating and receiving a PO, or
-              processing and paying an invoice. Apply the prescribed six
-              controls instead of entering them manually.
+              The shared maker-checker baseline already prevents an actor from
+              approving their own transaction. Apply these templates only when
+              this policy needs additional named role-conflict declarations.
             </span>
             <Button
               type="button"
@@ -580,7 +581,7 @@ export default function ProcurementPolicySetDetailPage() {
               className="shrink-0"
               onClick={() => setSodDialogOpen(true)}
             >
-              Apply required SOD controls
+              Apply recommended SOD templates
             </Button>
           </AlertDescription>
         </Alert>
@@ -618,7 +619,7 @@ export default function ProcurementPolicySetDetailPage() {
                 <CardTitle>{policy.ruleCount}</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                {policy.ruleFamilyCount}/7 enabled families
+                {policy.ruleFamilyCount}/7 configured families (3 core)
               </CardContent>
             </Card>
             <Card>
@@ -650,11 +651,10 @@ export default function ProcurementPolicySetDetailPage() {
             <CardHeader>
               <CardTitle>Rule-family coverage</CardTitle>
               <CardDescription>
-                Category, method, threshold, and authority define execution.
-                Evidence defines the audit documents; Exception records the
-                explicit permitted or prohibited exception stance; SOD enforces
-                maker-checker conflicts. Publication remains fail-closed when a
-                mandatory family is absent.
+                Category, method, and threshold are the core sourcing families.
+                Authority is required only for policy-routed approvals. Evidence,
+                Exception, and SOD add conditional controls when the process needs
+                them; shared workflow and maker-checker controls remain active.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -664,7 +664,15 @@ export default function ProcurementPolicySetDetailPage() {
                   className="flex items-center justify-between border-b py-2 text-sm"
                 >
                   <span>{formatKind(item.kind)}</span>
-                  <Badge variant={item.count ? 'default' : 'destructive'}>
+                  <Badge
+                    variant={
+                      item.count
+                        ? 'default'
+                        : corePolicyRuleKinds.has(item.kind)
+                          ? 'destructive'
+                          : 'secondary'
+                    }
+                  >
                     {item.count}
                   </Badge>
                 </div>
@@ -784,13 +792,11 @@ export default function ProcurementPolicySetDetailPage() {
               <ShieldCheck className="h-4 w-4" />
               <AlertTitle>Why publication is stopped</AlertTitle>
               <AlertDescription>
-                The policy is executable configuration, so an incomplete rule
-                can approve the wrong amount or bypass a required control.
-                Evidence makes document/audit requirements explicit; Exception
-                makes the permitted or prohibited exception route explicit; SOD
-                prevents one actor from performing incompatible stages. Use
-                Resolve on each issue. Prescribed SOD controls can be
-                provisioned automatically.
+                The policy is executable configuration, so its core sourcing
+                rules and every enabled conditional rule must be internally
+                consistent. Evidence, Exception, Authority, and SOD are required
+                only when that control is enabled for this policy. Use Resolve on
+                each blocking issue.
               </AlertDescription>
             </Alert>
           )}
@@ -799,8 +805,8 @@ export default function ProcurementPolicySetDetailPage() {
               <CheckCircle2 className="h-4 w-4" />
               <AlertTitle>Publication validation passed</AlertTitle>
               <AlertDescription>
-                All rule families, relationships, periods, bounds, DEC lineage,
-                and override references currently pass.
+                Core sourcing families and all enabled relationships, periods,
+                bounds, DEC lineage, and override references currently pass.
               </AlertDescription>
             </Alert>
           )}
@@ -1148,10 +1154,11 @@ export default function ProcurementPolicySetDetailPage() {
       <Dialog open={sodDialogOpen} onOpenChange={setSodDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Apply required SOD controls</DialogTitle>
+            <DialogTitle>Apply recommended SOD templates</DialogTitle>
             <DialogDescription>
-              This creates only missing prescribed HardStop controls in this
-              Draft. Existing controls are retained and every change is audited.
+              This creates only missing recommended HardStop role-conflict
+              declarations in this Draft. Existing controls are retained and
+              every change is audited.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -1159,7 +1166,7 @@ export default function ProcurementPolicySetDetailPage() {
             <Textarea
               value={sodReason}
               onChange={(event) => setSodReason(event.target.value)}
-              placeholder="Why these mandatory controls are being provisioned"
+              placeholder="Why these additional role-conflict controls are needed"
             />
           </div>
           <DialogFooter>

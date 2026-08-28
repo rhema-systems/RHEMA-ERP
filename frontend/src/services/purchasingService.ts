@@ -21,7 +21,10 @@ function getMultipartAuthHeaders(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function getFriendlyErrorMessage(response: Response): Promise<string> {
+async function getFriendlyErrorMessage(
+  response: Response,
+  procurementPermissionGuidance?: string
+): Promise<string> {
   // Try to extract a meaningful error message from the API.
   // Some endpoints return plain text; others return JSON.
   let raw = '';
@@ -63,6 +66,10 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
     message &&
     message.includes('no Security role granting this procurement privilege')
   ) {
+    if (procurementPermissionGuidance) {
+      return procurementPermissionGuidance;
+    }
+
     return 'You cannot create this purchase requisition yet. Ask a Security administrator to assign the active TDC Requisitioner, TDC User Department Head, TDC Procurement Officer, or TDC Senior Procurement Officer role. A warehouse responsibility assignment is not required for requisition creation.';
   }
 
@@ -1061,9 +1068,9 @@ export interface ProcurementReceiptInspectionOverviewDto {
   history: ProcurementReceiptInspectionDto[];
 }
 
-export type ProcurementReceiptDocumentKind = 0 | 1;
-export type ProcurementReceiptDocumentStatus = 0 | 1 | 2 | 3;
-export type ProcurementReceiptDocumentReconciliationStatus = 0 | 1 | 2 | 3;
+export type ProcurementReceiptDocumentKind = 0 | 1 | 'Grn' | 'Mrn';
+export type ProcurementReceiptDocumentStatus = 0 | 1 | 2 | 3 | 'Draft' | 'PendingSignatures' | 'Issued' | 'Cancelled';
+export type ProcurementReceiptDocumentReconciliationStatus = 0 | 1 | 2 | 3 | 'Pending' | 'Reconciled' | 'Exception' | 'Cancelled';
 
 export interface ProcurementReceiptDocumentSignatureDto {
   id: string;
@@ -1182,6 +1189,9 @@ export interface ReceivePurchaseOrderItemDto {
   rejectedQuantity: number;
   warehouseId?: string;
   locationId?: string;
+  createInventoryItemIfMissing?: boolean;
+  inventoryCategoryId?: string;
+  proposedItemCode?: string;
   serialNumber?: string;
   lotNumber?: string;
   expirationDate?: string;
@@ -1576,7 +1586,14 @@ export const purchasingService = {
       `${API_BASE_URL}/PurchaseOrders/${id}/compliance-readiness?action=${encodeURIComponent(action)}`,
       { headers: getAuthHeaders() }
     );
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot view purchase-order compliance readiness. Ask a Security administrator to grant the procurement.records.read permission for this tenant.'
+        )
+      );
+    }
     return response.json();
   },
 
@@ -1587,15 +1604,26 @@ export const purchasingService = {
       `${API_BASE_URL}/PurchaseOrders/${id}/sod-readiness`,
       { headers: getAuthHeaders() }
     );
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot view purchase-order role-separation readiness. Ask a Security administrator to grant the procurement.records.read permission for this tenant.'
+        )
+      );
+    }
     return response.json();
   },
 
   async getReceiptSourceReadiness(
-    id: string
+    id: string,
+    warehouseId?: string
   ): Promise<ProcurementReceiptSourceReadinessDto> {
+    const warehouseQuery = warehouseId
+      ? `?warehouseId=${encodeURIComponent(warehouseId)}`
+      : '';
     const response = await fetch(
-      `${API_BASE_URL}/PurchaseOrders/${id}/receipt-source-readiness`,
+      `${API_BASE_URL}/PurchaseOrders/${id}/receipt-source-readiness${warehouseQuery}`,
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
@@ -1874,7 +1902,14 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot submit this purchase order for approval. Ask a Security administrator to grant the procurement.purchase-order.create permission. Only an authorized PO creator can submit it.'
+        )
+      );
+    }
   },
 
   /**
@@ -1890,7 +1925,14 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    if (!response.ok) {
+      throw new Error(
+        await getFriendlyErrorMessage(
+          response,
+          'You cannot approve or reject this purchase order. Ask a Security administrator to grant the procurement.purchase-order.approve permission. The approver must also be independent from the PO creator.'
+        )
+      );
+    }
   },
 
   /**

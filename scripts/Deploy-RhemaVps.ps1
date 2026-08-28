@@ -219,10 +219,38 @@ function Invoke-RemoteHelper {
     $encoded = [Convert]::ToBase64String(
         [Text.Encoding]::Unicode.GetBytes($remoteScript))
     $sshArguments = Get-SshArguments
-    $output = & ssh @sshArguments `
-        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded" `
-        2>&1
-    if ($LASTEXITCODE -ne 0) {
+    # Capture native stdout/stderr as raw text. PowerShell's native-command
+    # adapter attempts to deserialize large remote CLIXML error streams and
+    # can itself fail with "unclosed literal string", hiding the real remote
+    # result after packages and backups have already succeeded.
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command ssh.exe -ErrorAction Stop).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $sshArguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    [void]$startInfo.ArgumentList.Add(
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded")
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+
+    $output = @(
+        @($stdout -split "`r?`n")
+        @($stderr -split "`r?`n")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    if ($exitCode -ne 0) {
         $summary = (@($output) | Where-Object {
             $_ -notmatch '^#< CLIXML' -and $_ -notmatch '^<Objs '
         } | Select-Object -Last 20) -join [Environment]::NewLine
@@ -314,7 +342,8 @@ function New-ReleaseArtifacts {
         'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
         '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-o', $apiOutput,
-        '/p:PublishSingleFile=false', '-p:TdcFastEfBuild=true'
+        '/p:PublishSingleFile=false', '-p:TdcFastEfBuild=true',
+        '-p:UseSharedCompilation=false', '-m:1'
     ) 'API publish failed' | Out-Host
 
     foreach ($name in @(
@@ -394,7 +423,10 @@ function New-ReleaseArtifacts {
     Copy-Item (Join-Path $frontendRoot 'package.json') `
         (Join-Path $frontendOutput 'package.json') -Force
 
-    $cacheVersion = "vps-$($script:ShortCommit)"
+    # A diagnostic dirty-worktree release can share HEAD with an earlier VPS
+    # package. Include the deployment stamp so browsers always receive a new
+    # service-worker cache identity for the exact package being applied.
+    $cacheVersion = "vps-$($script:ShortCommit)-$($script:DeploymentStamp)"
     $serviceWorkerPath = Join-Path $frontendOutput 'public\sw.js'
     $serviceWorker = Get-Content $serviceWorkerPath -Raw
     $cacheMap = @{
@@ -572,9 +604,19 @@ function Invoke-PublicSmoke {
         '(?im)^access-control-allow-origin:') `
         'Unapproved-origin CORS preflight returned an allow-origin header.'
 
-    $direct = & curl.exe -sS --connect-timeout 5 --max-time 8 -o NUL `
-        -w '%{http_code}' "http://${VpsHost}:5000/health" 2>$null
-    Assert-True ($direct -eq '000') 'Direct public port 5000 is reachable.'
+    $directClient = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $directTask = $directClient.ConnectAsync($VpsHost, 5000)
+        $directReachable = $directTask.Wait([TimeSpan]::FromSeconds(5)) -and
+            $directClient.Connected
+    }
+    catch {
+        $directReachable = $false
+    }
+    finally {
+        $directClient.Dispose()
+    }
+    Assert-True (-not $directReachable) 'Direct public port 5000 is reachable.'
     Write-Output "PUBLIC_ASSETS|$($allAssets.Count)|JS=$javascriptCount|BAD_URLS=0"
     Write-Output 'PUBLIC_SMOKE|PASS'
 }
@@ -644,8 +686,8 @@ try {
             "HEAD is $($script:Commit), but origin/master is $remoteHead."
     }
 
-    $deploymentStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
-    $deploymentId = "$($script:ShortCommit)-$deploymentStamp"
+    $script:DeploymentStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
+    $deploymentId = "$($script:ShortCommit)-$($script:DeploymentStamp)"
     $releaseDirectory = Join-Path $ReleaseRoot $script:ShortCommit
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     $releaseManifest = $null

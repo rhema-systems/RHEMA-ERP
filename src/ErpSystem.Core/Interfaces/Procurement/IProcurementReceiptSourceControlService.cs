@@ -9,7 +9,8 @@ public interface IProcurementReceiptSourceControlService
     Task<ProcurementReceiptSourceReadinessDto> GetReadinessAsync(
         Guid purchaseOrderId,
         string correlationId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Guid? warehouseId = null);
 
     Task<ProcurementReceiptSourceSnapshot> EnforceCreateAsync(
         PurchaseOrder purchaseOrder,

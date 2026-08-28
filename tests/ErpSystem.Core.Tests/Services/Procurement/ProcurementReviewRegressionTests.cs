@@ -72,6 +72,104 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
+    public void Draft_and_submitted_purchase_orders_check_capacity_while_final_approval_posts_finance()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementPurchaseOrderSourceService.cs");
+        var reserveStart = source.IndexOf(
+            "public async Task ReserveAsync(",
+            StringComparison.Ordinal);
+        var reserveEnd = source.IndexOf(
+            "public async Task EnsureBudgetCommitmentForIssueAsync(",
+            reserveStart,
+            StringComparison.Ordinal);
+        var reserveBody = source[reserveStart..reserveEnd];
+
+        reserveStart.Should().BeGreaterThanOrEqualTo(0);
+        reserveEnd.Should().BeGreaterThan(reserveStart);
+        reserveBody.Should().Contain("await EnsureAwardBudgetCapacityAsync(");
+        reserveBody.Should().NotContain("await EnsureBudgetCommitmentAsync(",
+            "a Draft PO must not create Finance exposure");
+        var issueBody = source[reserveEnd..];
+        issueBody.Should().Contain("await EnsureBudgetCommitmentAsync(",
+            "the controlled final-approval path must establish Finance exposure");
+        var commitmentStart = source.IndexOf(
+            "private async Task EnsureBudgetCommitmentAsync(",
+            StringComparison.Ordinal);
+        var commitmentEnd = source.IndexOf(
+            "internal static void EnsureAwardBudgetExposure(",
+            commitmentStart,
+            StringComparison.Ordinal);
+        var commitmentBody = source[commitmentStart..commitmentEnd];
+        commitmentBody.Should().Contain("ApprovePermission",
+            "the independent approver must not require the maker's PO-create permission to post the final commitment");
+
+        var controller = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Controllers", "Procurement",
+            "PurchaseOrdersController.cs");
+        var approvalStart = controller.IndexOf(
+            "public Task<IActionResult> ApprovePurchaseOrder(",
+            StringComparison.Ordinal);
+        var submissionStart = controller.IndexOf(
+            "private async Task<IActionResult> SubmitPurchaseOrderCore(",
+            StringComparison.Ordinal);
+        var approvalBody = controller[approvalStart..submissionStart];
+        var submissionBody = controller[submissionStart..];
+
+        approvalBody.Should().Contain("_unitOfWork.ExecuteInStrategyAsync(",
+            "SQL Server retry strategies require the complete approval transaction to run inside the strategy delegate");
+        approvalBody.Should().Contain("private async Task<IActionResult> ApprovePurchaseOrderCore(");
+        approvalBody.Should().NotContain(
+            "return StatusCode(500, \"An error occurred while approving the purchase order\")",
+            "unexpected approval failures must reach the global exception logger with their real exception and stack trace");
+        approvalBody.Should().Contain("workflowResult.Outcome == WorkflowOutcome.Approved");
+        approvalBody.Should().Contain("EnsureBudgetCommitmentForIssueAsync(");
+        approvalBody.IndexOf("EnsureBudgetCommitmentForIssueAsync(", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                approvalBody.IndexOf("ApplyApprovalOutcome(", StringComparison.Ordinal),
+                "the commitment must exist before the PO is persisted as Approved");
+        submissionBody.Should().Contain("EnsureBudgetAvailabilityForSubmissionAsync(");
+        submissionBody.Should().NotContain("EnsureBudgetCommitmentForIssueAsync(",
+            "submission revalidates budget availability but must not post a firm commitment");
+        submissionBody.Should().Contain(
+            "HasActiveApprovalWorkflowAsync(",
+            "a missing PO workflow must be reported as configuration, not as a maker-checker violation");
+        submissionBody.Should().Contain("PO_APPROVAL_WORKFLOW_NOT_CONFIGURED");
+        submissionBody.IndexOf("HasActiveApprovalWorkflowAsync(", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                submissionBody.IndexOf("SubmitAsync(\"PurchaseOrder\"", StringComparison.Ordinal),
+                "the controller must fail clearly before the shared workflow fallback can auto-complete");
+    }
+
+    [Fact]
+    public void Permitted_vps_startup_repairs_and_publishes_the_uat_po_workflow()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs");
+        var lightweightStart = source.IndexOf(
+            "public async Task SeedWorkflowDefinitionsAsync()",
+            StringComparison.Ordinal);
+        var lightweightEnd = source.IndexOf(
+            "private async Task EnsureFinancePermissionAssignmentsAsync()",
+            lightweightStart,
+            StringComparison.Ordinal);
+        var lightweightBody = source[lightweightStart..lightweightEnd];
+
+        lightweightBody.Should().Contain(
+            "StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(");
+        lightweightBody.Should().Contain("_procurementAccessControlSeeder.SeedAsync()");
+        lightweightBody.Should().Contain(
+            "EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync()");
+        lightweightBody.IndexOf("_procurementAccessControlSeeder.SeedAsync()", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                lightweightBody.IndexOf(
+                    "EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync()",
+                    StringComparison.Ordinal),
+                "the Draft workflow and approver configuration must be repaired before publication");
+    }
+
+    [Fact]
     public void Plan_item_purchase_order_conversion_maps_source_authorization_to_forbidden()
     {
         var source = ReadRepositoryFile(
@@ -359,6 +457,8 @@ public sealed class ProcurementReviewRegressionTests
         source.Should().Contain("tdc.receipt-document.issued.v2");
         source.Should().Contain("evidence = inspection.Evidence");
         source.Should().Contain("signatures = document.Signatures");
+        source.Should().Contain("private const string IssuePermission = ManagePermission;",
+            "an authorised Stores actor must be able to issue a fully signed receipt document");
     }
 
     [Fact]

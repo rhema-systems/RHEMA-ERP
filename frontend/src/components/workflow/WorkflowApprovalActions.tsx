@@ -72,7 +72,15 @@ export interface WorkflowApprovalActionsProps {
   size?: 'sm' | 'default' | 'lg' | 'icon';
   iconOnly?: boolean;
   renderMode?: 'buttons' | 'menu-items';
+  submitCopyMode?: 'automatic' | 'approval';
   className?: string;
+}
+
+export function shouldUseApprovalSubmitCopy(
+  directLifecycle: boolean,
+  submitCopyMode: 'automatic' | 'approval' = 'automatic'
+) {
+  return submitCopyMode === 'approval' || !directLifecycle;
 }
 
 export function WorkflowApprovalActions({
@@ -102,6 +110,7 @@ export function WorkflowApprovalActions({
   size = 'sm',
   iconOnly = false,
   renderMode = 'buttons',
+  submitCopyMode = 'automatic',
   className,
 }: WorkflowApprovalActionsProps) {
   const formatPendingApprovers = (pending: WorkflowPendingApproverDto[], maxNames = 2) => {
@@ -199,6 +208,10 @@ export function WorkflowApprovalActions({
 
   const submitEnabled = approvalAvailabilityKnown && (canSubmit ?? defaultCanSubmit) && !!onSubmit;
   const directLifecycle = submitEnabled && !effectiveApprovalRequired;
+  const approvalSubmitCopy = shouldUseApprovalSubmitCopy(
+    directLifecycle,
+    submitCopyMode
+  );
   const approveRejectEnabledByStatus = effectiveApprovalRequired &&
     (canApproveReject ?? defaultCanApproveReject) && !!onApprove && !!onReject;
 
@@ -420,11 +433,11 @@ export function WorkflowApprovalActions({
     try {
       setSubmitting(true);
       await onSubmit();
-      toast.success(directLifecycle ? `${entityLabel} finalized` : `${entityLabel} submitted for approval`, {
+      toast.success(approvalSubmitCopy ? `${entityLabel} submitted for approval` : `${entityLabel} finalized`, {
         description: entityNumber
-          ? directLifecycle
-            ? `${entityNumber} has been finalized because approval is not enabled for this process.`
-            : `${entityNumber} has been submitted.`
+          ? approvalSubmitCopy
+            ? `${entityNumber} has been submitted.`
+            : `${entityNumber} has been finalized because approval is not enabled for this process.`
           : undefined,
       });
       await runAfter();
@@ -809,7 +822,7 @@ export function WorkflowApprovalActions({
             title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
           >
             <Send className="mr-2 h-4 w-4" />
-            {directLifecycle ? 'Finalize' : 'Submit for Approval'}
+            {approvalSubmitCopy ? 'Submit for Approval' : 'Finalize'}
           </DropdownMenuItem>
         )}
 
@@ -888,21 +901,21 @@ export function WorkflowApprovalActions({
         <ConfirmationDialog
           open={submitOpen}
           onOpenChange={setSubmitOpen}
-          title={directLifecycle ? `Finalize ${entityLabel}?` : `Submit ${entityLabel} For Approval?`}
+          title={approvalSubmitCopy ? `Submit ${entityLabel} For Approval?` : `Finalize ${entityLabel}?`}
           description={
             <div className="space-y-2">
               <div>
-                {directLifecycle ? 'You are about to finalize ' : 'You are about to submit '}
-                <strong>{entityNumber || entityLabel}</strong>{directLifecycle ? '.' : ' for approval.'}
+                {approvalSubmitCopy ? 'You are about to submit ' : 'You are about to finalize '}
+                <strong>{entityNumber || entityLabel}</strong>{approvalSubmitCopy ? ' for approval.' : '.'}
               </div>
               <div className="text-xs text-muted-foreground">
-                {directLifecycle
-                  ? 'No active approval workflow is configured for this process, so no approver action will be created.'
-                  : 'This will start (or resume) the configured approval workflow for this record.'}
+                {approvalSubmitCopy
+                  ? 'This will start (or resume) the configured approval workflow for this record.'
+                  : 'No active approval workflow is configured for this process, so no approver action will be created.'}
               </div>
             </div>
           }
-          confirmText={submitting ? (directLifecycle ? 'Finalizing...' : 'Submitting...') : (directLifecycle ? 'Finalize' : 'Submit')}
+          confirmText={submitting ? (approvalSubmitCopy ? 'Submitting...' : 'Finalizing...') : (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
           cancelText="Cancel"
           onConfirm={confirmSubmit}
           isLoading={submitting}
@@ -1178,11 +1191,11 @@ export function WorkflowApprovalActions({
             size={size}
             onClick={() => setSubmitOpen(true)}
             disabled={submitting || forwardActionsDisabled}
-            title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `${directLifecycle ? 'Finalize' : 'Submit'} ${entityLabel}` : undefined}
-            aria-label={iconOnly ? `${directLifecycle ? 'Finalize' : 'Submit'} ${entityLabel}` : undefined}
+            title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `${approvalSubmitCopy ? 'Submit for Approval' : 'Finalize'} ${entityLabel}` : undefined}
+            aria-label={iconOnly ? `${approvalSubmitCopy ? 'Submit for Approval' : 'Finalize'} ${entityLabel}` : undefined}
           >
             <Send className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
-            {!iconOnly && (directLifecycle ? 'Finalize' : 'Submit')}
+            {!iconOnly && (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
           </Button>
         )}
 
@@ -1264,21 +1277,21 @@ export function WorkflowApprovalActions({
       <ConfirmationDialog
         open={submitOpen}
         onOpenChange={setSubmitOpen}
-        title={directLifecycle ? `Finalize ${entityLabel}?` : `Submit ${entityLabel} For Approval?`}
+        title={approvalSubmitCopy ? `Submit ${entityLabel} For Approval?` : `Finalize ${entityLabel}?`}
         description={
           <div className="space-y-2">
             <div>
-              {directLifecycle ? 'You are about to finalize ' : 'You are about to submit '}
-              <strong>{entityNumber || entityLabel}</strong>{directLifecycle ? '.' : ' for approval.'}
+              {approvalSubmitCopy ? 'You are about to submit ' : 'You are about to finalize '}
+              <strong>{entityNumber || entityLabel}</strong>{approvalSubmitCopy ? ' for approval.' : '.'}
             </div>
             <div className="text-xs text-muted-foreground">
-              {directLifecycle
-                ? 'No active approval workflow is configured for this process, so no approver action will be created.'
-                : 'This will start (or resume) the configured approval workflow for this record.'}
+              {approvalSubmitCopy
+                ? 'This will start (or resume) the configured approval workflow for this record.'
+                : 'No active approval workflow is configured for this process, so no approver action will be created.'}
             </div>
           </div>
         }
-        confirmText={submitting ? (directLifecycle ? 'Finalizing...' : 'Submitting...') : (directLifecycle ? 'Finalize' : 'Submit')}
+        confirmText={submitting ? (approvalSubmitCopy ? 'Submitting...' : 'Finalizing...') : (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
         cancelText="Cancel"
         onConfirm={confirmSubmit}
         isLoading={submitting}

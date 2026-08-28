@@ -102,8 +102,22 @@ import {
   type PurchaseRequisitionType,
   type PurchaseRequisitionSummaryDto,
 } from '@/services/purchasingService';
+import { procurementSourcingCaseService } from '@/services/procurement-sourcing-case.service';
+import type { ProcurementMethodType } from '@/types/procurement-policy';
 
 type PlanExecutionAction = 'pr' | 'tender' | 'rfq' | 'po';
+
+const tenderSourcingMethods = new Set<ProcurementMethodType>([
+  'NationalCompetitiveTendering',
+  'InternationalCompetitiveTendering',
+  'RestrictedTendering',
+  'SingleSource',
+  'QualityBasedSelection',
+  'QualityAndCostBasedSelection',
+]);
+
+const formatSourcingMethod = (method?: ProcurementMethodType) =>
+  method ? method.replace(/([a-z])([A-Z])/g, '$1 $2') : 'no method';
 
 const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
   itemDescription: '',
@@ -1042,13 +1056,31 @@ export default function ProcurementPlanDetailPage() {
             await purchasingService.getPurchaseRequisitionSourcingReadiness(
               linkedRequisition.id
             );
-          if (!readiness.isReleased) {
+          if (!readiness.isReleased && !readiness.canRelease) {
             throw new Error(
-              `${linkedRequisition.requisitionNumber} has not passed and recorded sourcing release.`
+              readiness.message ||
+                `${linkedRequisition.requisitionNumber} is not ready for sourcing.`
             );
           }
 
           if (executionAction === 'tender') {
+            const methodReadiness =
+              await procurementSourcingCaseService.readiness(
+                linkedRequisition.id
+              );
+            const resolvedMethod =
+              methodReadiness.selectedMethod ?? methodReadiness.recommendedMethod;
+            if (
+              !methodReadiness.isMethodCompliant ||
+              !resolvedMethod ||
+              !tenderSourcingMethods.has(resolvedMethod)
+            ) {
+              throw new Error(
+                methodReadiness.isMethodCompliant
+                  ? `The effective policy selected ${formatSourcingMethod(resolvedMethod)}, not a Tender route.`
+                  : methodReadiness.message
+              );
+            }
             if (item.tenderId && item.procurementMethod !== 'RFQ') {
               completed += 1;
               navigationTarget =
@@ -1076,6 +1108,22 @@ export default function ProcurementPlanDetailPage() {
           }
 
           if (executionAction === 'rfq') {
+            const methodReadiness =
+              await procurementSourcingCaseService.readiness(
+                linkedRequisition.id
+              );
+            const resolvedMethod =
+              methodReadiness.selectedMethod ?? methodReadiness.recommendedMethod;
+            if (
+              !methodReadiness.isMethodCompliant ||
+              resolvedMethod !== 'RequestForQuotation'
+            ) {
+              throw new Error(
+                methodReadiness.isMethodCompliant
+                  ? `The effective policy selected ${formatSourcingMethod(resolvedMethod)}, not Request for Quotation.`
+                  : methodReadiness.message
+              );
+            }
             if (item.tenderId && item.procurementMethod === 'RFQ') {
               completed += 1;
               navigationTarget =
@@ -1926,7 +1974,7 @@ export default function ProcurementPlanDetailPage() {
                                         item.tenderId &&
                                         item.procurementMethod !== 'RFQ'
                                           ? 'Open Tender'
-                                          : 'Create Tender after PR sourcing release'
+                                          : 'Create Tender when the approved PR policy selects a tender route'
                                       }
                                       aria-label={`${item.tenderId ? 'Open' : 'Create'} tender for ${item.itemDescription}`}
                                     >
@@ -1949,7 +1997,7 @@ export default function ProcurementPlanDetailPage() {
                                         item.tenderId &&
                                         item.procurementMethod === 'RFQ'
                                           ? 'Open RFQ'
-                                          : 'Create RFQ after PR sourcing release'
+                                          : 'Create RFQ when the approved PR policy selects Request for Quotation'
                                       }
                                       aria-label={`${item.tenderId ? 'Open' : 'Create'} RFQ for ${item.itemDescription}`}
                                     >
@@ -3009,7 +3057,8 @@ export default function ProcurementPlanDetailPage() {
             {executionAction !== 'pr' && (
               <p>
                 The action proceeds only where the linked Purchase Requisition
-                is Approved and has a current recorded sourcing release.
+                is Approved and its effective policy selects that route. The
+                sourcing-release audit record is generated automatically.
               </p>
             )}
             {executionAction === 'po' && (

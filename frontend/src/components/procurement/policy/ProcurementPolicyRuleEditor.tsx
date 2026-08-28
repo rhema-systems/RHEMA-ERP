@@ -105,7 +105,7 @@ export function ProcurementPolicyRuleEditor({
   const { toast } = useToast();
   const definition = procurementPolicyRuleRegistry[kind];
   const [value, setValue] = useState<ProcurementPolicyRuleValue>(() => {
-    const initial = {
+    const initial: ProcurementPolicyRuleValue = {
       ...createProcurementPolicyRuleValue(
         kind,
         policyEffectiveFrom.slice(0, 10),

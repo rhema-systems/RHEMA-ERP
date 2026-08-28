@@ -9,6 +9,22 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementPurchaseOrderComplianceRulesTests
 {
     [Theory]
+    [InlineData("Draft", false)]
+    [InlineData("Pending Approval", false)]
+    [InlineData("Submitted", false)]
+    [InlineData("Approved", true)]
+    [InlineData("Sent", true)]
+    [InlineData("Partially Received", true)]
+    public void ActiveCommitmentIsRequiredOnlyAfterFinalApproval(
+        string status,
+        bool expected)
+    {
+        ProcurementPurchaseOrderComplianceRules
+            .RequiresActiveBudgetCommitment(status)
+            .Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(100, 100, true)]
     [InlineData(100, 75, true)]
     [InlineData(100, 0, true)]

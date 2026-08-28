@@ -33,7 +33,7 @@ describe('getSourcingReleasePresentation', () => {
     });
   });
 
-  it('enables the release action only for compliant readiness', () => {
+  it('allows sourcing to generate the release audit record for compliant readiness', () => {
     expect(
       getSourcingReleasePresentation(
         readiness({
@@ -45,7 +45,7 @@ describe('getSourcingReleasePresentation', () => {
     ).toMatchObject({
       tone: 'ready',
       canRelease: true,
-      canEnterSourcing: false,
+      canEnterSourcing: true,
     });
   });
 
@@ -65,14 +65,14 @@ describe('getSourcingReleasePresentation', () => {
     });
   });
 
-  it('keeps stale releases out of sourcing', () => {
+  it('allows sourcing to revalidate and append a new release after an eligible change', () => {
     expect(
       getSourcingReleasePresentation(
         readiness({ hasStaleRelease: true, canRelease: true })
       )
     ).toMatchObject({
       tone: 'stale',
-      canEnterSourcing: false,
+      canEnterSourcing: true,
       canRelease: true,
     });
   });

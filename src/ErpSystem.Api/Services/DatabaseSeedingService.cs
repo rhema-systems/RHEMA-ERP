@@ -341,12 +341,29 @@ namespace ErpSystem.Web.Services
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
             await EnsureBusinessPartnerWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring procurement receipt-inspection workflow is seeded...");
+            await EnsureProcurementOperationalWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring project workflows are seeded...");
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
+
+            // Program.cs invokes this lightweight path during every permitted VPS
+            // startup. Keep the UAT PO route here so Draft templates are repaired and
+            // published before operators can submit purchase orders.
+            if (_procurementAccessControlSeeder is not null &&
+                StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+                    _environment.EnvironmentName,
+                    _allowDevelopmentDataSeedingOutsideDevelopment))
+            {
+                _logger.LogInformation(
+                    "Ensuring TDC Draft workflow templates and the UAT Purchase Order approval workflow are ready...");
+                await _procurementAccessControlSeeder.SeedAsync();
+                await _procurementAccessControlSeeder
+                    .EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync();
+            }
         }
 
         private async Task EnsureFinancePermissionAssignmentsAsync()
@@ -356,6 +373,77 @@ namespace ErpSystem.Web.Services
             // required by Finance authorization policies exists before those policies are enforced.
             await SeedRolesAsync();
             await SeedRolePermissionAssignmentsAsync();
+        }
+
+        private async Task EnsureProcurementOperationalWorkflowsSeededAsync()
+        {
+            try
+            {
+                const string entityCode = "PROCUREMENT_RECEIPT_INSPECTION";
+                const string definitionName = "Procurement Receipt Inspection Approval";
+                const string approverRole = "TDC_STORES_MANAGER";
+                var stages = new[]
+                {
+                    new WorkflowApprovalStageSeed(
+                        "PendingApproval",
+                        new[] { approverRole },
+                        "Independent Stores Manager approval of accepted, rejected, damaged, and short receipt quantities.")
+                };
+                var tenants = await _context.Tenants
+                    .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                foreach (var tenant in tenants)
+                {
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode,
+                        "Procurement Receipt Inspection",
+                        typeof(ProcurementReceiptInspectionCase).FullName,
+                        definitionName,
+                        "Stores maker-checker approval before accepted receipt quantities become stock and AP eligible.",
+                        stages);
+
+                    // Earlier system seed data assigned this step to Head of Procurement.
+                    // Pending approval rows contain no decision and are safe to realign to
+                    // the corrected Stores Manager workflow role. Completed rows remain immutable.
+                    var pendingApprovals = await _context.WorkflowApprovals
+                        .Include(approval => approval.StepInstance)
+                            .ThenInclude(instance => instance.WorkflowStep)
+                                .ThenInclude(step => step.WorkflowDefinition)
+                        .Where(approval =>
+                            approval.TenantId == tenant.Id &&
+                            !approval.IsDeleted &&
+                            approval.Status == WorkflowApprovalStatus.Pending &&
+                            approval.ApproverId == null &&
+                            approval.ApproverRole != approverRole &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.CreatedBy == "System" &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.Name.StartsWith(definitionName))
+                        .ToListAsync();
+
+                    if (pendingApprovals.Count == 0)
+                        continue;
+
+                    var repairedAt = DateTime.UtcNow;
+                    foreach (var approval in pendingApprovals)
+                    {
+                        approval.ApproverRole = approverRole;
+                        approval.UpdatedAt = repairedAt;
+                        approval.UpdatedBy = "System";
+                    }
+
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation(
+                        "Realigned {Count} pending receipt-inspection approval assignment(s) to {Role} for tenant {TenantId}",
+                        pendingApprovals.Count,
+                        approverRole,
+                        tenant.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed procurement operational workflows");
+            }
         }
 
         private async Task EnsureProjectWorkflowsSeededAsync()
@@ -8325,6 +8413,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
@@ -8409,6 +8498,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
                     "Finance.AP.Payments.Process",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",

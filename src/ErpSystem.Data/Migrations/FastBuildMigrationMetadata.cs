@@ -8,6 +8,14 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage")] partial class AllowReceiptDocumentDefaultsWithAuditLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster")] partial class AlignRfqCommercialIdentityWithReceiptItemMaster { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827090000_AlignSupplierOnboardingPartnerCategories")] partial class AlignSupplierOnboardingPartnerCategories { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes")] partial class AlignPurchaseOrderSourceTriggerWithSupportedRoutes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826190000_AlignPurchaseOrderCommitmentWithRequisition")] partial class AlignPurchaseOrderCommitmentWithRequisition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826180000_AllowReleaseOnlyPurchaseOrderSourceLineage")] partial class AllowReleaseOnlyPurchaseOrderSourceLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826170000_AllowReleaseOnlyRfqAwardTransition")] partial class AllowReleaseOnlyRfqAwardTransition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825170000_AllowReleaseOnlyProcurementSourceEntry")] partial class AllowReleaseOnlyProcurementSourceEntry { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260825143000_HardenProcurementPolicyRoleLineage")] partial class HardenProcurementPolicyRoleLineage { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824183000_SimplifyPurchaseRequisitionControls")] partial class SimplifyPurchaseRequisitionControls { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260824162000_BackfillPlanLinkedPurchaseRequisitionCostCenters")] partial class BackfillPlanLinkedPurchaseRequisitionCostCenters { }

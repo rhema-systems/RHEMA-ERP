@@ -7016,7 +7016,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure PartnerCategory entity
         builder.Entity<PartnerCategory>(entity =>
         {
-            entity.HasIndex(pc => pc.CategoryCode).IsUnique();
+            entity.HasIndex(pc => new { pc.TenantId, pc.CategoryCode }).IsUnique();
             entity.HasIndex(pc => pc.CategoryName);
             entity.HasIndex(pc => pc.CategoryType);
             entity.HasIndex(pc => pc.IsActive);
@@ -9900,7 +9900,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[ProcurementSourceType] IS NULL OR [ProcurementSourceType] = 5 OR [ProcurementCategory] IS NOT NULL");
                 table.HasCheckConstraint(
                     "CK_PurchaseOrders_ApprovedSourceLineage",
-                    "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
+                    "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND (([SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL) OR ([SourcingCaseId] IS NULL AND [ProcurementSourceType] = 0 AND [AwardReadinessDecisionId] IS NULL) OR ([SourcingCaseId] IS NULL AND [ProcurementSourceType] IN (1, 2) AND [AwardReadinessDecisionId] IS NOT NULL))))");
             });
             entity.HasIndex(po => po.OrderNumber).IsUnique();
             entity.HasIndex(po => po.Status);

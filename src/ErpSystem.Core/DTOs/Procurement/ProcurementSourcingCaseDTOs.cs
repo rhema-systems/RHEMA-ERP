@@ -35,8 +35,8 @@ public sealed class ProcurementSourcingCaseSourceOptionDto
     public Guid RequisitionId { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public string RequisitionStatus { get; set; } = string.Empty;
-    public Guid SourcingReleaseId { get; set; }
-    public string ReleaseReference { get; set; } = string.Empty;
+    public Guid? SourcingReleaseId { get; set; }
+    public string? ReleaseReference { get; set; }
     public Guid? SourcePlanId { get; set; }
     public Guid? SourcePlanItemId { get; set; }
     public string? SourcePlanNumber { get; set; }

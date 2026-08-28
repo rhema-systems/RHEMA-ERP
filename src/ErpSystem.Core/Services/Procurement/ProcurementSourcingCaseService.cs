@@ -110,28 +110,41 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         CancellationToken cancellationToken = default)
     {
         await EnsureCapabilityAsync(ReadPermission, "source-options", "sourcing-case-source-options", cancellationToken);
-        var releases = await Releases.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
-            .Include(item => item.PurchaseRequisition).AsNoTracking()
-            .OrderByDescending(item => item.AttemptNumber).ThenByDescending(item => item.ReleasedAtUtc)
+        var requisitions = await Requisitions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.Status == "Approved")
+            .AsNoTracking()
+            .OrderByDescending(item => item.ApprovedAt)
+            .Take(250)
             .ToListAsync(cancellationToken);
-        var latest = releases.GroupBy(item => item.PurchaseRequisitionId).Select(group => group.First()).ToList();
-        var releaseIds = latest.Select(item => item.Id).ToList();
+        var requisitionIds = requisitions.Select(item => item.Id).ToList();
         var cases = await Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                releaseIds.Contains(item.SourcingReleaseId) && !item.IsDeleted)
-            .AsNoTracking().ToListAsync(cancellationToken);
-        return latest.Select(item =>
+                requisitionIds.Contains(item.PurchaseRequisitionId) && !item.IsDeleted)
+            .AsNoTracking()
+            .OrderByDescending(item => item.CaseSequence)
+            .ToListAsync(cancellationToken);
+        var options = new List<ProcurementSourcingCaseSourceOptionDto>();
+        foreach (var requisition in requisitions)
         {
-            var existing = cases.SingleOrDefault(entry => entry.SourcingReleaseId == item.Id);
-            var requisition = item.PurchaseRequisition;
-            return new ProcurementSourcingCaseSourceOptionDto
+            PurchaseRequisitionSourcingReadinessDto readiness;
+            try
             {
-                RequisitionId = item.PurchaseRequisitionId,
+                readiness = await _sourcingReleases.GetReadinessAsync(requisition.Id, cancellationToken);
+            }
+            catch (ProcurementRequisitionSourcingNotFoundException)
+            {
+                continue;
+            }
+            if (!readiness.IsCompliant) continue;
+            var existing = cases.FirstOrDefault(entry => entry.PurchaseRequisitionId == requisition.Id);
+            options.Add(new ProcurementSourcingCaseSourceOptionDto
+            {
+                RequisitionId = requisition.Id,
                 RequisitionNumber = requisition.RequisitionNumber,
                 RequisitionStatus = requisition.Status,
-                SourcingReleaseId = item.Id,
-                ReleaseReference = item.ReleaseReference,
-                SourcePlanId = item.SourcePlanId,
-                SourcePlanItemId = item.SourcePlanItemId,
+                SourcingReleaseId = readiness.CurrentRelease?.Id,
+                ReleaseReference = readiness.CurrentRelease?.ReleaseReference,
+                SourcePlanId = requisition.SourcePlanId,
+                SourcePlanItemId = requisition.SourcePlanItemId,
                 SourcePlanNumber = requisition.SourcePlanNumber,
                 SourcePlanItemDescription = requisition.SourcePlanItemDescription,
                 Category = requisition.ProcurementCategory ?? ProcurementCategoryClass.Goods,
@@ -139,8 +152,9 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
                 CurrencyCode = NormalizeCurrency(requisition.Currency),
                 CurrentCaseId = existing?.Id,
                 CurrentCaseNumber = existing?.CaseNumber
-            };
-        }).OrderByDescending(item => item.RequisitionNumber).ToList();
+            });
+        }
+        return options;
     }
 
     public async Task<ProcurementSourcingCaseReadinessDto> GetReadinessAsync(
@@ -160,7 +174,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         }
 
         MethodSelectionDecision? selection = null;
-        if (releaseReadiness.IsReleased)
+        if (releaseReadiness.IsCompliant)
             selection = await ResolveMethodSelectionAsync(requisition, method, overrideReason,
                 $"sourcing-case-readiness:{requisitionId:N}", OverrideControlMode.Check, cancellationToken);
         var existing = releaseReadiness.CurrentRelease is null
@@ -169,17 +183,17 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             : await CaseQuery(false).SingleOrDefaultAsync(item => item.SourcingReleaseId == releaseReadiness.CurrentRelease.Id, cancellationToken);
         var existingDto = existing is null ? null : await MapAsync(existing, cancellationToken);
         var methodCompliant = selection?.IsEligible == true;
-        var canCreate = releaseReadiness.IsReleased && releaseReadiness.CurrentRelease is not null && existing is null && methodCompliant;
-        var code = !releaseReadiness.IsReleased ? releaseReadiness.DecisionCode
+        var canCreate = releaseReadiness.IsCompliant && existing is null && methodCompliant;
+        var code = !releaseReadiness.IsCompliant ? releaseReadiness.DecisionCode
             : existing is not null ? "SOURCING_CASE_ALREADY_EXISTS"
             : !methodCompliant ? selection?.DecisionCode ?? "SOURCING_CASE_METHOD_BLOCKED"
             : selection?.MethodSelectionBasis == ProcurementSourcingMethodSelectionBasis.ApprovedOverride
                 ? "SOURCING_CASE_OVERRIDE_READY"
                 : "SOURCING_CASE_RECOMMENDATION_READY";
-        var message = !releaseReadiness.IsReleased ? releaseReadiness.Message
+        var message = !releaseReadiness.IsCompliant ? releaseReadiness.Message
             : existing is not null ? $"Sourcing case {existing.CaseNumber} already owns this immutable release."
             : !methodCompliant ? selection?.Message ?? "The procurement method could not be resolved from the current effective policy."
-            : selection?.Message ?? "The current immutable release and server-derived recommendation can be locked into a sourcing case.";
+            : selection?.Message ?? "The server-derived recommendation can be locked into a sourcing case; its release audit record is created automatically.";
         return new ProcurementSourcingCaseReadinessDto
         {
             RequisitionId = requisition.Id,
@@ -223,6 +237,19 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         var requisition = await LoadRequisitionAsync(request.RequisitionId, true, cancellationToken);
         var lines = await LoadLinesAsync(requisition.Id, true, cancellationToken);
         var readiness = await GetReadinessAsync(requisition.Id, request.SelectedMethod, request.MethodOverrideReason, cancellationToken);
+        if (!readiness.IsReleaseCurrent && readiness.CanCreate)
+        {
+            await _sourcingReleases.ReleaseAsync(
+                requisition.Id,
+                $"System-generated release for sourcing case {requisition.RequisitionNumber}.",
+                normalizedCorrelation,
+                cancellationToken);
+            readiness = await GetReadinessAsync(
+                requisition.Id,
+                request.SelectedMethod,
+                request.MethodOverrideReason,
+                cancellationToken);
+        }
         if (!readiness.IsReleaseCurrent || readiness.CurrentRelease is null)
             throw new ProcurementSourcingCaseValidationException(readiness.DecisionCode, readiness.Message);
         var selection = await ResolveMethodSelectionAsync(requisition, request.SelectedMethod, request.MethodOverrideReason,

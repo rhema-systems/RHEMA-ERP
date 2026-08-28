@@ -92,6 +92,14 @@ public static class ProcurementPurchaseOrderComplianceRules
         activePurchaseOrderExposure >= 0m &&
         activePurchaseOrderExposure <= activeReservedAmount;
 
+    public static bool RequiresActiveBudgetCommitment(string? purchaseOrderStatus) =>
+        !string.IsNullOrWhiteSpace(purchaseOrderStatus) &&
+        !purchaseOrderStatus.Equals("Draft", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Pending Approval", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Rejected", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsContractSignatureComplete(
         DateTime? organizationSignedAt,
         Guid? organizationSignatoryId,

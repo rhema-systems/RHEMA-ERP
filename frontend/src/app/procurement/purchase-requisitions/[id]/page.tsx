@@ -69,7 +69,11 @@ import {
   PurchaseRequisitionSubmissionReadinessDto,
   PurchaseRequisitionSourcingReadinessDto,
   PurchaseRequisitionSourcingReleaseDto,
+  ProcurementPurchaseOrderSourceStatusDto,
 } from '@/services/purchasingService';
+import { procurementSourcingCaseService } from '@/services/procurement-sourcing-case.service';
+import type { ProcurementSourcingCaseReadiness } from '@/types/procurement-sourcing-case';
+import type { ProcurementMethodType } from '@/types/procurement-policy';
 import { getBudgetControlPresentation } from '@/lib/procurement-requisition-budget';
 import { getAuthorityControlPresentation } from '@/lib/procurement-requisition-authority';
 import { getSubmissionControlPresentation } from '@/lib/procurement-requisition-submission';
@@ -131,6 +135,20 @@ const formatMoney = (amount: number, currency?: string) =>
     maximumFractionDigits: 2,
   }).format(amount);
 
+const tenderMethods = new Set<ProcurementMethodType>([
+  'NationalCompetitiveTendering',
+  'InternationalCompetitiveTendering',
+  'RestrictedTendering',
+  'SingleSource',
+  'QualityBasedSelection',
+  'QualityAndCostBasedSelection',
+]);
+
+const formatMethod = (method?: ProcurementMethodType) =>
+  method
+    ? method.replace(/([a-z])([A-Z])/g, '$1 $2')
+    : 'Not resolved';
+
 export default function PurchaseRequisitionDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -170,7 +188,10 @@ export default function PurchaseRequisitionDetailPage() {
     PurchaseRequisitionSourcingReleaseDto[]
   >([]);
   const [sourcingReadinessLoading, setSourcingReadinessLoading] = useState(true);
-  const [releasingForSourcing, setReleasingForSourcing] = useState(false);
+  const [sourcingCaseReadiness, setSourcingCaseReadiness] =
+    useState<ProcurementSourcingCaseReadiness>();
+  const [poSourceStatus, setPoSourceStatus] =
+    useState<ProcurementPurchaseOrderSourceStatusDto>();
   const [exporting, setExporting] = useState(false);
 
   const fetchRequisition = async () => {
@@ -259,6 +280,22 @@ export default function PurchaseRequisitionDetailPage() {
         setSourcingHistory([]);
       } finally {
         setSourcingReadinessLoading(false);
+      }
+      const [caseResult, poResult] = await Promise.allSettled([
+        procurementSourcingCaseService.readiness(id),
+        purchasingService.getPurchaseOrderSourceOptions(id),
+      ]);
+      if (caseResult.status === 'fulfilled') {
+        setSourcingCaseReadiness(caseResult.value);
+      } else {
+        console.warn('Policy-selected sourcing route is unavailable:', caseResult.reason);
+        setSourcingCaseReadiness(undefined);
+      }
+      if (poResult.status === 'fulfilled') {
+        setPoSourceStatus(poResult.value);
+      } else {
+        console.warn('Purchase-order source readiness is unavailable:', poResult.reason);
+        setPoSourceStatus(undefined);
       }
       try {
         setSubmissionHistory(
@@ -383,18 +420,25 @@ export default function PurchaseRequisitionDetailPage() {
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
   const handleConvertToPO = async () => {
-    try {
-      const poData = await purchasingService.convertToPurchaseOrder(id);
-      toast.success('Redirecting to create purchase order...');
-      // Navigate to PO creation page with pre-filled data
-      router.push(`/procurement/purchase-orders/new?fromRequisition=${id}`);
-    } catch (error: any) {
-      console.error('Error converting to PO:', error);
-      toast.error(error.message || 'Failed to convert to purchase order');
+    if (!poSourceStatus?.ready) {
+      toast.error(
+        poSourceStatus?.blockedReasons[0] ||
+          'Complete the approved award or other eligible PO source before creating the purchase order.'
+      );
+      return;
     }
+    router.push(`/procurement/purchase-orders/new?fromRequisition=${id}`);
   };
 
   const handleCreateRfq = async () => {
+    if (!canCreateRfq) {
+      toast.error(
+        resolvedMethod
+          ? `The effective policy selected ${formatMethod(resolvedMethod)}, not Request for Quotation.`
+          : sourcingCaseReadiness?.message || 'The procurement method has not been resolved.'
+      );
+      return;
+    }
     try {
       const result =
         await purchasingService.createRfqFromPurchaseRequisition(id);
@@ -409,30 +453,19 @@ export default function PurchaseRequisitionDetailPage() {
   };
 
   const handleCreateTender = async () => {
+    if (!canCreateTender) {
+      toast.error(
+        resolvedMethod
+          ? `The effective policy selected ${formatMethod(resolvedMethod)}, which is not routed through Tender creation.`
+          : sourcingCaseReadiness?.message || 'The procurement method has not been resolved.'
+      );
+      return;
+    }
     try {
       router.push(`/procurement/tenders/new?fromRequisitionId=${id}`);
     } catch (error: any) {
       console.error('Error navigating to tender creation:', error);
       toast.error(error.message || 'Failed to start Tender process');
-    }
-  };
-
-  const handleReleaseForSourcing = async (reason: string) => {
-    try {
-      setReleasingForSourcing(true);
-      const release = await purchasingService.releasePurchaseRequisitionForSourcing(id, reason);
-      toast.success(`Sourcing release ${release.releaseReference} recorded`);
-      const [readiness, history] = await Promise.all([
-        purchasingService.getPurchaseRequisitionSourcingReadiness(id),
-        purchasingService.getPurchaseRequisitionSourcingReleaseHistory(id),
-      ]);
-      setSourcingReadiness(readiness);
-      setSourcingHistory(history);
-    } catch (releaseError: any) {
-      toast.error(releaseError.message || 'Failed to release requisition for sourcing');
-      throw releaseError;
-    } finally {
-      setReleasingForSourcing(false);
     }
   };
 
@@ -496,9 +529,21 @@ export default function PurchaseRequisitionDetailPage() {
   }
 
   const canEdit = requisition.status === 'Draft';
-  const canConvertToPO = requisition.status === 'Approved';
-  const canCreateRfq = requisition.status === 'Approved' && sourcingPresentation.canEnterSourcing;
-  const canCreateTender = requisition.status === 'Approved' && sourcingPresentation.canEnterSourcing;
+  const approved = requisition.status === 'Approved';
+  const resolvedMethod =
+    sourcingCaseReadiness?.selectedMethod ??
+    sourcingCaseReadiness?.recommendedMethod;
+  const canConvertToPO = approved && poSourceStatus?.ready === true;
+  const canCreateRfq =
+    approved &&
+    sourcingPresentation.canEnterSourcing &&
+    sourcingCaseReadiness?.isMethodCompliant === true &&
+    resolvedMethod === 'RequestForQuotation';
+  const canCreateTender =
+    approved &&
+    sourcingPresentation.canEnterSourcing &&
+    sourcingCaseReadiness?.isMethodCompliant === true &&
+    Boolean(resolvedMethod && tenderMethods.has(resolvedMethod));
 
   return (
     <div className="space-y-6">
@@ -545,22 +590,36 @@ export default function PurchaseRequisitionDetailPage() {
 
           <WorkflowApprovalActions {...workflow.actionProps} />
 
-          {canCreateTender && (
-            <Button variant="outline" onClick={handleCreateTender}>
+          {approved && (
+            <Button
+              variant="outline"
+              onClick={handleCreateTender}
+              disabled={!canCreateTender}
+              title={!canCreateTender ? 'Available only when policy selects a tender method.' : undefined}
+            >
               <FileText className="h-4 w-4 mr-2" />
               Create Tender
             </Button>
           )}
 
-          {canConvertToPO && (
-            <Button onClick={handleConvertToPO}>
+          {approved && (
+            <Button
+              onClick={handleConvertToPO}
+              disabled={!canConvertToPO}
+              title={!canConvertToPO ? poSourceStatus?.blockedReasons[0] || 'An approved PO source is required.' : undefined}
+            >
               <ShoppingCart className="h-4 w-4 mr-2" />
               Create Purchase Order
             </Button>
           )}
 
-          {canCreateRfq && (
-            <Button variant="outline" onClick={handleCreateRfq}>
+          {approved && (
+            <Button
+              variant="outline"
+              onClick={handleCreateRfq}
+              disabled={!canCreateRfq}
+              title={!canCreateRfq ? 'Available only when policy selects Request for Quotation.' : undefined}
+            >
               <FileText className="h-4 w-4 mr-2" />
               Create RFQ
             </Button>
@@ -572,6 +631,20 @@ export default function PurchaseRequisitionDetailPage() {
           </Button>
         </div>
       </div>
+
+      {approved && (
+        <div className="rounded-lg border bg-slate-50 px-4 py-3 text-sm">
+          <span className="font-medium">Next procurement route:</span>{' '}
+          {sourcingCaseReadiness?.isMethodCompliant
+            ? `${formatMethod(resolvedMethod)} was selected by the effective category, amount, currency, and threshold rules.`
+            : sourcingCaseReadiness?.message || 'The policy-selected sourcing route is being resolved.'}
+          {!poSourceStatus?.ready && poSourceStatus?.blockedReasons[0] && (
+            <span className="ml-2 text-muted-foreground">
+              Purchase Order: {poSourceStatus.blockedReasons[0]}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Breadcrumbs */}
       <Breadcrumb>
@@ -1064,8 +1137,6 @@ export default function PurchaseRequisitionDetailPage() {
         readiness={sourcingReadiness}
         history={sourcingHistory}
         loading={sourcingReadinessLoading}
-        releasing={releasingForSourcing}
-        onRelease={handleReleaseForSourcing}
       />
 
       {/* Rejection Notice */}

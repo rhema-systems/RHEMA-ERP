@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
@@ -46,12 +47,50 @@ public sealed class ProcurementReceiptSourceEvidenceServiceTests
             .WithMessage("*External users*");
     }
 
+    [Fact]
+    public async Task ProcurementRecordsReaderCanViewReceiptEvidenceWithoutInventoryAssignment()
+    {
+        var receiptId = Guid.NewGuid();
+        await using var db = Database();
+        SeedReceipt(db, TenantScope, receiptId);
+        await db.SaveChangesAsync();
+        var access = new Mock<IProcurementAccessControlService>();
+        access.Setup(item => item.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+            {
+                Allowed = false,
+                Code = "ACCESS_DENIED"
+            });
+        access.Setup(item => item.CheckCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.records.read"),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+            {
+                Allowed = true,
+                Code = "ACCESS_ALLOWED"
+            });
+
+        var result = await Service(db, User(TenantScope), access.Object)
+            .GetOverviewAsync(receiptId);
+
+        result.ReceiptId.Should().Be(receiptId);
+        result.CanUpload.Should().BeFalse();
+        access.Verify(item => item.CheckCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.records.read"),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private static ProcurementReceiptSourceEvidenceService Service(
         ApplicationDbContext db,
-        ICurrentUserProvider user) => new(
+        ICurrentUserProvider user,
+        IProcurementAccessControlService? access = null) => new(
         db,
         user,
-        Mock.Of<IProcurementAccessControlService>(),
+        access ?? Mock.Of<IProcurementAccessControlService>(),
         Mock.Of<IControlledFileUploadService>(),
         Mock.Of<ICentralDocumentRepositoryFileService>(),
         Mock.Of<IProcurementControlEventService>(),
@@ -75,13 +114,23 @@ public sealed class ProcurementReceiptSourceEvidenceServiceTests
 
     private static void SeedReceipt(ApplicationDbContext db, Guid tenantId, Guid receiptId)
     {
+        var partner = new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PartnerCode = $"SUP-{Guid.NewGuid():N}"[..18],
+            PartnerName = "Receipt Test Supplier"
+        };
         var purchaseOrder = new PurchaseOrder
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             OrderNumber = $"PO-{Guid.NewGuid():N}"[..18],
-            Status = "Approved"
+            Status = "Approved",
+            BusinessPartnerId = partner.Id,
+            BusinessPartner = partner
         };
+        db.BusinessPartners.Add(partner);
         db.PurchaseOrders.Add(purchaseOrder);
         db.PurchaseOrderReceipts.Add(new PurchaseOrderReceipt
         {

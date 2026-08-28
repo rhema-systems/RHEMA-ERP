@@ -133,20 +133,22 @@ export function getSourcingReleasePresentation(
   if (readiness.hasStaleRelease) {
     return {
       tone: 'stale',
-      title: 'Sourcing release is stale',
-      badge: 'Revalidation required',
+      title: readiness.canRelease
+        ? 'Ready for sourcing revalidation'
+        : 'Sourcing release is stale',
+      badge: readiness.canRelease ? 'Ready' : 'Revalidation required',
       canRelease: readiness.canRelease,
-      canEnterSourcing: false,
+      canEnterSourcing: readiness.canRelease,
     };
   }
 
   if (readiness.canRelease) {
     return {
       tone: 'ready',
-      title: 'Ready for sourcing release',
+      title: 'Ready for sourcing',
       badge: 'Ready',
       canRelease: true,
-      canEnterSourcing: false,
+      canEnterSourcing: true,
     };
   }
 

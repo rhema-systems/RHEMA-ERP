@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
@@ -61,7 +62,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting RFQs");
-            return StatusCode(500, "An error occurred while retrieving RFQs");
+            throw;
         }
     }
 
@@ -78,7 +79,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting RFQ {RfqId}", id);
-            return StatusCode(500, "An error occurred while retrieving the RFQ");
+            throw;
         }
     }
 
@@ -86,7 +87,7 @@ public class RfqsController : ControllerBase
     /// Generates an RFQ PDF (for printing / emailing) even before sending it to suppliers.
     /// </summary>
     [HttpGet("{id:guid}/pdf")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT")]
     public async Task<IActionResult> GetRfqPdf(Guid id, CancellationToken cancellationToken)
     {
         try
@@ -101,12 +102,12 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating RFQ PDF for {RfqId}", id);
-            return StatusCode(500, "An error occurred while generating the RFQ PDF");
+            throw;
         }
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT")]
     public async Task<ActionResult<RfqDetailDto>> UpdateRfq(Guid id, [FromBody] UpdateRfqDto dto)
     {
         try
@@ -121,7 +122,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating RFQ {RfqId}", id);
-            return StatusCode(500, "An error occurred while updating the RFQ");
+            throw;
         }
     }
 
@@ -194,6 +195,14 @@ public class RfqsController : ControllerBase
         {
             return UnprocessableEntity(AwardReadinessProblem(422, ex.Code, ex.Message));
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -206,7 +215,7 @@ public class RfqsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/send")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT")]
     public async Task<IActionResult> SendRfq(Guid id, [FromBody] SendRfqDto dto)
     {
         try
@@ -261,6 +270,19 @@ public class RfqsController : ControllerBase
         catch (ProcurementControlEventValidationException ex)
         {
             return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
+        catch (SupplierEligibilityException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                status = 422,
+                title = "RFQ supplier is not eligible",
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = ex.Code,
+                correlationId = HttpContext.TraceIdentifier,
+                eligibility = ex.Result
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -346,7 +368,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting supplier RFQs");
-            return StatusCode(500, "An error occurred while retrieving RFQs");
+            throw;
         }
     }
 
@@ -372,7 +394,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting supplier RFQ detail {RfqId}", id);
-            return StatusCode(500, "An error occurred while retrieving the RFQ");
+            throw;
         }
     }
 

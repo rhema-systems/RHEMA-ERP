@@ -53,6 +53,10 @@ public interface IProcurementPurchaseOrderSourceService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task EnsureBudgetAvailabilityForSubmissionAsync(
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken = default);
+
     Task EnsureBudgetCommitmentForIssueAsync(
         PurchaseOrder purchaseOrder,
         string correlationId,

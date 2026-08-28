@@ -15,6 +15,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
     IProcurementPurchaseOrderSourceService
 {
     private const string Permission = "procurement.purchase-order.create";
+    private const string ApprovePermission = "procurement.purchase-order.approve";
     private const string EventType = "ProcurementPurchaseOrderSourceControl";
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(number => $"DEC-{number:000}").ToArray();
@@ -130,7 +131,9 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 "SourceValidated",
                 ProcurementControlEventResult.Allowed,
                 correlationId,
-                "The approved source lineage passed tenant, requisition, sourcing-case, award-readiness, and supplier checks.",
+                resolution.SourcingCaseId == Guid.Empty
+                    ? "The direct approved-source award passed tenant, approved-requisition, immutable-release, commercial-line, award-readiness, and supplier checks."
+                    : "The approved source lineage passed tenant, requisition, sourcing-case, award-readiness, and supplier checks.",
                 new
                 {
                     resolution.SourceType,
@@ -179,8 +182,13 @@ public sealed class ProcurementPurchaseOrderSourceService :
         purchaseOrder.SourceRequisitionId = source.PurchaseRequisitionId;
         purchaseOrder.SourceRequisitionNumber = source.PurchaseRequisitionNumber;
         purchaseOrder.SourcingReleaseId = source.SourcingReleaseId;
-        purchaseOrder.SourcingCaseId = source.SourcingCaseId;
-        purchaseOrder.AwardReadinessDecisionId = source.AwardReadinessDecisionId;
+        purchaseOrder.SourcingCaseId = source.SourcingCaseId == Guid.Empty
+            ? null
+            : source.SourcingCaseId;
+        purchaseOrder.AwardReadinessDecisionId =
+            source.AwardReadinessDecisionId == Guid.Empty
+                ? null
+                : source.AwardReadinessDecisionId;
         purchaseOrder.ProcurementCategory = source.ProcurementCategory;
         purchaseOrder.SourceSnapshotJson = source.SourceSnapshotJson;
         purchaseOrder.SourceIntegrityHash = source.SourceIntegrityHash;
@@ -378,8 +386,8 @@ public sealed class ProcurementPurchaseOrderSourceService :
 
         if (current.PurchaseRequisitionId != purchaseOrder.SourceRequisitionId ||
             current.SourcingReleaseId != purchaseOrder.SourcingReleaseId ||
-            current.SourcingCaseId != purchaseOrder.SourcingCaseId ||
-            current.AwardReadinessDecisionId != purchaseOrder.AwardReadinessDecisionId ||
+            NormalizeOptionalId(current.SourcingCaseId) != purchaseOrder.SourcingCaseId ||
+            NormalizeOptionalId(current.AwardReadinessDecisionId) != purchaseOrder.AwardReadinessDecisionId ||
             !string.Equals(current.SourceIntegrityHash,
                 purchaseOrder.SourceIntegrityHash, StringComparison.OrdinalIgnoreCase))
         {
@@ -578,6 +586,19 @@ public sealed class ProcurementPurchaseOrderSourceService :
                     cancellationToken);
             }
 
+            // Draft creation consumes the approved source commercially but must
+            // not post Finance exposure. The controlled Submit route creates or
+            // reuses the authoritative requisition commitment in its own
+            // serializable transaction. Award creation still checks the actual
+            // quote exposure against the linked approved budget's availability;
+            // the PR value remains its pre-sourcing estimate and audit baseline.
+            await EnsureAwardBudgetCapacityAsync(
+                current,
+                totalAmount,
+                currencyCode,
+                purchaseOrderId,
+                cancellationToken);
+
             await RecordAsync(
                 current.SourceId,
                 current.SourceReference,
@@ -629,7 +650,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (!_unitOfWork.HasActiveTransaction)
             throw Invalid(
                 "PO_BUDGET_TRANSACTION_REQUIRED",
-                "The purchase-order budget commitment must be created inside the submission transaction.");
+                "The purchase-order budget commitment must be created inside the final approval transaction.");
 
         var source = await EvaluateCurrentAsync(purchaseOrder, cancellationToken);
         await EnsureBudgetCommitmentAsync(
@@ -638,6 +659,19 @@ public sealed class ProcurementPurchaseOrderSourceService :
             purchaseOrder.Currency,
             purchaseOrder.Id,
             correlationId,
+            cancellationToken);
+    }
+
+    public async Task EnsureBudgetAvailabilityForSubmissionAsync(
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken = default)
+    {
+        var source = await EvaluateCurrentAsync(purchaseOrder, cancellationToken);
+        await EnsureAwardBudgetCapacityAsync(
+            source,
+            purchaseOrder.TotalAmount,
+            purchaseOrder.Currency,
+            purchaseOrder.Id,
             cancellationToken);
     }
 
@@ -798,6 +832,27 @@ public sealed class ProcurementPurchaseOrderSourceService :
             businessPartnerId,
             owningPurchaseOrderId,
             cancellationToken);
+        var approvedLines = await ResolveRfqLinesAsync(
+            rfq.Id,
+            businessPartnerId,
+            cancellationToken);
+        var approvedAmount = approvedLines.Sum(item => item.LineTotal);
+
+        if (!rfq.SourcingCaseId.HasValue || rfq.SourcingCaseId == Guid.Empty)
+        {
+            var directLink = await RequireReleaseOnlySourceLinkAsync(
+                rfq.SourcePurchaseRequisitionId,
+                rfq.SourcingReleaseId,
+                cancellationToken);
+            return BuildReleaseOnlyRfqResolution(
+                rfq,
+                directLink.Requisition,
+                directLink.Release,
+                businessPartnerId,
+                approvedLines,
+                approvedAmount);
+        }
+
         var link = await RequireSourceLinkAsync(
             rfq.SourcePurchaseRequisitionId, rfq.SourcingReleaseId,
             rfq.SourcingCaseId, cancellationToken);
@@ -806,11 +861,6 @@ public sealed class ProcurementPurchaseOrderSourceService :
             rfq.Id,
             businessPartnerId,
             cancellationToken);
-        var approvedLines = await ResolveRfqLinesAsync(
-            rfq.Id,
-            businessPartnerId,
-            cancellationToken);
-        var approvedAmount = approvedLines.Sum(item => item.LineTotal);
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.RfqAward,
             rfq.Id,
@@ -886,9 +936,6 @@ public sealed class ProcurementPurchaseOrderSourceService :
             owningPurchaseOrderId,
             cancellationToken);
         var tender = await RequireTenderAsync(award.TenderId, cancellationToken);
-        var link = await RequireSourceLinkAsync(
-            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
-            tender.SourcingCaseId, cancellationToken);
         var readiness = await RequireCurrentReadinessAsync(
             ProcurementAwardReadinessSourceType.Tender,
             tender.Id,
@@ -899,6 +946,59 @@ public sealed class ProcurementPurchaseOrderSourceService :
             award.BidLotId,
             award.NegotiationId,
             cancellationToken);
+        if (!tender.SourcingCaseId.HasValue || tender.SourcingCaseId == Guid.Empty)
+        {
+            var directLink = await RequireReleaseOnlySourceLinkAsync(
+                tender.SourcePurchaseRequisitionId,
+                tender.SourcingReleaseId,
+                cancellationToken);
+            return BuildReleaseOnlyResolution(
+                ProcurementPurchaseOrderSourceType.TenderAward,
+                award.Id,
+                $"{tender.TenderNumber}/{award.Id:N}",
+                directLink.Requisition,
+                directLink.Release,
+                readiness,
+                businessPartnerId,
+                award.Currency ?? tender.Currency ?? "GHS",
+                new
+                {
+                    SourceType = ProcurementPurchaseOrderSourceType.TenderAward,
+                    SourceId = award.Id,
+                    SourceReference = tender.TenderNumber,
+                    award.TenderId,
+                    award.TenderBidId,
+                    award.Status,
+                    award.AwardedAmount,
+                    RequisitionId = directLink.Requisition.Id,
+                    directLink.Requisition.RequisitionNumber,
+                    SourcingReleaseId = directLink.Release.Id,
+                    directLink.Release.ReleaseReference,
+                    directLink.Release.AttemptNumber,
+                    directLink.Release.ReleasedAtUtc,
+                    ReleaseIntegrityHash = directLink.Release.IntegrityHash,
+                    AwardReadinessDecisionId = readiness.Id,
+                    readiness.IntegrityHash,
+                    award.BusinessPartnerId,
+                    award.Currency,
+                    ApprovedLines = approvedLines.Select(line => new
+                    {
+                        line.SourceLineId,
+                        line.ItemCode,
+                        line.Description,
+                        line.Quantity,
+                        line.UnitOfMeasure,
+                        line.UnitPrice,
+                        line.LineTotal
+                    })
+                },
+                approvedLines,
+                award.AwardedAmount);
+        }
+
+        var link = await RequireSourceLinkAsync(
+            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
+            tender.SourcingCaseId, cancellationToken);
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.TenderAward,
             award.Id,
@@ -907,7 +1007,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
             link.SourcingCase,
             readiness,
             businessPartnerId,
-            award.Currency ?? tender.Currency ?? "USD",
+            award.Currency ?? tender.Currency ?? "GHS",
             new
             {
                 SourceType = ProcurementPurchaseOrderSourceType.TenderAward,
@@ -973,9 +1073,6 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ?? throw Invalid("PO_CONTRACT_AWARD_NOT_FOUND",
                 "The contract's tender award was not found.");
         var tender = await RequireTenderAsync(contract.TenderId, cancellationToken);
-        var link = await RequireSourceLinkAsync(
-            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
-            tender.SourcingCaseId, cancellationToken);
         var readiness = await RequireCurrentReadinessAsync(
             ProcurementAwardReadinessSourceType.Tender,
             tender.Id,
@@ -986,6 +1083,62 @@ public sealed class ProcurementPurchaseOrderSourceService :
             award.BidLotId,
             award.NegotiationId,
             cancellationToken);
+        if (!tender.SourcingCaseId.HasValue || tender.SourcingCaseId == Guid.Empty)
+        {
+            var directLink = await RequireReleaseOnlySourceLinkAsync(
+                tender.SourcePurchaseRequisitionId,
+                tender.SourcingReleaseId,
+                cancellationToken);
+            return BuildReleaseOnlyResolution(
+                ProcurementPurchaseOrderSourceType.Contract,
+                contract.Id,
+                contract.ContractNumber,
+                directLink.Requisition,
+                directLink.Release,
+                readiness,
+                businessPartnerId,
+                contract.Currency,
+                new
+                {
+                    SourceType = ProcurementPurchaseOrderSourceType.Contract,
+                    SourceId = contract.Id,
+                    SourceReference = contract.ContractNumber,
+                    contract.Status,
+                    contract.TenderAwardId,
+                    contract.TenderId,
+                    contract.BusinessPartnerId,
+                    contract.ContractValue,
+                    contract.Currency,
+                    contract.StartDate,
+                    contract.EndDate,
+                    AwardStatus = award.Status,
+                    RequisitionId = directLink.Requisition.Id,
+                    directLink.Requisition.RequisitionNumber,
+                    SourcingReleaseId = directLink.Release.Id,
+                    directLink.Release.ReleaseReference,
+                    directLink.Release.AttemptNumber,
+                    directLink.Release.ReleasedAtUtc,
+                    ReleaseIntegrityHash = directLink.Release.IntegrityHash,
+                    AwardReadinessDecisionId = readiness.Id,
+                    readiness.IntegrityHash,
+                    ApprovedLines = approvedLines.Select(line => new
+                    {
+                        line.SourceLineId,
+                        line.ItemCode,
+                        line.Description,
+                        line.Quantity,
+                        line.UnitOfMeasure,
+                        line.UnitPrice,
+                        line.LineTotal
+                    })
+                },
+                approvedLines,
+                contract.ContractValue);
+        }
+
+        var link = await RequireSourceLinkAsync(
+            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
+            tender.SourcingCaseId, cancellationToken);
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.Contract,
             contract.Id,
@@ -1519,6 +1672,122 @@ public sealed class ProcurementPurchaseOrderSourceService :
         return (requisition, sourcingCase);
     }
 
+    private async Task<(PurchaseRequisition Requisition, ProcurementRequisitionSourcingRelease Release)>
+        RequireReleaseOnlySourceLinkAsync(
+            Guid? requisitionId,
+            Guid? sourcingReleaseId,
+            CancellationToken cancellationToken)
+    {
+        if (!requisitionId.HasValue || !sourcingReleaseId.HasValue)
+            throw Invalid(
+                "PO_SOURCE_LINEAGE_INCOMPLETE",
+                "The direct procurement source does not identify its approved requisition and immutable sourcing release.");
+
+        var requisition = await RequireApprovedRequisitionAsync(
+            requisitionId.Value,
+            cancellationToken);
+        var release = await SourcingReleases.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == sourcingReleaseId.Value &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid(
+                "PO_SOURCING_RELEASE_NOT_FOUND",
+                "The direct procurement source's immutable sourcing release was not found or does not match its approved requisition.");
+
+        var currentReleaseId = await SourcingReleases.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                !item.IsDeleted)
+            .OrderByDescending(item => item.AttemptNumber)
+            .ThenByDescending(item => item.ReleasedAtUtc)
+            .Select(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (currentReleaseId != release.Id)
+            throw Invalid(
+                "PO_SOURCING_RELEASE_SUPERSEDED",
+                "The direct procurement source's sourcing release has been superseded. Re-evaluate the requisition before creating a purchase order.");
+
+        return (requisition, release);
+    }
+
+    private async Task EnsureAwardBudgetCapacityAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        decimal totalAmount,
+        string? currencyCode,
+        Guid purchaseOrderId,
+        CancellationToken cancellationToken)
+    {
+        var requisition = await Requisitions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == source.PurchaseRequisitionId &&
+                item.Status == "Approved" &&
+                !item.IsDeleted)
+            .Include(item => item.Budget)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid(
+                "PO_APPROVED_REQUISITION_NOT_FOUND",
+                "The purchase-order source no longer identifies an approved requisition in the current tenant.");
+
+        var budget = requisition.Budget
+            ?? throw Invalid(
+                "PO_BUDGET_NOT_FOUND",
+                "The approved requisition's linked budget was not found in the current tenant.");
+        var now = DateTime.UtcNow;
+        if (budget.TenantId != _currentUser.TenantId || budget.IsDeleted ||
+            (!string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+             !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase)) ||
+            !budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue ||
+            (budget.EffectiveDate.HasValue && budget.EffectiveDate.Value > now) ||
+            (budget.ExpiryDate.HasValue && budget.ExpiryDate.Value < now))
+            throw Invalid(
+                "PO_BUDGET_NOT_AVAILABLE",
+                "The linked procurement budget is not approved, effective, and available for award.");
+
+        var awardCurrency = string.IsNullOrWhiteSpace(currencyCode)
+            ? source.CurrencyCode
+            : currencyCode.Trim().ToUpperInvariant();
+        if (!string.Equals(awardCurrency, requisition.Currency, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(awardCurrency, budget.Currency, StringComparison.OrdinalIgnoreCase))
+            throw Invalid(
+                "PO_BUDGET_CURRENCY_MISMATCH",
+                "The selected quote currency must match the approved requisition and linked budget currency.");
+
+        var priorExposure = await PurchaseOrders.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceRequisitionId == source.PurchaseRequisitionId &&
+                item.Id != purchaseOrderId &&
+                !item.IsDeleted &&
+                item.Status != "Cancelled" &&
+                item.Status != "Rejected")
+            .Select(item => (decimal?)item.TotalAmount)
+            .SumAsync(cancellationToken) ?? 0m;
+        var requiredExposure = decimal.Round(
+            priorExposure + totalAmount, 2, MidpointRounding.AwayFromZero);
+        var existingReservation = await _unitOfWork
+            .Repository<ProcurementBudgetCommitment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                item.Status == ProcurementBudgetCommitmentStatus.Reserved &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => (decimal?)item.ReservedAmount)
+            .SingleOrDefaultAsync(cancellationToken) ?? 0m;
+        var availableForAward = decimal.Round(
+            budget.AllocatedAmount - budget.UtilizedAmount -
+            budget.CommittedAmount + existingReservation,
+            2,
+            MidpointRounding.AwayFromZero);
+        EnsureAwardBudgetExposure(
+            availableForAward,
+            requiredExposure,
+            awardCurrency);
+    }
+
     private async Task EnsureBudgetCommitmentAsync(
         ProcurementPurchaseOrderSourceResolution source,
         decimal totalAmount,
@@ -1532,40 +1801,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 item.Id == source.SourcingReleaseId &&
                 item.PurchaseRequisitionId == source.PurchaseRequisitionId &&
                 !item.IsDeleted)
-            .Include(item => item.BudgetCommitment)
-                .ThenInclude(item => item.ProcurementBudget)
             .Include(item => item.PurchaseRequisition)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw Invalid("PO_BUDGET_SOURCING_RELEASE_NOT_FOUND",
                 "The approved sourcing release and budget commitment were not found in the current tenant.");
-        var commitment = release.BudgetCommitment;
-        var budget = commitment?.ProcurementBudget;
-        if (commitment is null || budget is null)
-        {
-            var readiness = await _budgetControl.ReserveForDownstreamAsync(
-                release.PurchaseRequisition,
-                Permission,
-                correlationId,
-                cancellationToken);
-            if (!readiness.IsCompliant || !readiness.CommitmentId.HasValue)
-                throw Invalid(
-                    readiness.DecisionCode,
-                    readiness.Message);
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            commitment = await _unitOfWork.Repository<ProcurementBudgetCommitment>()
-                .GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId &&
-                    item.Id == readiness.CommitmentId.Value &&
-                    !item.IsDeleted)
-                .Include(item => item.ProcurementBudget)
-                .SingleOrDefaultAsync(cancellationToken);
-            budget = commitment?.ProcurementBudget;
-        }
-        if (commitment is null || budget is null)
-            throw Invalid("PO_BUDGET_COMMITMENT_NOT_FOUND",
-                "The approved sourcing release has no authoritative budget commitment.");
 
         var priorExposure = await PurchaseOrders.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
@@ -1578,13 +1817,57 @@ public sealed class ProcurementPurchaseOrderSourceService :
             .SumAsync(cancellationToken) ?? 0m;
         var requiredExposure = decimal.Round(
             priorExposure + totalAmount, 2, MidpointRounding.AwayFromZero);
+        var requisition = release.PurchaseRequisition
+            ?? throw Invalid(
+                "PO_APPROVED_REQUISITION_NOT_FOUND",
+                "The sourcing release no longer identifies its approved requisition.");
+        PurchaseRequisitionBudgetReadinessDto readiness;
+        try
+        {
+            readiness = await _budgetControl.ReserveForDownstreamAsync(
+                requisition,
+                requiredExposure,
+                currencyCode ?? source.CurrencyCode,
+                ApprovePermission,
+                correlationId,
+                cancellationToken);
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException exception)
+        {
+            throw Invalid(exception.Code, exception.Message);
+        }
+        catch (ProcurementRequisitionBudgetValidationException exception)
+        {
+            throw Invalid(exception.Code, exception.Message);
+        }
+        catch (ProcurementRequisitionBudgetConflictException exception)
+        {
+            throw Invalid(exception.Code, exception.Message);
+        }
+        if (!readiness.IsCompliant || !readiness.CommitmentId.HasValue)
+            throw Invalid(readiness.DecisionCode, readiness.Message);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var commitment = await _unitOfWork.Repository<ProcurementBudgetCommitment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == readiness.CommitmentId.Value &&
+                !item.IsDeleted)
+            .Include(item => item.ProcurementBudget)
+            .SingleOrDefaultAsync(cancellationToken);
+        var budget = commitment?.ProcurementBudget;
+        if (commitment is null || budget is null)
+            throw Invalid("PO_BUDGET_COMMITMENT_NOT_FOUND",
+                "The approved sourcing release has no authoritative budget commitment.");
+
         var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
             new ProcurementCommitmentLifecycleSnapshot(
                 _currentUser.TenantId,
-                release.PurchaseRequisition.Id,
-                release.PurchaseRequisition.TenantId,
-                release.PurchaseRequisition.Currency,
-                release.PurchaseRequisition.BudgetId,
+                requisition.Id,
+                requisition.TenantId,
+                requisition.Currency,
+                requisition.BudgetId,
                 release.TenantId,
                 release.PurchaseRequisitionId,
                 release.BudgetCommitmentId,
@@ -1611,6 +1894,27 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 DateTime.UtcNow));
         if (!result.IsValid)
             throw Invalid(result.Code, result.Message);
+    }
+
+    internal static void EnsureAwardBudgetExposure(
+        decimal availableBudgetAmount,
+        decimal requiredExposure,
+        string? currencyCode)
+    {
+        var available = decimal.Round(
+            availableBudgetAmount, 2, MidpointRounding.AwayFromZero);
+        var required = decimal.Round(
+            requiredExposure, 2, MidpointRounding.AwayFromZero);
+        if (required <= available)
+            return;
+
+        var currency = string.IsNullOrWhiteSpace(currencyCode)
+            ? "GHS"
+            : currencyCode.Trim().ToUpperInvariant();
+        var shortfall = required - available;
+        throw Invalid(
+            "PO_BUDGET_INSUFFICIENT_FOR_AWARD",
+            $"The selected awarded exposure {required:N2} {currency} exceeds the linked approved budget availability {available:N2} {currency} by {shortfall:N2} {currency}. Revise the award or complete an approved budget adjustment before proceeding.");
     }
 
     private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
@@ -1779,6 +2083,119 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ValidatedAtUtc = DateTime.UtcNow
         };
     }
+
+    private static ProcurementPurchaseOrderSourceResolution BuildReleaseOnlyRfqResolution(
+        RequestForQuotation rfq,
+        PurchaseRequisition requisition,
+        ProcurementRequisitionSourcingRelease release,
+        Guid businessPartnerId,
+        IReadOnlyList<ProcurementPurchaseOrderSourceLineDto> approvedLines,
+        decimal approvedAmount)
+    {
+        var snapshot = new
+        {
+            SourceType = ProcurementPurchaseOrderSourceType.RfqAward,
+            SourceId = rfq.Id,
+            SourceReference = rfq.RfqNumber,
+            rfq.Status,
+            RequisitionId = requisition.Id,
+            requisition.RequisitionNumber,
+            SourcingReleaseId = release.Id,
+            release.ReleaseReference,
+            release.AttemptNumber,
+            release.ReleasedAtUtc,
+            release.IntegrityHash,
+            BusinessPartnerId = businessPartnerId,
+            rfq.Currency,
+            ApprovedAmount = approvedAmount,
+            ApprovedLines = approvedLines.Select(line => new
+            {
+                line.SourceLineId,
+                line.ItemCode,
+                line.Description,
+                line.Quantity,
+                line.UnitOfMeasure,
+                line.UnitPrice,
+                line.LineTotal
+            })
+        };
+        var json = JsonSerializer.Serialize(snapshot, JsonOptions);
+        return new ProcurementPurchaseOrderSourceResolution
+        {
+            SourceType = ProcurementPurchaseOrderSourceType.RfqAward,
+            SourceId = rfq.Id,
+            SourceReference = rfq.RfqNumber,
+            PurchaseRequisitionId = requisition.Id,
+            PurchaseRequisitionNumber = requisition.RequisitionNumber,
+            PurchaseRequisitionRequestedById = requisition.RequestedById,
+            SourcingCaseId = Guid.Empty,
+            SourcingReleaseId = release.Id,
+            AwardReadinessDecisionId = Guid.Empty,
+            BusinessPartnerId = businessPartnerId,
+            ProcurementCategory = requisition.ProcurementCategory ??
+                throw Invalid(
+                    "PO_SOURCE_CATEGORY_REQUIRED",
+                    "The approved requisition has no governed procurement category."),
+            CurrencyCode = !string.IsNullOrWhiteSpace(rfq.Currency)
+                ? rfq.Currency.Trim().ToUpperInvariant()
+                : !string.IsNullOrWhiteSpace(requisition.Currency)
+                    ? requisition.Currency.Trim().ToUpperInvariant()
+                    : "GHS",
+            ApprovedAmount = approvedAmount,
+            ApprovedLines = approvedLines,
+            SourceSnapshotJson = json,
+            SourceIntegrityHash = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant(),
+            ValidatedAtUtc = DateTime.UtcNow
+        };
+    }
+
+    private static ProcurementPurchaseOrderSourceResolution BuildReleaseOnlyResolution(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        string sourceReference,
+        PurchaseRequisition requisition,
+        ProcurementRequisitionSourcingRelease release,
+        ProcurementAwardReadinessDecision readiness,
+        Guid businessPartnerId,
+        string? currencyCode,
+        object snapshot,
+        IReadOnlyList<ProcurementPurchaseOrderSourceLineDto> approvedLines,
+        decimal approvedAmount)
+    {
+        var json = JsonSerializer.Serialize(snapshot, JsonOptions);
+        return new ProcurementPurchaseOrderSourceResolution
+        {
+            SourceType = sourceType,
+            SourceId = sourceId,
+            SourceReference = sourceReference,
+            PurchaseRequisitionId = requisition.Id,
+            PurchaseRequisitionNumber = requisition.RequisitionNumber,
+            PurchaseRequisitionRequestedById = requisition.RequestedById,
+            SourcingCaseId = Guid.Empty,
+            SourcingReleaseId = release.Id,
+            AwardReadinessDecisionId = readiness.Id,
+            BusinessPartnerId = businessPartnerId,
+            ProcurementCategory = requisition.ProcurementCategory ??
+                throw Invalid(
+                    "PO_SOURCE_CATEGORY_REQUIRED",
+                    "The approved requisition has no governed procurement category."),
+            CurrencyCode = !string.IsNullOrWhiteSpace(currencyCode)
+                ? currencyCode.Trim().ToUpperInvariant()
+                : !string.IsNullOrWhiteSpace(requisition.Currency)
+                    ? requisition.Currency.Trim().ToUpperInvariant()
+                    : "GHS",
+            ApprovedAmount = approvedAmount,
+            ApprovedLines = approvedLines,
+            SourceSnapshotJson = json,
+            SourceIntegrityHash = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant(),
+            ValidatedAtUtc = DateTime.UtcNow
+        };
+    }
+
+    private static Guid? NormalizeOptionalId(Guid value) =>
+        value == Guid.Empty ? null : value;
 
     private static void EnsureOrderMatchesSource(
         ProcurementPurchaseOrderSourceResolution source,

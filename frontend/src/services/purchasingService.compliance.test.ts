@@ -58,4 +58,42 @@ describe('purchase-order compliance client', () => {
       purchasingService.submitPurchaseOrder('po-0404')
     ).rejects.toThrow('Purchase order is blocked by 2 compliance checks.');
   });
+
+  it('shows PO read guidance instead of requisition guidance when readiness is forbidden', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail:
+              'The current actor has no Security role granting this procurement privilege.',
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+
+    await expect(
+      purchasingService.getPurchaseOrderComplianceReadiness('po-0404')
+    ).rejects.toThrow('procurement.records.read');
+  });
+
+  it('shows the exact PO submit permission when submission is forbidden', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail:
+              'The current actor has no Security role granting this procurement privilege.',
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+
+    await expect(
+      purchasingService.submitPurchaseOrder('po-0404')
+    ).rejects.toThrow('procurement.purchase-order.create');
+  });
 });

@@ -67,6 +67,108 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
     }
 
     [Fact]
+    public async Task DownstreamCommitmentUsesActualAwardInsteadOfPrEstimate()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(250_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            3_990m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-actual-award");
+
+        readiness.CommitmentStatus.Should().Be("Reserved");
+        readiness.RequestedAmount.Should().Be(3_990m);
+        budget.CommittedAmount.Should().Be(3_990m);
+        requisition.BudgetValidated.Should().BeFalse(
+            "an approved requisition retains its immutable approval-time budget snapshot");
+        requisition.BudgetRemaining.Should().Be(0m,
+            "downstream commitment changes belong to the Finance budget ledger, not the approved requisition");
+        var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
+        commitment.ReservedAmount.Should().Be(3_990m);
+    }
+
+    [Fact]
+    public async Task ReadinessUsesActiveAwardReservationInsteadOfOriginalPrEstimate()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(250_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            3_990m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-actual-award");
+
+        var readiness = await fixture.Service.GetReadinessAsync(requisition.Id);
+
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.DecisionCode.Should().Be("PR_BUDGET_COMMITMENT_ACTIVE");
+        readiness.RequestedAmount.Should().Be(3_990m);
+        readiness.CommitmentStatus.Should().Be("Reserved");
+    }
+
+    [Fact]
+    public async Task DownstreamReadinessUsesPoExposureInsteadOfLargerPrEstimate()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(4_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.GetDownstreamReadinessAsync(
+            requisition.Id,
+            3_990m,
+            "GHS");
+
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.CanReserve.Should().BeTrue();
+        readiness.RequestedAmount.Should().Be(3_990m);
+        readiness.AvailableAmount.Should().Be(4_000m);
+    }
+
+    [Fact]
+    public async Task ExistingEstimateReservationIsAdjustedToActualAwardWithoutDuplicateCommitment()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(10_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Service.ReserveAsync(requisition, "trace-estimate");
+        requisition.Status = "Approved";
+
+        var readiness = await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            3_990m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-adjust-award");
+
+        readiness.RequestedAmount.Should().Be(3_990m);
+        budget.CommittedAmount.Should().Be(3_990m);
+        budget.RemainingAmount.Should().Be(6_010m);
+        var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
+        commitment.ReservedAmount.Should().Be(3_990m);
+        commitment.ReservationSequence.Should().Be(2);
+        (await fixture.Service.GetHistoryAsync(requisition.Id)).Should()
+            .Contain(item => item.Action == "BudgetCommitmentAdjustedForAward");
+    }
+
+    [Fact]
     public async Task InsufficientBudgetBlocksWithoutCreatingACommitmentOrMutatingFinanceTotals()
     {
         await using var fixture = new Fixture();

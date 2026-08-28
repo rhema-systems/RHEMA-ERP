@@ -56,6 +56,8 @@ import { PurchaseOrderAmendmentWorkspace } from '@/components/procurement/Purcha
 import { format } from 'date-fns';
 import Link from 'next/link';
 import { formatProcurementMoney } from '@/lib/procurement-currency';
+import { useAuth } from '@/hooks/use-auth';
+import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
 
 const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Freight / Shipping' },
@@ -84,6 +86,7 @@ const POStatuses = [
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const { hasPermission } = useAuth();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
   const [order, setOrder] = useState<PurchaseOrderDetailDto | null>(null);
@@ -165,6 +168,10 @@ export default function PurchaseOrderDetailPage() {
     ? sodReadiness?.checks.find((check) => check.key === 'receipt')?.message ||
       'The PO creator cannot confirm its goods receipt.'
     : 'Wait for the purchase-order role-separation check to finish.';
+  const actionAccess = resolvePurchaseOrderActionAccess(
+    order?.status,
+    hasPermission
+  );
 
   const workflow = useWorkflowRecord({
     entityType: 'PurchaseOrder',
@@ -173,8 +180,8 @@ export default function PurchaseOrderDetailPage() {
     entityNumber: order?.orderNumber,
     status: order?.status || '',
     currentStepName: order?.currentWorkflowStepName,
-    canSubmit: order?.status === 'Draft',
-    canApproveReject: order?.status === 'Pending Approval',
+    canSubmit: actionAccess.canSubmit,
+    canApproveReject: actionAccess.canApproveReject,
     enabled: Boolean(id && order),
     commands: {
       submit: () => purchasingService.submitPurchaseOrder(id),
@@ -228,7 +235,7 @@ export default function PurchaseOrderDetailPage() {
     );
   }
 
-  const canEdit = order.status === 'Draft';
+  const canEdit = actionAccess.canEdit;
   const canReceive = order.status === 'Approved' || order.status === 'Sent' || 
                      order.status === 'Acknowledged' || order.status === 'Partially Received';
 
@@ -267,6 +274,7 @@ export default function PurchaseOrderDetailPage() {
           
           <WorkflowApprovalActions
             {...workflow.actionProps}
+            submitCopyMode="approval"
             forwardActionsDisabled={forwardActionsBlocked}
             forwardActionsDisabledReason={forwardActionsBlockedReason}
           />

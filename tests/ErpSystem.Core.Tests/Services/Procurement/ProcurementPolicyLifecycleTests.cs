@@ -89,10 +89,40 @@ public sealed class ProcurementPolicyServiceTests
         JsonSerializer.Deserialize<SaveProcurementPolicyEvidenceRuleValue>(exceptionEvidence.Value.GetRawText(), JsonOptions)!
             .Method.Should().Be(ProcurementMethodType.SingleSource);
         created.Validation.IsValid.Should().BeFalse();
-        created.Validation.Errors.Should().Contain(item =>
-            item.Code == "RULE_FAMILY_MISSING" && item.RuleKind == ProcurementPolicyRuleKind.SegregationOfDuties);
+        created.Validation.Errors.Should().NotContain(item =>
+            item.Code == "RULE_FAMILY_MISSING" &&
+            (item.RuleKind == ProcurementPolicyRuleKind.Authority ||
+             item.RuleKind == ProcurementPolicyRuleKind.Evidence ||
+             item.RuleKind == ProcurementPolicyRuleKind.Exception ||
+             item.RuleKind == ProcurementPolicyRuleKind.SegregationOfDuties));
+        created.Validation.Errors.Should().Contain(item => item.Code == "RFQ_COMPETITION_REQUIRED");
+        created.Validation.Errors.Should().NotContain(item => item.Code == "RFQ_WORKFLOW_REQUIRED");
         (await fixture.Context.ProcurementConfigurationProfiles.SingleAsync(item => item.Id == source.Id))
             .LifecycleStatus.Should().Be(ProcurementConfigurationProfileStatus.Retired);
+    }
+
+    [Fact]
+    public async Task CoreSourcingPolicyPublishesWithoutOptionalAuthorityEvidenceExceptionOrSodFamilies()
+    {
+        await using var fixture = new ServiceFixture("SuperAdmin");
+        var source = await fixture.AddSourceConfigurationAsync();
+        var draft = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id, "CORE-SOURCING"), "create-core");
+        await fixture.ConfigureRfqRuleAsync(draft.Id);
+
+        draft = await fixture.Service.GetPolicySetAsync(draft.Id);
+        draft.Validation.IsValid.Should().BeTrue();
+        draft.IsComplete.Should().BeTrue();
+        draft.Validation.Errors.Should().NotContain(item =>
+            item.Code == "RULE_FAMILY_MISSING" || item.Code == "SOD_REQUIRED_CONTROL_MISSING");
+
+        var published = await fixture.Service.PublishPolicySetAsync(draft.Id,
+            new ProcurementPolicyLifecycleRequest
+            {
+                RowVersion = draft.RowVersion,
+                Reason = "Publish document-aligned core sourcing policy"
+            }, "publish-core");
+
+        published.LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Published);
     }
 
     [Fact]
@@ -426,7 +456,7 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
-    public async Task RfqPolicyCannotPublishWithoutPositiveCompetitionAndSharedApprovalWorkflow()
+    public async Task RfqPolicyRequiresPositiveCompetitionButWorkflowMetadataIsOptional()
     {
         await using var fixture = new ServiceFixture("SuperAdmin");
         var source = await fixture.AddSourceConfigurationAsync();
@@ -435,7 +465,7 @@ public sealed class ProcurementPolicyServiceTests
         var validation = await fixture.Service.ValidatePolicySetAsync(created.Id, "validate-rfq-operational");
 
         validation.Errors.Should().Contain(item => item.Code == "RFQ_COMPETITION_REQUIRED");
-        validation.Errors.Should().Contain(item => item.Code == "RFQ_WORKFLOW_REQUIRED");
+        validation.Errors.Should().NotContain(item => item.Code == "RFQ_WORKFLOW_REQUIRED");
     }
 
     [Fact]
@@ -706,6 +736,11 @@ public sealed class ProcurementPolicyServiceTests
                 }, "add-required-sod");
             }
 
+            await ConfigureRfqRuleAsync(policyId);
+        }
+
+        public async Task ConfigureRfqRuleAsync(Guid policyId)
+        {
             var method = await Context.ProcurementPolicyMethodRules.SingleAsync(item =>
                 item.PolicySetId == policyId && item.Method == ProcurementMethodType.RequestForQuotation);
             var entityType = new WorkflowEntityType

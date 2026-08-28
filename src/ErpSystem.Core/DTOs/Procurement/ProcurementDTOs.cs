@@ -459,6 +459,28 @@ public class ReceivePurchaseOrderItemDto
     public decimal RejectedQuantity { get; set; }
     public Guid? WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// Explicit receiver consent to create and link a controlled stock item
+    /// when the approved purchase-order line has no InventoryItemId. The
+    /// server derives the item name, UOM, supplier, cost and source lineage
+    /// from the governed purchase-order line; it never trusts client-supplied
+    /// descriptive master data.
+    /// </summary>
+    public bool CreateInventoryItemIfMissing { get; set; }
+
+    /// <summary>
+    /// Required active inventory category when a missing item must be created.
+    /// </summary>
+    public Guid? InventoryCategoryId { get; set; }
+
+    /// <summary>
+    /// Optional tenant-unique item code proposed by the receiver. When omitted,
+    /// the server generates a stable code from the PO and line identifiers.
+    /// </summary>
+    [MaxLength(100)]
+    public string? ProposedItemCode { get; set; }
+
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public DateTime? ExpirationDate { get; set; }

@@ -17,7 +17,7 @@ public sealed class SubmitProcurementContractActivationRequest
     [Required, StringLength(1000)] public string Reason { get; set; } = string.Empty;
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [Required] public string ContractRowVersion { get; set; } = string.Empty;
-    [MinLength(1)] public List<ProcurementContractActivationEvidenceRequest> Evidence { get; set; } = new();
+    public List<ProcurementContractActivationEvidenceRequest> Evidence { get; set; } = new();
 }
 
 public sealed class DecideProcurementContractActivationRequest

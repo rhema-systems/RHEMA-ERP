@@ -489,6 +489,20 @@ export default function BusinessPartnerDetailPage() {
                 <Label className="text-gray-600">Partner Code</Label>
                 <p className="font-semibold font-mono">{partner.partnerCode}</p>
               </div>
+              <div className="md:col-span-2">
+                <Label className="text-gray-600">Business Categories</Label>
+                {partner.categories?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {partner.categories.map((category) => (
+                      <Badge key={category} variant="secondary">
+                        {category}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="font-semibold">Not assigned</p>
+                )}
+              </div>
               {partner.registrationNumber && (
                 <div>
                   <Label className="text-gray-600">Registration Number</Label>
