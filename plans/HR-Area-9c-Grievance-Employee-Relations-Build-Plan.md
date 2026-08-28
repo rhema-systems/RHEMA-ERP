@@ -45,7 +45,8 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 7 | Reminder-sweep extension + notifications | **COMPLETE 2026-08-27** — 46 ×2 + the ladder = **705**; migration `AddEmployeeRelationsReminderSettings`; the rung clock is a setting at last, and 3 defects were caught by the harness |
 | 8 | ER analytics & reporting | **COMPLETE 2026-08-28** — 104 ×2 + the ladder = **811**; no migration. Found a live defect: four readers of "an answer is owed" had drifted, 227 vs 174 |
 | 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | **COMPLETE 2026-08-28** — 114 ×2 + the ladder = **925**; migration `AddEmployeeRelationsCaseCrossLinks`; the link rule (*about somebody already on the case*) is the leak fix and the meaning at once |
-| 10 | Desk screens: the ER case register and case file | ⏳ |
+| 10 | Desk screens: the ER case register and case file | **COMPLETE 2026-08-28** — 2 screens, 30-method client, types written from a payload PROBE; §3.4 defects 1 and 2 both fixed; tsc + lint clean, every desk method has a caller |
+| 10b | Desk screens: analytics, the responder matrix, the concern inbox | ⏳ **ADDED 2026-08-28** — three backend surfaces with no UI at all. Named here rather than left for slice 12's greps to discover |
 | 11 | Portal screens: the employee's side | ⏳ |
 | 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | ⏳ |
 
@@ -993,3 +994,102 @@ the slice.
 The API supports the reverse affordance (`GET by-source/{source}/{recordId}`), but the **buttons on
 the SHE, performance and discipline screens** are a cross-area UI change into three closed areas.
 Decide there whether they land in this area or go on the cross-module list.
+
+---
+
+### Slice 10 — the desk screens. CLOSED 2026-08-28.
+
+`/hr/employee-relations` (paged register) and `/hr/employee-relations/[id]` (the case file, seven
+tabs), on a 30-method client and a types file written from probed payloads. `tsc` and `lint` clean;
+**every desk method on the client has a caller**. Both §3.4 defects fixed.
+
+#### ⚠ The probe came first, and it earned its keep twice
+
+`dev-harness/hr-employee-relations/probe-slice10.mjs` walked the whole register, found a **non-empty
+example of every collection** and printed it — because an empty array tells you a field exists and
+nothing about what is in it, and because area 12 shipped a type written from an endpoint's *name*
+that type-checked perfectly and described a response the server never sent.
+
+It paid twice:
+
+1. **The reads carry computed fields the C# does not obviously show.** `displayName`, `isActive`,
+   `investigatorDisplayName`, `isComplete`, `isOverdue`, `outcomeIsMissing`, `agreementAccepted`,
+   `notesRedacted` are all expression-bodied properties, and every one of them is easy to miss when
+   transcribing a class by eye. Several are load-bearing on the screen.
+2. **The WRITE shapes, which no probe covers, were wrong where I wrote them from memory** — and I
+   caught it only by then reading the DTOs. `HoldConferenceRequest` had an optional `outcome` and a
+   `heldDate`; in fact `outcome` is **required, minimum 20 characters**, and there is no `heldDate`
+   at all (the server stamps it). `UpdateConferenceRequest` was missing `chairId` /
+   `externalChairName`, so a screen built on it could never change a chair. **The lesson generalises:
+   probing proves the reads; only the DTO proves the writes.**
+
+#### What the screens refuse to lie about
+
+- **`notesRedacted`.** A conference's notes arrive null both when none were taken and when the
+  reader is neither HR nor the chair. Rendering both as an empty box tells a falsehood in the more
+  consequential case — a mediation whose notes are *withheld* would read as one nobody minuted. The
+  screen says which.
+- **A stood-down party stays on the file**, greyed, with its date and reason. It is not a delete.
+- **A retired link renders dead rather than disappearing**: that the case *was* cross-referenced is
+  part of how it was handled.
+- **`outcomeIsMissing` is surfaced as a warning**, not dressed up as an outcome. A case settled
+  through the old `respond(resolvesGrievance)` path has a real gap in its file.
+- **"Close unresolved" only appears at the Board rung**, because that is the server's rule. An
+  affordance for an action that always fails is worse than no affordance.
+- **There is no "accept the agreement" button on the desk**, and the screen says why: acceptance is
+  the employee's alone.
+
+#### The link picker mirrors the server's rule instead of guessing
+
+The cross-reference dialog offers **only records about somebody already named on the case** — the
+primary party plus every active party — by calling each source module's own employee-scoped read. A
+free-text record id would have let the desk pick something the server then refuses, which is how a
+correct rule comes to look like a broken screen.
+
+For incidents it calls **`getForEmployee`, not `getByInvolvedEmployee`**: the former is
+`ReportedById || InvolvedPersons.Any(...)`, which is *exactly* the set slice 9's rule accepts. The
+latter omits the reporter and would have hidden the clearest victimisation case in the module. Worth
+noting that SHE's own notion of "an employee's incidents" and the rule I wrote independently in
+slice 9 turned out to be the same predicate.
+
+#### §3.4's two defects, both fixed
+
+1. **The empty untracked `app/hr/grievances/[id]/` is gone.**
+2. **The register no longer sends HR into `/me/`.** `/hr/grievances` is now a redirect — kept rather
+   than deleted, because it has been the desk's bookmark since area 9 slice 7 — and the sidebar and
+   HR landing card are renamed to *Employee relations*. The old screen also read **every case in the
+   tenant and filtered the array in the browser**, which was 442 rows; the new one filters, counts
+   and pages on the server.
+
+`types/hr/grievance.ts` is now a re-export with a deprecation note. Its types described area 9 slice
+7's grievance — a statement and a ladder — and had silently missed nine slices of growth. **That gap
+was invisible rather than broken: TypeScript cannot warn about a field you never declared.**
+
+#### Lint caught a real bug, not a style point
+
+`@typescript-eslint/no-non-null-assertion` rejected eleven `!`s. They were mutations closing over
+dialog state and asserting it non-null at request time — and the rule is right: the dialog can be
+dismissed between the click and the call, which turns the assertion into a crash rather than a
+no-op. The conference mutations now take their target as a variable.
+
+#### Owed, and named rather than left to be discovered
+
+Seven client methods have no caller, and each has a reason:
+
+- `file`, `escalate`, `withdraw`, `acceptAgreement`, `getMine`, `getAwaitingMyResponse` — **the
+  employee's surface, slice 11.**
+- `getCasesForSource` — **the reverse panel on the SHE / performance / discipline screens.** That is
+  a UI change into three closed areas; decide in slice 12 whether it lands here or goes on the
+  cross-module list.
+
+Two endpoints are now unreferenced and are **slice 12 deletion candidates**:
+`GET api/hr/employee-relations` (superseded by `register`) and `GET .../awaiting-response` (the
+register's `awaitingResponseOnly` filter is the same query, paged, since slice 8 unified `IsOpen`).
+`getByStatus` remains the known-dead third.
+
+**Also spotted, and not touched:** `services/hr/separation.service.ts:156` `downloadDocumentUrl` has
+no consumer anywhere — the same dead-method shape, in area 9b. Recorded, not fixed.
+
+**Slice 10b added.** Analytics, the responder matrix and the anonymous-concern inbox are three
+backend surfaces with **no UI at all**. Naming the gap now is better than having slice 12's
+service-to-screen grep report it as a discovery.

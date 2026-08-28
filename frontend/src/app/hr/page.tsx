@@ -338,10 +338,10 @@ const AREAS = [
     icon: Gavel,
   },
   {
-    title: 'Grievances',
+    title: 'Employee relations',
     description:
-      'Raise a grievance and follow it up the escalation route, or answer one you have been asked about.',
-    href: '/hr/grievances',
+      'Grievances up the escalation route, alongside mediations, welfare matters and union consultations.',
+    href: '/hr/employee-relations',
     icon: MessagesSquare,
   },
   {

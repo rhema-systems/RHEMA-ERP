@@ -890,12 +890,16 @@ export const navigationItems: NavItem[] = [
         // raised ABOUT an employee and a grievance BY one, which gives them opposite permissions —
         // HR cannot file, escalate or withdraw a grievance at all.
         // Area 25 slice 9: the employee surface (mine, filing, the detail) moved to the portal
-        // under /me/grievances; the register stays and its rows open the portal detail.
-        title: 'Grievances',
-        href: '/hr/grievances',
+        // under /me/grievances.
+        // Area 9c slice 10: renamed and re-homed to /hr/employee-relations. The register has held
+        // mediations, welfare matters and union consultations since slice 1, so "Grievances" had
+        // become the wrong name for it — and its rows now open the DESK's case file rather than
+        // the employee's portal detail, which they had been doing by accident.
+        title: 'Employee relations',
+        href: '/hr/employee-relations',
         icon: MessagesSquare,
         children: [
-          { title: 'Register', href: '/hr/grievances', icon: ClipboardList, permissions: ['HR.Discipline.Read'] },
+          { title: 'Case register', href: '/hr/employee-relations', icon: ClipboardList, permissions: ['HR.Discipline.Read'] },
         ],
       },
       {
