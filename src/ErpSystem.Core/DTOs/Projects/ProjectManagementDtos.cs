@@ -363,6 +363,19 @@ public class ProjectBoqItemDto
     public Guid ProjectPackageId { get; set; }
     public string? PackageCode { get; set; }
     public string? PackageName { get; set; }
+    public Guid? SectionCatalogEntryId { get; set; }
+    public string? SectionCode { get; set; }
+    public string? SectionName { get; set; }
+    public Guid? TradeCatalogEntryId { get; set; }
+    public string? TradeCode { get; set; }
+    public string? TradeName { get; set; }
+    public Guid? CostCodeCatalogEntryId { get; set; }
+    public string? CostCode { get; set; }
+    public string? CostCodeName { get; set; }
+    public Guid? MeasurementCodeCatalogEntryId { get; set; }
+    public string? MeasurementStandard { get; set; }
+    public string? MeasurementCode { get; set; }
+    public string? MeasurementRule { get; set; }
     public string? LineNumber { get; set; }
     public string? ItemCode { get; set; }
     public string ItemType { get; set; } = string.Empty;
@@ -390,6 +403,11 @@ public class CreateProjectBoqItemDto
 {
     [Required]
     public Guid ProjectPackageId { get; set; }
+
+    public Guid? SectionCatalogEntryId { get; set; }
+    public Guid? TradeCatalogEntryId { get; set; }
+    public Guid? CostCodeCatalogEntryId { get; set; }
+    public Guid? MeasurementCodeCatalogEntryId { get; set; }
 
     public string? LineNumber { get; set; }
     public string? ItemCode { get; set; }
@@ -419,6 +437,30 @@ public class CreateProjectBoqItemDto
 
 public class UpdateProjectBoqItemDto : CreateProjectBoqItemDto
 {
+}
+
+public class ProjectBoqClassificationOptionDto
+{
+    public Guid Id { get; set; }
+    public string CatalogType { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? StandardCode { get; set; }
+    public string? MeasurementRule { get; set; }
+    public string? DefaultUnitOfMeasure { get; set; }
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class ProjectBoqClassificationOptionsDto
+{
+    public DateTime EffectiveAtUtc { get; set; }
+    public IReadOnlyList<ProjectBoqClassificationOptionDto> Sections { get; set; } = [];
+    public IReadOnlyList<ProjectBoqClassificationOptionDto> Trades { get; set; } = [];
+    public IReadOnlyList<ProjectBoqClassificationOptionDto> CostCodes { get; set; } = [];
+    public IReadOnlyList<ProjectBoqClassificationOptionDto> MeasurementCodes { get; set; } = [];
 }
 
 public class ProjectApprovalRegisterItemDto
@@ -471,6 +513,8 @@ public class ProjectDrawingDto
     public Guid ProjectId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public string? ProjectPhaseName { get; set; }
+    public Guid? SupersedesDrawingId { get; set; }
+    public string? SupersedesDrawingLabel { get; set; }
     public string DrawingNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Discipline { get; set; } = string.Empty;
@@ -487,6 +531,7 @@ public class ProjectDrawingDto
 public class CreateProjectDrawingDto
 {
     public Guid? ProjectPhaseId { get; set; }
+    public Guid? SupersedesDrawingId { get; set; }
 
     [Required]
     public string DrawingNumber { get; set; } = string.Empty;
@@ -2934,6 +2979,11 @@ public class ProjectCatalogEntryDto
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? StandardCode { get; set; }
+    public string? MeasurementRule { get; set; }
+    public string? DefaultUnitOfMeasure { get; set; }
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; }
 }
@@ -2950,8 +3000,19 @@ public class CreateProjectCatalogEntryDto
     public string Name { get; set; } = string.Empty;
 
     public string? Description { get; set; }
+    public string? StandardCode { get; set; }
+    public string? MeasurementRule { get; set; }
+    public string? DefaultUnitOfMeasure { get; set; }
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+public sealed class ProjectCatalogLookupOptionDto
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
 }
 
 public class UpdateProjectManagementSettingsDto

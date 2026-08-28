@@ -1,7 +1,10 @@
+using System.Text.Json;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -66,11 +69,107 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
         var now = DateTime.UtcNow;
         var documentType = Required(
             request.DocumentType, nameof(request.DocumentType), 120);
+        var sourceModule = Required(
+            request.SourceModule, nameof(request.SourceModule), 120);
+        var accessProfile = Required(
+            request.AccessProfile, nameof(request.AccessProfile), 120);
+        var templateCode = Trim(request.MetadataTemplateCode, 80);
+        ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate? template = null;
+
+        if (request.RequirePublishedGovernance)
+        {
+            if (string.IsNullOrWhiteSpace(templateCode))
+            {
+                throw new InvalidOperationException(
+                    "A published Central DMS metadata template is required for this document.");
+            }
+
+            template = await _db.CentralDocumentMetadataTemplates
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                        item.TenantId == request.TenantId &&
+                        item.TemplateCode == templateCode &&
+                        item.IsActive &&
+                        item.PublishedAt.HasValue &&
+                        !item.IsDeleted,
+                    cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"Published Central DMS metadata template '{templateCode}' is unavailable for this tenant.");
+
+            if (!string.Equals(template.Module, sourceModule, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(template.DocumentType, documentType, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The Central DMS metadata template does not match the source module and document type.");
+            }
+
+            if (!string.Equals(template.AccessProfile, accessProfile, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The Central DMS access profile must match the published metadata template.");
+            }
+
+            var hasAccessRules = await _db.CentralDocumentAccessRules
+                .AsNoTracking()
+                .AnyAsync(item =>
+                        item.TenantId == request.TenantId &&
+                        item.AccessProfile == accessProfile &&
+                        item.IsActive &&
+                        item.CanView &&
+                        !item.IsDeleted &&
+                        (item.Module == null || item.Module == sourceModule) &&
+                        (!string.IsNullOrWhiteSpace(item.RoleName) ||
+                         !string.IsNullOrWhiteSpace(item.PermissionKey)),
+                    cancellationToken);
+            if (!hasAccessRules)
+            {
+                throw new InvalidOperationException(
+                    $"Central DMS access profile '{accessProfile}' has no active view rule.");
+            }
+
+            var hasRetentionPolicy = await _db.CentralDocumentRetentionPolicies
+                .AsNoTracking()
+                .AnyAsync(item =>
+                        item.TenantId == request.TenantId &&
+                        item.IsActive &&
+                        !item.IsDeleted &&
+                        (item.Module == null || item.Module == sourceModule) &&
+                        (item.DocumentType == null || item.DocumentType == documentType),
+                    cancellationToken);
+            if (!hasRetentionPolicy)
+            {
+                throw new InvalidOperationException(
+                    $"No active Central DMS retention policy covers '{sourceModule}/{documentType}'.");
+            }
+
+            ValidateRequiredMetadata(template, request.MetadataValues);
+        }
+
+        var duplicateMetadataKeys = request.MetadataValues
+            .Select(value => NormalizeMetadataField(
+                string.IsNullOrWhiteSpace(value.FieldKey) ? value.FieldLabel : value.FieldKey))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToList();
+        if (duplicateMetadataKeys.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Central DMS metadata contains duplicate fields: {string.Join(", ", duplicateMetadataKeys)}.");
+        }
+
         var actorName = string.IsNullOrWhiteSpace(request.ActorName)
             ? request.ActorUserId.ToString()
             : request.ActorName.Trim();
         var documentReference = BuildDocumentReference(
-            request.SourceModule, now);
+            sourceModule, now);
+        var versionStatus = Required(
+            request.VersionStatus, nameof(request.VersionStatus), 80);
+        var isPublished = string.Equals(
+            versionStatus,
+            CentralDocumentEvidenceRules.PublishedVersionStatus,
+            StringComparison.OrdinalIgnoreCase);
 
         var record = new CentralDocumentRecord
         {
@@ -78,27 +177,27 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
             TenantId = request.TenantId,
             DocumentReference = documentReference,
             Title = Required(request.Title, nameof(request.Title), 250),
-            SourceModule = Required(
-                request.SourceModule, nameof(request.SourceModule), 120),
+            SourceModule = sourceModule,
             SourceLabel = Required(
                 request.SourceLabel, nameof(request.SourceLabel), 500),
             SourceEntityType = Required(
                 request.SourceEntityType, nameof(request.SourceEntityType), 150),
             SourceRecordId = request.SourceRecordId,
             SourceRecordReference = Trim(request.SourceRecordReference, 180),
-            MetadataTemplateCode = Trim(request.MetadataTemplateCode, 80),
+            MetadataTemplateCode = templateCode,
             RepositoryStatus = "Linked",
             RepositoryPath = upload.FilePath,
             CurrentVersion = Required(
                 request.VersionNumber, nameof(request.VersionNumber), 120),
-            VersionStatus = Required(
-                request.VersionStatus, nameof(request.VersionStatus), 80),
+            VersionStatus = versionStatus,
             AnnotationStatus = "PDF rendition required",
             CommentStatus = "No comments",
-            AccessProfile = Required(
-                request.AccessProfile, nameof(request.AccessProfile), 120),
+            AccessProfile = accessProfile,
             RetentionStatus = "Current",
             LifecycleStatus = "Active",
+            PublishedAt = isPublished ? now : null,
+            PublishedById = isPublished ? request.ActorUserId : null,
+            EffectiveDate = isPublished ? now : null,
             Notes = Trim(
                 string.IsNullOrWhiteSpace(request.Notes)
                     ? $"Document type: {documentType}"
@@ -125,6 +224,8 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
             FileUploadRecordId = upload.Id,
             ChangeSummary = Trim(request.ChangeSummary, 1000),
             CreatedByUserId = request.ActorUserId,
+            PublishedAt = isPublished ? now : null,
+            PublishedById = isPublished ? request.ActorUserId : null,
             CreatedAt = now,
             CreatedBy = actorName,
             CreatedById = request.ActorUserId
@@ -132,6 +233,67 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
 
         _db.CentralDocumentRecords.Add(record);
         _db.CentralDocumentVersions.Add(version);
+
+        foreach (var value in request.MetadataValues
+                     .Where(value => !string.IsNullOrWhiteSpace(value.FieldLabel)))
+        {
+            var fieldLabel = Required(value.FieldLabel, nameof(value.FieldLabel), 200);
+            var fieldKey = NormalizeMetadataField(
+                string.IsNullOrWhiteSpace(value.FieldKey) ? fieldLabel : value.FieldKey);
+            if (string.IsNullOrWhiteSpace(fieldKey))
+            {
+                continue;
+            }
+
+            _db.CentralDocumentMetadataValues.Add(new CentralDocumentMetadataValue
+            {
+                Id = Guid.NewGuid(),
+                TenantId = request.TenantId,
+                DocumentRecordId = record.Id,
+                TemplateCode = templateCode,
+                FieldKey = fieldKey,
+                FieldLabel = fieldLabel,
+                FieldValue = Trim(value.FieldValue, 2000),
+                ValueType = Required(value.ValueType, nameof(value.ValueType), 50),
+                Source = sourceModule,
+                CapturedAt = now,
+                CapturedById = request.ActorUserId,
+                CreatedAt = now,
+                CreatedBy = actorName,
+                CreatedById = request.ActorUserId
+            });
+        }
+
+        var actorExists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == request.ActorUserId, cancellationToken);
+        if (actorExists)
+        {
+            _db.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = request.TenantId,
+                UserId = request.ActorUserId,
+                Username = actorName,
+                Action = "CentralDmsDocumentRegistered",
+                Resource = request.SourceEntityType,
+                ResourceId = request.SourceRecordId.ToString(),
+                NewValues = JsonSerializer.Serialize(new
+                {
+                    record.Id,
+                    versionId = version.Id,
+                    uploadId = upload.Id,
+                    record.DocumentReference,
+                    sourceModule,
+                    documentType,
+                    templateCode,
+                    accessProfile
+                }),
+                IpAddress = "system",
+                Timestamp = now
+            });
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
 
         return new CentralDocumentRepositoryLink
@@ -310,4 +472,48 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
             first?.Replace('\\', '/').TrimStart('/'),
             second?.Replace('\\', '/').TrimStart('/'),
             StringComparison.OrdinalIgnoreCase);
+
+    private static void ValidateRequiredMetadata(
+        ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate template,
+        IReadOnlyList<CentralDocumentMetadataRegistrationValue> values)
+    {
+        string[] requiredFields;
+        try
+        {
+            requiredFields = JsonSerializer.Deserialize<string[]>(template.RequiredFieldsJson) ?? [];
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException(
+                $"Central DMS metadata template '{template.TemplateCode}' is invalid.", exception);
+        }
+
+        var supplied = values
+            .Where(value => !string.IsNullOrWhiteSpace(value.FieldValue))
+            .SelectMany(value => new[]
+            {
+                NormalizeMetadataField(value.FieldKey),
+                NormalizeMetadataField(value.FieldLabel)
+            })
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = requiredFields
+            .Where(field => !string.IsNullOrWhiteSpace(field))
+            .Where(field => !supplied.Contains(NormalizeMetadataField(field)))
+            .Select(field => field.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Central DMS metadata is incomplete. Missing: {string.Join(", ", missing)}.");
+        }
+    }
+
+    private static string NormalizeMetadataField(string? value) =>
+        new((value ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant()
+            .Where(char.IsLetterOrDigit)
+            .ToArray());
 }

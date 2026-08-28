@@ -173,6 +173,14 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved tenant exchange-rate record frozen for a governed foreign-currency opening
+    /// invoice. Ordinary legacy invoices may remain null until their FX entry contract is
+    /// migrated independently.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+    public virtual ExchangeRate? ExchangeRateRecord { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal BaseCurrencyAmount { get; set; }
 
@@ -244,6 +252,25 @@ public class VendorInvoice : TenantEntity
     /// </summary>
     public Guid? MatchExceptionControlEventId { get; set; }
 
+    // ── Authoritative supply acceptance lineage ────────────────────────
+
+    /// <summary>
+    /// Typed owner of the accepted performance record used by matching.
+    /// Goods remains owned by Procurement receiving/inspection, Services by
+    /// Projects deliverables, and Works by QS payment certificates.
+    /// </summary>
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+
+    public Guid? AcceptedSupplySourceId { get; set; }
+
+    [MaxLength(100)]
+    public string? AcceptedSupplySourceReference { get; set; }
+
+    [MaxLength(64)]
+    public string? AcceptedSupplySnapshotHash { get; set; }
+
+    public DateTime? AcceptedSupplyValidatedAtUtc { get; set; }
+
     // ── Status & Approval ───────────────────────────────────────────────
 
     public VendorInvoiceStatus Status { get; set; } = VendorInvoiceStatus.Draft;
@@ -289,6 +316,14 @@ public class VendorInvoice : TenantEntity
 
     public virtual ICollection<VendorInvoiceLineItem> LineItems { get; set; } = new List<VendorInvoiceLineItem>();
     public virtual ICollection<VendorPaymentAllocation> PaymentAllocations { get; set; } = new List<VendorPaymentAllocation>();
+
+    /// <summary>
+    /// Finance-owned supplier debit-note applications that reduce this invoice's AP balance.
+    /// They are separate from cash allocations because the debit note has already posted its
+    /// own AP-control reduction and must not be posted again as part of the payment journal.
+    /// </summary>
+    public virtual ICollection<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
+        = new List<SupplierDebitNoteApplication>();
 }
 
 /// <summary>
@@ -313,12 +348,31 @@ public class VendorInvoiceLineItem : TenantEntity
     public Guid? GLAccountId { get; set; }
     public virtual Account? GLAccount { get; set; }
 
+    /// <summary>
+    /// Canonical adopted Finance budget cell selected for this direct expense line. The
+    /// relationship is optional because opening, inventory, fixed-asset and Procurement/GRV
+    /// lines do not create a second AP budget commitment. When the resolved expense account is
+    /// budget-controlled, submission requires this evidence and Finance derives both the
+    /// reservation and the posted dimension set from it.
+    /// </summary>
+    public Guid? BudgetEntryId { get; set; }
+    public virtual BudgetEntry? BudgetEntry { get; set; }
+
     public Guid? FixedAssetId { get; set; }
     public virtual FixedAsset? FixedAsset { get; set; }
 
     public Guid? CapitalizationJournalEntryId { get; set; }
     public Guid? CapitalizationPostingEventId { get; set; }
     public DateTime? CapitalizedAt { get; set; }
+
+    /// <summary>
+    /// When the containing AP invoice is voided, these fields prove that its shared reversal
+    /// journal also removed this line's asset-register cost. A separate asset journal is never
+    /// posted because doing so would reverse the invoice's AP/tax lines twice.
+    /// </summary>
+    public Guid? CapitalizationReversalJournalEntryId { get; set; }
+    public Guid? CapitalizationReversalPostingEventId { get; set; }
+    public DateTime? CapitalizationReversedAt { get; set; }
 
     // ── For product-based lines (links to PO item for matching) ─────────
 
@@ -437,6 +491,19 @@ public class VendorPayment : TenantEntity
     /// </summary>
     public bool IsSupplierAdvance { get; set; }
 
+    /// <summary>
+    /// Identifies a canonical AP record created from approved cutover evidence rather than a
+    /// current-period bank disbursement. The type distinguishes supplier advances from WHT
+    /// liabilities so downstream settlement and compliance services can reuse this payment
+    /// without mistaking the migration-clearing journal for a cash movement.
+    /// </summary>
+    [MaxLength(40)]
+    public string? OpeningBalanceType { get; set; }
+    public Guid? OpeningBalanceBatchId { get; set; }
+
+    [MaxLength(100)]
+    public string? OpeningSourceReference { get; set; }
+
     [NotMapped]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 
@@ -454,6 +521,12 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved payment-currency rate selected for this payment. Cross-currency settlement uses
+    /// this stable reference instead of trusting a later lookup or an untraceable typed value.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+
     // ── Bank Details ────────────────────────────────────────────────────
 
     public Guid? BankAccountId { get; set; }
@@ -470,6 +543,10 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(5,2)")]
     public decimal WithholdingTaxRate { get; set; }
 
+    /// <summary>
+    /// Functional/statutory WHT roll-up derived from the active invoice allocations. It must not
+    /// be interpreted as payment-currency cash when a payment settles foreign-currency invoices.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
@@ -508,6 +585,10 @@ public class VendorPayment : TenantEntity
 
     // ── Early-Payment Discount Applied ──────────────────────────────────
 
+    /// <summary>
+    /// Functional-currency roll-up of allocation discounts. Native discount evidence remains on
+    /// each allocation because one payment may settle invoices in different currencies.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountTaken { get; set; }
 
@@ -615,6 +696,13 @@ public class VendorPayment : TenantEntity
     // ── Navigation ──────────────────────────────────────────────────────
 
     public virtual ICollection<VendorPaymentAllocation> Allocations { get; set; } = new List<VendorPaymentAllocation>();
+
+    /// <summary>
+    /// Finance AP settlement bridge for supplier credits consumed alongside this payment.
+    /// These rows do not consume payment cash and therefore do not change AllocatedAmount.
+    /// </summary>
+    public virtual ICollection<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
+        = new List<SupplierDebitNoteApplication>();
 }
 
 /// <summary>
@@ -635,11 +723,64 @@ public class VendorPaymentAllocation : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// Cash or supplier-advance lot consumed in payment currency. AllocatedAmount is deliberately
+    /// retained as the invoice-currency reduction for aging and invoice balance; when this row is
+    /// a posted advance application, the two amounts may differ and are reversed as one pair.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentCurrencyAmount { get; set; }
+
+    [Required]
+    [MaxLength(3)]
+    public string InvoiceCurrencyCode { get; set; } = "GHS";
+
+    [Required]
+    [MaxLength(3)]
+    public string PaymentCurrencyCode { get; set; } = "GHS";
+
+    public bool IsCrossCurrency { get; set; }
+
+    /// <summary>
+    /// Approved rate ids and frozen values retain both audit lineage and deterministic arithmetic
+    /// if the exchange-rate master is corrected after posting. For an advance application the
+    /// payment rate is the advance's origin rate and the invoice rate is the application-date rate.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal InvoiceSettlementExchangeRate { get; set; } = 1m;
+
+    public Guid? PaymentExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal PaymentExchangeRate { get; set; } = 1m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentFunctionalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal SettlementFunctionalAmount { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; }
 
+    /// <summary>
+    /// Functional-currency value of the invoice-currency discount. Keeping this beside the
+    /// native amount prevents later rate-master edits from changing the posted deduction.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DiscountFunctionalAmount { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
+
+    /// <summary>
+    /// Functional/statutory value of this invoice's WHT component. The header remains a roll-up;
+    /// allocation evidence is authoritative when invoices or payment currency differ.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxFunctionalAmount { get; set; }
 
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 

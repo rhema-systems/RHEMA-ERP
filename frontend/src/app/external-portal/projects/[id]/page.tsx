@@ -13,6 +13,12 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { QuantitySurveyJointMeasurementWorkspace } from '@/components/quantity-survey/QuantitySurveyJointMeasurementWorkspace';
+import { QuantitySurveyValuationPortalWorkspace } from '@/components/quantity-survey/QuantitySurveyValuationPortalWorkspace';
+import { QuantitySurveyMaterialContractorWorkspace } from '@/components/quantity-survey/QuantitySurveyMaterialReconciliationDialog';
+import { QuantitySurveyContractClaimsWorkspace } from '@/components/quantity-survey/QuantitySurveyContractClaimsWorkspace';
+import { QuantitySurveyDayworkWorkspace } from '@/components/quantity-survey/QuantitySurveyDayworkWorkspace';
+import { QuantitySurveySubcontractWorkspace } from '@/components/quantity-survey/QuantitySurveySubcontractWorkspace';
 import { AttachProjectDocumentDto, CreateProjectCommentDto, ProjectCatalogEntryDto, ProjectExternalDetailDto, projectService, SubmitProjectDeliverableDto, UpdateProjectWorkItemProgressDto } from '@/services/projectService';
 
 const commentInit: CreateProjectCommentDto = { body: '', commentType: 'ExternalUpdate' };
@@ -340,11 +346,14 @@ export default function ExternalProjectDetailPage() {
       </Card>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-3 gap-1 md:grid-cols-8">
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="milestones">Milestones</TabsTrigger>
           <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="measurements">Measurements</TabsTrigger>
+          <TabsTrigger value="valuations">Valuations</TabsTrigger>
+          <TabsTrigger value="claims">Claims & dayworks</TabsTrigger>
           <TabsTrigger value="updates">Updates</TabsTrigger>
         </TabsList>
 
@@ -614,6 +623,21 @@ export default function ExternalProjectDetailPage() {
           {project.externalCollaborationEnabled && !project.canUploadDocuments ? (
             <Card><CardContent className="py-6 text-sm text-muted-foreground">Document upload is not available for this account.</CardContent></Card>
           ) : null}
+        </TabsContent>
+
+        <TabsContent value="measurements" className="space-y-6">
+          <QuantitySurveyJointMeasurementWorkspace projectId={project.id} external />
+        </TabsContent>
+
+        <TabsContent value="valuations" className="space-y-6">
+          <QuantitySurveyValuationPortalWorkspace projectId={project.id} />
+          <QuantitySurveyMaterialContractorWorkspace projectId={project.id} />
+        </TabsContent>
+
+        <TabsContent value="claims" className="space-y-6">
+          <QuantitySurveyDayworkWorkspace projectId={project.id} external />
+          <QuantitySurveyContractClaimsWorkspace projectId={project.id} external />
+          <QuantitySurveySubcontractWorkspace projectId={project.id} external />
         </TabsContent>
 
         <TabsContent value="updates" className="space-y-6">

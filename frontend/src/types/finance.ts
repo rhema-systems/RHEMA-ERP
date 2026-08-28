@@ -8,6 +8,7 @@
 
 export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
 export type AccountStatus = 'Active' | 'Inactive' | 'Closed';
+export type CashFlowClassification = 'Operating' | 'Investing' | 'Financing';
 export type JournalType = 'General' | 'Adjusting' | 'Reversing' | 'Recurring' | 'Opening Balance' | 'Closing' | 'Revaluation' | 'System Generated';
 export type PostingStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Rejected' | 'Reversed';
 export type ExchangeRateType = 'Daily' | 'Average' | 'MonthEnd' | 'QuarterEnd' | 'YearEnd' | 'Budget' | 'Fixed' | 'Spot';
@@ -170,6 +171,7 @@ export interface Account {
     accountType: AccountType;
     accountCategory?: string;
     accountSubCategory?: string;
+    cashFlowClassification?: CashFlowClassification | null;
     description?: string;
     parentAccountId?: string;
     isSegmented: boolean;
@@ -216,6 +218,8 @@ export interface AccountCurrencyLink {
     transactionQuoteSide: ExchangeRateQuoteSide;
     revaluationRateType: string;
     revaluationQuoteSide: ExchangeRateQuoteSide;
+    effectiveDate?: string;
+    effectiveEndDate?: string;
     foreignCurrencyBalance: number;
     baseCurrencyBalance: number;
     currentExchangeRate?: number;
@@ -373,6 +377,107 @@ export interface AccountTransaction {
     /** creditAmount = amount when transactionType === 'Credit', else 0 */
     creditAmount?: number;
     lineNumber?: number;
+    financeDimensionSetId?: string;
+    financeDimensionDisplayValue?: string;
+    dimensions?: FinanceDimensionAssignment[];
+}
+
+export interface FinanceDimensionAssignment {
+    definitionId: string;
+    valueId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+}
+
+export interface FinancePostingDimensionValue {
+    dimensionCode: string;
+    valueCode?: string;
+    sourceEntityType?: string;
+    sourceEntityId?: string;
+}
+
+export interface FinanceDimensionValue {
+    id: string;
+    financeDimensionDefinitionId: string;
+    code: string;
+    name: string;
+    parentValueId?: string;
+    sourceEntityType?: string;
+    sourceEntityId?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
+    displayOrder: number;
+}
+
+export interface FinanceDimensionDefinition {
+    id: string;
+    code: string;
+    name: string;
+    description?: string;
+    classification: 'Analytical' | 'Balancing' | 'Derived';
+    valueSourceType: 'Lookup' | 'EntityBacked';
+    sourceEntityType?: string;
+    isActive: boolean;
+    displayOrder: number;
+    values: FinanceDimensionValue[];
+}
+
+export interface UpsertFinanceDimensionDefinition {
+    code: string;
+    name: string;
+    description?: string;
+    classification: 'Analytical' | 'Balancing' | 'Derived';
+    valueSourceType: 'Lookup' | 'EntityBacked';
+    sourceEntityType?: string;
+    isActive: boolean;
+    displayOrder: number;
+}
+
+export interface UpsertFinanceDimensionValue {
+    code: string;
+    name: string;
+    parentValueId?: string;
+    sourceEntityType?: string;
+    sourceEntityId?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
+    displayOrder: number;
+}
+
+export interface FinanceDimensionAccountRule {
+    id: string;
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    financeDimensionDefinitionId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    ruleType: 'Required' | 'Optional' | 'Prohibited' | 'Fixed';
+    defaultDimensionValueId?: string;
+    defaultValueCode?: string;
+    sourceModule?: string;
+    sourceDocumentType?: string;
+    postingAction?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
+}
+
+export interface UpsertFinanceDimensionAccountRule {
+    accountId: string;
+    financeDimensionDefinitionId: string;
+    ruleType: 'Required' | 'Optional' | 'Prohibited' | 'Fixed';
+    defaultDimensionValueId?: string;
+    sourceModule?: string;
+    sourceDocumentType?: string;
+    postingAction?: string;
+    effectiveDate: string;
+    expiryDate?: string;
+    isActive: boolean;
 }
 
 /** @deprecated Use AccountTransaction instead */
@@ -388,6 +493,59 @@ export interface JournalEntryAttachment {
     fileSize?: number;
     uploadedAt: string;
     uploadedBy: string;
+}
+
+export interface FinanceBudgetControlLine {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    fiscalPeriodId: string;
+    fiscalPeriodCode: string;
+    budgetScenarioId?: string | null;
+    budgetScenarioName?: string | null;
+    budgetReturnId?: string | null;
+    budgetEntryId?: string | null;
+    segmentValueId?: string | null;
+    segmentValue?: string | null;
+    requestedAmount: number;
+    budgetAmount: number;
+    postedActualAmount: number;
+    reservedAmount: number;
+    availableAmount: number;
+    shortfallAmount: number;
+    decisionCode: string;
+    message: string;
+}
+
+export interface FinanceBudgetControlEvaluation {
+    sourceDocumentId: string;
+    entryDate: string;
+    currencyCode: string;
+    evaluationHash: string;
+    hasTrackedExpenseLines: boolean;
+    isAllowed: boolean;
+    requiresOverride: boolean;
+    hasApprovedOverride: boolean;
+    overrideStatus?: string | null;
+    totalRequestedAmount: number;
+    totalShortfallAmount: number;
+    lines: FinanceBudgetControlLine[];
+}
+
+export interface FinanceBudgetOverrideRequest {
+    id: string;
+    sourceDocumentId: string;
+    evaluationHash: string;
+    reason: string;
+    requestedAmount: number;
+    currencyCode: string;
+    shortfallAmount: number;
+    status: string;
+    workflowInstanceId?: string | null;
+    requestedByUserId: string;
+    requestedAt: string;
+    approvedByUserId?: string | null;
+    approvedAt?: string | null;
 }
 
 export interface FinanceJournalAuditLog {
@@ -664,6 +822,11 @@ export interface CreateFiscalYearDto {
 }
 
 // Fiscal Period
+export interface PeriodOpenRequestDto {
+    fiscalPeriodId: string;
+    reason: string;
+}
+
 export interface PeriodCloseRequestDto {
     fiscalPeriodId: string;
     closingNotes?: string;
@@ -926,6 +1089,7 @@ export interface CreateAccountDto {
     accountType: AccountType;
     accountCategory?: string;
     accountSubCategory?: string;
+    cashFlowClassification?: CashFlowClassification | null;
     description?: string;
     parentAccountId?: string;
     isSegmented: boolean;
@@ -1059,6 +1223,7 @@ export interface CreateAccountTransactionDto {
     foreignAmount?: number;
     exchangeRate?: number;
     lineNumber?: number;
+    dimensions?: FinancePostingDimensionValue[];
 }
 
 // Controlled Opening Balances
@@ -1077,6 +1242,8 @@ export interface CreateOpeningBalanceLineDto {
     accountId: string;
     debitAmount: number;
     creditAmount: number;
+    transactionDebitAmount?: number;
+    transactionCreditAmount?: number;
     transactionCurrencyCode?: string;
     functionalCurrencyCode?: string;
     exchangeRateId?: string;
@@ -1087,6 +1254,202 @@ export interface CreateOpeningBalanceLineDto {
     counterpartyId?: string;
     sourceReference?: string;
     notes?: string;
+}
+
+export interface CreateFixedAssetOpeningBalanceBatchDto {
+    batchNumber?: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    fixedAssetBookValueIds: string[];
+}
+
+export interface CreateBankAccountOpeningBalanceDto {
+    batchNumber?: string;
+    sourceReference: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    bankAccountId: string;
+    /** Opening amount in the bank account's own currency. */
+    amount: number;
+    /** Server-selected approved historical rate; required only for a foreign-currency bank. */
+    exchangeRateId?: string;
+}
+
+export interface CreateResidualGlEquityOpeningBalanceDto {
+    batchNumber?: string;
+    sourceReference: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    accruedExpensesAccountId: string;
+    accruedExpensesAmount: number;
+    shareCapitalAccountId: string;
+    shareCapitalAmount: number;
+    retainedEarningsAmount: number;
+}
+
+export interface CreateSpecializedOpeningBalanceDto {
+    batchNumber?: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    currencyCode: string;
+    amount: number;
+    exchangeRateId?: string;
+    exchangeRate: number;
+}
+
+export interface CreateSupplierAdvanceOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    supplierId: string;
+}
+
+export interface CreateCustomerAdvanceOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    customerId: string;
+}
+
+export interface CreateApWithholdingOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    supplierId: string;
+    taxId: string;
+    withholdingTaxAccountId: string;
+    taxableBase: number;
+    netPaidAmount: number;
+}
+
+export interface CreateArWithholdingOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    customerId: string;
+    taxId: string;
+    withholdingTaxAccountId: string;
+    certificateNumber?: string;
+    certificateDate?: string;
+}
+
+export interface SpecializedOpeningBalanceOptions {
+    functionalCurrencyCode: string;
+    suppliers: OpeningBalancePartyOption[];
+    customers: OpeningBalancePartyOption[];
+    withholdingTaxes: OpeningBalanceWhtOption[];
+}
+
+export interface GovernedOpeningBalanceOptions {
+    functionalCurrencyCode: string;
+    bankAccounts: BankAccountOpeningOption[];
+    accruedExpensesAccounts: ResidualOpeningAccountOption[];
+    shareCapitalAccounts: ResidualOpeningAccountOption[];
+    migrationClearingAccount?: GovernedOpeningDerivedAccount;
+    retainedEarningsAccount?: GovernedOpeningDerivedAccount;
+    blockers: string[];
+}
+
+export interface GovernedOpeningBalanceOptionsRequest {
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+}
+
+export interface BankAccountOpeningOption {
+    id: string;
+    accountNumber: string;
+    accountName: string;
+    bankName: string;
+    currencyCode: string;
+    glAccountId?: string;
+    glAccountCode?: string;
+    glAccountName?: string;
+    postingDirection: 'Debit' | string;
+    exchangeRateId?: string;
+    exchangeRate: number;
+    exchangeRateDate?: string;
+    exchangeRateType?: string;
+    exchangeRateQuoteSide?: string;
+    exchangeRateSource?: string;
+    isEligible: boolean;
+    blockers: string[];
+}
+
+export interface ResidualOpeningAccountOption {
+    id: string;
+    accountCode: string;
+    accountName: string;
+    accountType: string;
+    postingDirection: 'Credit' | string;
+}
+
+export interface GovernedOpeningDerivedAccount {
+    accountId: string;
+    accountCode: string;
+    accountName: string;
+    postingDirection: string;
+    isEligible: boolean;
+    blockers: string[];
+}
+
+export interface OpeningBalancePartyOption {
+    id: string;
+    code: string;
+    name: string;
+}
+
+export interface OpeningBalanceWhtOption {
+    id: string;
+    code: string;
+    name: string;
+    rate: number;
+    payableAccountId?: string;
+    receivableAccountId?: string;
+}
+
+export interface FixedAssetOpeningBalanceCandidate {
+    fixedAssetId: string;
+    fixedAssetBookValueId: string;
+    assetCode: string;
+    assetName: string;
+    categoryCode: string;
+    bookClassification: string;
+    openingAsOfDate?: string;
+    acquisitionCost: number;
+    accumulatedDepreciation: number;
+    netBookValue: number;
+    openingPostedToGl: boolean;
+    openingJournalEntryId?: string;
+}
+
+export interface SubledgerOpeningBalanceReadiness {
+    apOpeningInvoiceCount: number;
+    postedApOpeningInvoiceCount: number;
+    apOpeningInvoiceFunctionalAmount: number;
+    arOpeningInvoiceCount: number;
+    postedArOpeningInvoiceCount: number;
+    arOpeningInvoiceFunctionalAmount: number;
+    supplierAdvanceOpeningCount: number;
+    postedSupplierAdvanceOpeningCount: number;
+    supplierAdvanceOpeningFunctionalAmount: number;
+    customerAdvanceOpeningCount: number;
+    postedCustomerAdvanceOpeningCount: number;
+    customerAdvanceOpeningFunctionalAmount: number;
+    apWithholdingOpeningCount: number;
+    postedApWithholdingOpeningCount: number;
+    apWithholdingOpeningAmount: number;
+    arWithholdingOpeningCount: number;
+    postedArWithholdingOpeningCount: number;
+    arWithholdingOpeningAmount: number;
+    fixedAssetOpeningBookValueCount: number;
+    postedFixedAssetOpeningBookValueCount: number;
+    fixedAssetOpeningCost: number;
+    fixedAssetOpeningAccumulatedDepreciation: number;
+    fixedAssetOpeningNetBookValue: number;
+    fixedAssetCandidates: FixedAssetOpeningBalanceCandidate[];
+    warnings: string[];
 }
 
 export interface UpdateCurrencyLinkRatePolicyDto {
@@ -1119,6 +1482,9 @@ export interface OpeningBalanceBatch {
     fiscalPeriodCode: string;
     bookClassification: string;
     status: string;
+    sourceKind: string;
+    isSystemGenerated: boolean;
+    isEditable: boolean;
     idempotencyKey: string;
     totalDebit: number;
     totalCredit: number;
@@ -1144,6 +1510,8 @@ export interface OpeningBalanceLine {
     accountName: string;
     debitAmount: number;
     creditAmount: number;
+    transactionDebitAmount?: number;
+    transactionCreditAmount?: number;
     transactionCurrencyCode: string;
     functionalCurrencyCode: string;
     exchangeRateId?: string;
@@ -1182,11 +1550,18 @@ export interface FinanceSegmentFilterDto {
     segmentValue: string;
 }
 
+export interface FinanceDimensionFilterDto {
+    financeDimensionDefinitionId?: string;
+    dimensionCode?: string;
+    valueCodes: string[];
+}
+
 export interface TrialBalanceRequestDto {
     asAtDate?: string;
     bookClassification?: string;
     includeZeroBalances?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    dimensionFilters?: FinanceDimensionFilterDto[];
 }
 
 export interface TrialBalanceReportDto {
@@ -1219,6 +1594,7 @@ export interface DetailedLedgerRequestDto {
     bookClassification?: string;
     includeReversed?: boolean;
     includeOpeningBalances?: boolean;
+    dimensionFilters?: FinanceDimensionFilterDto[];
 }
 
 export interface DetailedLedgerReportDto {
@@ -1266,6 +1642,10 @@ export interface DetailedLedgerLineDto {
     foreignAmount?: number;
     exchangeRate?: number;
     isReversed: boolean;
+    segmentString?: string;
+    financeDimensionSetId?: string;
+    financeDimensionDisplay?: string;
+    dimensions: FinanceDimensionAssignment[];
 }
 
 export interface IncomeStatementRequestDto {
@@ -1274,6 +1654,7 @@ export interface IncomeStatementRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    dimensionFilters?: FinanceDimensionFilterDto[];
     layoutId?: string;
     useDefaultLayout?: boolean;
 }
@@ -1283,6 +1664,7 @@ export interface BalanceSheetRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    dimensionFilters?: FinanceDimensionFilterDto[];
     layoutId?: string;
     useDefaultLayout?: boolean;
 }
@@ -1627,6 +2009,8 @@ export interface CashFlowStatementReportDto {
     periodEnd: string;
     bookClassification: string;
     currencyCode: string;
+    method: 'Direct' | 'Indirect';
+    presentationWarnings: string[];
     operatingActivities: CashFlowSectionDto;
     investingActivities: CashFlowSectionDto;
     financingActivities: CashFlowSectionDto;

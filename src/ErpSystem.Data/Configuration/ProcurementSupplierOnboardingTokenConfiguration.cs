@@ -70,7 +70,8 @@ public sealed class ProcurementSupplierOnboardingPaymentConfiguration :
                 "AND [ReceiptNumber] IS NOT NULL AND [ReceiptIssuedAtUtc] IS NOT NULL) " +
                 "OR [Status] NOT IN (2, 3)) " +
                 "AND (([Status] = 3 AND [ReconciledAtUtc] IS NOT NULL AND [ReconciledById] IS NOT NULL " +
-                "AND [ReconciliationReference] IS NOT NULL) OR [Status] <> 3)");
+                "AND [ReconciliationReference] IS NOT NULL) OR [Status] <> 3) " +
+                "AND ([SubmittedByApplicantSessionId] IS NULL OR [CreatedById] IS NULL)");
         });
 
         builder.HasIndex(item => new { item.TenantId, item.CreationCorrelationId }).IsUnique();
@@ -79,11 +80,16 @@ public sealed class ProcurementSupplierOnboardingPaymentConfiguration :
         builder.HasIndex(item => new { item.TenantId, item.PostingEventId })
             .IsUnique().HasFilter("[PostingEventId] IS NOT NULL AND [IsDeleted] = 0");
         builder.HasIndex(item => new { item.TenantId, item.TokenId, item.Status });
+        builder.HasIndex(item => new { item.TenantId, item.SubmittedByApplicantSessionId });
 
         builder.HasOne(item => item.Token).WithMany(item => item.Payments)
             .HasForeignKey(item => item.TokenId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.PaymentMethod).WithMany()
             .HasForeignKey(item => item.PaymentMethodId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(item => item.SubmittedByApplicantSession)
+            .WithMany(item => item.SubmittedPayments)
+            .HasForeignKey(item => item.SubmittedByApplicantSessionId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

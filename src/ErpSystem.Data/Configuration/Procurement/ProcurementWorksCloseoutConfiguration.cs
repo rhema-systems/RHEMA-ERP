@@ -10,7 +10,10 @@ public sealed class ProcurementWorksCloseoutActionConfiguration :
     public void Configure(EntityTypeBuilder<ProcurementWorksCloseoutAction> builder)
     {
         builder.ToTable("ProcurementWorksCloseoutActions", table =>
-            table.HasTrigger("TR_ProcurementWorksCloseoutActions_TDC0409Protected"));
+        {
+            table.HasTrigger("TR_ProcurementWorksCloseoutActions_TDC0409Protected");
+            table.HasTrigger("TR_ProcurementWorksCloseoutActions_QS0504RetentionGuard");
+        });
         builder.HasKey(item => item.Id);
         builder.HasIndex(item => new { item.TenantId, item.ContractId, item.Sequence })
             .IsUnique();
@@ -23,6 +26,28 @@ public sealed class ProcurementWorksCloseoutActionConfiguration :
             item.ActionType,
             item.Status
         });
+        builder.HasIndex(item => new
+        {
+            item.TenantId,
+            item.ContractId,
+            item.RetentionReleaseStage,
+            item.Status
+        });
+        builder.HasIndex(item => new
+        {
+            item.TenantId,
+            item.ContractId,
+            item.RetentionReleaseStage,
+            item.ProjectHandoverItemId
+        })
+            .IsUnique()
+            .HasFilter("[ActionType] = 5 AND [Status] = 1 AND [ProjectHandoverItemId] IS NOT NULL AND [IsDeleted] = 0");
+        builder.Property(item => item.RequestHash).IsUnicode(false);
+        builder.Property(item => item.QuantitySurveyRetentionPolicyHash).IsUnicode(false);
+        builder.Property(item => item.RetentionHeldSnapshot).HasColumnType("decimal(18,2)");
+        builder.Property(item => item.RetentionReleasedBefore).HasColumnType("decimal(18,2)");
+        builder.Property(item => item.RetentionStageLimitAmount).HasColumnType("decimal(18,2)");
+        builder.Property(item => item.RetentionReleasedAfter).HasColumnType("decimal(18,2)");
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.HasCheckConstraint("CK_ProcurementWorksCloseoutActions_Sequence",
             "[Sequence] >= 1");
@@ -39,6 +64,8 @@ public sealed class ProcurementWorksCloseoutActionConfiguration :
             "([ActionType] NOT IN (5,8,9) AND [RequiresIndependentFinanceApproval] = 0)");
         builder.HasCheckConstraint("CK_ProcurementWorksCloseoutActions_Currency",
             "([Amount] IS NULL AND [Currency] IS NULL) OR ([Amount] IS NOT NULL AND [Amount] >= 0 AND LEN([Currency]) = 3)");
+        builder.HasCheckConstraint("CK_ProcurementWorksCloseoutActions_QsRetention",
+            "[RequestHash] IS NULL OR (LEN([RequestHash]) = 64 AND (([ActionType] = 5 AND [RetentionReleaseStage] BETWEEN 0 AND 3 AND [QuantitySurveyConfigurationProfileId] IS NOT NULL AND [QuantitySurveyConfigurationProfileVersion] > 0 AND [QuantitySurveyRetentionDecisionId] IS NOT NULL AND LEN([QuantitySurveyRetentionPolicyHash]) = 64 AND [Amount] > 0 AND [RetentionHeldSnapshot] >= 0 AND [RetentionReleasedBefore] >= 0 AND [RetentionStageLimitAmount] >= [Amount] AND ABS([RetentionReleasedAfter] - ([RetentionReleasedBefore] + [Amount])) <= 0.01 AND [RetentionReleasedAfter] <= [RetentionHeldSnapshot]) OR ([ActionType] <> 5 AND [RetentionReleaseStage] IS NULL AND [QuantitySurveyConfigurationProfileId] IS NULL AND [QuantitySurveyConfigurationProfileVersion] IS NULL AND [QuantitySurveyRetentionDecisionId] IS NULL AND [QuantitySurveyRetentionPolicyHash] IS NULL AND [RetentionHeldSnapshot] IS NULL AND [RetentionReleasedBefore] IS NULL AND [RetentionStageLimitAmount] IS NULL AND [RetentionReleasedAfter] IS NULL AND [UsesRetentionBond] = 0)))");
         builder.HasOne(item => item.Contract).WithMany()
             .HasForeignKey(item => item.ContractId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.Project).WithMany()
@@ -57,6 +84,14 @@ public sealed class ProcurementWorksCloseoutActionConfiguration :
             .HasForeignKey(item => item.ProjectPaymentCertificateId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.PerformanceBondRequest).WithMany()
             .HasForeignKey(item => item.PerformanceBondRequestId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.QuantitySurvey.QuantitySurveyConfigurationProfile>()
+            .WithMany()
+            .HasForeignKey(item => item.QuantitySurveyConfigurationProfileId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.QuantitySurvey.QuantitySurveyConfigurationDecision>()
+            .WithMany()
+            .HasForeignKey(item => item.QuantitySurveyRetentionDecisionId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

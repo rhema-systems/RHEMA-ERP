@@ -5,10 +5,32 @@
 export type BudgetStatus = 'Draft' | 'Collecting' | 'InReview' | 'Approved' | 'Superseded' | 'Archived';
 export type BudgetReturnStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
 
+export interface BudgetControlDimension {
+    financeDimensionDefinitionId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    displayOrder: number;
+}
+
+export interface BudgetDimensionAssignmentInput {
+    financeDimensionDefinitionId: string;
+    financeDimensionValueId: string;
+}
+
+export interface BudgetDimensionAssignment extends BudgetDimensionAssignmentInput {
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+}
+
 export interface BudgetScenario {
     id: string;
     name: string;
     description?: string;
+    versionType: 'Original' | 'Virement' | 'Supplementary' | string;
+    versionNumber: number;
+    parentScenarioId?: string;
     fiscalYearId: string;
     baseCurrencyCode: string;
     isActive: boolean;
@@ -31,6 +53,7 @@ export interface BudgetScenario {
     updatedBy?: string;
     tenantId: string;
     rowVersion: string;
+    controlDimensions: BudgetControlDimension[];
 }
 
 export interface BudgetReturn {
@@ -79,6 +102,9 @@ export interface BudgetEntry {
     updatedAt?: string;
     tenantId: string;
     rowVersion: string;
+    financeDimensionSetId?: string;
+    dimensionCombinationHash?: string;
+    dimensionAssignments: BudgetDimensionAssignment[];
 
     // Virtual/Display properties
     accountCode?: string;
@@ -93,6 +119,7 @@ export interface CreateBudgetScenarioDto {
     description?: string;
     fiscalYearId: string;
     baseCurrencyCode: string;
+    controlDimensionDefinitionIds: string[];
 }
 
 export interface UpdateBudgetScenarioDto {
@@ -100,6 +127,7 @@ export interface UpdateBudgetScenarioDto {
     description?: string;
     isActive?: boolean;
     rowVersion: string;
+    controlDimensionDefinitionIds?: string[];
 }
 
 export interface CreateBudgetReturnDto {
@@ -128,6 +156,9 @@ export interface BudgetEntryDto {
     exchangeRate: number;
     amount: number;
     rowVersion?: string;
+    financeDimensionSetId?: string;
+    dimensionCombinationHash?: string;
+    dimensionAssignments: BudgetDimensionAssignmentInput[];
 }
 
 export interface SubmitBudgetReturnDto {
@@ -269,4 +300,64 @@ export interface BudgetScenarioComparison {
     comparisonTotal: number;
     differenceTotal: number;
     lines: BudgetScenarioComparisonLine[];
+}
+
+export type BudgetRevisionType = 'Virement' | 'Supplementary';
+export type BudgetRevisionStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Applied';
+
+export interface BudgetRevisionLineInput {
+    segmentValueId?: string;
+    accountId: string;
+    fiscalPeriodId: string;
+    adjustmentAmountBase: number;
+    notes?: string;
+}
+
+export interface CreateBudgetRevisionDto {
+    sourceScenarioId: string;
+    revisionType: BudgetRevisionType;
+    effectiveDate: string;
+    boardResolutionReference: string;
+    boardResolutionDate: string;
+    justification: string;
+    lines: BudgetRevisionLineInput[];
+}
+
+export interface BudgetRevisionLine extends BudgetRevisionLineInput {
+    id: string;
+    segmentCode: string;
+    segmentName: string;
+    accountCode: string;
+    accountName: string;
+    periodCode: string;
+    periodName: string;
+    currentAmountBase: number;
+    revisedAmountBase: number;
+}
+
+export interface BudgetRevision {
+    id: string;
+    revisionNumber: string;
+    revisionType: BudgetRevisionType;
+    sourceScenarioId: string;
+    sourceScenarioName: string;
+    fiscalYearId: string;
+    fiscalYearName: string;
+    resultScenarioId?: string;
+    resultScenarioName?: string;
+    effectiveDate: string;
+    boardResolutionReference: string;
+    boardResolutionDate: string;
+    justification: string;
+    status: BudgetRevisionStatus;
+    increaseAmountBase: number;
+    reductionAmountBase: number;
+    netChangeAmountBase: number;
+    submittedAt?: string;
+    approvedAt?: string;
+    appliedAt?: string;
+    rejectionReason?: string;
+    createdAt: string;
+    rowVersion: string;
+    lines: BudgetRevisionLine[];
 }

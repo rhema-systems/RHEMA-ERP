@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace ErpSystem.Core.DTOs.Reports
 {
@@ -79,6 +80,17 @@ namespace ErpSystem.Core.DTOs.Reports
         public bool IncludeMetadata { get; set; } = true;
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 100;
+
+        /// <summary>
+        /// Marks an execution initiated by the server's authorized export workflow. This value is
+        /// never accepted from HTTP JSON; protected providers may use it to apply export authority
+        /// and their saved export ceiling without weakening interactive report-run authorization.
+        /// </summary>
+        [JsonIgnore]
+        public bool IsExportExecution { get; set; }
+
+        [JsonIgnore]
+        public ReportTemplateGenerationContextDto? TemplateContext { get; set; }
     }
 
     public class ReportResultDto
@@ -107,6 +119,7 @@ namespace ErpSystem.Core.DTOs.Reports
         public DateTime? DataAsOf { get; set; }
         public string? DataSource { get; set; }
         public Dictionary<string, object>? Statistics { get; set; }
+        public ReportTemplateGenerationContextDto? TemplateGeneration { get; set; }
     }
 
     public class ReportChartDataDto
@@ -124,10 +137,19 @@ namespace ErpSystem.Core.DTOs.Reports
         public bool IncludeCharts { get; set; } = true;
         public bool IncludeHeaders { get; set; } = true;
         public string? Template { get; set; }
+
+        [JsonIgnore]
+        public ReportTemplateGenerationContextDto? TemplateContext { get; set; }
     }
 
     public class ReportExportResultDto
     {
+        /// <summary>
+        /// Identifies the durable export audit record. Scheduled delivery uses
+        /// this key to attach private-file evidence without creating a duplicate
+        /// export record alongside the existing reporting service.
+        /// </summary>
+        public Guid ExportId { get; set; }
         public Guid ReportId { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime ExportedAt { get; set; }
@@ -177,10 +199,21 @@ namespace ErpSystem.Core.DTOs.Reports
     public class ReportTemplateDto
     {
         public Guid Id { get; set; }
+        public Guid? ReportId { get; set; }
+        public string? ReportName { get; set; }
+        public string TemplateKey { get; set; } = string.Empty;
+        public int Version { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
+        public string Audience { get; set; } = string.Empty;
+        public string Cadence { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string DefaultOutputFormat { get; set; } = string.Empty;
+        public List<string> OutputFormats { get; set; } = new();
+        public Dictionary<string, object>? SavedFilters { get; set; }
+        public Dictionary<string, object>? GenerationMetadata { get; set; }
         public string? ChartType { get; set; }
         public bool IsCustom { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
@@ -190,6 +223,10 @@ namespace ErpSystem.Core.DTOs.Reports
         public List<string>? Tags { get; set; }
         public string? PreviewImage { get; set; }
         public Dictionary<string, object>? Configuration { get; set; }
+        public DateTime? LastGeneratedAt { get; set; }
+        public Guid? LastGeneratedBy { get; set; }
+        public string? LastGenerationFormat { get; set; }
+        public string RowVersion { get; set; } = string.Empty;
     }
 
     public class ReportAnalyticsDto
@@ -237,15 +274,74 @@ namespace ErpSystem.Core.DTOs.Reports
 
     public class CreateReportTemplateDto
     {
+        [Required]
+        public Guid ReportId { get; set; }
+
+        [Required, StringLength(80)]
+        public string TemplateKey { get; set; } = string.Empty;
+
+        [Required, StringLength(200)]
         public string Name { get; set; } = string.Empty;
+
+        [StringLength(1000)]
         public string Description { get; set; } = string.Empty;
+
+        [Required, StringLength(50)]
         public string Category { get; set; } = string.Empty;
+
+        [Required, StringLength(20)]
         public string Type { get; set; } = string.Empty;
+        [Required] public string Audience { get; set; } = "Finance";
+        [Required] public string Cadence { get; set; } = "AdHoc";
+        [Required] public string DefaultOutputFormat { get; set; } = "Online";
+        public List<string> OutputFormats { get; set; } = ["Online"];
+        public Dictionary<string, object>? SavedFilters { get; set; }
+        public Dictionary<string, object>? GenerationMetadata { get; set; }
         public string? ChartType { get; set; }
         public bool IsCustom { get; set; } = true;
         public List<string>? Tags { get; set; }
         public string? PreviewImage { get; set; }
         public Dictionary<string, object>? Configuration { get; set; }
+    }
+
+    public class UpdateReportTemplateDto : CreateReportTemplateDto
+    {
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
+    }
+
+    public class ReportTemplateLifecycleActionDto
+    {
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
+    }
+
+    public class CloneReportTemplateDto : ReportTemplateLifecycleActionDto
+    {
+        [StringLength(200)]
+        public string? Name { get; set; }
+    }
+
+    public class GenerateReportTemplateDto
+    {
+        public string Format { get; set; } = "Online";
+        public Dictionary<string, object>? FilterOverrides { get; set; }
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 100;
+        public bool IncludeCharts { get; set; } = true;
+        public bool IncludeHeaders { get; set; } = true;
+    }
+
+    public class ReportTemplateGenerationContextDto
+    {
+        public Guid TemplateId { get; set; }
+        public string TemplateKey { get; set; } = string.Empty;
+        public string TemplateName { get; set; } = string.Empty;
+        public int Version { get; set; }
+        public string Audience { get; set; } = string.Empty;
+        public string Cadence { get; set; } = string.Empty;
+        public string OutputFormat { get; set; } = string.Empty;
+        public Dictionary<string, object>? GenerationMetadata { get; set; }
     }
 
     public class ReportRoleAssignmentDto

@@ -258,6 +258,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
                 EvaluatedAtUtc = DateTime.UtcNow,
                 WasAudited = true
             });
+        var issueFinanceAssets = Mock.Of<IInventoryIssueFinanceAssetService>();
 
         _returns = new InventoryReturnControlService(
             _unitOfWork,
@@ -275,6 +276,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             workflow.Object,
             controlEvents.Object,
             projectService,
+            issueFinanceAssets,
             _currentUser);
 
         _requisitions = new InventoryRequisitionService(
@@ -298,6 +300,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             access.Object,
             controlEvents.Object,
             _returns,
+            issueFinanceAssets,
             NullLogger<InventoryRequisitionService>.Instance);
     }
 
@@ -530,6 +533,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             CorrelationId = "e2e-010",
             RowVersion = Convert.ToBase64String(_requisitionRowVersion),
             ReceiverUserId = _receiverId,
+            MovementReasonCode = InventoryIssueMovementReasons.ProjectConsumption,
             Notes = "Partial issue for representative project demand.",
             Items =
             [

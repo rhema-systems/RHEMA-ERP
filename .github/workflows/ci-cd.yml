@@ -60,7 +60,11 @@ jobs:
       if: github.repository == 'owner/repo-with-advanced-security'
 
   journal-batch-sql-release-gate:
-    name: Journal Batch SQL Server Release Gate
+    # This job began as a journal-batch-only gate. It now also owns SQL Server behaviours shared by
+    # every Finance consumer, such as synchronizing raw-SQL account balance updates with entities a
+    # calling module already tracks. Keep the stable job id because the production deployment depends
+    # on it, while the display name and artifact make the broader responsibility explicit.
+    name: Finance SQL Server Release Gate
     runs-on: ubuntu-latest
     needs: code-quality
 
@@ -111,10 +115,10 @@ jobs:
         docker logs "$container_id"
         exit 1
 
-    - name: Restore journal-batch test project
+    - name: Restore Finance SQL Server test project
       run: dotnet restore tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj
 
-    - name: Run real SQL rollback and concurrency tests
+    - name: Run real SQL Finance posting, rollback, and concurrency tests
       env:
         RHEMA_TEST_SQLSERVER: "Server=localhost,1433;Database=master;User Id=sa;Password=JournalBatchGate2026!;Encrypt=True;TrustServerCertificate=True"
       run: |
@@ -122,13 +126,13 @@ jobs:
           --configuration Release \
           --no-restore \
           --filter "FullyQualifiedName~JournalBatchSqlServerReleaseGateTests" \
-          --logger "trx;LogFileName=journal-batch-sql-release-gate.trx" \
+          --logger "trx;LogFileName=finance-sql-release-gate.trx" \
           --results-directory artifacts/test-results
 
     - name: Verify the SQL tests executed rather than skipped
       shell: bash
       run: |
-        trx="artifacts/test-results/journal-batch-sql-release-gate.trx"
+        trx="artifacts/test-results/finance-sql-release-gate.trx"
         if [ ! -f "$trx" ]; then
           echo "The SQL release-gate result file was not produced."
           exit 1
@@ -139,8 +143,11 @@ jobs:
           exit 1
         fi
 
-        if ! grep -Eq '<Counters[^>]*total="2"[^>]*executed="2"[^>]*passed="2"' "$trx"; then
-          echo "Expected exactly two executed and passing SQL release-gate tests."
+        # The exact count prevents an accidental rename, filter drift, or skipped opt-in test from
+        # making the gate green without exercising all four real SQL Server contracts: schema,
+        # rollback, concurrent claims, and posting with consumer-loaded Account entities tracked.
+        if ! grep -Eq '<Counters[^>]*total="4"[^>]*executed="4"[^>]*passed="4"' "$trx"; then
+          echo "Expected exactly four executed and passing Finance SQL release-gate tests."
           cat "$trx"
           exit 1
         fi
@@ -149,7 +156,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: journal-batch-sql-release-gate
+        name: finance-sql-release-gate
         path: artifacts/test-results/
         retention-days: 14
 

@@ -11,6 +11,11 @@ namespace ErpSystem.Api.Services.Finance.Cash;
 
 public class BankAccountService : IBankAccountService
 {
+    private const string BankAccountOpening = "BankAccountOpening";
+    private const string OpeningBalanceBatch = "OpeningBalanceBatch";
+    private const string MigrationSourceModule = "MIGRATION";
+    private const string StatusPosted = "Posted";
+    private const string StatusRejected = "Rejected";
     private readonly ApplicationDbContext _context;
     private readonly ITenantSettingsService _tenantSettingsService;
     private readonly ICurrentUserService _currentUserService;
@@ -117,7 +122,7 @@ public class BankAccountService : IBankAccountService
 
         if (dto.GLAccountId.HasValue)
         {
-            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank");
+            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank", currency);
         }
 
         var strategy = _context.Database.CreateExecutionStrategy();
@@ -179,9 +184,18 @@ public class BankAccountService : IBankAccountService
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
 
+        var changesGovernedIdentity = account.GLAccountId != dto.GLAccountId;
+        var deactivatesGovernedMaster = account.IsActive && !dto.IsActive;
+        if ((changesGovernedIdentity || deactivatesGovernedMaster) &&
+            await HasBlockingGovernedOpeningEvidenceAsync(tenantId, account.Id))
+        {
+            throw new InvalidOperationException(
+                "This bank account has active or posted governed opening evidence; its GL mapping and active state are locked to preserve bank/GL reconciliation.");
+        }
+
         if (dto.GLAccountId.HasValue)
         {
-            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank");
+            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank", account.Currency);
         }
 
         account.AccountName = dto.AccountName;
@@ -235,6 +249,12 @@ public class BankAccountService : IBankAccountService
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
 
+        if (await HasBlockingGovernedOpeningEvidenceAsync(tenantId, account.Id))
+        {
+            throw new InvalidOperationException(
+                "This bank account has active or posted governed opening evidence and cannot be deleted.");
+        }
+
         // Check if account has transactions
         var hasTransactions = await _context.Set<CashTransaction>()
             .AnyAsync(t => t.TenantId == tenantId && t.BankAccountId == id);
@@ -242,6 +262,21 @@ public class BankAccountService : IBankAccountService
         if (hasTransactions)
         {
             throw new Exception("Cannot delete bank account with existing transactions");
+        }
+
+        var hasActiveLiquidityAccount = await _context.LiquidityAccounts
+            .AnyAsync(item =>
+                item.TenantId == tenantId &&
+                item.BankAccountId == id &&
+                item.IsActive &&
+                !item.IsDeleted);
+        if (hasActiveLiquidityAccount)
+        {
+            // Finance owns both sides of this master-data boundary. Do not silently mutate the
+            // liquidity register as a side effect of deleting a bank master; the controller must
+            // first deactivate the bank, which explicitly synchronises its system wrapper.
+            throw new InvalidOperationException(
+                "Deactivate this bank account before deleting it; Finance will also deactivate its linked Bank liquidity account.");
         }
 
         account.IsDeleted = true;
@@ -342,6 +377,25 @@ public class BankAccountService : IBankAccountService
         return $"BANK-{account.Id.ToString("N")[..8]}".ToUpperInvariant();
     }
 
+    private Task<bool> HasBlockingGovernedOpeningEvidenceAsync(Guid tenantId, Guid bankAccountId)
+        => _context.OpeningBalanceLines.AsNoTracking().AnyAsync(line =>
+            line.TenantId == tenantId &&
+            line.BankAccountId == bankAccountId &&
+            line.CounterpartyType == BankAccountOpening &&
+            !line.IsDeleted &&
+            !line.Batch.IsDeleted &&
+            !(line.Batch.Status == StatusRejected &&
+              line.Batch.JournalEntryId == null &&
+              line.Batch.PostingEventId == null &&
+              line.Batch.PostedAt == null &&
+              !_context.FinancePostingEvents.Any(postingEvent =>
+                  postingEvent.TenantId == tenantId &&
+                  postingEvent.SourceModule == MigrationSourceModule &&
+                  postingEvent.SourceDocumentType == OpeningBalanceBatch &&
+                  postingEvent.SourceDocumentId == line.Batch.Id &&
+                  postingEvent.PostingStatus == StatusPosted &&
+                  !postingEvent.IsDeleted)));
+
     private static string NormalizeCurrency(string? currency)
     {
         return string.IsNullOrWhiteSpace(currency)
@@ -349,15 +403,44 @@ public class BankAccountService : IBankAccountService
             : currency.Trim().ToUpperInvariant();
     }
 
-    private async Task ValidateGLAccountAsync(Guid accountId, Guid tenantId, string label)
+    private async Task ValidateGLAccountAsync(
+        Guid accountId,
+        Guid tenantId,
+        string label,
+        string currency)
     {
-        var accountExists = await _context.Accounts
+        var account = await _context.Accounts
             .AsNoTracking()
-            .AnyAsync(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted && a.Status == AccountStatus.Active);
+            .FirstOrDefaultAsync(a =>
+                a.TenantId == tenantId &&
+                a.Id == accountId &&
+                !a.IsDeleted);
 
-        if (!accountExists)
+        if (account == null)
         {
             throw new InvalidOperationException($"The {label} GL account was not found for this tenant.");
+        }
+        var now = DateTime.UtcNow;
+        if (account.Status != AccountStatus.Active ||
+            (account.EffectiveDate.HasValue && account.EffectiveDate.Value > now) ||
+            (account.ExpirationDate.HasValue && account.ExpirationDate.Value <= now))
+        {
+            throw new InvalidOperationException($"The {label} GL account must be currently effective and active.");
+        }
+        if (account.AccountType != AccountType.Asset)
+        {
+            throw new InvalidOperationException($"The {label} GL account must be an Asset account.");
+        }
+        if (!account.IsMultiCurrency &&
+            !account.CurrencyCode.Equals(currency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"The {label} account currency ({currency}) must match the GL account currency ({account.CurrencyCode}).");
+        }
+        if (!account.IsControlAccount && !account.AllowDirectPosting)
+        {
+            throw new InvalidOperationException(
+                $"The {label} GL account must be a protected control account or allow direct posting.");
         }
     }
 }

@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
-public class AssetValuationService : IAssetValuationService
+public partial class AssetValuationService : IAssetValuationService
 {
     private const string SourceModule = "FixedAssets";
     private const string SourceDocumentType = "FixedAssetValuation";
@@ -21,6 +21,7 @@ public class AssetValuationService : IAssetValuationService
     private readonly IFinancePostingEngine? _financePostingEngine;
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowService? _workflowService;
+    private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
 
     public AssetValuationService(
         ApplicationDbContext context,
@@ -29,7 +30,8 @@ public class AssetValuationService : IAssetValuationService
         IAccountingBookService? accountingBookService = null,
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
-        IWorkflowService? workflowService = null)
+        IWorkflowService? workflowService = null,
+        IFinanceReversalPolicyService? financeReversalPolicyService = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -37,6 +39,7 @@ public class AssetValuationService : IAssetValuationService
         _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
+        _financeReversalPolicyService = financeReversalPolicyService;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -70,9 +73,7 @@ public class AssetValuationService : IAssetValuationService
         await _context.SaveChangesAsync();
 
         await RecordValuationAuditAsync(
-            dto.ValuationType == ValuationType.Revaluation
-                ? FinanceAuditEvents.FixedAssetRevaluationCalculated
-                : FinanceAuditEvents.FixedAssetImpairmentCalculated,
+            GetCalculatedAuditEvent(dto.ValuationType),
             valuation,
             afterValues: BuildValuationAuditSnapshot(valuation),
             comment: $"{dto.ValuationType} calculated for fixed asset.",
@@ -111,6 +112,12 @@ public class AssetValuationService : IAssetValuationService
     public async Task<BulkOperationResultDto<AssetValuationDto>> CreateBulkValuationAsync(
         CreateBulkAssetValuationDto dto, Guid performedByUserId)
     {
+        if (dto.ValuationType == ValuationType.ImpairmentReversal)
+        {
+            throw new InvalidOperationException(
+                "Impairment reversals must be created individually so each reversal identifies its source impairment and IAS 36 ceiling.");
+        }
+
         var result = new BulkOperationResultDto<AssetValuationDto>
         {
             TotalCount = dto.FixedAssetIds.Count
@@ -293,7 +300,8 @@ public class AssetValuationService : IAssetValuationService
                     asset.Category.RevaluationSurplusAccountId,
                     asset.Category.RevaluationLossAccountId,
                     asset.Category.ImpairmentLossAccountId,
-                    asset.Category.AccumulatedImpairmentAccountId
+                    asset.Category.AccumulatedImpairmentAccountId,
+                    asset.Category.ImpairmentReversalAccountId
                 },
                 comment: "Fixed asset valuation account mappings used for posting.",
                 cancellationToken: CancellationToken.None);
@@ -303,9 +311,7 @@ public class AssetValuationService : IAssetValuationService
 
             await _context.SaveChangesAsync();
             await RecordValuationAuditAsync(
-                valuation.ValuationType == ValuationType.Revaluation
-                    ? FinanceAuditEvents.FixedAssetRevaluationPosted
-                    : FinanceAuditEvents.FixedAssetImpairmentPosted,
+                GetPostedAuditEvent(valuation.ValuationType),
                 valuation,
                 postingEventId: postingResult.PostingEventId,
                 journalEntryId: postingResult.JournalEntryId,
@@ -327,9 +333,7 @@ public class AssetValuationService : IAssetValuationService
             var eventType = ex.Message.Contains("period is not open", StringComparison.OrdinalIgnoreCase)
                 || ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase)
                     ? FinanceAuditEvents.FixedAssetValuationBlockedClosedPeriod
-                    : valuation.ValuationType == ValuationType.Revaluation
-                        ? FinanceAuditEvents.FixedAssetRevaluationPostingFailed
-                        : FinanceAuditEvents.FixedAssetImpairmentPostingFailed;
+                    : GetFailedAuditEvent(valuation.ValuationType);
 
             await RecordValuationAuditAsync(
                 eventType,
@@ -367,10 +371,6 @@ public class AssetValuationService : IAssetValuationService
         Guid performedByUserId)
     {
         EnsureAssetEligibleForValuation(asset, dto);
-        if (dto.ValuationType == ValuationType.ImpairmentReversal)
-        {
-            throw new InvalidOperationException("Impairment reversal is not supported in the Batch 21A foundation.");
-        }
 
         if (dto.FairValue < 0m)
         {
@@ -392,6 +392,10 @@ public class AssetValuationService : IAssetValuationService
         decimal surplus = 0m;
         decimal deficit = 0m;
         decimal impairmentLoss = 0m;
+        decimal impairmentReversal = 0m;
+        decimal outstandingImpairmentBefore = 0m;
+        decimal unimpairedCarryingAmountCap = 0m;
+        AssetValuation? sourceImpairment = null;
         decimal surplusApplied = 0m;
         decimal revaluationLossRecognized = 0m;
 
@@ -418,6 +422,43 @@ public class AssetValuationService : IAssetValuationService
 
             impairmentLoss = RoundMoney(carryingBefore - carryingAfter);
         }
+        else if (dto.ValuationType == ValuationType.ImpairmentReversal)
+        {
+            // IAS 36 does not permit an arbitrary upward valuation to masquerade as an
+            // impairment reversal. The request must identify one posted impairment, and the
+            // server derives its still-unreversed balance from immutable valuation history.
+            sourceImpairment = await ResolveSourceImpairmentAsync(asset, bookValue, dto);
+            outstandingImpairmentBefore = await GetOutstandingImpairmentAsync(sourceImpairment);
+            if (outstandingImpairmentBefore <= 0m)
+                throw new InvalidOperationException("The selected impairment has already been fully reversed.");
+            if (carryingAfter <= carryingBefore)
+                throw new InvalidOperationException("Recoverable amount must exceed the current carrying amount for impairment reversal.");
+            if (!dto.UnimpairedCarryingAmountCap.HasValue)
+                throw new InvalidOperationException("The no-prior-impairment carrying amount is required for impairment reversal.");
+
+            unimpairedCarryingAmountCap = RoundMoney(dto.UnimpairedCarryingAmountCap.Value);
+            if (unimpairedCarryingAmountCap <= carryingBefore)
+                throw new InvalidOperationException("The no-prior-impairment carrying amount must exceed the current carrying amount.");
+
+            // The lower of these independent ceilings is the maximum lawful post-reversal NBV:
+            // (1) the remaining source loss and (2) IAS 36's hypothetical no-impairment NBV.
+            var maximumCarryingAmount = Math.Min(
+                RoundMoney(carryingBefore + outstandingImpairmentBefore),
+                unimpairedCarryingAmountCap);
+            if (carryingAfter > maximumCarryingAmount)
+            {
+                throw new InvalidOperationException(
+                    $"Impairment reversal cannot increase carrying amount above {maximumCarryingAmount:N2}.");
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.ValuationReportReference) || string.IsNullOrWhiteSpace(dto.ValuationMethod))
+            {
+                throw new InvalidOperationException(
+                    "Impairment reversal requires valuation method and report-reference evidence.");
+            }
+
+            impairmentReversal = RoundMoney(carryingAfter - carryingBefore);
+        }
 
         var accountingDate = dto.ValuationDate.Date;
         return new AssetValuation
@@ -438,11 +479,16 @@ public class AssetValuationService : IAssetValuationService
             RevaluationSurplus = surplus,
             RevaluationDeficit = deficit,
             ImpairmentLoss = impairmentLoss,
-            ImpairmentReversal = 0m,
+            ImpairmentReversal = impairmentReversal,
+            SourceImpairmentValuationId = sourceImpairment?.Id,
+            OutstandingImpairmentBefore = outstandingImpairmentBefore,
+            UnimpairedCarryingAmountCap = unimpairedCarryingAmountCap,
             AdjustmentAmount = RoundMoney(carryingAfter - carryingBefore),
             RevaluationSurplusApplied = surplusApplied,
             RevaluationLossRecognized = revaluationLossRecognized,
             RevisedUsefulLifeMonths = dto.RevisedUsefulLifeMonths,
+            UsefulLifeMonthsBefore = bookValue.UsefulLifeMonths,
+            RemainingUsefulLifeMonthsBefore = bookValue.RemainingUsefulLifeMonths,
             ValuerName = dto.ValuerName,
             ValuationMethod = dto.ValuationMethod,
             ValuationReportReference = dto.ValuationReportReference,
@@ -501,9 +547,12 @@ public class AssetValuationService : IAssetValuationService
             lines.Add(CreatePostingLine(lossAccount.Id, valuation.ImpairmentLoss, 0m, "Impairment loss", reference, lineNumber++, "FA-ImpairmentLoss", valuation, functionalCurrency));
             lines.Add(CreatePostingLine(allowanceAccount.Id, 0m, valuation.ImpairmentLoss, "Accumulated impairment", reference, lineNumber++, "FA-AccumulatedImpairment", valuation, functionalCurrency));
         }
-        else
+        else if (valuation.ValuationType == ValuationType.ImpairmentReversal)
         {
-            throw new InvalidOperationException("Impairment reversal is not supported in the Batch 21A foundation.");
+            var allowanceAccount = await ResolveValuationAccountAsync(category.AccumulatedImpairmentAccountId, "accumulated impairment account", AccountType.Asset);
+            var reversalAccount = await ResolveValuationAccountAsync(category.ImpairmentReversalAccountId, "impairment reversal account", AccountType.Revenue);
+            lines.Add(CreatePostingLine(allowanceAccount.Id, valuation.ImpairmentReversal, 0m, "Release accumulated impairment", reference, lineNumber++, "FA-ImpairmentRelease", valuation, functionalCurrency));
+            lines.Add(CreatePostingLine(reversalAccount.Id, 0m, valuation.ImpairmentReversal, "Impairment reversal income", reference, lineNumber++, "FA-ImpairmentReversal", valuation, functionalCurrency));
         }
 
         if (lines.Count < 2)
@@ -517,14 +566,17 @@ public class AssetValuationService : IAssetValuationService
             SourceDocumentType = SourceDocumentType,
             SourceDocumentId = valuation.Id,
             SourceDocumentTenantId = valuation.TenantId,
-            PostingAction = valuation.ValuationType == ValuationType.Revaluation ? "Revaluation" : "Impairment",
+            PostingAction = valuation.ValuationType.ToString(),
             SourceDocumentReference = reference,
             Description = $"{valuation.ValuationType} for {asset.AssetCode} - {asset.Name}",
             PostingDate = valuation.AccountingDate == default ? valuation.ValuationDate.Date : valuation.AccountingDate.Date,
             FiscalPeriodId = fiscalPeriod.Id,
-            JournalType = valuation.ValuationType == ValuationType.Revaluation
-                ? "Fixed Asset Revaluation"
-                : "Fixed Asset Impairment",
+            JournalType = valuation.ValuationType switch
+            {
+                ValuationType.Revaluation => "Fixed Asset Revaluation",
+                ValuationType.Impairment => "Fixed Asset Impairment",
+                _ => "Fixed Asset Impairment Reversal"
+            },
             BookClassification = valuation.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FA:Valuation:{valuation.TenantId:N}:{valuation.Id:N}:{valuation.ValuationType}",
@@ -606,7 +658,7 @@ public class AssetValuationService : IAssetValuationService
             AccountingBookId = bookValue.AccountingBookId,
             BookClassification = bookValue.BookClassification,
             TransactionDate = valuation.AccountingDate == default ? valuation.ValuationDate : valuation.AccountingDate,
-            TransactionType = valuation.ValuationType == ValuationType.Revaluation ? "Revaluation" : "Impairment",
+            TransactionType = valuation.ValuationType.ToString(),
             Description = $"{valuation.ValuationType} posted through finance posting engine",
             Amount = valuation.AdjustmentAmount,
             ResultingBookValue = valuation.CarryingAmountAfter,
@@ -693,6 +745,43 @@ public class AssetValuationService : IAssetValuationService
         return RoundMoney(postedRevaluations.Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied));
     }
 
+    private async Task<AssetValuation> ResolveSourceImpairmentAsync(
+        FixedAsset asset,
+        FixedAssetBookValue bookValue,
+        CreateAssetValuationDto dto)
+    {
+        if (!dto.SourceImpairmentValuationId.HasValue || dto.SourceImpairmentValuationId == Guid.Empty)
+            throw new InvalidOperationException("A posted source impairment is required for impairment reversal.");
+
+        var source = await _context.AssetValuations.FirstOrDefaultAsync(v =>
+            v.TenantId == TenantId && v.Id == dto.SourceImpairmentValuationId.Value && !v.IsDeleted);
+        if (source == null || source.FixedAssetId != asset.Id ||
+            source.AccountingBookId != bookValue.AccountingBookId ||
+            !source.BookClassification.Equals(bookValue.BookClassification, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Source impairment must belong to the same tenant, fixed asset, and accounting book.");
+        }
+
+        if (source.ValuationType != ValuationType.Impairment || !source.IsPostedToGL || source.IsCorrected)
+            throw new InvalidOperationException("Only an active posted impairment can be reversed.");
+
+        return source;
+    }
+
+    private async Task<decimal> GetOutstandingImpairmentAsync(AssetValuation source)
+    {
+        var reversedAmount = await _context.AssetValuations
+            .AsNoTracking()
+            .Where(v => v.TenantId == TenantId &&
+                v.SourceImpairmentValuationId == source.Id &&
+                v.ValuationType == ValuationType.ImpairmentReversal &&
+                v.IsPostedToGL && !v.IsCorrected && !v.IsDeleted)
+            .SumAsync(v => (decimal?)v.ImpairmentReversal) ?? 0m;
+
+        return Math.Max(0m, RoundMoney(source.ImpairmentLoss - reversedAmount));
+    }
+
     private async Task<Account> ResolveValuationAccountAsync(Guid? accountId, string label, params AccountType[] allowedTypes)
     {
         if (!accountId.HasValue || accountId.Value == Guid.Empty)
@@ -764,6 +853,27 @@ public class AssetValuationService : IAssetValuationService
     private static decimal RoundMoney(decimal amount)
         => Math.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+    private static string GetCalculatedAuditEvent(ValuationType type) => type switch
+    {
+        ValuationType.Revaluation => FinanceAuditEvents.FixedAssetRevaluationCalculated,
+        ValuationType.Impairment => FinanceAuditEvents.FixedAssetImpairmentCalculated,
+        _ => FinanceAuditEvents.FixedAssetImpairmentReversalCalculated
+    };
+
+    private static string GetPostedAuditEvent(ValuationType type) => type switch
+    {
+        ValuationType.Revaluation => FinanceAuditEvents.FixedAssetRevaluationPosted,
+        ValuationType.Impairment => FinanceAuditEvents.FixedAssetImpairmentPosted,
+        _ => FinanceAuditEvents.FixedAssetImpairmentReversalPosted
+    };
+
+    private static string GetFailedAuditEvent(ValuationType type) => type switch
+    {
+        ValuationType.Revaluation => FinanceAuditEvents.FixedAssetRevaluationPostingFailed,
+        ValuationType.Impairment => FinanceAuditEvents.FixedAssetImpairmentPostingFailed,
+        _ => FinanceAuditEvents.FixedAssetImpairmentReversalPostingFailed
+    };
+
     private static object BuildValuationAuditSnapshot(AssetValuation valuation)
         => new
         {
@@ -781,6 +891,10 @@ public class AssetValuationService : IAssetValuationService
             valuation.RevaluationSurplusApplied,
             valuation.RevaluationLossRecognized,
             valuation.ImpairmentLoss,
+            valuation.ImpairmentReversal,
+            valuation.SourceImpairmentValuationId,
+            valuation.OutstandingImpairmentBefore,
+            valuation.UnimpairedCarryingAmountCap,
             valuation.AdjustmentAmount,
             valuation.JournalEntryId,
             valuation.PostingEventId,
@@ -844,10 +958,15 @@ public class AssetValuationService : IAssetValuationService
             RevaluationDeficit = v.RevaluationDeficit,
             ImpairmentLoss = v.ImpairmentLoss,
             ImpairmentReversal = v.ImpairmentReversal,
+            SourceImpairmentValuationId = v.SourceImpairmentValuationId,
+            OutstandingImpairmentBefore = v.OutstandingImpairmentBefore,
+            UnimpairedCarryingAmountCap = v.UnimpairedCarryingAmountCap,
             AdjustmentAmount = v.AdjustmentAmount,
             RevaluationSurplusApplied = v.RevaluationSurplusApplied,
             RevaluationLossRecognized = v.RevaluationLossRecognized,
             RevisedUsefulLifeMonths = v.RevisedUsefulLifeMonths,
+            UsefulLifeMonthsBefore = v.UsefulLifeMonthsBefore,
+            RemainingUsefulLifeMonthsBefore = v.RemainingUsefulLifeMonthsBefore,
             ValuerName = v.ValuerName,
             ValuationMethod = v.ValuationMethod,
             ValuationReportReference = v.ValuationReportReference,
@@ -856,6 +975,9 @@ public class AssetValuationService : IAssetValuationService
             IsPostedToGL = v.IsPostedToGL,
             JournalEntryId = v.JournalEntryId,
             PostingEventId = v.PostingEventId,
+            IsCorrected = v.IsCorrected,
+            CorrectionId = v.CorrectionId,
+            CorrectedAt = v.CorrectedAt,
             Status = v.Status,
             IdempotencyKey = v.IdempotencyKey,
             PostedDate = v.PostedDate,

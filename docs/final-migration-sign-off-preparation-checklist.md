@@ -63,7 +63,7 @@ The run returns a tenant-scoped status, check list, evidence export manifest, li
 - Disposal records tie to posted GL.
 - Fixed asset roll-forward generated.
 - Fixed asset GL reconciliation generated.
-- Any unsupported fixed asset opening registers remain rejected under `FIN-LIM-0048`.
+- Fixed-asset opening register rows are explicitly selected in the opening-balance workspace, posted through maker-checker, and carry journal/posting-event back-links before reconciliation sign-off.
 
 ## Bank Snapshot Diagnostics
 
@@ -112,9 +112,9 @@ The run returns a tenant-scoped status, check list, evidence export manifest, li
 - Any limitation accepted as non-blocking has accounting/product leadership approval.
 - `FIN-LIM-0048` reviewed against production cutover subledger balance requirements.
 - Sign-off run request declares whether AP/AR/fixed-asset source-level openings are in scope.
-- `FIN-LIM-0048` is marked not applicable only when the tenant cutover has no open AP/AR/fixed-asset source balances requiring aging/register proof.
-- `FIN-LIM-0048` blocks sign-off when source-level AP/AR/fixed-asset openings are required but not loaded through supported posted source-document/import paths.
-- Unapplied payment/receipt and functional-currency advance balances are reviewed separately from invoice aging; foreign-currency advances remain safely rejected pending dedicated FX settlement support.
+- Core AP/AR/fixed-asset opening scope is accepted only when canonical opening invoices and controlled fixed-asset register batches reconcile to posted GL.
+- TDC has confirmed specialised unapplied advances and withholding/certificate records are present; confirm every item is loaded through the controlled specialised opening workflow before accepting `FIN-LIM-0048` implementation evidence.
+- Unapplied payment/receipt balances are reviewed separately from invoice aging. Foreign-currency advances require approved rate evidence; statutory WHT openings are reviewed in functional currency.
 - Reversal/correction limitations reviewed against cutover correction policy.
 
 ## Rollback And Reset

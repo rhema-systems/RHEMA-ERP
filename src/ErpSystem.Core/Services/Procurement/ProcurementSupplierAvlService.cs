@@ -540,6 +540,11 @@ public sealed class ProcurementSupplierAvlService : IProcurementSupplierAvlServi
             Touch(entity, "Published", correlation, now);
             Capture(entity);
             await Registers.UpdateAsync(entity);
+            // Persist the parent lifecycle transition before appending its immutable
+            // publication snapshot. SQL deliberately accepts snapshots only when the
+            // retained parent row is already Published; a single EF batch can order the
+            // child insert before this update even though both are in one transaction.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             var snapshotJson = Serialize(Snapshot(entity));
             var snapshot = new ProcurementSupplierAvlPublicationSnapshot
             {

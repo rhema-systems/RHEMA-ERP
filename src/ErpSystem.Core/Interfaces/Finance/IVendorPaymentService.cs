@@ -32,6 +32,15 @@ public interface IVendorPaymentService
     Task<PagedResult<VendorPaymentDto>> GetAllAsync(VendorPaymentQueryDto query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns only posted, non-reversed supplier advances with an unapplied balance for the
+    /// supplied legacy Supplier or canonical BusinessPartner identifier. Supplier identity
+    /// reconciliation remains owned by Finance rather than being reimplemented by consumers.
+    /// </summary>
+    Task<List<PostedSupplierAdvanceDto>> GetPostedSupplierAdvancesAsync(
+        Guid supplierOrBusinessPartnerId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Creates a new vendor payment.
     /// - Auto-generates payment number (VP-YYYY-NNNNN)
     /// - Optionally creates allocations in the same transaction
@@ -100,6 +109,30 @@ public interface IVendorPaymentService
     /// Gets all allocations for a specific vendor payment.
     /// </summary>
     Task<List<VendorPaymentAllocationDto>> GetPaymentAllocationsAsync(Guid paymentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reserves posted supplier debit notes against invoices in this payment settlement. The
+    /// application is a Finance-owned AP subledger link and never creates a second GL posting.
+    /// It becomes effective against invoice PaidAmount only when the payment posts.
+    /// </summary>
+    Task<SupplierDebitNoteApplicationResultDto> ApplySupplierDebitNotesAsync(
+        Guid paymentId,
+        List<SupplierDebitNoteApplicationCreateDto> applications,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the complete original-and-reversal supplier-credit application history.</summary>
+    Task<List<SupplierDebitNoteApplicationDto>> GetSupplierDebitNoteApplicationsAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Releases a draft supplier debit-note application through an immutable compensating row.
+    /// Posted applications are reversed only with the containing payment.
+    /// </summary>
+    Task ReverseSupplierDebitNoteApplicationAsync(
+        Guid applicationId,
+        string reason,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets outstanding (not fully paid) invoices for a specific supplier.

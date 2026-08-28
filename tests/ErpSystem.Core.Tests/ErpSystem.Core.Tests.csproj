@@ -18,6 +18,11 @@
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <!-- DatabaseReportsService lives in Data, while the application normally supplies iText's
+         cryptography adapter through the API project. The focused shared-export acceptance test
+         runs without that host, so it declares the same runtime adapter explicitly. -->
+    <PackageReference Include="itext7.bouncy-castle-adapter" Version="8.0.2" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,6 +35,7 @@
     <Compile Include="Services\Crm\**\*.cs" />
     <Compile Include="Services\Procurement\**\*.cs" />
     <Compile Include="Services\Projects\**\*.cs" />
+    <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Security\**\*.cs" />
     <Compile Include="Services\Workflow\**\*.cs" />
     <Compile Include="Services\Inventory\InventoryItemIdentifierServiceTests.cs" />
@@ -37,11 +43,13 @@
     <Compile Include="Services\Inventory\InventoryDirectedOperationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryReturnAdjustmentControlTests.cs" />
+    <Compile Include="Services\Inventory\InventoryOpeningStockGovernanceTests.cs" />
     <Compile Include="Services\Inventory\InventoryTransferControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryPhysicalCountControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryNegativeStockControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryReadScopeRegressionTests.cs" />
     <Compile Include="Services\Inventory\InventoryProjectReservationControlTests.cs" />
+    <Compile Include="Services\Inventory\InventoryWorkOrderReservationControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryReplenishmentControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryScanningServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryItemProfileServiceTests.cs" />

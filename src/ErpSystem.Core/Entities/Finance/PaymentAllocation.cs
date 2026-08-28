@@ -23,8 +23,80 @@ public class PaymentAllocation : BaseEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// Portion of the receipt or customer-advance lot consumed in receipt currency. AllocatedAmount
+    /// remains the invoice reduction in invoice currency; cross-currency applications preserve and
+    /// reverse these as a pair rather than treating either amount as a functional-currency proxy.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentCurrencyAmount { get; set; }
+
+    [Required]
+    [MaxLength(3)]
+    public string InvoiceCurrencyCode { get; set; } = "GHS";
+
+    [Required]
+    [MaxLength(3)]
+    public string PaymentCurrencyCode { get; set; } = "GHS";
+
+    public bool IsCrossCurrency { get; set; }
+
+    /// <summary>
+    /// Immutable approved-rate evidence and calculated functional values used by posting,
+    /// reversal, settlement read-model rebuilds, and audit traces. Advance applications retain
+    /// the origin receipt rate alongside the approved application-date invoice rate.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal InvoiceSettlementExchangeRate { get; set; } = 1m;
+
+    public Guid? PaymentExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal PaymentExchangeRate { get; set; } = 1m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentFunctionalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal SettlementFunctionalAmount { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; } = 0;
+
+    /// <summary>
+    /// Frozen functional-currency value posted for the invoice-currency discount. This is kept
+    /// separately because the receipt cash and invoice deduction may use different currencies.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DiscountFunctionalAmount { get; set; }
+
+    /// <summary>
+    /// WHT and VAT-WHT are stored per invoice in invoice currency. Their functional snapshots
+    /// are the statutory/reporting values and allow a single receipt to settle invoices in
+    /// different currencies without inventing a header currency for the deductions.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxAmount { get; set; }
+
+    /// <summary>
+    /// Functional/statutory value of WHT suffered on this invoice allocation.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxFunctionalAmount { get; set; }
+
+    /// <summary>
+    /// VAT withholding suffered in the invoice currency.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VatWithholdingAmount { get; set; }
+
+    /// <summary>
+    /// Frozen functional/statutory value of the allocation's VAT withholding component.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VatWithholdingFunctionalAmount { get; set; }
 
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 

@@ -63,6 +63,14 @@ public sealed class ProcurementRequisitionAuthorityRouteService : IProcurementRe
         CancellationToken cancellationToken = default)
     {
         EnsureReader();
+        return await GetLinkedControlReadinessAsync(requisitionId, cancellationToken);
+    }
+
+    public async Task<PurchaseRequisitionAuthorityReadinessDto> GetLinkedControlReadinessAsync(
+        Guid requisitionId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
         var requisition = await LoadRequisitionAsync(requisitionId, cancellationToken);
         var route = await LoadLatestRouteAsync(requisition.Id, cancellationToken);
         if (!string.Equals(requisition.Status, "Draft", StringComparison.OrdinalIgnoreCase) && route is not null)

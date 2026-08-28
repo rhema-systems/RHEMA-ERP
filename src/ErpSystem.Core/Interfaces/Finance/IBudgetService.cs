@@ -33,6 +33,15 @@ public interface IBudgetService
     Task<BudgetScenarioComparisonDto> CompareScenariosAsync(Guid baseScenarioId, Guid comparisonScenarioId);
     Task<IReadOnlyList<BudgetAuditEventDto>> GetAuditHistoryAsync(string entityType, Guid entityId);
 
+    // Controlled changes to an adopted budget. Approval does not mutate the
+    // official scenario; Apply creates and adopts an immutable successor version.
+    Task<IReadOnlyList<BudgetRevisionDto>> GetRevisionsAsync(Guid? fiscalYearId = null);
+    Task<BudgetRevisionDto> GetRevisionAsync(Guid id);
+    Task<BudgetRevisionDto> CreateRevisionAsync(CreateBudgetRevisionDto dto);
+    Task<BudgetRevisionDto> UpdateRevisionAsync(Guid id, UpdateBudgetRevisionDto dto);
+    Task<BudgetRevisionDto> SubmitRevisionAsync(Guid id, string rowVersion);
+    Task<BudgetRevisionDto> ApplyRevisionAsync(Guid id, string rowVersion);
+
     // Analytics
     Task<BudgetSummaryDto> GetScenarioSummaryAsync(Guid scenarioId);
 }

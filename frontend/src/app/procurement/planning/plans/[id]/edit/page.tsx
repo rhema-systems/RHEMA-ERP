@@ -799,21 +799,35 @@ export default function EditProcurementPlanPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="currency">Currency</Label>
-                  <Select
-                    value={formData.currency}
-                    onValueChange={(value) => handleInputChange('currency', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select currency" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USD">USD - US Dollar</SelectItem>
-                      <SelectItem value="EUR">EUR - Euro</SelectItem>
-                      <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                      <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
-                      <SelectItem value="ETB">ETB - Ethiopian Birr</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {plan?.budgetId ? (
+                    <Input
+                      id="currency"
+                      value={formData.currency}
+                      readOnly
+                      aria-readonly="true"
+                    />
+                  ) : (
+                    <Select
+                      value={formData.currency}
+                      onValueChange={(value) => handleInputChange('currency', value)}
+                    >
+                      <SelectTrigger id="currency">
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="USD">USD - US Dollar</SelectItem>
+                        <SelectItem value="EUR">EUR - Euro</SelectItem>
+                        <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                        <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
+                        <SelectItem value="ETB">ETB - Ethiopian Birr</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {plan?.budgetId && (
+                    <p className="text-xs text-muted-foreground">
+                      Currency is inherited from the linked approved budget.
+                    </p>
+                  )}
                 </div>
               </div>
 

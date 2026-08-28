@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -640,7 +641,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
         return await _finance.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "InventoryDisposal",
             SourceDocumentId = item.Id,
             SourceDocumentTenantId = item.TenantId,

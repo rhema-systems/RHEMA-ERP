@@ -1,10 +1,16 @@
+using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -16,6 +22,151 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 /// </summary>
 public sealed class JournalBatchSqlServerReleaseGateTests
 {
+    [SqlServerFact]
+    [Trait("Batch", "FinancePerformance")]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task CurrentSqlServerModel_ShouldExposeTheMeasuredLedgerAccessIndexInKeyOrder()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        await using var context = database.CreateContext();
+        await context.Database.OpenConnectionAsync();
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = """
+            SELECT STRING_AGG(column_definition.name, ',')
+                WITHIN GROUP (ORDER BY index_column.key_ordinal)
+            FROM sys.indexes AS index_definition
+            INNER JOIN sys.tables AS table_definition
+                ON table_definition.object_id = index_definition.object_id
+            INNER JOIN sys.index_columns AS index_column
+                ON index_column.object_id = index_definition.object_id
+                AND index_column.index_id = index_definition.index_id
+            INNER JOIN sys.columns AS column_definition
+                ON column_definition.object_id = index_column.object_id
+                AND column_definition.column_id = index_column.column_id
+            WHERE table_definition.name = N'AccountTransactions'
+                AND index_definition.name = N'IX_AccountTransactions_TenantId_BookClassification_TransactionDate_AccountId'
+                AND index_column.key_ordinal > 0;
+            """;
+
+        // Key order matters: changing it can leave the index present while making the tenant/book
+        // prefix unusable for the trial-balance and journal-inquiry query shapes it was designed for.
+        Convert.ToString(await command.ExecuteScalarAsync())
+            .Should().Be("TenantId,BookClassification,TransactionDate,AccountId");
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinanceSchema")]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task CurrentSqlServerSchema_ShouldExposeEveryLineScopedDeductionEvidenceColumn()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        await using var context = database.CreateContext();
+        await context.Database.OpenConnectionAsync();
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM sys.columns AS column_definition
+            INNER JOIN sys.tables AS table_definition
+                ON table_definition.object_id = column_definition.object_id
+            WHERE
+                (table_definition.name = N'VendorPaymentAllocation'
+                    AND column_definition.name IN
+                        (N'DiscountFunctionalAmount', N'WithholdingTaxFunctionalAmount'))
+                OR
+                (table_definition.name = N'PaymentAllocation'
+                    AND column_definition.name IN
+                        (N'DiscountFunctionalAmount', N'WithholdingTaxAmount',
+                         N'WithholdingTaxFunctionalAmount', N'VatWithholdingAmount',
+                         N'VatWithholdingFunctionalAmount'));
+            """;
+
+        // This SQL Server check complements the provider-neutral migration-operation test. It
+        // guards the relational names consumed by AP/AR integrations after the model is created.
+        Convert.ToInt32(await command.ExecuteScalarAsync()).Should().Be(7);
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task PostingWithAlreadyTrackedAccounts_ShouldSynchronizeBalancesWithoutMutatingTrackerEnumeration()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+
+        await using var context = database.CreateContext();
+
+        // Consumer modules often load the configured control accounts while preparing their own
+        // transaction before handing the posting request to Finance. Keep both accounts tracked here
+        // to reproduce that integration shape against SQL Server's raw balance-update path.
+        var trackedAccounts = await context.Accounts
+            .Where(account => account.TenantId == seeded.TenantId &&
+                              (account.Id == seeded.DebitAccountId || account.Id == seeded.CreditAccountId))
+            .ToListAsync();
+        trackedAccounts.Should().HaveCount(2);
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(service => service.TenantId).Returns(seeded.TenantId);
+        currentUser.SetupGet(service => service.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(service => service.UserName).Returns("sql.finance.integration");
+        currentUser.SetupGet(service => service.Claims).Returns(new Dictionary<string, string>());
+        currentUser.SetupGet(service => service.IpAddress).Returns("127.0.0.1");
+        currentUser.SetupGet(service => service.UserAgent).Returns("sql-server-release-gate");
+
+        var engine = new FinancePostingEngine(
+            context,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>());
+        var request = new FinancePostingRequestDto
+        {
+            SourceModule = "PROC",
+            OriginModuleCode = "PROC",
+            SourceDocumentType = "SupplierPaymentReconciliation",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post",
+            SourceDocumentReference = "SQL-TRACKED-ACCOUNT-001",
+            Description = "SQL Server tracked-account posting regression",
+            PostingDate = new DateTime(2026, 7, 15),
+            JournalType = "System Generated",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS",
+            Lines =
+            [
+                new FinancePostingLineDto
+                {
+                    AccountId = seeded.DebitAccountId,
+                    Description = "Supplier control",
+                    DebitAmount = 100m
+                },
+                new FinancePostingLineDto
+                {
+                    AccountId = seeded.CreditAccountId,
+                    Description = "Bank",
+                    CreditAmount = 100m
+                }
+            ]
+        };
+
+        var result = await engine.PostAsync(request);
+
+        result.PostingStatus.Should().Be("Posted");
+        trackedAccounts.Single(account => account.Id == seeded.DebitAccountId).Balance.Should().Be(-100m);
+        trackedAccounts.Single(account => account.Id == seeded.CreditAccountId).Balance.Should().Be(-100m);
+
+        // Verify the durable SQL values as well as the in-memory snapshot. This guards against fixing
+        // the enumerator by detaching entities while accidentally losing or double-applying balances.
+        await using var verification = database.CreateContext();
+        (await verification.Accounts.AsNoTracking()
+                .SingleAsync(account => account.Id == seeded.DebitAccountId))
+            .Balance.Should().Be(-100m);
+        (await verification.Accounts.AsNoTracking()
+                .SingleAsync(account => account.Id == seeded.CreditAccountId))
+            .Balance.Should().Be(-100m);
+        (await verification.FinancePostingEvents.AsNoTracking()
+                .CountAsync(postingEvent => postingEvent.SourceDocumentId == request.SourceDocumentId))
+            .Should().Be(1);
+    }
+
     [SqlServerFact]
     [Trait("Batch", "GeneralLedger")]
     [Trait("Category", "SqlServerTransaction")]
@@ -353,6 +504,90 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             return new SeededBatch(tenantId, periodId, batchId, itemId);
         }
 
+        public async Task<SeededPostingAccounts> SeedPostingAccountsAsync()
+        {
+            var tenantId = Guid.NewGuid();
+            var fiscalYearId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var debitAccountId = Guid.NewGuid();
+            var creditAccountId = Guid.NewGuid();
+
+            await using var context = CreateContext();
+            context.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "SQL Finance Posting Test",
+                Code = $"FP-{tenantId:N}"[..12],
+                Status = TenantStatus.Active,
+                BaseCurrency = "GHS"
+            });
+            context.FinanceSettings.Add(new FinanceSettings
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                BaseCurrency = "GHS",
+                CoaType = "Segmented",
+                AccountSeparator = "-"
+            });
+            context.FiscalYears.Add(new FiscalYear
+            {
+                Id = fiscalYearId,
+                TenantId = tenantId,
+                FiscalYearName = "Fiscal Year 2026",
+                FiscalYearCode = $"FY-{tenantId:N}"[..12],
+                Year = 2026,
+                FiscalYearType = "Calendar",
+                StartDate = new DateTime(2026, 1, 1),
+                EndDate = new DateTime(2026, 12, 31),
+                TotalDays = 365,
+                NumberOfPeriods = 12,
+                Status = "Open"
+            });
+            context.FiscalPeriods.Add(new FiscalPeriod
+            {
+                Id = periodId,
+                TenantId = tenantId,
+                FiscalYearId = fiscalYearId,
+                PeriodName = "July 2026",
+                PeriodCode = $"P-{tenantId:N}"[..12],
+                PeriodNumber = 7,
+                PeriodType = PeriodType.Monthly,
+                StartDate = new DateTime(2026, 7, 1),
+                EndDate = new DateTime(2026, 7, 31),
+                PeriodDays = 31,
+                PeriodStatus = "Open",
+                IsOpen = true
+            });
+            context.Accounts.AddRange(
+                new Account
+                {
+                    Id = debitAccountId,
+                    TenantId = tenantId,
+                    AccountCode = "2100",
+                    AccountNumber = "2100",
+                    AccountName = "Supplier Control",
+                    AccountType = AccountType.Liability,
+                    Status = AccountStatus.Active,
+                    CurrencyCode = "GHS",
+                    AllowDirectPosting = true
+                },
+                new Account
+                {
+                    Id = creditAccountId,
+                    TenantId = tenantId,
+                    AccountCode = "1100",
+                    AccountNumber = "1100",
+                    AccountName = "Operating Bank",
+                    AccountType = AccountType.Asset,
+                    Status = AccountStatus.Active,
+                    CurrencyCode = "GHS",
+                    AllowDirectPosting = true
+                });
+            await context.SaveChangesAsync();
+
+            return new SeededPostingAccounts(tenantId, debitAccountId, creditAccountId);
+        }
+
         public async ValueTask DisposeAsync()
         {
             await using var context = CreateContext();
@@ -361,4 +596,5 @@ public sealed class JournalBatchSqlServerReleaseGateTests
     }
 
     private sealed record SeededBatch(Guid TenantId, Guid PeriodId, Guid BatchId, Guid ItemId);
+    private sealed record SeededPostingAccounts(Guid TenantId, Guid DebitAccountId, Guid CreditAccountId);
 }

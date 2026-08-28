@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Auth;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Interfaces.Identity;
 using ErpSystem.Core.Services;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -42,6 +43,7 @@ namespace ErpSystem.Api.Controllers
         private readonly ICaptchaVerificationService _captchaVerificationService;
         private readonly IOtpService _otpService;
         private readonly IEmployeeLinkResolutionService _employeeLinkResolution;
+        private readonly IHrIdentityAccessService _hrIdentityAccessService;
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
@@ -67,6 +69,7 @@ namespace ErpSystem.Api.Controllers
             ICaptchaVerificationService captchaVerificationService,
             IOtpService otpService,
             IEmployeeLinkResolutionService employeeLinkResolution,
+            IHrIdentityAccessService hrIdentityAccessService,
             ApplicationDbContext context,
             IConfiguration configuration,
             ILogger<AuthController> logger)
@@ -91,6 +94,7 @@ namespace ErpSystem.Api.Controllers
             _captchaVerificationService = captchaVerificationService;
             _otpService = otpService;
             _employeeLinkResolution = employeeLinkResolution;
+            _hrIdentityAccessService = hrIdentityAccessService;
             _context = context;
             _configuration = configuration;
             _logger = logger;
@@ -210,6 +214,16 @@ namespace ErpSystem.Api.Controllers
 
         private async Task<IActionResult> CompleteSuccessfulLoginAsync(ApplicationUser user, Tenant? tenant, string usernameForLogs, string details)
         {
+            var accessDecision = await _hrIdentityAccessService.EvaluateAsync(user.Id, HttpContext.RequestAborted);
+            if (!accessDecision.IsAllowed)
+            {
+                _logger.LogWarning(
+                    "Login denied for HR-ineligible identity {UserId}. Code={Code}",
+                    user.Id,
+                    accessDecision.Code);
+                return Unauthorized(new { message = accessDecision.Message, code = accessDecision.Code });
+            }
+
             if (user.MustChangePassword &&
                 (!user.TemporaryPasswordExpiresAtUtc.HasValue ||
                  user.TemporaryPasswordExpiresAtUtc.Value <= DateTime.UtcNow))
@@ -599,7 +613,12 @@ namespace ErpSystem.Api.Controllers
                             }
                             user.Email = !string.IsNullOrWhiteSpace(ldapUser.Email) ? ldapUser.Email : fallbackEmail;
                             user.AuthenticationProvider = AuthenticationProvider.LDAP;
-                            user.IsActive = true;
+                            // Directory authentication can refresh profile data, but it must not silently
+                            // reactivate an HR-linked identity that HR or reconciliation has suspended.
+                            if (!user.EmployeeId.HasValue)
+                            {
+                                user.IsActive = true;
+                            }
                             user.LdapDn = string.IsNullOrWhiteSpace(ldapUser.DistinguishedName) ? user.LdapDn : ldapUser.DistinguishedName;
                             await _userManager.UpdateAsync(user);
                         }
@@ -780,6 +799,16 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
+                var accessDecision = await _hrIdentityAccessService.EvaluateAsync(user.Id, HttpContext.RequestAborted);
+                if (!accessDecision.IsAllowed)
+                {
+                    _logger.LogWarning(
+                        "Credential validation succeeded but HR access was denied for user {UserId}. Code={Code}",
+                        user.Id,
+                        accessDecision.Code);
+                    return Unauthorized(new { message = accessDecision.Message, code = accessDecision.Code });
+                }
+
                 // Check if user has Two-Factor Authentication enabled
                 var hasTwoFactorEnabled = await _userManager.GetTwoFactorEnabledAsync(user) && !string.IsNullOrEmpty(user.AuthenticatorKey);
 
@@ -875,9 +904,15 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var user = await _userManager.FindByIdAsync(userId);
-                if (user == null || !user.IsActive)
+                if (user == null)
                 {
                     return Unauthorized(new { message = "Invalid token" });
+                }
+
+                var accessDecision = await _hrIdentityAccessService.EvaluateAsync(user.Id, HttpContext.RequestAborted);
+                if (!accessDecision.IsAllowed)
+                {
+                    return Unauthorized(new { message = accessDecision.Message, code = accessDecision.Code });
                 }
 
                 if (user.MustChangePassword &&

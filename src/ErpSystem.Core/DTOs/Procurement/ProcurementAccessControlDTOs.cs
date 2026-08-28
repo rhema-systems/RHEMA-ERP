@@ -51,6 +51,7 @@ public sealed class ProcurementAccessUserOptionDto
     public string Username { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+    public List<string> RoleNames { get; set; } = new();
 }
 
 public sealed class ProcurementAccessWarehouseOptionDto

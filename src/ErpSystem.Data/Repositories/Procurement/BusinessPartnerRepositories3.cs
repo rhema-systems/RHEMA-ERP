@@ -426,22 +426,21 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
                 registration.ReviewedById = changedById;
             }
 
-            // Create status history entry
-            if (changedById.HasValue)
+            // External applicants are not rows in Users. Keep their history
+            // without populating the internal-user foreign key; their external
+            // actor reference is retained in the central control event.
+            var history = new BusinessPartnerRegistrationStatusHistory
             {
-                var history = new BusinessPartnerRegistrationStatusHistory
-                {
-                    Id = Guid.NewGuid(),
-                    RegistrationId = registrationId,
-                    FromStatus = oldStatus,
-                    ToStatus = status,
-                    ChangedById = changedById.Value,
-                    ChangedAt = DateTime.UtcNow,
-                    Notes = notes,
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _context.BusinessPartnerRegistrationStatusHistories.AddAsync(history);
-            }
+                Id = Guid.NewGuid(),
+                RegistrationId = registrationId,
+                FromStatus = oldStatus,
+                ToStatus = status,
+                ChangedById = changedById,
+                ChangedAt = DateTime.UtcNow,
+                Notes = notes,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _context.BusinessPartnerRegistrationStatusHistories.AddAsync(history);
 
             // Note: SaveChangesAsync should be called by the service layer using Unit of Work
         }

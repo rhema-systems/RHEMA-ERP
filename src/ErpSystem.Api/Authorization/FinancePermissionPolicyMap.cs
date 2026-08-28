@@ -111,12 +111,15 @@ public static class FinancePermissionPolicyMap
             "Allocation" => AllocationPolicy(action),
             "VendorInvoice" => VendorInvoicePolicy(action),
             "VendorPayment" => VendorPaymentPolicy(action),
+            "SupplierDebitNotes" => SupplierDebitNotesPolicy(action),
             "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
+            "FinanceDimensions" => ReadOrManage(action, methods, FinancePermissions.ManageCodingDimensions),
             "PaymentBatch" => PaymentBatchPolicy(action),
             "ApReports" => ReportPolicy(action),
             "Invoice" => ArInvoicePolicy(action),
             "Payment" => ArPaymentPolicy(action),
             "ArReports" => ReportPolicy(action),
+            "ArCollectionFollowUp" => ArCollectionFollowUpPolicy(action),
             "BankAccount" => ReadOrManage(action, methods, FinancePermissions.ManageBankAccounts),
             "BankReconciliation" => BankReconciliationPolicy(action),
             "BankingSettlement" => BankingSettlementPolicy(action),
@@ -131,6 +134,8 @@ public static class FinancePermissionPolicyMap
             "FinanceApprovals" => FinanceApprovalPolicy(action),
             "Finance" => FinanceControllerPolicy(action),
             "FinanceReportExports" => One(FinancePermissions.ExportFinanceReports),
+            "FinanceAdHocReports" => FinanceAdHocReportPolicy(action),
+            "FinanceReportAutomation" => FinanceReportAutomationPolicy(action),
             "FinancialStatementLayouts" => FinancialStatementLayoutPolicy(action),
             "FinancePurchaseOrder" => FinancePurchaseOrderPolicy(action),
             "FinancePurchaseOrderReceipt" => FinancePurchaseOrderReceiptPolicy(action),
@@ -177,6 +182,15 @@ public static class FinancePermissionPolicyMap
         return One(FinancePermissions.ManageChartOfAccounts);
     }
 
+    private static IReadOnlyList<string> FinanceAdHocReportPolicy(string action) => action switch
+    {
+        "Execute" => One(FinancePermissions.RunFinanceReports),
+        "Export" => One(FinancePermissions.ExportFinanceReports),
+        // Reading the builder catalogue exposes its curated Finance field dictionary and saved
+        // definitions, so it deliberately requires builder authority rather than generic view.
+        _ => One(FinancePermissions.BuildAdHocReports)
+    };
+
     private static IReadOnlyList<string> AllocationPolicy(string action)
         => string.Equals(action, "RunAllocation", StringComparison.OrdinalIgnoreCase)
             ? One(FinancePermissions.PostJournalEntries)
@@ -212,6 +226,17 @@ public static class FinancePermissionPolicyMap
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ProcessApPayments)
         };
 
+    private static IReadOnlyList<string> SupplierDebitNotesPolicy(string action)
+        => action switch
+        {
+            "Create" or "Update" or "Cancel" => One(FinancePermissions.ManageApSupplierDebitNotes),
+            "Submit" => One(FinancePermissions.SubmitApSupplierDebitNotes),
+            "ProcessApproval" => One(FinancePermissions.ApproveApSupplierDebitNotes),
+            "Post" => One(FinancePermissions.PostApSupplierDebitNotes),
+            "Reverse" => One(FinancePermissions.ReverseApSupplierDebitNotes),
+            _ => One(FinancePermissions.ViewFinance)
+        };
+
     private static IReadOnlyList<string> PaymentBatchPolicy(string action)
         => action switch
         {
@@ -242,6 +267,14 @@ public static class FinancePermissionPolicyMap
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ReceiveCustomerPayments)
         };
 
+    private static IReadOnlyList<string> ArCollectionFollowUpPolicy(string action)
+        => action switch
+        {
+            "GenerateTasks" or "CreateTask" or "UpdateTask" => One(FinancePermissions.ManageArCollections),
+            "RecordReminder" => One(FinancePermissions.RecordArCollectionReminders),
+            _ => One(FinancePermissions.ViewArCollections)
+        };
+
     private static IReadOnlyList<string> BankReconciliationPolicy(string action)
         => action switch
         {
@@ -255,6 +288,10 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "CreateScenario" or "UpdateScenario" or "DeleteScenario" or "CreateReturn" or "OpenScenario" => One(FinancePermissions.MaintainBudgets),
+            "CreateRevision" or "UpdateRevision" => One(FinancePermissions.MaintainBudgetRevisions),
+            "SubmitRevision" => One(FinancePermissions.SubmitBudgetRevisions),
+            "ApplyRevision" => One(FinancePermissions.ApplyBudgetRevisions),
+            "GetRevisions" or "GetRevision" => One(FinancePermissions.ViewBudgetRevisions),
             "GetReturns" or "UpdateReturn" => One(FinancePermissions.AssignBudgetReturns),
             "BulkSaveEntries" => One(FinancePermissions.EditBudgetReturns),
             "SubmitReturn" or "RecallReturn" => One(FinancePermissions.SubmitBudgetReturns),
@@ -351,6 +388,9 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> FiscalPeriodPolicy(string action)
         => action switch
         {
+            // Opening a never-used Future period is deliberately separate from both month-end
+            // close preparation and maker-checker reopening of a certified Closed period.
+            "OpenPeriod" => One(FinancePermissions.OpenAccountingPeriods),
             "EvaluatePeriodCloseWorkspace" or "PreparePeriodClose" or "UpdateFinanceCloseTask" or
             "ClosePeriod" or "CloseFiscalYear" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
             "RequestPeriodReopen" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
@@ -425,9 +465,16 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> OpeningBalancePolicy(string action)
         => action switch
         {
-            "Get" or "List" => One(FinancePermissions.ViewFinance),
+            "Get" or "List" or "GetSubledgerReadiness" => One(FinancePermissions.ViewFinance),
             "Diagnostics" => One(FinancePermissions.RunMigrationDiagnostics),
-            "Create" or "Update" or "Validate" => One(FinancePermissions.PrepareOpeningBalances),
+            // Fixed-asset batches are another preparation route into the same maker-checker
+            // opening-balance aggregate; they must not inherit the more powerful adjustment
+            // permission merely because the action name differs from the original Create action.
+            "GetSpecializedOptions" or "GetGovernedOptions" => One(FinancePermissions.ViewFinance),
+            "Create" or "CreateFixedAssetBatch" or "CreateBankAccountOpening"
+                or "CreateResidualGlEquityOpening" or "CreateSupplierAdvance" or "CreateCustomerAdvance"
+                or "CreateApWithholding" or "CreateArWithholding" or "Update" or "Validate"
+                => One(FinancePermissions.PrepareOpeningBalances),
             "Submit" => new[] { FinancePermissions.PrepareOpeningBalances, FinancePermissions.WorkflowSubmit },
             _ => One(FinancePermissions.RunMigrationAdjustments)
         };
@@ -571,6 +618,14 @@ public static class FinancePermissionPolicyMap
             "ValidateVersion" => One(FinancePermissions.ManageFinancialStatementLayouts),
             "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
+        };
+
+    private static IReadOnlyList<string> FinanceReportAutomationPolicy(string action)
+        => action switch
+        {
+            "GetWorkspace" or "DownloadArtifact" => One(FinancePermissions.ViewReportSchedules),
+            "RunNow" or "ProcessDue" => One(FinancePermissions.RunReportSchedules),
+            _ => One(FinancePermissions.ManageReportSchedules)
         };
 
     private static IReadOnlyList<string> FallbackPolicy(string action, IReadOnlyCollection<string> methods)

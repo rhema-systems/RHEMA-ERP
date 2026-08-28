@@ -82,20 +82,21 @@ public sealed class WithholdingTaxCertificatesController : ControllerBase
     }
 
     [HttpGet("{vendorPaymentId:guid}/print")]
-    public async Task<IActionResult> GetApCertificatePrintView(
+    [Obsolete("Use the controlled Finance.Tax.WhtCertificate PDF issue endpoint.")]
+    public IActionResult GetApCertificatePrintView(
         Guid vendorPaymentId,
         [FromQuery] Guid? certificateId,
         CancellationToken cancellationToken)
     {
-        try
+        // Browser HTML was not an exact retained artifact and allowed an unregistered print path.
+        // Keep the route explicit for older clients, but fail closed rather than silently issuing
+        // evidence outside the one-original/reason-backed-replacement PDF register.
+        return StatusCode(StatusCodes.Status410Gone, new ProblemDetails
         {
-            var html = await _certificateService.GetApCertificateHtmlAsync(vendorPaymentId, certificateId, cancellationToken);
-            return Content(html, "text/html; charset=utf-8");
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+            Status = StatusCodes.Status410Gone,
+            Title = "Legacy WHT browser print retired",
+            Detail = "Issue or download the retained controlled WHT certificate PDF from the Finance WHT Certificates worklist."
+        });
     }
 
     [HttpPost("calculate")]

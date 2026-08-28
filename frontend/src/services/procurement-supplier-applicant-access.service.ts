@@ -2,6 +2,7 @@ import type {
   SupplierApplicantAccessHistory,
   SupplierApplicantAccessSummary,
   SupplierApplicantChannel,
+  SupplierApplicantContactCorrectionResult,
   SupplierApplicantIssueResult,
   SupplierApplicantPaymentMethod,
   SupplierApplicantPortal,
@@ -16,11 +17,20 @@ const SESSION_KEY = 'tdc-supplier-applicant-session';
 async function read<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const correlationId =
+      body.correlationId || body.extensions?.correlationId || body.traceId;
+    const detail =
+      body.detail || body.message || 'The supplier application request failed.';
     const error = new Error(
-      body.detail || body.message || 'The supplier application request failed.'
-    ) as Error & { status?: number; code?: string };
+      correlationId ? `${detail} Reference: ${correlationId}` : detail
+    ) as Error & {
+      status?: number;
+      code?: string;
+      correlationId?: string;
+    };
     error.status = response.status;
     error.code = body.code || body.extensions?.code;
+    error.correlationId = correlationId;
     throw error;
   }
   return body as T;
@@ -55,8 +65,13 @@ export const supplierApplicantAccessService = {
     contact: string;
     recaptchaToken?: string;
   }) {
-    return fetch(`${ROOT}/verification-challenges`, json(input)).then((response) =>
-      read<{ message: string; maskedContact: string }>(response)
+    return fetch(`${ROOT}/verification-challenges`, json(input)).then(
+      (response) =>
+        read<{
+          message: string;
+          maskedContact: string;
+          resumesExistingApplication: boolean;
+        }>(response)
     );
   },
 
@@ -70,8 +85,8 @@ export const supplierApplicantAccessService = {
     retainedRegistrationId?: string;
     recaptchaToken?: string;
   }) {
-    return fetch(`${ROOT}/verified-applications`, json(input)).then((response) =>
-      read<SupplierApplicantIssueResult>(response)
+    return fetch(`${ROOT}/verified-applications`, json(input)).then(
+      (response) => read<SupplierApplicantIssueResult>(response)
     );
   },
 
@@ -195,5 +210,44 @@ export const supplierApplicantAccessService = {
     ).then(async (response) => {
       if (!response.ok) await read(response);
     });
+  },
+
+  requestContactCorrectionChallenge(
+    registrationId: string,
+    input: { channel: SupplierApplicantChannel; contact: string }
+  ) {
+    const token =
+      typeof window === 'undefined'
+        ? null
+        : localStorage.getItem('authToken') || localStorage.getItem('token');
+    return fetch(
+      `${ROOT}/admin/registrations/${registrationId}/contact-correction/challenges`,
+      json(input, token || undefined)
+    ).then((response) =>
+      read<{ message: string; channel: string; maskedContact: string }>(
+        response
+      )
+    );
+  },
+
+  confirmContactCorrection(
+    registrationId: string,
+    input: {
+      channel: SupplierApplicantChannel;
+      contact: string;
+      otpCode: string;
+      reason: string;
+    }
+  ) {
+    const token =
+      typeof window === 'undefined'
+        ? null
+        : localStorage.getItem('authToken') || localStorage.getItem('token');
+    return fetch(
+      `${ROOT}/admin/registrations/${registrationId}/contact-correction/confirm`,
+      json(input, token || undefined)
+    ).then((response) =>
+      read<SupplierApplicantContactCorrectionResult>(response)
+    );
   },
 };

@@ -22,6 +22,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ErpSystem.Api.Services.Finance.AP
 {
@@ -30,6 +32,7 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// </summary>
     public class VendorInvoiceService : IVendorInvoiceService
     {
+        private const string VendorInvoiceBudgetSource = "VendorInvoice";
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ILogger<VendorInvoiceService> _logger;
@@ -42,6 +45,8 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IFixedAssetService? _fixedAssetService;
         private readonly IProcurementConfigurationService? _procurementConfiguration;
         private readonly IProcurementControlEventService? _procurementControlEvents;
+        private readonly IProcurementAcceptedSupplyService? _acceptedSupply;
+        private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
@@ -55,7 +60,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             ITaxCalculationEngine? taxEngine = null,
             IFixedAssetService? fixedAssetService = null,
             IProcurementConfigurationService? procurementConfiguration = null,
-            IProcurementControlEventService? procurementControlEvents = null)
+            IProcurementControlEventService? procurementControlEvents = null,
+            IProcurementAcceptedSupplyService? acceptedSupply = null,
+            IFinanceBudgetCommitmentService? budgetCommitments = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -69,6 +76,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             _fixedAssetService = fixedAssetService;
             _procurementConfiguration = procurementConfiguration;
             _procurementControlEvents = procurementControlEvents;
+            _acceptedSupply = acceptedSupply;
+            _budgetCommitments = budgetCommitments;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -203,6 +212,8 @@ namespace ErpSystem.Api.Services.Finance.AP
         public async Task<VendorInvoiceDto> CreateAsync(VendorInvoiceCreateDto dto, CancellationToken cancellationToken = default)
         {
             var supplier = await ResolveSupplierForInvoiceAsync(dto.SupplierId, cancellationToken);
+            var acceptedSupply = await ResolveAcceptedSupplyForCreateAsync(
+                dto, supplier, cancellationToken);
 
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? supplier.PaymentTermId, "Supplier", cancellationToken);
             var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
@@ -227,6 +238,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
                 cancellationToken);
+            var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
 
             var invoice = new VendorInvoice
             {
@@ -240,8 +259,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 InvoiceDate = dto.InvoiceDate,
                 ReceivedDate = dto.ReceivedDate ?? now,
                 DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
-                CurrencyCode = dto.CurrencyCode,
-                ExchangeRate = dto.ExchangeRate,
+                CurrencyCode = governedExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
+                ExchangeRate = governedExchangeRate?.Rate ?? dto.ExchangeRate,
+                ExchangeRateId = governedExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
                 PaymentTermId = paymentTerm?.Id,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
@@ -267,6 +287,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CreatedAt = now,
                 CreatedBy = UserName
             };
+            ApplyAcceptedSupply(invoice, acceptedSupply);
 
             // ── Process line items ──────────────────────────────────────
             decimal subtotal = 0;
@@ -287,6 +308,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorInvoiceId = invoice.Id,
                     LineItemType = lineDto.LineItemType,
                     GLAccountId = lineDto.GLAccountId,
+                    BudgetEntryId = lineDto.BudgetEntryId,
                     FixedAssetId = lineDto.FixedAssetId,
                     PurchaseOrderItemId = lineDto.PurchaseOrderItemId,
                     Description = lineDto.Description,
@@ -368,6 +390,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
                 cancellationToken);
+            var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
+            var acceptedSupply = await ResolveAcceptedSupplyForUpdateAsync(
+                invoice, dto, supplier, cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.SupplierInvoiceNumber = dto.SupplierInvoiceNumber;
@@ -375,8 +407,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.InvoiceDate = dto.InvoiceDate;
             invoice.ReceivedDate = dto.ReceivedDate;
             invoice.DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays);
-            invoice.CurrencyCode = dto.CurrencyCode;
-            invoice.ExchangeRate = dto.ExchangeRate;
+            invoice.CurrencyCode = governedExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
+            invoice.ExchangeRate = governedExchangeRate?.Rate ?? dto.ExchangeRate;
+            invoice.ExchangeRateId = governedExchangeRate?.ExchangeRateId;
             invoice.PaymentTermsDays = paymentTermsDays;
             invoice.PaymentTermId = paymentTerm?.Id;
             invoice.EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage;
@@ -394,6 +427,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.Notes = dto.Notes;
             invoice.Reference = dto.Reference;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
+            ApplyAcceptedSupply(invoice, acceptedSupply);
             InvalidateMatching(invoice, "Invoice content changed after its previous matching evaluation.");
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
@@ -430,6 +464,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorInvoiceId = invoice.Id,
                     LineItemType = lineDto.LineItemType,
                     GLAccountId = lineDto.GLAccountId,
+                    BudgetEntryId = lineDto.BudgetEntryId,
                     FixedAssetId = lineDto.FixedAssetId,
                     PurchaseOrderItemId = lineDto.PurchaseOrderItemId,
                     Description = lineDto.Description,
@@ -512,15 +547,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .SingleOrDefaultAsync(cancellationToken)
                 ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
 
-            if (!ProcurementInvoiceThreeWayMatchRules.IsRequired(
-                    scope.PurchaseOrderId,
-                    scope.IsOpeningBalance))
-            {
-                return await SubmitForApprovalCoreAsync(id, cancellationToken);
-            }
-
-            var lockResource =
-                $"tdc-ap-match:{TenantId:N}:{scope.PurchaseOrderId!.Value:N}";
+            var requiresProcurementMatch = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                scope.PurchaseOrderId,
+                scope.IsOpeningBalance);
+            var lockResource = requiresProcurementMatch
+                ? $"tdc-ap-match:{TenantId:N}:{scope.PurchaseOrderId!.Value:N}"
+                : $"finance-ap-budget:{TenantId:N}:{id:N}";
             if (_unitOfWork.HasActiveTransaction)
             {
                 await _unitOfWork.AcquireTransactionLockAsync(
@@ -572,8 +604,22 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be submitted for approval.");
 
+            if (invoice.IsOpeningBalance)
+                await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+
             if (ProcurementInvoiceThreeWayMatchRules.IsRequired(invoice.PurchaseOrderId, invoice.IsOpeningBalance))
                 await EvaluateThreeWayMatchAsync(invoice.Id, "SubmitForApproval", requireApprovalReady: true, cancellationToken);
+            else
+                await RevalidateWorksAcceptedSupplyAsync(invoice, cancellationToken);
+
+            // Direct expense invoices reserve the exact adopted Finance budget cells before
+            // their workflow starts. Opening invoices and PO/GRV-backed invoices intentionally
+            // remain outside this adapter so AP never duplicates a cutover or Procurement
+            // commitment. The surrounding serializable transaction owns both records.
+            var budgetReservations = await ReserveVendorInvoiceBudgetAsync(
+                invoice.Id,
+                "Submit",
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.PendingApproval;
@@ -589,6 +635,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("VendorInvoice", id);
             if (!workflowResult.Success)
             {
+                await ReleaseVendorInvoiceBudgetAsync(
+                    invoice.Id,
+                    budgetReservations,
+                    "Vendor invoice workflow did not start.",
+                    "WorkflowStartFailed",
+                    cancellationToken);
                 invoice.Status = VendorInvoiceStatus.Draft;
                 invoice.ApprovalStatus = "Draft";
                 invoice.SubmittedById = null;
@@ -631,8 +683,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be approved.");
 
+            if (invoice.IsOpeningBalance)
+                await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+
             if (ProcurementInvoiceThreeWayMatchRules.IsRequired(invoice.PurchaseOrderId, invoice.IsOpeningBalance))
                 await EvaluateThreeWayMatchAsync(invoice.Id, "Approve", requireApprovalReady: true, cancellationToken);
+            else
+                await RevalidateWorksAcceptedSupplyAsync(invoice, cancellationToken);
 
             invoice = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
@@ -711,15 +768,26 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
             var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
-            var hasFixedAssetLines = !invoice.IsOpeningBalance && invoice.LineItems.Any(IsFixedAssetLine);
-            if (hasFixedAssetLines && _fixedAssetService == null)
+            // Procured assets are capitalized from the accepted receipt carrying value by
+            // FIN-INT-007. Their later supplier invoice clears GRV only, so treating those lines
+            // as direct AP capitalization would debit the asset account a second time.
+            var hasDirectApFixedAssetLines = !invoice.IsOpeningBalance &&
+                !IsProcurementGrvClearingInvoice(invoice) &&
+                invoice.LineItems.Any(IsFixedAssetLine);
+            if (hasDirectApFixedAssetLines && _fixedAssetService == null)
             {
                 throw new InvalidOperationException("Fixed asset capitalization service is not configured for AP fixed asset lines.");
             }
 
             try
             {
-                var postingRequest = await BuildApInvoicePostingRequestAsync(invoice, cancellationToken);
+                var budgetReservationIds = await PrepareVendorInvoiceBudgetForPostingAsync(
+                    invoice,
+                    cancellationToken);
+                var postingRequest = await BuildApInvoicePostingRequestAsync(
+                    invoice,
+                    budgetReservationIds,
+                    cancellationToken);
                 var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
 
                 if (invoice.JournalEntryId.HasValue && invoice.JournalEntryId.Value != postingResult.JournalEntryId)
@@ -736,7 +804,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 
-                if (hasFixedAssetLines)
+                if (hasDirectApFixedAssetLines)
                 {
                     await _fixedAssetService!.RecordApInvoiceCapitalizationAsync(
                         invoice.Id,
@@ -873,6 +941,35 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<VendorInvoiceDto> RejectAsync(Guid id, string comments, CancellationToken cancellationToken = default)
         {
+            if (_unitOfWork.HasActiveTransaction)
+                return await RejectCoreAsync(id, comments, cancellationToken);
+
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"finance-ap-budget:{TenantId:N}:{id:N}", cancellationToken);
+                    var result = await RejectCoreAsync(id, comments, cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            }, cancellationToken);
+        }
+
+        private async Task<VendorInvoiceDto> RejectCoreAsync(
+            Guid id,
+            string comments,
+            CancellationToken cancellationToken)
+        {
             var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
 
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
@@ -897,6 +994,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                     workflowResult.Status);
                 return MapToDto(invoice);
             }
+
+            await ReleaseVendorInvoiceBudgetAsync(
+                invoice.Id,
+                reservations: null,
+                "Vendor invoice was rejected.",
+                "Rejected",
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.Rejected;
@@ -965,6 +1069,41 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
 
+                // A posted supplier debit note is the controlled correction of this exact AP
+                // recognition. Do not void its source invoice underneath that evidence; reverse
+                // the debit note and any payment applications first.
+                var activeDebitNoteExists = await _unitOfWork.Repository<SupplierDebitNote>()
+                    .ExistsAsync(note =>
+                        note.TenantId == TenantId &&
+                        note.OriginalVendorInvoiceId == invoice.Id &&
+                        !note.IsDeleted &&
+                        note.Status != SupplierDebitNoteStatus.Cancelled &&
+                        note.Status != SupplierDebitNoteStatus.Reversed);
+                if (activeDebitNoteExists)
+                    throw new InvalidOperationException(
+                        "Cannot void an invoice with an active linked supplier debit note. Cancel or reverse the debit note and its payment applications first.");
+
+                var supplierCreditApplications = await _unitOfWork.Repository<SupplierDebitNoteApplication>()
+                    .GetQueryable(application =>
+                        application.TenantId == TenantId &&
+                        application.VendorInvoiceId == invoice.Id &&
+                        !application.IsDeleted)
+                    .Select(application => new
+                    {
+                        application.Id,
+                        application.IsReversal,
+                        application.OriginalApplicationId
+                    })
+                    .ToListAsync(cancellationToken);
+                var reversedApplicationIds = supplierCreditApplications
+                    .Where(item => item.IsReversal && item.OriginalApplicationId.HasValue)
+                    .Select(item => item.OriginalApplicationId!.Value)
+                    .ToHashSet();
+                if (supplierCreditApplications.Any(item =>
+                        !item.IsReversal && !reversedApplicationIds.Contains(item.Id)))
+                    throw new InvalidOperationException(
+                        "Cannot void an invoice with an effective supplier debit-note application. Reverse the application first.");
+
                 var activeSettlement = RoundMoney(invoice.PaymentAllocations.Sum(
                     allocation => allocation.AllocatedAmount +
                                   allocation.DiscountAmount +
@@ -978,6 +1117,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 FinancePostingResultDto? reversal = null;
                 if (invoice.JournalEntryId.HasValue)
                 {
+                    // AP-created fixed assets share the invoice journal. Validate the asset
+                    // lifecycle before reversing that journal; otherwise a successful AP void
+                    // could leave depreciation/valuation based on cost that no longer exists.
+                    // The post-step below then updates the register using this same reversal event
+                    // rather than creating a second journal that would duplicate AP/tax reversal.
+                    if (_fixedAssetService != null)
+                        await _fixedAssetService.ValidateApInvoiceCapitalizationReversalAsync(invoice.Id, cancellationToken);
+
                     var originalEvent = await GetPostedInvoiceEventAsync(invoice, cancellationToken);
                     var originalJournal = await _unitOfWork.Repository<JournalEntry>()
                         .GetQueryable(j =>
@@ -1016,6 +1163,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                             "VendorInvoice",
                             cancellationToken);
                     }
+                }
+
+                if (reversal != null && _fixedAssetService != null)
+                {
+                    await _fixedAssetService.RecordApInvoiceCapitalizationReversalAsync(
+                        invoice.Id,
+                        reversal.JournalEntryId,
+                        reversal.PostingEventId,
+                        reason.Trim(),
+                        cancellationToken);
                 }
 
                 if (invoice.Status != VendorInvoiceStatus.Voided)
@@ -1405,46 +1562,58 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (activeLines.Count == 0)
                 AddHardStop("AP_MATCH_LINES_MISSING", "Invoice lines", "The invoice has no active lines to match.");
 
-            var receipts = await _unitOfWork.Repository<PurchaseOrderReceipt>()
-                .GetQueryable(item => item.TenantId == TenantId &&
-                                      item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
-                .Include(item => item.Items)
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
-            var receiptIds = receipts.Select(item => item.Id).ToList();
-            var inspectionCases = receiptIds.Count == 0
-                ? new List<ProcurementReceiptInspectionCase>()
-                : await _unitOfWork.Repository<ProcurementReceiptInspectionCase>()
-                    .GetQueryable(item => item.TenantId == TenantId &&
-                                          receiptIds.Contains(item.PurchaseOrderReceiptId) && !item.IsDeleted)
-                    .Include(item => item.Lines)
-                        .ThenInclude(item => item.PurchaseOrderReceiptItem)
-                    .AsNoTracking()
-                    .ToListAsync(cancellationToken);
-            var latestInspections = inspectionCases
-                .GroupBy(item => item.PurchaseOrderReceiptId)
-                .Select(group => group.OrderByDescending(item => item.Sequence).First())
-                .ToList();
-            var eligibleInspections = latestInspections.Where(item =>
-                ProcurementReceiptInspectionRules.IsApEligible(
-                    item.Status, item.PendingQuantity, item.ApEligibleQuantity)).ToList();
-            var resolvedInspections = latestInspections.Where(item =>
-                ProcurementReceiptInspectionRules.IsApMatchingResolved(
-                    item.Status, item.PendingQuantity, item.ApEligibleQuantity)).ToList();
-
-            if (receipts.Count == 0)
-                AddHardStop("AP_MATCH_RECEIPT_MISSING", "Accepted receipt", "No governed purchase-order receipt exists for this invoice.");
-            else if (latestInspections.Count != receipts.Count || resolvedInspections.Count != receipts.Count)
-                AddHardStop("AP_MATCH_INSPECTION_BLOCKED", "Accepted receipt", "Every linked receipt must have a latest independently approved accepted quantity or a terminal zero-eligible rejection outcome.");
+            ProcurementAcceptedSupplyResolutionDto? acceptedSupply = null;
+            var acceptedByPoLine = new Dictionary<Guid, decimal>();
+            if (!purchaseOrder.ProcurementCategory.HasValue)
+            {
+                AddHardStop("AP_MATCH_CATEGORY_MISSING", "Procurement category",
+                    "The purchase order has no governed category snapshot from its approved requisition.");
+            }
+            else if (purchaseOrder.ProcurementCategory == ProcurementCategoryClass.Works)
+            {
+                AddHardStop("AP_MATCH_WORKS_QS_HANDOFF_REQUIRED", "Works certification",
+                    "Works invoices must originate from the approved QS payment-certificate handoff.");
+            }
+            else if (_acceptedSupply == null)
+            {
+                AddHardStop("AP_MATCH_ACCEPTED_SUPPLY_UNAVAILABLE", "Accepted supply",
+                    "The shared category-aware accepted-supply control is not registered.");
+            }
             else
-                result.Checks.Add(Check("AP-MATCH-INSPECTION", "Accepted receipt", true, false,
-                    $"{eligibleInspections.Count} receipt inspection outcome(s) are AP eligible; " +
-                    $"{resolvedInspections.Count - eligibleInspections.Count} terminal zero-eligible outcome(s) contribute no invoiceable quantity."));
-
-            var acceptedByPoLine = eligibleInspections
-                .SelectMany(item => item.Lines)
-                .GroupBy(item => item.PurchaseOrderReceiptItem.PurchaseOrderItemId)
-                .ToDictionary(group => group.Key, group => group.Sum(item => item.AcceptedQuantity));
+            {
+                try
+                {
+                    var kind = purchaseOrder.ProcurementCategory == ProcurementCategoryClass.Goods
+                        ? ProcurementAcceptedSupplyKind.GoodsReceiptInspection
+                        : ProcurementAcceptedSupplyKind.ServiceCompletion;
+                    var sourceId = kind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection
+                        ? purchaseOrder.Id
+                        : invoice.AcceptedSupplyKind == kind && invoice.AcceptedSupplySourceId.HasValue
+                            ? invoice.AcceptedSupplySourceId.Value
+                            : Guid.Empty;
+                    acceptedSupply = await _acceptedSupply.ResolveAsync(
+                        kind, sourceId, purchaseOrder.Id, invoice.Id, cancellationToken);
+                    acceptedByPoLine = acceptedSupply.Lines
+                        .ToDictionary(value => value.PurchaseOrderItemId,
+                            value => value.AcceptedQuantity);
+                    result.Checks.Add(Check(
+                        kind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection
+                            ? "AP-MATCH-GOODS-ACCEPTANCE"
+                            : "AP-MATCH-SERVICE-COMPLETION",
+                        kind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection
+                            ? "Accepted GRN inspection"
+                            : "Approved service completion",
+                        true,
+                        false,
+                        $"Authoritative {acceptedSupply.SourceReference} acceptance lineage is current."));
+                    if (persist)
+                        ApplyAcceptedSupply(invoice, acceptedSupply);
+                }
+                catch (ProcurementAcceptedSupplyValidationException exception)
+                {
+                    AddHardStop(exception.Code, "Accepted supply", exception.Message);
+                }
+            }
             result.GoodsReceiptTotal = acceptedByPoLine.Values.Sum();
 
             var committedStatuses = new[]
@@ -1541,6 +1710,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .Select(item => new { item.Id, item.OrderedQuantity, item.UnitPrice })
                 },
                 acceptedByPoLine = acceptedByPoLine.OrderBy(item => item.Key),
+                acceptedSupply = acceptedSupply == null ? null : new
+                {
+                    acceptedSupply.Kind, acceptedSupply.SourceId,
+                    acceptedSupply.SourceReference, acceptedSupply.Category,
+                    acceptedSupply.PurchaseOrderId, acceptedSupply.BusinessPartnerId,
+                    acceptedSupply.CurrencyCode, acceptedSupply.AcceptedAmount,
+                    acceptedSupply.AcceptedAtUtc, acceptedSupply.SourceIntegrityHash
+                },
                 priorByPoLine = priorByPoLine.OrderBy(item => item.Key),
                 tolerances = new { result.PriceTolerancePercentage, result.QuantityTolerancePercentage },
                 profile = profile == null ? null : new
@@ -1801,6 +1978,248 @@ namespace ErpSystem.Api.Services.Finance.AP
         //  UTILITIES
         // ═════════════════════════════════════════════════════════════════
 
+        private async Task<IReadOnlyList<FinanceBudgetReservationDto>> ReserveVendorInvoiceBudgetAsync(
+            Guid invoiceId,
+            string operation,
+            CancellationToken cancellationToken)
+        {
+            var invoice = await LoadInvoiceForPostingAsync(invoiceId, cancellationToken);
+            var request = await BuildVendorInvoiceBudgetRequestAsync(invoice, operation, cancellationToken);
+            if (request is null)
+                return Array.Empty<FinanceBudgetReservationDto>();
+            return (await _budgetCommitments!.ReserveAsync(request, cancellationToken)).Reservations;
+        }
+
+        private async Task<IReadOnlyList<Guid>> PrepareVendorInvoiceBudgetForPostingAsync(
+            VendorInvoice invoice,
+            CancellationToken cancellationToken)
+        {
+            var request = await BuildVendorInvoiceBudgetRequestAsync(invoice, "Post", cancellationToken);
+            if (request is null)
+                return Array.Empty<Guid>();
+
+            // The posting event is the durable accounting truth. A journal may already be
+            // committed even when the repairable invoice back-reference failed to save. Check
+            // that evidence before reserving so a retry cannot leak a second commitment and then
+            // short-circuit as a duplicate in the posting engine.
+            var durablePosting = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(posting => posting.TenantId == TenantId && !posting.IsDeleted
+                    && posting.SourceModule == "AP"
+                    && posting.SourceDocumentType == VendorInvoiceBudgetSource
+                    && posting.SourceDocumentId == invoice.Id
+                    && posting.PostingAction == "Post"
+                    && posting.PostingStatus == "Posted")
+                .AsNoTracking()
+                .Select(posting => new { posting.Id, posting.JournalEntryId })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (durablePosting != null)
+            {
+                var expectedBudgetEntryIds = request.Lines
+                    .Select(line => line.BudgetEntryId)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToArray();
+                var consumed = await _unitOfWork.Repository<FinanceBudgetReservation>()
+                    .GetQueryable(row => row.TenantId == TenantId && !row.IsDeleted
+                        && row.SourceDocumentType == VendorInvoiceBudgetSource
+                        && row.SourceDocumentId == invoice.Id
+                        && row.Status == "Consumed"
+                        && row.JournalEntryId == durablePosting.JournalEntryId
+                        && row.PostingEventId == durablePosting.Id)
+                    .AsNoTracking()
+                    .Select(row => row.BudgetEntryId)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToArrayAsync(cancellationToken);
+                if (!consumed.SequenceEqual(expectedBudgetEntryIds))
+                    throw new InvalidOperationException(
+                        "The posted AP invoice is missing its consumed Finance budget evidence.");
+                return Array.Empty<Guid>();
+            }
+
+            if (invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException(
+                    "The AP invoice journal back-reference has no matching posted Finance event.");
+
+            var result = await _budgetCommitments!.ReserveAsync(request, cancellationToken);
+            return result.Reservations.Select(row => row.Id).ToArray();
+        }
+
+        private async Task<FinanceBudgetCommitmentRequestDto?> BuildVendorInvoiceBudgetRequestAsync(
+            VendorInvoice invoice,
+            string operation,
+            CancellationToken cancellationToken)
+        {
+            var activeLines = invoice.LineItems.Where(line => !line.IsDeleted).ToList();
+            var hasBudgetSelections = activeLines.Any(line => line.BudgetEntryId.HasValue);
+            var procurementOwned = invoice.PurchaseOrderId.HasValue
+                || await _unitOfWork.Repository<FinancePurchaseOrderReceipt>()
+                    .GetQueryable(receipt => receipt.TenantId == TenantId && !receipt.IsDeleted
+                        && receipt.VendorInvoiceId == invoice.Id)
+                    .AsNoTracking()
+                    .AnyAsync(cancellationToken);
+            if (invoice.IsOpeningBalance || procurementOwned)
+            {
+                if (hasBudgetSelections)
+                    throw new InvalidOperationException(
+                        "Opening and PO/GRV-backed invoices cannot create a second AP budget commitment.");
+                return null;
+            }
+
+            var supplier = invoice.Supplier ?? await ResolveInvoiceSupplierForPostingAsync(invoice, cancellationToken);
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var accountCache = new Dictionary<Guid, Account>();
+            var candidateLines = new List<(VendorInvoiceLineItem Line, Account Account)>();
+            foreach (var line in activeLines)
+            {
+                var directExpense = !IsFixedAssetLine(line)
+                    && !string.Equals(line.LineItemType, "Inventory", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(line.LineItemType, "Product", StringComparison.OrdinalIgnoreCase);
+                if (!directExpense)
+                {
+                    if (line.BudgetEntryId.HasValue)
+                        throw new InvalidOperationException(
+                            $"AP line '{line.Description}' is not a direct expense and cannot select a Finance budget cell.");
+                    continue;
+                }
+
+                var accountId = await ResolveDebitAccountForInvoiceLineAsync(
+                    invoice, supplier, settings, line, accountCache, cancellationToken);
+                var account = accountCache[accountId];
+                if (account.AccountType == AccountType.Expense && account.BudgetTrackingEnabled)
+                {
+                    if (!line.BudgetEntryId.HasValue)
+                        throw new InvalidOperationException(
+                            $"AP expense line '{line.Description}' requires an adopted Finance budget cell before submission.");
+                    candidateLines.Add((line, account));
+                }
+                else if (line.BudgetEntryId.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"AP line '{line.Description}' selected a budget cell for an account that is not budget-controlled.");
+                }
+            }
+
+            if (candidateLines.Count == 0)
+                return null;
+            if (_budgetCommitments == null)
+                throw new InvalidOperationException(
+                    "Finance budget commitments are not configured for this budget-controlled AP invoice.");
+
+            var entryIds = candidateLines.Select(item => item.Line.BudgetEntryId!.Value).Distinct().ToArray();
+            var entries = await _unitOfWork.Repository<BudgetEntry>()
+                .GetQueryable(entry => entry.TenantId == TenantId && entryIds.Contains(entry.Id) && !entry.IsDeleted)
+                .Include(entry => entry.BudgetReturn)
+                .Include(entry => entry.FinanceDimensionSet)
+                    .ThenInclude(set => set!.Items)
+                .ToDictionaryAsync(entry => entry.Id, cancellationToken);
+            if (entries.Count != entryIds.Length)
+                throw new InvalidOperationException("One or more selected Finance budget cells were not found in this tenant.");
+
+            var sourceVersion = BuildVendorInvoiceBudgetSourceVersion(invoice, activeLines);
+            return new FinanceBudgetCommitmentRequestDto
+            {
+                SourceDocumentType = VendorInvoiceBudgetSource,
+                SourceDocumentId = invoice.Id,
+                SourceDocumentReference = invoice.InvoiceNumber,
+                SourceVersion = sourceVersion,
+                BudgetDate = invoice.InvoiceDate.Date,
+                IdempotencyKey = $"AP:{invoice.Id:N}:Budget:{operation}:{sourceVersion[..12]}",
+                CorrelationId = $"AP:{invoice.Id:N}:Budget",
+                Lines = candidateLines.Select(item =>
+                {
+                    var entry = entries[item.Line.BudgetEntryId!.Value];
+                    return new FinanceBudgetCommitmentLineDto
+                    {
+                        SourceLineId = item.Line.Id.ToString("N"),
+                        BudgetEntryId = entry.Id,
+                        AccountId = item.Account.Id,
+                        FiscalPeriodId = entry.FiscalPeriodId,
+                        SegmentValueId = entry.BudgetReturn?.SegmentValueId,
+                        DimensionAssignments = entry.FinanceDimensionSet?.Items
+                            .Select(dimension => new BudgetDimensionAssignmentInputDto
+                            {
+                                FinanceDimensionDefinitionId = dimension.FinanceDimensionDefinitionId,
+                                FinanceDimensionValueId = dimension.FinanceDimensionValueId
+                            }).ToArray() ?? Array.Empty<BudgetDimensionAssignmentInputDto>(),
+                        TransactionAmount = RoundMoney(item.Line.Quantity * item.Line.UnitPrice),
+                        TransactionCurrencyCode = invoice.CurrencyCode,
+                        ExchangeRateId = invoice.ExchangeRateId
+                    };
+                }).ToArray()
+            };
+        }
+
+        private async Task ReleaseVendorInvoiceBudgetAsync(
+            Guid invoiceId,
+            IReadOnlyList<FinanceBudgetReservationDto>? reservations,
+            string reason,
+            string operation,
+            CancellationToken cancellationToken)
+        {
+            if (_budgetCommitments == null)
+                return;
+            var active = reservations ?? await _unitOfWork.Repository<FinanceBudgetReservation>()
+                .GetQueryable(row => row.TenantId == TenantId && !row.IsDeleted
+                    && row.SourceDocumentType == VendorInvoiceBudgetSource
+                    && row.SourceDocumentId == invoiceId && row.Status == "Reserved")
+                .AsNoTracking()
+                .Select(row => new FinanceBudgetReservationDto
+                {
+                    Id = row.Id,
+                    Version = row.ReservationVersion
+                })
+                .ToListAsync(cancellationToken);
+            foreach (var reservation in active)
+            {
+                await _budgetCommitments.ReleaseAsync(
+                    reservation.Id,
+                    new ReleaseFinanceBudgetReservationDto
+                    {
+                        Reason = reason,
+                        ExpectedVersion = reservation.Version,
+                        IdempotencyKey = $"AP:{invoiceId:N}:BudgetRelease:{operation}:{reservation.Id:N}",
+                        CorrelationId = $"AP:{invoiceId:N}:Budget"
+                    },
+                    cancellationToken);
+            }
+        }
+
+        private static string BuildVendorInvoiceBudgetSourceVersion(
+            VendorInvoice invoice,
+            IReadOnlyCollection<VendorInvoiceLineItem> lines)
+        {
+            var payload = string.Join('|', new[]
+            {
+                invoice.Id.ToString("N"),
+                invoice.InvoiceDate.Date.ToString("yyyy-MM-dd"),
+                invoice.CurrencyCode.Trim().ToUpperInvariant(),
+                invoice.ExchangeRateId?.ToString("N") ?? "NONE",
+                string.Join(';', lines.OrderBy(line => line.Id).Select(line =>
+                    $"{line.Id:N},{line.LineItemType},{line.GLAccountId?.ToString("N") ?? "NONE"},{line.BudgetEntryId?.ToString("N") ?? "NONE"},{line.Quantity:0.####},{line.UnitPrice:0.####},{line.DiscountAmount:0.00}"))
+            });
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+        }
+
+        private static void ApplyBudgetDimensions(
+            FinancePostingLineDto postingLine,
+            VendorInvoiceLineItem sourceLine,
+            IReadOnlyDictionary<Guid, BudgetEntry> budgetEntries)
+        {
+            if (!sourceLine.BudgetEntryId.HasValue)
+                return;
+            if (!budgetEntries.TryGetValue(sourceLine.BudgetEntryId.Value, out var entry))
+                throw new InvalidOperationException(
+                    $"AP line '{sourceLine.Description}' references a Finance budget cell that was not found.");
+            postingLine.Dimensions = entry.FinanceDimensionSet?.Items
+                .OrderBy(item => item.DimensionCodeSnapshot)
+                .Select(item => new FinancePostingDimensionValueDto
+                {
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    ValueCode = item.DimensionValueCodeSnapshot
+                }).ToArray() ?? Array.Empty<FinancePostingDimensionValueDto>();
+        }
+
         private async Task<VendorInvoice> LoadInvoiceForPostingAsync(Guid id, CancellationToken cancellationToken)
         {
             var tenantId = TenantId;
@@ -1821,6 +2240,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private async Task<FinancePostingRequestDto> BuildApInvoicePostingRequestAsync(
             VendorInvoice invoice,
+            IReadOnlyList<Guid> budgetReservationIds,
             CancellationToken cancellationToken)
         {
             var tenantId = TenantId;
@@ -1844,6 +2264,24 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .OrderBy(l => l.CreatedAt)
                 .ThenBy(l => l.Id)
                 .ToList();
+
+            var budgetEntryIds = activeLines
+                .Where(line => line.BudgetEntryId.HasValue)
+                .Select(line => line.BudgetEntryId!.Value)
+                .Distinct()
+                .ToArray();
+            var budgetEntries = budgetEntryIds.Length == 0
+                ? new Dictionary<Guid, BudgetEntry>()
+                : await _unitOfWork.Repository<BudgetEntry>()
+                    .GetQueryable(entry => entry.TenantId == tenantId
+                        && budgetEntryIds.Contains(entry.Id) && !entry.IsDeleted)
+                    .Include(entry => entry.FinanceDimensionSet)
+                        .ThenInclude(set => set!.Items)
+                            .ThenInclude(item => item.FinanceDimensionDefinition)
+                    .Include(entry => entry.FinanceDimensionSet)
+                        .ThenInclude(set => set!.Items)
+                            .ThenInclude(item => item.FinanceDimensionValue)
+                    .ToDictionaryAsync(entry => entry.Id, cancellationToken);
 
             if (activeLines.Count == 0)
                 throw new InvalidOperationException("AP invoice has no lines to post.");
@@ -1883,8 +2321,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             var linkedFinanceReceipt = await _unitOfWork.Repository<FinancePurchaseOrderReceipt>()
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted);
             var clearsFinanceGrv = linkedFinanceReceipt != null;
+            var clearsProcurementGrv = IsProcurementGrvClearingInvoice(invoice);
+            var clearsGrv = clearsFinanceGrv || clearsProcurementGrv;
             Guid? grvAccrualAccountId = null;
-            if (clearsFinanceGrv)
+            if (clearsGrv)
             {
                 grvAccrualAccountId = settings.ControlAccountGRVAccrualId
                     ?? throw new InvalidOperationException("GRV accrual control account is not configured for this tenant.");
@@ -1906,9 +2346,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (line.DiscountAmount < 0m || line.TaxAmount < 0m)
                     throw new InvalidOperationException("AP invoice line discount and tax amounts cannot be negative.");
 
-                if (clearsFinanceGrv)
+                if (clearsGrv)
                 {
-                    if (IsFixedAssetLine(line))
+                    if (clearsFinanceGrv && IsFixedAssetLine(line))
                     {
                         throw new InvalidOperationException("Fixed asset capitalization from GRV accrual clearing is deferred until procurement receipt capitalization is modeled.");
                     }
@@ -1977,7 +2417,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     accountCache,
                     cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
+                var expenseLine = BuildPostingLine(
                     debitAccountId,
                     $"AP invoice {invoice.InvoiceNumber} - {line.Description}",
                     debitForeignAmount: grossAmount,
@@ -1988,7 +2428,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     lineNumber++,
-                    ResolveLineTag(line)));
+                    ResolveLineTag(line));
+                expenseLine.SourceDocumentLineId = line.Id;
+                ApplyBudgetDimensions(expenseLine, line, budgetEntries);
+                postingLines.Add(expenseLine);
             }
 
             if (!clearsFinanceGrv && documentDiscountAmount > 0m)
@@ -2076,6 +2519,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
+                BudgetReservationIds = budgetReservationIds,
+                BudgetReservationSourceDocumentType = budgetReservationIds.Count > 0
+                    ? VendorInvoiceBudgetSource
+                    : null,
                 Lines = postingLines,
                 TaxCalculationSnapshots = taxSnapshotLines
             };
@@ -2091,6 +2538,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             Dictionary<Guid, Account> accountCache,
             CancellationToken cancellationToken)
         {
+            var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+            exchangeRate = rateSnapshot.Rate;
             var migrationClearingAccountId = settings.MigrationClearingAccountId
                 ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AP opening balance posting.");
             await ResolvePostingAccountAsync(
@@ -2106,17 +2555,22 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 throw new InvalidOperationException($"Opening-balance vendor invoice {invoice.InvoiceNumber} has no positive AP amount to post.");
             }
+            var functionalOpeningAmount = ToFunctionalAmount(
+                openingAmount,
+                invoiceCurrency,
+                functionalCurrency,
+                exchangeRate);
 
             var postingLines = new List<FinancePostingLineDto>
             {
                 BuildPostingLine(
                     migrationClearingAccountId,
                     $"Migration clearing - AP opening balance {invoice.InvoiceNumber}",
-                    debitForeignAmount: openingAmount,
+                    debitForeignAmount: functionalOpeningAmount,
                     creditForeignAmount: 0m,
-                    invoiceCurrency,
                     functionalCurrency,
-                    exchangeRate,
+                    functionalCurrency,
+                    1m,
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     1,
@@ -2132,7 +2586,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     2,
-                    "AP-Control")
+                    "AP-Control",
+                    rateSnapshot.ExchangeRateId,
+                    rateSnapshot.Source)
             };
 
             return new FinancePostingRequestDto
@@ -2501,7 +2957,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime exchangeRateDate,
             string reference,
             int lineNumber,
-            string transactionTag)
+            string transactionTag,
+            Guid? exchangeRateId = null,
+            string? exchangeRateSource = null)
         {
             var isForeign = !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
             var debitAmount = ToFunctionalAmount(debitForeignAmount, invoiceCurrency, functionalCurrency, exchangeRate);
@@ -2514,11 +2972,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DebitAmount = debitAmount,
                 CreditAmount = creditAmount,
                 TransactionCurrency = invoiceCurrency,
+                TransactionDebitAmount = debitForeignAmount,
+                TransactionCreditAmount = creditForeignAmount,
                 ForeignCurrencyAmount = isForeign
                     ? debitForeignAmount > 0m ? debitForeignAmount : creditForeignAmount
                     : null,
                 ExchangeRate = isForeign ? exchangeRate : null,
-                ExchangeRateSource = isForeign ? "AP invoice exchange-rate snapshot" : null,
+                ExchangeRateId = isForeign ? exchangeRateId : null,
+                ExchangeRateSource = isForeign
+                    ? exchangeRateSource ?? "AP invoice exchange-rate snapshot"
+                    : null,
                 ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
                 SourceReferenceNumber = reference,
                 LineNumber = lineNumber,
@@ -2538,6 +3001,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             => string.Equals(line.LineItemType, "FixedAsset", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(line.LineItemType, "Fixed Asset", StringComparison.OrdinalIgnoreCase)
                 || line.FixedAssetId.HasValue;
+
+        private static bool IsProcurementGrvClearingInvoice(VendorInvoice invoice)
+            => invoice.PurchaseOrderId.HasValue &&
+                invoice.AcceptedSupplyKind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection &&
+                invoice.AcceptedSupplySourceId == invoice.PurchaseOrderId;
 
         private static string BuildFixedAssetLineNotes(VendorInvoiceLineItem line)
             => line.FixedAssetId.HasValue
@@ -2762,8 +3230,255 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? defaultValue.Trim().ToUpperInvariant()
                 : currencyCode.Trim().ToUpperInvariant();
 
+        private async Task<OpeningInvoiceExchangeRateSnapshot> ResolveOpeningInvoiceExchangeRateAsync(
+            string? currencyCode,
+            DateTime invoiceDate,
+            Guid? exchangeRateId,
+            decimal suppliedRate,
+            CancellationToken cancellationToken)
+        {
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var transactionCurrency = NormalizeCurrency(currencyCode, functionalCurrency);
+
+            if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                if (exchangeRateId.HasValue)
+                    throw new InvalidOperationException("Functional-currency AP opening invoices cannot carry foreign exchange-rate evidence.");
+                if (RoundRate(suppliedRate) != 1m)
+                    throw new InvalidOperationException("Functional-currency AP opening invoices must use an exchange rate of 1.");
+                return new OpeningInvoiceExchangeRateSnapshot(null, 1m, transactionCurrency, functionalCurrency, "Functional currency");
+            }
+
+            if (!exchangeRateId.HasValue)
+                throw new InvalidOperationException("Foreign-currency AP opening invoices require an approved exchange-rate record.");
+
+            var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
+                ? settings.ApInvoiceQuoteSide
+                : ExchangeRateQuoteSide.Mid;
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == exchangeRateId.Value &&
+                    !item.IsDeleted);
+
+            if (rate == null ||
+                !rate.IsActive ||
+                rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved) ||
+                rate.Rate <= 0m ||
+                rate.RateType != ExchangeRateType.Daily ||
+                rate.QuoteSide != quoteSide ||
+                !string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                rate.EffectiveDate.Date > invoiceDate.Date ||
+                (rate.EndDate.HasValue && rate.EndDate.Value.Date < invoiceDate.Date))
+            {
+                throw new InvalidOperationException(
+                    "The selected AP opening-invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
+            }
+
+            if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
+                throw new InvalidOperationException("The AP opening-invoice exchange-rate value does not match the approved rate record.");
+
+            return new OpeningInvoiceExchangeRateSnapshot(
+                rate.Id,
+                rate.Rate,
+                transactionCurrency,
+                functionalCurrency,
+                rate.RateSource);
+        }
+
+        private Task<OpeningInvoiceExchangeRateSnapshot> RevalidateOpeningInvoiceExchangeRateAsync(
+            VendorInvoice invoice,
+            CancellationToken cancellationToken)
+            => ResolveOpeningInvoiceExchangeRateAsync(
+                invoice.CurrencyCode,
+                invoice.InvoiceDate,
+                invoice.ExchangeRateId,
+                invoice.ExchangeRate,
+                cancellationToken);
+
+        private static decimal RoundRate(decimal amount)
+            => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
+
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+        private async Task<ProcurementAcceptedSupplyResolutionDto?>
+            ResolveAcceptedSupplyForCreateAsync(
+                VendorInvoiceCreateDto dto,
+                Supplier supplier,
+                CancellationToken cancellationToken)
+        {
+            if (dto.IsOpeningBalance)
+            {
+                if (dto.AcceptedSupplyKind.HasValue || dto.AcceptedSupplySourceId.HasValue)
+                    throw new InvalidOperationException(
+                        "Opening-balance invoices cannot consume a procurement acceptance record.");
+                return null;
+            }
+
+            if (!dto.PurchaseOrderId.HasValue)
+            {
+                if (!dto.AcceptedSupplyKind.HasValue && !dto.AcceptedSupplySourceId.HasValue)
+                    return null;
+                if (!dto.IsTrustedAcceptedSupplyHandoff ||
+                    dto.AcceptedSupplyKind != ProcurementAcceptedSupplyKind.WorksPaymentCertificate ||
+                    !dto.AcceptedSupplySourceId.HasValue)
+                    throw new InvalidOperationException(
+                        "Works invoices must originate from the approved QS payment-certificate handoff.");
+                var works = await RequireAcceptedSupplyServiceAsync()
+                    .ResolveAsync(dto.AcceptedSupplyKind.Value,
+                        dto.AcceptedSupplySourceId.Value, null, null, cancellationToken);
+                await EnsureAcceptedSupplySupplierAsync(works, supplier, cancellationToken);
+                return works;
+            }
+
+            var order = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryable(value => value.TenantId == TenantId &&
+                    value.Id == dto.PurchaseOrderId.Value && !value.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The selected purchase order was not found in the current tenant.");
+            if (!order.ProcurementCategory.HasValue)
+                throw new InvalidOperationException(
+                    "The selected purchase order has no governed category snapshot.");
+
+            if (order.ProcurementCategory == ProcurementCategoryClass.Works)
+                throw new InvalidOperationException(
+                    "Works invoices must originate from the approved QS payment-certificate handoff.");
+            if (order.ProcurementCategory == ProcurementCategoryClass.Goods)
+            {
+                if (dto.AcceptedSupplyKind.HasValue || dto.AcceptedSupplySourceId.HasValue)
+                    throw new InvalidOperationException(
+                        "Goods acceptance is derived automatically from governed GRN inspections.");
+                return null;
+            }
+
+            if (dto.AcceptedSupplyKind != ProcurementAcceptedSupplyKind.ServiceCompletion ||
+                !dto.AcceptedSupplySourceId.HasValue)
+                throw new InvalidOperationException(
+                    "Select an approved service completion for this Services purchase order.");
+            var service = await RequireAcceptedSupplyServiceAsync()
+                .ResolveAsync(dto.AcceptedSupplyKind.Value,
+                    dto.AcceptedSupplySourceId.Value, order.Id, null, cancellationToken);
+            await EnsureAcceptedSupplySupplierAsync(service, supplier, cancellationToken);
+            return service;
+        }
+
+        private async Task<ProcurementAcceptedSupplyResolutionDto?>
+            ResolveAcceptedSupplyForUpdateAsync(
+                VendorInvoice invoice,
+                VendorInvoiceUpdateDto dto,
+                Supplier? supplier,
+                CancellationToken cancellationToken)
+        {
+            if (invoice.AcceptedSupplyKind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate)
+            {
+                if (dto.PurchaseOrderId != invoice.PurchaseOrderId ||
+                    dto.AcceptedSupplyKind != invoice.AcceptedSupplyKind ||
+                    dto.AcceptedSupplySourceId != invoice.AcceptedSupplySourceId)
+                    throw new InvalidOperationException(
+                        "QS Works acceptance lineage cannot be changed through the AP invoice editor.");
+                return await RequireAcceptedSupplyServiceAsync().ResolveAsync(
+                    invoice.AcceptedSupplyKind.Value,
+                    invoice.AcceptedSupplySourceId!.Value,
+                    invoice.PurchaseOrderId,
+                    invoice.Id,
+                    cancellationToken);
+            }
+
+            var request = new VendorInvoiceCreateDto
+            {
+                PurchaseOrderId = dto.PurchaseOrderId,
+                AcceptedSupplyKind = dto.AcceptedSupplyKind,
+                AcceptedSupplySourceId = dto.AcceptedSupplySourceId,
+                IsOpeningBalance = dto.IsOpeningBalance
+            };
+            return await ResolveAcceptedSupplyForCreateAsync(
+                request,
+                supplier ?? throw new InvalidOperationException(
+                    "The invoice supplier is unavailable."),
+                cancellationToken);
+        }
+
+        private IProcurementAcceptedSupplyService RequireAcceptedSupplyServiceAsync() =>
+            _acceptedSupply ?? throw new InvalidOperationException(
+                "The shared procurement accepted-supply control is not registered.");
+
+        private async Task EnsureAcceptedSupplySupplierAsync(
+            ProcurementAcceptedSupplyResolutionDto accepted,
+            Supplier supplier,
+            CancellationToken cancellationToken)
+        {
+            if (supplier.Id == accepted.BusinessPartnerId)
+                return;
+            var partner = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(value => value.TenantId == TenantId &&
+                    value.Id == accepted.BusinessPartnerId && !value.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+            if (partner == null ||
+                !(string.Equals(partner.PartnerCode, supplier.SupplierCode,
+                      StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(partner.PartnerName, supplier.Name,
+                      StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException(
+                    "The accepted-supply supplier does not match the invoice supplier.");
+        }
+
+        private static void ApplyAcceptedSupply(
+            VendorInvoice invoice,
+            ProcurementAcceptedSupplyResolutionDto? accepted)
+        {
+            invoice.AcceptedSupplyKind = accepted?.Kind;
+            invoice.AcceptedSupplySourceId = accepted?.SourceId;
+            invoice.AcceptedSupplySourceReference = accepted?.SourceReference;
+            invoice.AcceptedSupplySnapshotHash = accepted?.SourceIntegrityHash;
+            invoice.AcceptedSupplyValidatedAtUtc = accepted?.AcceptedAtUtc;
+        }
+
+        private async Task RevalidateWorksAcceptedSupplyAsync(
+            VendorInvoice invoice,
+            CancellationToken cancellationToken)
+        {
+            if (invoice.IsOpeningBalance)
+                return;
+            var appearsToBeQsHandoff =
+                invoice.Reference?.StartsWith("QS-", StringComparison.OrdinalIgnoreCase) == true;
+            if (invoice.AcceptedSupplyKind != ProcurementAcceptedSupplyKind.WorksPaymentCertificate)
+            {
+                if (appearsToBeQsHandoff)
+                    throw new VendorInvoiceMatchControlException(
+                        "AP_WORKS_CERTIFICATE_LINEAGE_MISSING",
+                        "The QS invoice has no typed Works certificate lineage.");
+                return;
+            }
+            if (!invoice.AcceptedSupplySourceId.HasValue)
+                throw new VendorInvoiceMatchControlException(
+                    "AP_WORKS_CERTIFICATE_SOURCE_MISSING",
+                    "The Works invoice has no authoritative certificate identifier.");
+
+            ProcurementAcceptedSupplyResolutionDto accepted;
+            try
+            {
+                accepted = await RequireAcceptedSupplyServiceAsync().ResolveAsync(
+                    invoice.AcceptedSupplyKind.Value,
+                    invoice.AcceptedSupplySourceId.Value,
+                    invoice.PurchaseOrderId,
+                    invoice.Id,
+                    cancellationToken);
+            }
+            catch (ProcurementAcceptedSupplyValidationException exception)
+            {
+                throw new VendorInvoiceMatchControlException(exception.Code, exception.Message);
+            }
+            if (!accepted.AcceptedAmount.HasValue ||
+                RoundMoney(accepted.AcceptedAmount.Value) != RoundMoney(invoice.TotalAmount))
+                throw new VendorInvoiceMatchControlException(
+                    "AP_WORKS_CERTIFICATE_AMOUNT_MISMATCH",
+                    "The AP invoice total no longer matches the approved Works certificate.");
+            ApplyAcceptedSupply(invoice, accepted);
+        }
 
         private async Task<Supplier> ResolveSupplierForInvoiceAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
         {
@@ -2917,6 +3632,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 BalanceAmount = invoice.BalanceAmount,
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
+                ExchangeRateId = invoice.ExchangeRateId,
                 BaseCurrencyAmount = invoice.BaseCurrencyAmount,
                 PaymentTermsDays = invoice.PaymentTermsDays,
                 PaymentTermId = invoice.PaymentTermId,
@@ -2938,6 +3654,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 MatchingPriceTolerancePercent = invoice.MatchingPriceTolerancePercent,
                 MatchingQuantityTolerancePercent = invoice.MatchingQuantityTolerancePercent,
                 MatchExceptionControlEventId = invoice.MatchExceptionControlEventId,
+                AcceptedSupplyKind = invoice.AcceptedSupplyKind,
+                AcceptedSupplySourceId = invoice.AcceptedSupplySourceId,
+                AcceptedSupplySourceReference = invoice.AcceptedSupplySourceReference,
+                AcceptedSupplySnapshotHash = invoice.AcceptedSupplySnapshotHash,
+                AcceptedSupplyValidatedAtUtc = invoice.AcceptedSupplyValidatedAtUtc,
                 Status = invoice.Status,
                 ApprovalStatus = invoice.ApprovalStatus,
                 ExpenseAccountId = invoice.ExpenseAccountId,
@@ -2955,6 +3676,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     LineItemType = li.LineItemType,
                     GLAccountId = li.GLAccountId,
                     GLAccountName = li.GLAccount?.AccountName,
+                    BudgetEntryId = li.BudgetEntryId,
                     FixedAssetId = li.FixedAssetId,
                     CapitalizationJournalEntryId = li.CapitalizationJournalEntryId,
                     CapitalizationPostingEventId = li.CapitalizationPostingEventId,
@@ -2979,8 +3701,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorPaymentId = a.VendorPaymentId,
                     VendorInvoiceId = a.VendorInvoiceId,
                     AllocatedAmount = a.AllocatedAmount,
+                    PaymentCurrencyAmount = a.PaymentCurrencyAmount,
+                    InvoiceCurrencyCode = a.InvoiceCurrencyCode,
+                    PaymentCurrencyCode = a.PaymentCurrencyCode,
+                    IsCrossCurrency = a.IsCrossCurrency,
+                    InvoiceSettlementExchangeRateId = a.InvoiceSettlementExchangeRateId,
+                    InvoiceSettlementExchangeRate = a.InvoiceSettlementExchangeRate,
+                    PaymentExchangeRateId = a.PaymentExchangeRateId,
+                    PaymentExchangeRate = a.PaymentExchangeRate,
+                    PaymentFunctionalAmount = a.PaymentFunctionalAmount,
+                    SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                     DiscountAmount = a.DiscountAmount,
+                    DiscountFunctionalAmount = a.DiscountFunctionalAmount,
                     WithholdingTaxAmount = a.WithholdingTaxAmount,
+                    WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
                     IsReversal = a.IsReversal
@@ -3078,6 +3812,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             return new InvoiceWhtResolution(tax.Id, effectiveRate.Value, tax.TaxPayableAccountId);
         }
+
+        private sealed record OpeningInvoiceExchangeRateSnapshot(
+            Guid? ExchangeRateId,
+            decimal Rate,
+            string TransactionCurrency,
+            string FunctionalCurrency,
+            string Source);
 
         private sealed record InvoiceWhtResolution(Guid? TaxId, decimal Rate, Guid? TaxPayableAccountId);
 

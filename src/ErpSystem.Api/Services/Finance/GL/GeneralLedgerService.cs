@@ -27,6 +27,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IAccountingBookService _accountingBookService;
         private readonly IFinancePostingEngine _financePostingEngine;
         private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
+        private readonly FinanceDimensionReportingFilterService? _dimensionReportingFilters;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -37,7 +38,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IDocumentNumberingService documentNumberingService,
             IAccountingBookService accountingBookService,
             IFinancePostingEngine financePostingEngine,
-            IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null)
+            IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null,
+            FinanceDimensionReportingFilterService? dimensionReportingFilters = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -48,6 +50,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _accountingBookService = accountingBookService;
             _financePostingEngine = financePostingEngine;
             _statementLayoutExecutionService = statementLayoutExecutionService;
+            _dimensionReportingFilters = dimensionReportingFilters;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -151,15 +154,11 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 return account;
             }
-            catch (Exception ex)
+            catch
             {
-                // Log the error (in production, use proper logging framework)
-                Console.WriteLine($"ERROR in CreateSegmentedAccountAsync: {ex.Message}");
-                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                    Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
-                
-                throw; // Re-throw to let the controller handle it
+                // The request-level exception middleware owns diagnostic logging and the
+                // tenant administrator audit record. Do not duplicate it on the console.
+                throw;
             }
         }
 
@@ -603,6 +602,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             var tenantId = TenantId;
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -614,7 +614,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 tenantId,
                 accounts.Select(a => a.Id).ToArray(),
                 request.AsAtDate,
-                bookClassification);
+                bookClassification,
+                dimensionFilters);
             var accountBalances = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
@@ -687,7 +688,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.UseDefaultLayout,
                 request.IncludeAccountDetails,
                 request.AccountIds,
-                request.SegmentFilters);
+                request.SegmentFilters,
+                request.DimensionFilters);
 
             return balanceSheet;
         }
@@ -946,6 +948,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             return _context.AccountTransactions
                 .AsNoTracking()
                 .Include(t => t.JournalEntry)
+                .Include(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Where(t =>
                     t.TenantId == tenantId &&
                     !t.IsDeleted &&
@@ -956,11 +960,38 @@ namespace ErpSystem.Api.Services.Finance.GL
                     statuses.Contains(t.JournalEntry.PostingStatus));
         }
 
+        private async Task<IReadOnlyCollection<ResolvedFinanceDimensionFilter>> ResolveDimensionFiltersAsync(
+            IEnumerable<FinanceDimensionFilterDto>? filters,
+            CancellationToken cancellationToken = default)
+        {
+            var requested = filters?.ToList() ?? new List<FinanceDimensionFilterDto>();
+            if (requested.Count == 0)
+            {
+                return Array.Empty<ResolvedFinanceDimensionFilter>();
+            }
+
+            if (_dimensionReportingFilters == null)
+            {
+                throw new InvalidOperationException(
+                    "Transaction-dimension filtering is not available for Finance reports.");
+            }
+
+            return await _dimensionReportingFilters.ResolveAsync(requested, cancellationToken);
+        }
+
+        private IQueryable<AccountTransaction> ApplyDimensionFilters(
+            IQueryable<AccountTransaction> query,
+            IReadOnlyCollection<ResolvedFinanceDimensionFilter>? filters)
+            => filters == null || filters.Count == 0
+                ? query
+                : _dimensionReportingFilters!.Apply(query, filters);
+
         private async Task<Dictionary<Guid, decimal>> CalculatePostedRawBalancesAsOfAsync(
             Guid tenantId,
             IReadOnlyCollection<Guid> accountIds,
             DateTime asAtDate,
-            string? bookClassification)
+            string? bookClassification,
+            IReadOnlyCollection<ResolvedFinanceDimensionFilter>? dimensionFilters = null)
         {
             if (accountIds.Count == 0)
             {
@@ -968,7 +999,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var endExclusive = asAtDate.Date.AddDays(1);
-            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+            return await ApplyDimensionFilters(
+                    BuildPostedLedgerQuery(tenantId, bookClassification),
+                    dimensionFilters)
                 .Where(t => accountIds.Contains(t.AccountId) && t.TransactionDate < endExclusive)
                 .GroupBy(t => t.AccountId)
                 .Select(g => new { AccountId = g.Key, Balance = g.Sum(t => t.DebitAmount - t.CreditAmount) })
@@ -980,7 +1013,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IReadOnlyCollection<Guid> accountIds,
             DateTime startDate,
             DateTime endDate,
-            string? bookClassification)
+            string? bookClassification,
+            IReadOnlyCollection<ResolvedFinanceDimensionFilter>? dimensionFilters = null)
         {
             if (accountIds.Count == 0)
             {
@@ -989,7 +1023,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var start = startDate.Date;
             var endExclusive = endDate.Date.AddDays(1);
-            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+            return await ApplyDimensionFilters(
+                    BuildPostedLedgerQuery(tenantId, bookClassification),
+                    dimensionFilters)
                 .Where(t =>
                     accountIds.Contains(t.AccountId) &&
                     t.TransactionDate >= start &&
@@ -1092,6 +1128,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -1104,7 +1141,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 accounts.Select(a => a.Id).ToArray(),
                 request.PeriodStart,
                 request.PeriodEnd,
-                bookClassification);
+                bookClassification,
+                dimensionFilters);
             var disposalGainAccountIds = await GetTenantDisposalGainAccountIdsAsync(tenantId);
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
@@ -1248,7 +1286,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 request.UseDefaultLayout,
                 request.IncludeAccountDetails,
                 request.AccountIds,
-                request.SegmentFilters);
+                request.SegmentFilters,
+                request.DimensionFilters);
 
             return incomeStatement;
         }
@@ -1262,7 +1301,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             bool useDefaultLayout,
             bool includeAccountDetails,
             IEnumerable<Guid>? accountIds,
-            IEnumerable<FinanceSegmentFilterDto>? segmentFilters)
+            IEnumerable<FinanceSegmentFilterDto>? segmentFilters,
+            IEnumerable<FinanceDimensionFilterDto>? dimensionFilters)
         {
             var requestedLayoutId = layoutId.HasValue && layoutId.Value != Guid.Empty
                 ? layoutId
@@ -1316,7 +1356,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                             .Distinct()
                             .ToList() ?? new List<Guid>(),
                         SegmentFilters = segmentFilters?.ToList()
-                            ?? new List<FinanceSegmentFilterDto>()
+                            ?? new List<FinanceSegmentFilterDto>(),
+                        DimensionFilters = dimensionFilters?.ToList()
+                            ?? new List<FinanceDimensionFilterDto>()
                     });
             }
             catch (KeyNotFoundException) when (!requestedLayoutId.HasValue)
@@ -1616,6 +1658,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var endExclusive = request.EndDate.Date.AddDays(1);
             var selectedAccountIds = request.AccountIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? new List<Guid>();
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -1634,7 +1677,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             foreach (var account in accounts)
             {
-                var transactionBaseQuery = BuildPostedLedgerQuery(tenantId, bookClassification, request.IncludeReversed)
+                var transactionBaseQuery = ApplyDimensionFilters(
+                        BuildPostedLedgerQuery(tenantId, bookClassification, request.IncludeReversed),
+                        dimensionFilters)
                     .Where(t => t.AccountId == account.Id);
 
                 if (!request.IncludeReversed)
@@ -1698,7 +1743,21 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ForeignAmount = transaction.ForeignCurrencyAmount,
                         ExchangeRate = transaction.ExchangeRate,
                         IsReversed = transaction.IsReversed,
-                        SegmentString = transaction.SegmentString
+                        SegmentString = transaction.SegmentString,
+                        FinanceDimensionSetId = transaction.FinanceDimensionSetId,
+                        FinanceDimensionDisplay = transaction.FinanceDimensionSet?.DisplayValue,
+                        Dimensions = transaction.FinanceDimensionSet?.Items
+                            .OrderBy(item => item.DimensionCodeSnapshot)
+                            .Select(item => new FinanceDimensionAssignmentDto
+                            {
+                                DefinitionId = item.FinanceDimensionDefinitionId,
+                                ValueId = item.FinanceDimensionValueId,
+                                DimensionCode = item.DimensionCodeSnapshot,
+                                DimensionName = item.DimensionCodeSnapshot,
+                                ValueCode = item.DimensionValueCodeSnapshot,
+                                ValueName = item.DimensionValueNameSnapshot
+                            })
+                            .ToList() ?? new List<FinanceDimensionAssignmentDto>()
                     });
                 }
 
@@ -1832,6 +1891,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     BankAccountId = bankAccount.Id,
                     BankAccountNumber = bankAccount.AccountNumber,
                     BankAccountName = bankAccount.AccountName,
+                    BankCurrencyCode = bankAccount.Currency,
                     GlAccountId = glAccount.Id,
                     GlAccountNumber = glAccount.AccountNumber,
                     GlAccountName = glAccount.AccountName,
@@ -1880,6 +1940,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ledgerAccount.Receipts = ledgerAccount.Lines.Sum(l => l.DebitAmount);
                 ledgerAccount.Payments = ledgerAccount.Lines.Sum(l => l.CreditAmount);
                 ledgerAccount.ClosingBalance = runningBalance;
+                ledgerAccount.SnapshotComparisonAvailable = string.Equals(
+                    bankAccount.Currency,
+                    report.CurrencyCode,
+                    StringComparison.OrdinalIgnoreCase);
                 report.Accounts.Add(ledgerAccount);
             }
 
@@ -1895,6 +1959,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             var tenantId = TenantId;
             var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var dimensionFilters = await ResolveDimensionFiltersAsync(request.DimensionFilters);
 
             var accounts = await GetReportingAccountsAsync(
                 bookClassification,
@@ -1918,7 +1983,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     tenantId,
                     accountIds,
                     periodStart.Value.AddDays(-1),
-                    bookClassification)
+                    bookClassification,
+                    dimensionFilters)
                 : new Dictionary<Guid, decimal>();
 
             var periodMovements = periodStart.HasValue
@@ -1927,13 +1993,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                     accountIds,
                     periodStart.Value,
                     asAtDate,
-                    bookClassification)
+                    bookClassification,
+                    dimensionFilters)
                 : await CalculatePostedPeriodMovementAsync(
                     tenantId,
                     accountIds,
                     DateTime.MinValue,
                     asAtDate,
-                    bookClassification);
+                    bookClassification,
+                    dimensionFilters);
 
             var trialBalance = new TrialBalanceDto
             {
@@ -1991,31 +2059,136 @@ namespace ErpSystem.Api.Services.Finance.GL
         public async Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request)
         {
             var tenantId = TenantId;
+            if (request.PeriodEnd.Date < request.PeriodStart.Date)
+            {
+                throw new ArgumentException("Period end must be on or after period start.");
+            }
+
+            var periodStart = request.PeriodStart.Date;
+            var periodEnd = request.PeriodEnd.Date;
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var cashFlowMethod = NormalizeCashFlowMethod(request.Method);
 
             var cashFlowStatement = new CashFlowStatementDto
             {
                 CompanyName = await _tenantSettings.GetCompanyNameAsync(),
-                PeriodStart = request.PeriodStart,
-                PeriodEnd = request.PeriodEnd,
-                BookClassification = request.BookClassification,
-                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd,
+                BookClassification = bookClassification,
+                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
+                Method = cashFlowMethod
             };
+
+            // A bank GL is a cash account because the tenant's bank master maps it as one.
+            // Account names and broad balance-sheet categories are not authoritative enough
+            // on their own, but the legacy fallbacks remain for petty-cash style accounts.
+            var mappedBankGlAccountIds = await _context.BankAccounts
+                .AsNoTracking()
+                .Where(bank =>
+                    bank.TenantId == tenantId &&
+                    !bank.IsDeleted &&
+                    bank.GLAccountId.HasValue)
+                .Select(bank => bank.GLAccountId!.Value)
+                .Distinct()
+                .ToListAsync();
+
+            var cashAccounts = await _context.Accounts
+                .Where(account =>
+                    account.TenantId == tenantId &&
+                    !account.IsDeleted &&
+                    (mappedBankGlAccountIds.Contains(account.Id) ||
+                     account.AccountCategory == "Cash" ||
+                     account.AccountCategory == "Cash and Cash Equivalents" ||
+                     EF.Functions.Like(account.AccountName, "%Cash%")))
+                .ToListAsync();
+            var cashAccountIds = cashAccounts.Select(account => account.Id).ToHashSet();
+
+            var activityEndExclusive = periodEnd.AddDays(1);
+            var cashActivityJournalIds = cashAccountIds.Count == 0
+                ? new List<Guid>()
+                : await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(transaction =>
+                        cashAccountIds.Contains(transaction.AccountId) &&
+                        transaction.TransactionDate >= periodStart &&
+                        transaction.TransactionDate < activityEndExclusive &&
+                        !(transaction.SourceModule == "MIGRATION" &&
+                          transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                    .Select(transaction => transaction.JournalEntryId)
+                    .Distinct()
+                    .ToListAsync();
+
+            // Every non-cash counterpart in a cash-touching journal must identify its
+            // statement section. Silently dropping an unclassified account produces a
+            // balanced GL but a false cash-flow statement, so reporting fails closed.
+            if (cashActivityJournalIds.Count > 0)
+            {
+                var cashCounterpartAccountIds = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(transaction =>
+                        cashActivityJournalIds.Contains(transaction.JournalEntryId) &&
+                        !cashAccountIds.Contains(transaction.AccountId) &&
+                        transaction.TransactionDate >= periodStart &&
+                        transaction.TransactionDate < activityEndExclusive &&
+                        !(transaction.SourceModule == "MIGRATION" &&
+                          transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                    .Select(transaction => transaction.AccountId)
+                    .Distinct()
+                    .ToListAsync();
+
+                var cashCounterpartAccounts = await _context.Accounts
+                    .AsNoTracking()
+                    .Where(account =>
+                        account.TenantId == tenantId &&
+                        !account.IsDeleted &&
+                        cashCounterpartAccountIds.Contains(account.Id))
+                    .ToListAsync();
+                var foundCounterpartIds = cashCounterpartAccounts.Select(account => account.Id).ToHashSet();
+                var unavailableCounterparts = cashCounterpartAccountIds
+                    .Where(accountId => !foundCounterpartIds.Contains(accountId))
+                    .OrderBy(accountId => accountId)
+                    .ToList();
+                if (unavailableCounterparts.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        "Cash-flow reporting cannot resolve active tenant account(s) referenced by cash journals: " +
+                        string.Join(", ", unavailableCounterparts) +
+                        ". Restore the account lineage before generating the statement.");
+                }
+
+                var unclassifiedCounterparts = cashCounterpartAccounts
+                    .Where(account => NormalizeCashFlowSection(account.CashFlowClassification) == null)
+                    .OrderBy(account => account.AccountNumber)
+                    .Select(account => $"{account.AccountNumber} - {account.AccountName}")
+                    .ToList();
+
+                if (unclassifiedCounterparts.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        "Cash-flow classification is required for cash-journal counterpart account(s): " +
+                        string.Join(", ", unclassifiedCounterparts) +
+                        ". Assign Operating, Investing, or Financing in Chart of Accounts.");
+                }
+            }
 
             // Get all accounts with cash flow classifications
             var accounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.CashFlowClassification != null)
+                .Where(account =>
+                    account.TenantId == tenantId &&
+                    !account.IsDeleted &&
+                    account.CashFlowClassification != null &&
+                    !cashAccountIds.Contains(account.Id))
                 .ToListAsync();
 
             // Calculate activity for each account during the period
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
-                var activity = await CalculateAccountActivityForPeriod(
+                var activity = await CalculateCashFlowAccountActivityForPeriod(
                     tenantId,
                     account.Id,
-                    request.PeriodStart,
-                    request.PeriodEnd,
-                    request.BookClassification);
+                    periodStart,
+                    periodEnd,
+                    bookClassification,
+                    cashActivityJournalIds);
                 if (Math.Abs(activity) > 0.01m)
                 {
                     accountActivity[account.Id] = activity;
@@ -2023,9 +2196,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             // Separate accounts by cash flow classification
-            var operatingAccounts = accounts.Where(a => a.CashFlowClassification == "Operating" && accountActivity.ContainsKey(a.Id)).ToList();
-            var investingAccounts = accounts.Where(a => a.CashFlowClassification == "Investing" && accountActivity.ContainsKey(a.Id)).ToList();
-            var financingAccounts = accounts.Where(a => a.CashFlowClassification == "Financing" && accountActivity.ContainsKey(a.Id)).ToList();
+            var operatingAccounts = accounts.Where(a => NormalizeCashFlowSection(a.CashFlowClassification) == "Operating" && accountActivity.ContainsKey(a.Id)).ToList();
+            var investingAccounts = accounts.Where(a => NormalizeCashFlowSection(a.CashFlowClassification) == "Investing" && accountActivity.ContainsKey(a.Id)).ToList();
+            var financingAccounts = accounts.Where(a => NormalizeCashFlowSection(a.CashFlowClassification) == "Financing" && accountActivity.ContainsKey(a.Id)).ToList();
 
             // Build Operating Activities section
             cashFlowStatement.OperatingActivities = BuildCashFlowSection(
@@ -2033,8 +2206,21 @@ namespace ErpSystem.Api.Services.Finance.GL
                 1,
                 operatingAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
+
+            if (cashFlowMethod == "Indirect")
+            {
+                cashFlowStatement.OperatingActivities = await BuildIndirectOperatingCashFlowSectionAsync(
+                    tenantId,
+                    periodStart,
+                    periodEnd,
+                    bookClassification,
+                    accounts,
+                    cashFlowStatement.OperatingActivities.SectionTotal,
+                    request.IncludeAccountDetails,
+                    cashFlowStatement.PresentationWarnings);
+            }
 
             // Build Investing Activities section
             cashFlowStatement.InvestingActivities = BuildCashFlowSection(
@@ -2042,7 +2228,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 2,
                 investingAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             // Build Financing Activities section
@@ -2051,7 +2237,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 3,
                 financingAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             // Calculate totals
@@ -2062,13 +2248,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                                                    cashFlowStatement.NetCashFromInvesting + 
                                                    cashFlowStatement.NetCashFromFinancing;
 
-            // Get cash balances
-            var cashAccounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId 
-                    && !a.IsDeleted 
-                    && (a.AccountCategory == "Cash" || EF.Functions.Like(a.AccountName, "%Cash%")))
-                .ToListAsync();
-
             decimal cashAtBeginning = 0;
             decimal cashAtEnd = 0;
 
@@ -2077,19 +2256,191 @@ namespace ErpSystem.Api.Services.Finance.GL
                 cashAtBeginning += await CalculateAccountBalanceAsOf(
                     tenantId,
                     cashAccount.Id,
-                    request.PeriodStart.AddDays(-1),
-                    request.BookClassification);
+                    periodStart.AddDays(-1),
+                    bookClassification);
                 cashAtEnd += await CalculateAccountBalanceAsOf(
                     tenantId,
                     cashAccount.Id,
-                    request.PeriodEnd,
-                    request.BookClassification);
+                    periodEnd,
+                    bookClassification);
+            }
+
+            // A governed opening posted on the first report date represents the position at
+            // the opening boundary. It is not a receipt generated during that reporting day.
+            // Add only the cash legs to beginning cash; the helper above excludes the entire
+            // opening batch from operating, investing and financing activity.
+            if (cashAccountIds.Count > 0)
+            {
+                var firstDayEndExclusive = periodStart.AddDays(1);
+                var cutoverCashAtBoundary = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(transaction =>
+                        cashAccountIds.Contains(transaction.AccountId) &&
+                        transaction.TransactionDate >= periodStart &&
+                        transaction.TransactionDate < firstDayEndExclusive &&
+                        transaction.SourceModule == "MIGRATION" &&
+                        transaction.SourceDocumentType == "OpeningBalanceBatch")
+                    .SumAsync(transaction => (decimal?)(transaction.DebitAmount - transaction.CreditAmount)) ?? 0m;
+                cashAtBeginning += cutoverCashAtBoundary;
             }
 
             cashFlowStatement.CashAtBeginning = cashAtBeginning;
             cashFlowStatement.CashAtEnd = cashAtEnd;
 
             return cashFlowStatement;
+        }
+
+        private async Task<CashFlowSectionDto> BuildIndirectOperatingCashFlowSectionAsync(
+            Guid tenantId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification,
+            IReadOnlyCollection<Account> classifiedAccounts,
+            decimal directOperatingCash,
+            bool includeAccountDetails,
+            ICollection<string> presentationWarnings)
+        {
+            var incomeStatement = await GenerateIncomeStatementAsync(new IncomeStatementRequestDto
+            {
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd,
+                BookClassification = bookClassification,
+                IncludeAccountDetails = false
+            });
+
+            var section = new CashFlowSectionDto
+            {
+                SectionName = "Cash Flows from Operating Activities (Indirect Method)",
+                SectionOrder = 1,
+                LineItems =
+                {
+                    new CashFlowLineItemDto
+                    {
+                        LineItemName = "Profit for the period",
+                        Amount = incomeStatement.NetProfit,
+                        LineOrder = 1
+                    }
+                }
+            };
+
+            var workingCapitalAccounts = classifiedAccounts
+                .Where(account =>
+                    NormalizeCashFlowSection(account.CashFlowClassification) == "Operating" &&
+                    account.AccountType is AccountType.Asset or AccountType.Liability)
+                .ToList();
+            var workingCapitalMovements = await CalculateCashFlowPeriodRawMovementsAsync(
+                tenantId,
+                workingCapitalAccounts.Select(account => account.Id).ToArray(),
+                periodStart,
+                periodEnd,
+                bookClassification);
+
+            var workingCapitalLines = workingCapitalAccounts
+                .Where(account => workingCapitalMovements.ContainsKey(account.Id))
+                .Select(account =>
+                {
+                    var normalMovement = ToStatementNormalBalance(
+                        account.AccountType,
+                        workingCapitalMovements[account.Id]);
+                    var cashAdjustment = account.AccountType == AccountType.Asset
+                        ? -normalMovement
+                        : normalMovement;
+                    return new
+                    {
+                        Name = $"Change in {GetLineItem(account, bookClassification) ?? account.AccountName}",
+                        Account = account,
+                        Amount = cashAdjustment
+                    };
+                })
+                .Where(item => Math.Abs(item.Amount) > 0.01m)
+                .GroupBy(item => item.Name)
+                .OrderBy(group => group.Key)
+                .Select(group => new CashFlowLineItemDto
+                {
+                    LineItemName = group.Key,
+                    Amount = group.Sum(item => item.Amount),
+                    AccountNumbers = includeAccountDetails
+                        ? group.Select(item => item.Account.AccountNumber).OrderBy(number => number).ToList()
+                        : null
+                })
+                .ToList();
+
+            foreach (var line in workingCapitalLines)
+            {
+                line.LineOrder = section.LineItems.Count + 1;
+                section.LineItems.Add(line);
+            }
+
+            var explainedOperatingCash = section.LineItems.Sum(line => line.Amount);
+            var otherNonCashAdjustments = directOperatingCash - explainedOperatingCash;
+            if (Math.Abs(otherNonCashAdjustments) > 0.01m)
+            {
+                section.LineItems.Add(new CashFlowLineItemDto
+                {
+                    LineItemName = "Other non-cash and classification adjustments",
+                    Amount = otherNonCashAdjustments,
+                    LineOrder = section.LineItems.Count + 1
+                });
+                presentationWarnings.Add(
+                    "Indirect operating cash flow contains a ledger-derived residual adjustment. " +
+                    "Review operating working-capital classifications and non-cash journals before final sign-off.");
+            }
+
+            section.SectionTotal = section.LineItems.Sum(line => line.Amount);
+            return section;
+        }
+
+        private async Task<Dictionary<Guid, decimal>> CalculateCashFlowPeriodRawMovementsAsync(
+            Guid tenantId,
+            IReadOnlyCollection<Guid> accountIds,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification)
+        {
+            if (accountIds.Count == 0)
+                return new Dictionary<Guid, decimal>();
+
+            var endExclusive = periodEnd.Date.AddDays(1);
+            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(transaction =>
+                    accountIds.Contains(transaction.AccountId) &&
+                    transaction.TransactionDate >= periodStart.Date &&
+                    transaction.TransactionDate < endExclusive &&
+                    !(transaction.SourceModule == "MIGRATION" &&
+                      transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                .GroupBy(transaction => transaction.AccountId)
+                .Select(group => new
+                {
+                    AccountId = group.Key,
+                    RawMovement = group.Sum(transaction => transaction.DebitAmount - transaction.CreditAmount)
+                })
+                .ToDictionaryAsync(item => item.AccountId, item => item.RawMovement);
+        }
+
+        private async Task<decimal> CalculateCashFlowAccountActivityForPeriod(
+            Guid tenantId,
+            Guid accountId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification,
+            IReadOnlyCollection<Guid> cashActivityJournalIds)
+        {
+            if (cashActivityJournalIds.Count == 0)
+            {
+                return 0m;
+            }
+
+            var endExclusive = periodEnd.Date.AddDays(1);
+            var transactions = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(transaction =>
+                    transaction.AccountId == accountId &&
+                    cashActivityJournalIds.Contains(transaction.JournalEntryId) &&
+                    transaction.TransactionDate >= periodStart.Date &&
+                    transaction.TransactionDate < endExclusive &&
+                    !(transaction.SourceModule == "MIGRATION" &&
+                      transaction.SourceDocumentType == "OpeningBalanceBatch"))
+                .ToListAsync();
+
+            return transactions.Sum(transaction => transaction.CreditAmount - transaction.DebitAmount);
         }
 
         private CashFlowSectionDto BuildCashFlowSection(
@@ -2135,6 +2486,30 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             section.SectionTotal = section.LineItems.Sum(li => li.Amount);
             return section;
+        }
+
+        private static string NormalizeCashFlowMethod(string? method)
+        {
+            return (method ?? "Indirect").Trim().ToUpperInvariant() switch
+            {
+                "DIRECT" => "Direct",
+                "INDIRECT" => "Indirect",
+                _ => throw new ArgumentException("Cash-flow method must be Direct or Indirect.", nameof(method))
+            };
+        }
+
+        private static string? NormalizeCashFlowSection(string? classification)
+        {
+            if (string.IsNullOrWhiteSpace(classification))
+                return null;
+
+            return classification.Trim().ToUpperInvariant() switch
+            {
+                "OPERATING" => "Operating",
+                "INVESTING" => "Investing",
+                "FINANCING" => "Financing",
+                _ => null
+            };
         }
 
         #endregion

@@ -17,6 +17,26 @@ public interface IFixedAssetService
     // Lifecycle Management
     Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CapitalizeAsync(Guid id, CapitalizeFixedAssetDto dto);
+    Task<FixedAssetDto> CapitalizeFromProcurementAsync(
+        Guid id,
+        ProcurementFixedAssetPostingInstructionDto dto,
+        CancellationToken cancellationToken = default);
+    Task<FixedAssetCapitalizationReversalDto> RequestCapitalizationReversalAsync(
+        Guid id,
+        RequestFixedAssetCapitalizationReversalDto dto,
+        CancellationToken cancellationToken = default);
+    Task<FixedAssetCapitalizationReversalDto> ReviewCapitalizationReversalAsync(
+        Guid id,
+        Guid requestId,
+        ReviewFixedAssetCapitalizationReversalDto dto,
+        CancellationToken cancellationToken = default);
+    Task<FixedAssetCapitalizationReversalDto> PostCapitalizationReversalAsync(
+        Guid id,
+        Guid requestId,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FixedAssetCapitalizationReversalDto>> GetCapitalizationReversalsAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
     Task<FixedAssetDto> ActivateAsync(Guid id, DateTime? placedInServiceDate);
     Task<FixedAssetDto> PutOnHoldAsync(Guid id, string reason);
     Task<FixedAssetDto> ResumeAsync(Guid id);
@@ -26,6 +46,27 @@ public interface IFixedAssetService
         Guid vendorInvoiceId,
         Guid journalEntryId,
         Guid postingEventId,
+        CancellationToken cancellationToken = default);
+    Task ValidateApInvoiceCapitalizationReversalAsync(Guid vendorInvoiceId, CancellationToken cancellationToken = default);
+    Task RecordApInvoiceCapitalizationReversalAsync(
+        Guid vendorInvoiceId,
+        Guid reversalJournalEntryId,
+        Guid reversalPostingEventId,
+        string reason,
+        CancellationToken cancellationToken = default);
+
+    // Governed Inventory issue/return integration. The central Finance engine owns the
+    // journal; Fixed Assets owns registration, custody and register compensation.
+    Task<FixedAssetDto> RegisterInventoryIssueAssetAsync(
+        RegisterInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+    Task ReverseInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReverseInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+    Task ReinstateInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReinstateInventoryIssueFixedAssetDto dto,
         CancellationToken cancellationToken = default);
 
     // Dashboard

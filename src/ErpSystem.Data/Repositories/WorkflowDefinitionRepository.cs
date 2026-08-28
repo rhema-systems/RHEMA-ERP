@@ -49,6 +49,7 @@ public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition
     public async Task<WorkflowDefinition?> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsSplitQuery()
             .Include(wd => wd.Steps.OrderBy(s => s.Order))
             .ThenInclude(s => s.OutgoingTransitions)
             .Include(wd => wd.Steps)

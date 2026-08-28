@@ -173,9 +173,11 @@ public class PurchaseOrderSummaryDto
     public DateTime? PromisedDate { get; set; }
     public string Status { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
     public string? RequestedByName { get; set; }
     public ProcurementPurchaseOrderSourceType? ProcurementSourceType { get; set; }
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
     public string? ProcurementSourceReference { get; set; }
     /// <summary>
     /// Runtime workflow info (populated when status is workflow-driven)
@@ -547,6 +549,12 @@ public class CreatePurchaseRequisitionDto
     public DateTime? RequiredDate { get; set; }
     public string Priority { get; set; } = "Normal";
     public string? Department { get; set; }
+
+    /// <summary>
+    /// Authoritative HR department selected by the requester.  Department is
+    /// retained as the display snapshot for legacy reporting only.
+    /// </summary>
+    public Guid? DepartmentId { get; set; }
     public string? CostCenter { get; set; }
     public string? Justification { get; set; }
     public string? Notes { get; set; }

@@ -62,6 +62,19 @@ namespace ErpSystem.Core.Enums
         Rejected = 12
     }
 
+    /// <summary>
+    /// Lifecycle of the Finance-owned handoff that turns an accepted Procurement item into a
+    /// fixed-asset register entry.  Procurement continues to own receipt and inspection approval;
+    /// this status describes only Finance reservation, capitalization and reversal state.
+    /// </summary>
+    public enum ProcurementFixedAssetCapitalizationStatus
+    {
+        Draft = 1,
+        Posted = 2,
+        Reversed = 3,
+        Failed = 4
+    }
+
     public enum DepreciationConvention
     {
         [Display(Name = "Full Month")]
@@ -90,6 +103,53 @@ namespace ErpSystem.Core.Enums
 
         [Display(Name = "Damage/Theft")]
         DamageTheft = 4
+    }
+
+    /// <summary>
+    /// Identifies whether derecognition removes the complete asset or only an evidenced portion.
+    /// Component and percentage disposals share the same allocation engine, but a component also
+    /// requires a stable business reference so Finance can explain exactly what left service.
+    /// </summary>
+    public enum AssetDisposalScope
+    {
+        [Display(Name = "Whole Asset")]
+        WholeAsset = 1,
+
+        [Display(Name = "Partial Portion")]
+        PartialPortion = 2,
+
+        [Display(Name = "Identified Component")]
+        Component = 3
+    }
+
+    /// <summary>
+    /// Determines how an approved fixed-asset sale is handed off to the Finance receivables and
+    /// collection subledgers. The disposal service remains the orchestrator, while AR continues
+    /// to own the statutory invoice and receipt lifecycles.
+    /// </summary>
+    public enum AssetDisposalSettlementMode
+    {
+        [Display(Name = "Not Applicable")]
+        NotApplicable = 0,
+
+        [Display(Name = "Credit Sale")]
+        CreditSale = 1,
+
+        [Display(Name = "Immediate Receipt")]
+        ImmediateReceipt = 2
+    }
+
+    /// <summary>
+    /// Durable hand-off state retained on the disposal so Finance can reconcile the fixed-asset
+    /// derecognition to its AR invoice and, where applicable, its posted receipt.
+    /// </summary>
+    public enum AssetDisposalSettlementStatus
+    {
+        NotApplicable = 0,
+        Pending = 1,
+        Invoiced = 2,
+        Settled = 3,
+        Failed = 4
     }
 
     public enum AssetTransferStatus

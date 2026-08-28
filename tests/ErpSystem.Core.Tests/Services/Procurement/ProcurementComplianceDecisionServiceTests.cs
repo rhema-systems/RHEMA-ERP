@@ -62,6 +62,20 @@ public sealed class ProcurementComplianceDecisionServiceTests
     }
 
     [Fact]
+    public async Task EvidenceStageFiltersRequirementsWithoutWeakeningGeneralPreview()
+    {
+        await using var fixture = new DecisionFixture();
+        var policy = await fixture.AddCompletePolicyAsync();
+        var staged = Request(policy.Id);
+        staged.EvidenceStage = ProcurementEvidenceStage.Sourcing;
+
+        var result = await fixture.Service.EvaluateAsync(staged, "trace-evidence-stage");
+
+        result.RequiredEvidence.Should().BeEmpty();
+        result.HardStops.Should().NotContain(item => item.Code == "MANDATORY_EVIDENCE_MISSING");
+    }
+
+    [Fact]
     public async Task SodConflictIsReturnedAsDeclarativeHardStopWithoutRuntimeEnforcement()
     {
         await using var fixture = new DecisionFixture();

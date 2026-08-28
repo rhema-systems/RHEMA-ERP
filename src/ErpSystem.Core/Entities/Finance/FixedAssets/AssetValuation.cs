@@ -74,6 +74,24 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal ImpairmentReversal { get; set; } = 0;
 
+        /// <summary>
+        /// Links an IAS 36 reversal to the posted impairment whose remaining balance it releases.
+        /// This explicit lineage prevents a reversal from being applied more than once or against
+        /// an unrelated asset/book impairment.
+        /// </summary>
+        public Guid? SourceImpairmentValuationId { get; set; }
+        public virtual AssetValuation? SourceImpairmentValuation { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal OutstandingImpairmentBefore { get; set; }
+
+        /// <summary>
+        /// Accountant-supported IAS 36 ceiling: the carrying amount that would have existed at
+        /// the reversal date had the source impairment never been recognised, net of depreciation.
+        /// </summary>
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal UnimpairedCarryingAmountCap { get; set; }
+
         [Column(TypeName = "decimal(18,2)")]
         public decimal AdjustmentAmount { get; set; } = 0;
 
@@ -87,6 +105,11 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         /// Revised useful life in months (optional — allows adjusting remaining life on revaluation)
         /// </summary>
         public int? RevisedUsefulLifeMonths { get; set; }
+
+        // These snapshots make a later approved correction deterministic. A correction restores
+        // the exact pre-valuation useful-life state rather than guessing from current master data.
+        public int UsefulLifeMonthsBefore { get; set; }
+        public int? RemainingUsefulLifeMonthsBefore { get; set; }
 
         // --- Valuation details ---
 
@@ -115,6 +138,10 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public Guid? PostingEventId { get; set; }
         public virtual FinancePostingEvent? PostingEvent { get; set; }
+
+        public bool IsCorrected { get; set; }
+        public Guid? CorrectionId { get; set; }
+        public DateTime? CorrectedAt { get; set; }
 
         [MaxLength(30)]
         public string Status { get; set; } = "Calculated";

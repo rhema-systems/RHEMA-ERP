@@ -1126,6 +1126,70 @@ rather than built, because the controller belongs to the helpdesk team.
 
 ---
 
+## 20. Shared reporting — the frontend type-check **crashes the TypeScript compiler**, so no module can be type-checked
+
+**Found 2026-08-28** while merging master (f71d6917) into hrdev (merge #8). Reproduced on
+`origin/master` **standalone**, so this is not a merge artefact.
+
+### What is broken
+
+`npx tsc --noEmit` does not fail — it **aborts**:
+
+```
+Error: Debug Failure. No error for last overload signature
+    at resolveJsxOpeningLikeElement (typescript/lib/_tsc.js:77292:12)
+    at checkJsxSelfClosingElementDeferred (typescript/lib/_tsc.js:74140:5)
+    at checkDeferredNodes (typescript/lib/_tsc.js:86617:27)
+```
+
+This is an internal compiler assertion, not a diagnostic. Because it throws mid-check, tsc emits
+**zero** diagnostics and exits 1 — so the run looks like a hard failure with no error list, and
+every genuine type error in every module is masked behind it.
+
+### What was proven
+
+A `--generateTrace` run names the file: checking begins on
+`frontend/src/components/reports/StatutoryReportCataloguePage.tsx` and never completes. The
+deferred node is a self-closing JSX element whose tag is a **variable**, not a literal —
+`const Icon = item.icon;` then `<Icon className="h-4 w-4" />` (`:813-815`), where
+`CatalogueItem.icon` is typed `LucideIcon` (`:83`).
+
+Three runs, TypeScript 5.9.2, `strict: true`, `skipLibCheck: true`:
+
+| Tree | Result |
+|---|---|
+| `backup/hrdev-premerge` (hrdev before the merge) | completes, exit 2, reports the known inventory errors (defect #4) |
+| `origin/master` **alone** | **crashes**, exit 1, 0 diagnostics |
+| the merge result | **crashes**, identically |
+
+Ruled out: the incremental cache (removed, still crashes), `.next/types/**` (excluded, still
+crashes), and any dependency drift — `package.json`, `package-lock.json` and `tsconfig.json` are
+byte-identical across all three trees, same TypeScript 5.9.2 from the same `node_modules`.
+
+The file was rewritten on master in this range (+983/-140), which is where the trigger entered;
+`CatalogueMode` went from a two-member union to a much wider one and `CatalogueItem` became
+exported. The precise minimal trigger has not been isolated — that belongs with the owning team.
+
+### What it blocks
+
+- **The whole repository's type-check gate.** Not one module: the compiler never finishes, so
+  no module's errors are reported. Any CI step running `tsc --noEmit` is now uninformative.
+- It supersedes defect #4 in practice — inventory's 19 errors are still there (they show on the
+  pre-merge tree) but are now invisible.
+- For HR specifically it removes one of the three legs of our UI verification method
+  (`tsc` + `next lint` + route resolution), which is the only verification available with no
+  browser automation in this environment.
+
+### What a fix needs
+
+Isolate the JSX element that trips the assertion in `StatutoryReportCataloguePage.tsx` — the
+`<Icon />` dynamic-tag render is the prime suspect — and give it an explicit type
+(`const Icon: LucideIcon = item.icon`) or narrow `CatalogueItem['icon']` to a concrete
+`ComponentType<SVGProps<SVGSVGElement>>`. A compiler crash is always worth reporting upstream
+too, but the practical fix is local. Until then the type-check gate is dead for everyone.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

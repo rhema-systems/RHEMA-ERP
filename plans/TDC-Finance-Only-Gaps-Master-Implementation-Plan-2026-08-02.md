@@ -133,7 +133,7 @@ flowchart LR
 | WP5 | Cash and bank operations | `FR-CB-005`, `FR-CB-008`, `FR-CB-010`, `FR-CB-011`, `CBK-005` | L | Finance can control tills, deposits, slips, reversals, reconciliation, and bank reports without live channels. |
 | WP6 | Fixed-asset lifecycle completion | `FR-FA-004`, `FR-FA-008`, `FR-FA-011` | XL | All in-scope asset lifecycle events have approved workflows, postings, reversals, and reports. |
 | WP7 | Budget preparation and control | `FR-BG-001`–`FR-BG-003`, `FR-BG-006`, `FR-BG-011`–`FR-BG-015` | XL | Approved budgets, revisions, actuals, and monitoring reports are controlled and auditable. |
-| WP8 | Finance reporting, tax packs, and distribution | `FR-RP-001`–`FR-RP-008`, `FR-RP-010`, `FR-RP-011`, `NFR-CMP`, `NFR-RPT` | XL | Approved Finance packs render consistently in-app, PDF, and spreadsheet formats and can run on schedule. |
+| WP8 | Finance reporting, tax packs, and distribution | `FR-RP-001`–`FR-RP-012`, `NFR-CMP`, `NFR-RPT` | XL | Approved Finance packs render consistently in-app, PDF, and spreadsheet formats, can run on schedule, and support governed ad hoc analysis. |
 | WP9 | Finance access scopes and security | `SRS-CONTROL-005`, `NFR-SEC` | L | Finance data and actions are constrained by explicit tenant/company/branch/account/dimension scope. |
 | WP10 | Finance migration and cutover | `SRS-MIG-001`–`SRS-MIG-006`, `FAR-001` | XL | Finance opening data reconciles to signed source/control totals and is approved for cutover. |
 | WP11 | Finance performance and scalability | `NFR-PER`, `NFR-SCA` | M | Agreed Finance workloads meet measured service-level targets at target volumes. |
@@ -397,12 +397,14 @@ stale-impact revalidation, higher-tier notification/escalation, and immediate ne
 7. Enforce WP9 access scope at query time and again when retrieving generated output.
 8. Add report-to-source drill-down for on-screen reports and a trace reference in static packs.
 9. Exclude Payroll/SSNIT and Procurement-owned sections until their interfaces are separately planned.
+10. Implement FR-RP-012 as a server-catalogued, tenant-safe ad hoc builder whose saved definitions reuse the shared Reports execution and export evidence rather than accepting browser-authored SQL.
 
 **Acceptance**
 
 - The same report parameters produce reconciled totals across on-screen, PDF, and spreadsheet output.
 - Scheduled output is generated once per run, delivered only to authorized recipients, and retained according to policy.
 - Finance filing packs and certificate registers are versioned and auditable.
+- Private and Finance-shared ad hoc definitions enforce ownership, permissions, tenant isolation, parameterised filters and governed row ceilings.
 
 ### WP9 — Finance access scopes and security
 
@@ -575,7 +577,7 @@ The table below is the control index for all documented limitations. **Regressio
 | `FIN-LIM-0019` | Resolved | Regression — preserve tax hardening. | WP4, WP8 |
 | `FIN-LIM-0020` | Resolved | Regression — preserve FX workflow foundation and effective configuration. | WP0, WP2 |
 | `FIN-LIM-0021` | Resolved | Preserve approved per-leg rate evidence, destination amount confirmation, realised FX posting, idempotent pair capture, native-currency reconciliation, reversal snapshots, access scope, and failure audit through regression/UAT. | WP2, WP5 regression |
-| `FIN-LIM-0022` | Open | Implement cross-currency AP/AR settlement. | WP2, WP4 |
+| `FIN-LIM-0022` | Partially Resolved | Ordinary cash-only AP/AR invoice settlement now records both native amounts, approved rate snapshots, functional values, central posting, realized FX and reversals. Complete line-scoped cross-currency deductions and currency-lotted supplier/customer advances. | WP2, WP4 |
 | `FIN-LIM-0023` | Resolved | Regression — preserve depreciation foundation. | WP6 |
 | `FIN-LIM-0024` | Resolved | Regression — preserve revaluation/impairment foundation. | WP6 |
 | `FIN-LIM-0025` | Resolved | Regression — preserve asset transfers. | WP6 |

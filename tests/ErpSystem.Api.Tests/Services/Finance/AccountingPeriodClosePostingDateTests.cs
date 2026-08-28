@@ -23,6 +23,73 @@ public sealed class AccountingPeriodClosePostingDateTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-PeriodClose")]
     [Trait("Category", "FiscalPeriod")]
+    public async Task OpenPeriod_ShouldAllowAdjacentOpenPeriodsButRejectFutureGapsAndAudit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var july = SeedPeriod(db, tenantId);
+        var august = CreateSiblingPeriod(july, 8, "August 2026", new DateTime(2026, 8, 1), new DateTime(2026, 8, 31));
+        var september = CreateSiblingPeriod(july, 9, "September 2026", new DateTime(2026, 9, 1), new DateTime(2026, 9, 30));
+        db.FiscalPeriods.AddRange(august, september);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+
+        var gapAttempt = () => service.OpenPeriodAsync(new PeriodOpenRequestDto
+        {
+            FiscalPeriodId = september.Id,
+            Reason = "Begin September operational posting"
+        });
+        await gapAttempt.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Open earlier period '2026-08 - August 2026'*");
+
+        var opened = await service.OpenPeriodAsync(new PeriodOpenRequestDto
+        {
+            FiscalPeriodId = august.Id,
+            Reason = "Begin August operational posting"
+        });
+
+        opened.PeriodStatus.Should().Be("Open");
+        // The rejected gap attempt rolls back the controlled unit and clears EF's change tracker.
+        // Reload persisted state instead of inspecting the now-detached setup objects; this also
+        // mirrors what the frontend receives from its post-operation refresh.
+        var persistedAugust = await db.FiscalPeriods.AsNoTracking()
+            .SingleAsync(item => item.Id == august.Id);
+        var persistedJuly = await db.FiscalPeriods.AsNoTracking()
+            .SingleAsync(item => item.Id == july.Id);
+        persistedAugust.IsOpen.Should().BeTrue();
+        persistedAugust.IsClosed.Should().BeFalse();
+        persistedJuly.IsOpen.Should().BeTrue("the prior period can remain open while Finance completes its close");
+        (await db.AuditLogs.CountAsync(item =>
+            item.TenantId == tenantId &&
+            item.Action == FinanceAuditEvents.AccountingPeriodOpened)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-PeriodClose")]
+    [Trait("Category", "FiscalPeriod")]
+    public async Task OpenPeriod_ShouldRejectClosedPeriodBecauseItRequiresControlledReopen()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId, isOpen: false, isClosed: true);
+        await db.SaveChangesAsync();
+
+        var action = () => CreateService(db, tenantId).OpenPeriodAsync(new PeriodOpenRequestDto
+        {
+            FiscalPeriodId = period.Id,
+            Reason = "Attempt direct opening after close"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A closed period must use the controlled reopen request and approval workflow.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-PeriodClose")]
+    [Trait("Category", "FiscalPeriod")]
     public async Task ClosePeriod_ShouldCloseOnlyCurrentTenantPeriodAndAudit()
     {
         var tenantId = Guid.NewGuid();
@@ -974,6 +1041,33 @@ public sealed class AccountingPeriodClosePostingDateTests
 
         db.FiscalPeriods.Add(period);
         return period;
+    }
+
+    private static FiscalPeriod CreateSiblingPeriod(
+        FiscalPeriod anchor,
+        int periodNumber,
+        string periodName,
+        DateTime startDate,
+        DateTime endDate)
+    {
+        return new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = anchor.TenantId,
+            FiscalYearId = anchor.FiscalYearId,
+            PeriodName = periodName,
+            PeriodCode = $"{startDate:yyyy-MM}",
+            PeriodNumber = periodNumber,
+            PeriodType = PeriodType.Monthly,
+            StartDate = startDate,
+            EndDate = endDate,
+            PeriodDays = (endDate - startDate).Days + 1,
+            Status = "Future",
+            PeriodStatus = "Future",
+            IsOpen = false,
+            IsClosed = false,
+            IsLocked = false
+        };
     }
 
     private static FinanceCloseCycle SeedCertifiedClosedCycle(

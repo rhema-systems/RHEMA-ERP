@@ -93,7 +93,7 @@ public sealed class TenderEvaluationServiceCommitteeTests
                 .ReturnsAsync(Bids);
             Evaluators.Setup(repository => repository.GetByUserIdAsync(UserId))
                 .ReturnsAsync([Evaluator]);
-            TenderControl.Setup(service => service.IsNctOrIctAsync(
+            TenderControl.Setup(service => service.IsControlledTenderMethodAsync(
                     It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
             ExceptionalControl.Setup(service => service.IsExceptionalAsync(

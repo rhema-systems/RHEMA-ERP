@@ -509,7 +509,7 @@ public class InventoryTransfersController : ControllerBase
         catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error receiving transfer {Id}", id);
-            return StatusCode(500, "An error occurred while receiving the transfer");
+            throw;
         }
     }
 

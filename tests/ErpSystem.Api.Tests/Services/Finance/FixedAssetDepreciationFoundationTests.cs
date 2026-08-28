@@ -170,6 +170,137 @@ public sealed class FixedAssetDepreciationFoundationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task DiminishingBalanceUsesApprovedAnnualRateAndSnapshotsIt()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            depreciationMethod: DepreciationMethod.DecliningBalance,
+            diminishingBalanceRatePercent: 20m);
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+
+        result.Single().DepreciationAmount.Should().Be(20m);
+        result.Single().DiminishingBalanceRatePercentSnapshot.Should().Be(20m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task DoubleDecliningDerivesTransparentRateFromUsefulLife()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            usefulLifeMonths: 60,
+            depreciationMethod: DepreciationMethod.DoubleDecliningBalance);
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+
+        result.Single().DiminishingBalanceRatePercentSnapshot.Should().Be(40m);
+        result.Single().DepreciationAmount.Should().Be(40m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task UnitsOfProductionUsesVerifiedPeriodUsageAndSnapshotsEvidence()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            residualValue: 200m,
+            depreciationMethod: DepreciationMethod.UnitsOfProduction,
+            lifetimeProductionCapacity: 1000m);
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false,
+            ProductionUsageEntries =
+            {
+                new FixedAssetProductionUsageDto
+                {
+                    FixedAssetId = fixture.Asset.Id,
+                    UnitsConsumed = 100m,
+                    EvidenceReference = "METER-2026-07-31",
+                    EvidenceNotes = "Plant meter signed by operations supervisor."
+                }
+            }
+        });
+
+        var schedule = result.Single();
+        schedule.DepreciationAmount.Should().Be(100m);
+        schedule.PeriodProductionUnits.Should().Be(100m);
+        schedule.CumulativeProductionUnitsAfter.Should().Be(100m);
+        schedule.ProductionEvidenceReference.Should().Be("METER-2026-07-31");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task UnitsOfProductionRejectsMissingEvidenceAndCapacityOverrun()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            depreciationMethod: DepreciationMethod.UnitsOfProduction,
+            lifetimeProductionCapacity: 1000m,
+            accumulatedProductionUnits: 950m);
+        var services = CreateServices(db, tenantId);
+
+        var missingEvidence = () => services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+        await missingEvidence.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Verified production usage is required*");
+
+        var capacityOverrun = () => services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false,
+            ProductionUsageEntries =
+            {
+                new FixedAssetProductionUsageDto
+                {
+                    FixedAssetId = fixture.Asset.Id,
+                    UnitsConsumed = 100m,
+                    EvidenceReference = "METER-OVERRUN"
+                }
+            }
+        });
+        await capacityOverrun.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*exceed approved lifetime capacity*");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDepreciation")]
     [Trait("Category", "FixedAssets")]
     public async Task ResidualValueCannotExceedAssetCost()
@@ -563,6 +694,171 @@ public sealed class FixedAssetDepreciationFoundationTests
         asset.PurchasePrice.Should().Be(1200m);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationReversal")]
+    [Trait("Requirement", "FR-GL-008;FR-GL-010;FIN-LIM-0033")]
+    public async Task ApprovedDepreciationReversal_ShouldPostCompensatingJournalRestoreRegisterAndAllowCorrectionRevision()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDepreciationFoundationAsync(db, tenantId);
+        var maker = CreateServices(db, tenantId, userId: makerId, userName: "fa.depreciation.maker");
+
+        var originalSchedules = await maker.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id
+        });
+        var originalSchedule = originalSchedules.Single();
+        var originalRun = await db.FixedAssetDepreciationRuns.SingleAsync();
+        var request = await maker.Depreciation.RequestReversalAsync(
+            originalRun.Id,
+            new RequestFixedAssetDepreciationReversalDto
+            {
+                ReversalDate = new DateTime(2026, 7, 25),
+                Reason = "The approved useful-life evidence was entered incorrectly and requires a controlled correction.",
+                ImpactAssessment = "The July depreciation expense and reserve will be reversed before a corrected July run is posted."
+            });
+
+        // Resolve the service again with a different authenticated identity. This proves the
+        // maker-checker rule is enforced in the domain service rather than only by the page.
+        var reviewer = CreateServices(
+            db,
+            tenantId,
+            userId: Guid.NewGuid(),
+            userName: "fa.depreciation.reviewer");
+        var approved = await reviewer.Depreciation.ReviewReversalAsync(
+            originalRun.Id,
+            request.Id,
+            new ReviewFixedAssetDepreciationReversalDto
+            {
+                Approved = true,
+                ReviewComment = "The source evidence and downstream impact were independently checked and the reversal is approved."
+            });
+        approved.Status.Should().Be(FixedAssetDepreciationReversalStatuses.Approved);
+
+        var posted = await maker.Depreciation.PostReversalAsync(originalRun.Id, request.Id);
+
+        posted.Status.Should().Be(FixedAssetDepreciationReversalStatuses.Posted);
+        posted.ReversalPostingEventId.Should().NotBeNull();
+        posted.ReversalJournalEntryId.Should().NotBeNull();
+        var reversedSchedule = await db.AssetDepreciationSchedules.SingleAsync(item => item.Id == originalSchedule.Id);
+        reversedSchedule.IsPosted.Should().BeTrue("the immutable original posting remains accounting evidence");
+        reversedSchedule.IsReversed.Should().BeTrue();
+        reversedSchedule.ReversalPostingEventId.Should().Be(posted.ReversalPostingEventId);
+        var restoredBook = await db.FixedAssetBookValues.SingleAsync(item => item.FixedAssetId == fixture.Asset.Id);
+        restoredBook.AccumulatedDepreciation.Should().Be(0m);
+        restoredBook.NetBookValue.Should().Be(1200m);
+        (await db.AssetTransactions.CountAsync(item =>
+            item.FixedAssetId == fixture.Asset.Id && item.TransactionType == "DepreciationReversal")).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "FixedAssetDepreciationReversal" && item.PostingAction == "Reverse")).Should().Be(1);
+
+        // A corrected same-period run receives revision one instead of deleting or colliding
+        // with revision zero. This is the core evidence-retention behavior for FIN-LIM-0033.
+        var corrected = await maker.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id
+        });
+        corrected.Single().CorrectionSequence.Should().Be(1);
+        (await db.FixedAssetDepreciationRuns.CountAsync()).Should().Be(2);
+        (await db.AssetDepreciationSchedules.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationReversal")]
+    [Trait("Requirement", "FR-GL-008;FIN-LIM-0033")]
+    public async Task DepreciationReversalRequester_ShouldNotApproveOwnRequest()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDepreciationFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId, userId: actorId, userName: "same.fa.actor");
+        await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id
+        });
+        var run = await db.FixedAssetDepreciationRuns.SingleAsync();
+        var request = await services.Depreciation.RequestReversalAsync(
+            run.Id,
+            new RequestFixedAssetDepreciationReversalDto
+            {
+                ReversalDate = new DateTime(2026, 7, 25),
+                Reason = "The posted depreciation used an incorrect approved assumption and must be corrected.",
+                ImpactAssessment = "The original expense and accumulated depreciation will be reversed before reposting."
+            });
+
+        var act = () => services.Depreciation.ReviewReversalAsync(
+            run.Id,
+            request.Id,
+            new ReviewFixedAssetDepreciationReversalDto
+            {
+                Approved = true,
+                ReviewComment = "This attempted self-approval must be rejected by the service-level maker-checker guard."
+            });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*requester cannot review*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationReversal")]
+    [Trait("Requirement", "FR-GL-010;FIN-LIM-0033")]
+    public async Task LaterPostedDepreciation_ShouldBlockEarlierRunReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDepreciationFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id
+        });
+        var run = await db.FixedAssetDepreciationRuns.SingleAsync();
+        var original = await db.AssetDepreciationSchedules.SingleAsync();
+
+        // Seed a later posted schedule directly so the test isolates reversal sequencing without
+        // requiring another fiscal-period fixture. The service must force reverse-order unwind.
+        db.AssetDepreciationSchedules.Add(new AssetDepreciationSchedule
+        {
+            TenantId = tenantId,
+            FixedAssetId = fixture.Asset.Id,
+            FiscalPeriodId = fixture.Period.Id,
+            AccountingBookId = original.AccountingBookId,
+            BookClassification = original.BookClassification,
+            CorrectionSequence = 1,
+            DepreciationAmount = 100m,
+            AccumulatedDepreciationBefore = 100m,
+            AccumulatedDepreciation = 200m,
+            NetBookValueBefore = 1100m,
+            NetBookValue = 1000m,
+            DepreciableAmount = 1200m,
+            PostingDate = original.PostingDate!.Value.AddDays(1),
+            IsPosted = true,
+            IsProjected = false,
+            PostingEventId = Guid.NewGuid(),
+            JournalEntryId = Guid.NewGuid(),
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var act = () => services.Depreciation.RequestReversalAsync(
+            run.Id,
+            new RequestFixedAssetDepreciationReversalDto
+            {
+                ReversalDate = new DateTime(2026, 7, 25),
+                Reason = "The earlier posted depreciation requires correction after later accounting was recorded.",
+                ImpactAssessment = "The request must be blocked until dependent later depreciation is reversed first."
+            });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Reverse later runs before reversing this run*");
+        (await db.FixedAssetDepreciationReversals.CountAsync()).Should().Be(0);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -573,9 +869,14 @@ public sealed class FixedAssetDepreciationFoundationTests
         return new ApplicationDbContext(options);
     }
 
-    private static ServiceFixture CreateServices(ApplicationDbContext db, Guid tenantId, IWorkflowService? workflowService = null)
+    private static ServiceFixture CreateServices(
+        ApplicationDbContext db,
+        Guid tenantId,
+        IWorkflowService? workflowService = null,
+        Guid? userId = null,
+        string userName = "fa.depreciation")
     {
-        var currentUser = CreateCurrentUser(tenantId);
+        var currentUser = CreateCurrentUser(tenantId, userId, userName);
         var auditService = new FinanceAuditService(
             db,
             currentUser.Object,
@@ -588,6 +889,7 @@ public sealed class FixedAssetDepreciationFoundationTests
             currentUser.Object,
             Mock.Of<ILogger<FinancePostingEngine>>(),
             auditService);
+        var reversalPolicy = new FinanceReversalPolicyService(db, currentUser.Object);
         var fixedAssetService = new FixedAssetService(
             db,
             currentUser.Object,
@@ -601,18 +903,22 @@ public sealed class FixedAssetDepreciationFoundationTests
             accountingBookService: null,
             financePostingEngine: postingEngine,
             financeAuditService: auditService,
-            workflowService: workflowService);
+            workflowService: workflowService,
+            financeReversalPolicyService: reversalPolicy);
 
         return new ServiceFixture(depreciationService, fixedAssetService);
     }
 
-    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
+    private static Mock<ICurrentUserService> CreateCurrentUser(
+        Guid tenantId,
+        Guid? userId = null,
+        string userName = "fa.depreciation")
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
-        currentUser.SetupGet(x => x.UserId).Returns(Guid.NewGuid().ToString());
-        currentUser.SetupGet(x => x.UserName).Returns("fa.depreciation");
+        currentUser.SetupGet(x => x.UserId).Returns((userId ?? Guid.NewGuid()).ToString());
+        currentUser.SetupGet(x => x.UserName).Returns(userName);
         currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(x => x.UserAgent).Returns("fixed-asset-depreciation-tests");
         currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
@@ -633,7 +939,11 @@ public sealed class FixedAssetDepreciationFoundationTests
         bool periodIsOpen = true,
         bool periodIsClosed = false,
         string transactionCurrency = "GHS",
-        decimal exchangeRate = 1m)
+        decimal exchangeRate = 1m,
+        DepreciationMethod depreciationMethod = DepreciationMethod.StraightLine,
+        decimal diminishingBalanceRatePercent = 0m,
+        decimal lifetimeProductionCapacity = 0m,
+        decimal accumulatedProductionUnits = 0m)
     {
         SeedTenant(db, tenantId);
         var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
@@ -680,8 +990,10 @@ public sealed class FixedAssetDepreciationFoundationTests
             AssetAccountId = assetAccount.Id,
             AccumulatedDepreciationAccountId = accumulatedAccount.Id,
             DepreciationExpenseAccountId = expenseAccount.Id,
-            DefaultMethod = DepreciationMethod.StraightLine,
+            DefaultMethod = depreciationMethod,
             DefaultUsefulLifeMonths = usefulLifeMonths,
+            DefaultDiminishingBalanceRatePercent = diminishingBalanceRatePercent,
+            DefaultLifetimeProductionCapacity = lifetimeProductionCapacity,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -706,8 +1018,11 @@ public sealed class FixedAssetDepreciationFoundationTests
             NetBookValue = netBookValue ?? acquisitionCost - accumulatedDepreciation,
             UsefulLifeMonths = usefulLifeMonths,
             ResidualValue = residualValue,
-            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationMethod = depreciationMethod,
             DepreciationConvention = DepreciationConvention.FullMonth,
+            DiminishingBalanceRatePercent = diminishingBalanceRatePercent,
+            LifetimeProductionCapacity = lifetimeProductionCapacity,
+            AccumulatedProductionUnits = accumulatedProductionUnits,
             Status = status,
             FunctionalCurrencyCode = "GHS",
             TransactionCurrencyCode = transactionCurrency,
@@ -737,8 +1052,11 @@ public sealed class FixedAssetDepreciationFoundationTests
             ResidualValue = residualValue,
             UsefulLifeMonths = usefulLifeMonths,
             RemainingUsefulLifeMonths = usefulLifeMonths,
-            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationMethod = depreciationMethod,
             DepreciationConvention = DepreciationConvention.FullMonth,
+            DiminishingBalanceRatePercent = diminishingBalanceRatePercent,
+            LifetimeProductionCapacity = lifetimeProductionCapacity,
+            AccumulatedProductionUnits = accumulatedProductionUnits,
             PlacedInServiceDate = asset.PlacedInServiceDate,
             CapitalizationDate = asset.CapitalizationDate,
             CapitalizationJournalEntryId = journalEntryId,

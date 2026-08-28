@@ -723,7 +723,8 @@ public class InventoryValuationService : IInventoryValuationService
         Guid? referenceId,
         string? lotNumber = null,
         string? serialNumber = null,
-        DateTime? expirationDate = null)
+        DateTime? expirationDate = null,
+        string authorizationAction = "AuthorizeInventoryPosting")
     {
         await _receiptSourceControl.EnforceInventoryPostingAsync(
             referenceType,
@@ -732,7 +733,8 @@ public class InventoryValuationService : IInventoryValuationService
             quantity,
             referenceId.HasValue
                 ? $"{referenceId.Value:N}:{inventoryItemId:N}"
-                : $"{Guid.NewGuid():N}:{inventoryItemId:N}");
+                : $"{Guid.NewGuid():N}:{inventoryItemId:N}",
+            authorizationAction);
 
         var item = await _unitOfWork.Repository<InventoryItem>()
             .GetQueryable(value =>

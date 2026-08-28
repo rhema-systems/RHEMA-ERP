@@ -28,6 +28,15 @@ public class BudgetEntry : TenantEntity
     public virtual FiscalPeriod? FiscalPeriod { get; set; }
 
     /// <summary>
+    /// Immutable assignments for the scenario's declared budget-control dimensions.
+    /// Null is retained only for legacy scenarios that declare no controlling dimensions.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSetId))]
+    public virtual FinanceDimensionSet? FinanceDimensionSet { get; set; }
+
+    /// <summary>
     /// The currency of the entered amount.
     /// </summary>
     [Required]

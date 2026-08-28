@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils';
 import {
   Building2,
   FileText,
-  MapPin,
   Home,
   User,
   Bell,
@@ -60,7 +59,7 @@ const menuItems: MenuItem[] = [
     icon: Briefcase,
   },
   {
-    title: 'My Bids',
+    title: 'My Tender Bids',
     href: '/external-portal/my-bids',
     icon: ClipboardList,
   },
@@ -94,23 +93,16 @@ const menuItems: MenuItem[] = [
     href: '/external-portal/user-management',
     icon: Users,
   },
-  {
-    title: 'Permit Applications',
-    href: '/external-portal/permits',
-    icon: FileText,
-    comingSoon: true,
-  },
-  {
-    title: 'Land Registration',
-    href: '/external-portal/land-registration',
-    icon: MapPin,
-    comingSoon: true,
-  },
   // Estate/customer portal integration: expose only public Estate listings, service requests, and dispatched documents.
   {
     title: 'Property Listings',
     href: '/external-portal/property-listings',
     icon: Home,
+  },
+  {
+    title: 'My Property Requests',
+    href: '/external-portal/my-property-requests',
+    icon: ClipboardList,
   },
   {
     title: 'Estate Services',

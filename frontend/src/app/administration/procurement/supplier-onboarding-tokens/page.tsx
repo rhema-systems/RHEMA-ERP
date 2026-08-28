@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
@@ -38,6 +38,8 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { QUERY_KEYS } from '@/config/api';
+import { resolveSupplierOnboardingAccess } from '@/lib/procurement-supplier-onboarding-access';
 import { procurementSupplierOnboardingTokenService as service } from '@/services/procurement-supplier-onboarding-token.service';
 import type {
   SupplierOnboardingExemption,
@@ -66,15 +68,17 @@ const actionTitles: Record<Action, string> = {
 };
 
 const money = (amount: number, currency = 'GHS') =>
-  new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(amount);
+  new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(
+    amount
+  );
 const dateTime = (value?: string) =>
   value ? new Date(value).toLocaleString() : '—';
 
 export default function SupplierOnboardingTokensPage() {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
-  const canManage = hasPermission('procurement.supplier.manage');
-  const canReview = hasPermission('procurement.supplier.review');
+  const { canManage, canReview, canVerifyPayment } =
+    resolveSupplierOnboardingAccess(hasPermission);
   const [filters, setFilters] = useState<SupplierOnboardingTokenSearch>({
     page: 1,
     pageSize: 25,
@@ -92,6 +96,12 @@ export default function SupplierOnboardingTokensPage() {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [plaintextToken, setPlaintextToken] = useState<string>();
+
+  useEffect(() => {
+    // Sensitive actions must reflect current Security grants instead of a stale
+    // user snapshot retained from before an administrator changed the role.
+    void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CURRENT_USER });
+  }, [queryClient]);
 
   const summary = useQuery({
     queryKey: ['supplier-onboarding-token-summary'],
@@ -117,6 +127,11 @@ export default function SupplierOnboardingTokensPage() {
     },
     enabled: Boolean(selectedId && action === 'payment'),
   });
+  const issueOptions = useQuery({
+    queryKey: ['supplier-onboarding-token-issue-options'],
+    queryFn: service.issueOptions,
+    enabled: Boolean(action === 'issue' && canManage),
+  });
 
   const refresh = async () => {
     await Promise.all([
@@ -129,6 +144,9 @@ export default function SupplierOnboardingTokensPage() {
       queryClient.invalidateQueries({
         queryKey: ['supplier-onboarding-token'],
       }),
+      queryClient.invalidateQueries({
+        queryKey: ['supplier-onboarding-token-issue-options'],
+      }),
     ]);
   };
 
@@ -140,6 +158,7 @@ export default function SupplierOnboardingTokensPage() {
     setReference('');
     setPaymentMethodId('');
     setNotes('');
+    setRegistrationId('');
   };
 
   const run = async () => {
@@ -166,16 +185,12 @@ export default function SupplierOnboardingTokensPage() {
           rowVersion: detail.data.rowVersion,
         });
         message = 'Payment claim submitted for trusted verification';
-      } else if (
-        action === 'reconcile' &&
-        detail.data &&
-        targetPayment
-      ) {
+      } else if (action === 'reconcile' && detail.data && targetPayment) {
         await service.reconcile(
           detail.data.id,
           targetPayment.id,
           reference.trim(),
-          notes.trim(),
+          notes.trim() || undefined,
           targetPayment.rowVersion
         );
         message = 'Payment verified, posted, receipted, and reconciled';
@@ -194,8 +209,7 @@ export default function SupplierOnboardingTokensPage() {
         });
         message = 'Exemption submitted to the configured workflow';
       } else if (
-        (action === 'approve-exemption' ||
-          action === 'reject-exemption') &&
+        (action === 'approve-exemption' || action === 'reject-exemption') &&
         detail.data &&
         targetExemption
       ) {
@@ -259,7 +273,9 @@ export default function SupplierOnboardingTokensPage() {
       {
         accessorKey: 'status',
         header: 'Token status',
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => (
+          <Badge variant="outline">{row.original.status}</Badge>
+        ),
       },
       {
         accessorKey: 'paymentStatus',
@@ -294,10 +310,7 @@ export default function SupplierOnboardingTokensPage() {
   );
 
   return (
-    <div
-      className="space-y-6 p-6"
-      data-testid="supplier-onboarding-token-page"
-    >
+    <div className="space-y-6 p-6" data-testid="supplier-onboarding-token-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Supplier onboarding tokens</h1>
@@ -366,7 +379,9 @@ export default function SupplierOnboardingTokensPage() {
               }))
             }
           >
-            <SelectTrigger><SelectValue placeholder="All token statuses" /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue placeholder="All token statuses" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All token statuses</SelectItem>
               <SelectItem value="AwaitingPayment">Awaiting payment</SelectItem>
@@ -387,12 +402,23 @@ export default function SupplierOnboardingTokensPage() {
               }))
             }
           >
-            <SelectTrigger><SelectValue placeholder="All payment statuses" /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue placeholder="All payment statuses" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All payment statuses</SelectItem>
-              {['Pending', 'Posted', 'Reconciled', 'Exempt', 'NotRequired', 'Failed'].map(
-                (status) => <SelectItem key={status} value={status}>{status}</SelectItem>
-              )}
+              {[
+                'Pending',
+                'Posted',
+                'Reconciled',
+                'Exempt',
+                'NotRequired',
+                'Failed',
+              ].map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </CardContent>
@@ -405,7 +431,9 @@ export default function SupplierOnboardingTokensPage() {
         data={tokens.data?.items ?? []}
         columns={columns}
         loading={tokens.isLoading}
-        error={tokens.error ? 'Failed to load supplier-onboarding tokens.' : null}
+        error={
+          tokens.error ? 'Failed to load supplier-onboarding tokens.' : null
+        }
         emptyStateMessage="No supplier-onboarding tokens match the current filters."
         enablePagination
         pageSize={25}
@@ -420,10 +448,15 @@ export default function SupplierOnboardingTokensPage() {
         ]}
       />
 
-      <Dialog open={Boolean(selectedId)} onOpenChange={(open) => !open && setSelectedId(undefined)}>
+      <Dialog
+        open={Boolean(selectedId)}
+        onOpenChange={(open) => !open && setSelectedId(undefined)}
+      >
         <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{value?.tokenReference ?? 'Loading token…'}</DialogTitle>
+            <DialogTitle>
+              {value?.tokenReference ?? 'Loading token…'}
+            </DialogTitle>
             <DialogDescription>
               {value?.registrationNumber} · {value?.applicantName}
             </DialogDescription>
@@ -431,39 +464,79 @@ export default function SupplierOnboardingTokensPage() {
           {value && (
             <div className="space-y-5">
               <div className="grid gap-3 md:grid-cols-4">
-                <Card><CardContent className="pt-5"><div className="text-xs text-muted-foreground">Status</div><div className="font-medium">{value.status}</div></CardContent></Card>
-                <Card><CardContent className="pt-5"><div className="text-xs text-muted-foreground">Payment</div><div className="font-medium">{value.paymentStatus}</div></CardContent></Card>
-                <Card><CardContent className="pt-5"><div className="text-xs text-muted-foreground">Amount</div><div className="font-medium">{value.feeMode === 'Free' ? 'Free' : money(value.totalAmount, value.currencyCode)}</div></CardContent></Card>
-                <Card><CardContent className="pt-5"><div className="text-xs text-muted-foreground">Configuration</div><div className="font-medium">{value.sourceConfigurationProfileCode} v{value.sourceConfigurationProfileVersion}</div></CardContent></Card>
+                <Card>
+                  <CardContent className="pt-5">
+                    <div className="text-xs text-muted-foreground">Status</div>
+                    <div className="font-medium">{value.status}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-5">
+                    <div className="text-xs text-muted-foreground">Payment</div>
+                    <div className="font-medium">{value.paymentStatus}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-5">
+                    <div className="text-xs text-muted-foreground">Amount</div>
+                    <div className="font-medium">
+                      {value.feeMode === 'Free'
+                        ? 'Free'
+                        : money(value.totalAmount, value.currencyCode)}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-5">
+                    <div className="text-xs text-muted-foreground">
+                      Configuration
+                    </div>
+                    <div className="font-medium">
+                      {value.sourceConfigurationProfileCode} v
+                      {value.sourceConfigurationProfileVersion}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
               <Alert>
                 <ShieldCheck className="h-4 w-4" />
                 <AlertTitle>Application-bound control</AlertTitle>
                 <AlertDescription>
-                  This token has no time expiry. It expires only when application
+                  This token has no time expiry. It expires only when
+                  application
                   {` ${value.registrationNumber} `} is approved or rejected.
                   Current value: {value.maskedToken}.
                 </AlertDescription>
               </Alert>
               <div className="flex flex-wrap gap-2">
                 {canManage && value.status !== 'Expired' && (
-                  <Button variant="outline" onClick={() => setAction('reissue')}>
-                    <RotateCw className="mr-2 h-4 w-4" />Reissue
+                  <Button
+                    variant="outline"
+                    onClick={() => setAction('reissue')}
+                  >
+                    <RotateCw className="mr-2 h-4 w-4" />
+                    Reissue
                   </Button>
                 )}
                 {canManage &&
                   value.paymentStatus === 'Pending' &&
                   value.payments.length === 0 && (
-                  <Button onClick={() => setAction('payment')}>
-                    <Banknote className="mr-2 h-4 w-4" />Submit payment
-                  </Button>
-                )}
-                {canManage && value.paymentStatus === 'Pending' && !pendingExemption && (
-                  <Button variant="outline" onClick={() => setAction('exemption')}>
-                    Request exemption
-                  </Button>
-                )}
-                {canReview && verifiablePayment && (
+                    <Button onClick={() => setAction('payment')}>
+                      <Banknote className="mr-2 h-4 w-4" />
+                      Submit payment
+                    </Button>
+                  )}
+                {canManage &&
+                  value.paymentStatus === 'Pending' &&
+                  !pendingExemption && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setAction('exemption')}
+                    >
+                      Request exemption
+                    </Button>
+                  )}
+                {canVerifyPayment && verifiablePayment && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -471,7 +544,8 @@ export default function SupplierOnboardingTokensPage() {
                       setAction('reconcile');
                     }}
                   >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />Verify &amp; post
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Verify &amp; post
                   </Button>
                 )}
                 {canReview && pendingExemption && (
@@ -497,31 +571,62 @@ export default function SupplierOnboardingTokensPage() {
                 )}
               </div>
               <section>
-                <h2 className="mb-2 font-semibold">Finance posting and receipts</h2>
+                <h2 className="mb-2 font-semibold">
+                  Finance posting and receipts
+                </h2>
                 <div className="space-y-2">
-                  {value.payments.length === 0 && <p className="text-sm text-muted-foreground">No payment activity.</p>}
+                  {value.payments.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      No payment activity.
+                    </p>
+                  )}
                   {value.payments.map((payment) => (
-                    <div key={payment.id} className="rounded-md border p-3 text-sm">
+                    <div
+                      key={payment.id}
+                      className="rounded-md border p-3 text-sm"
+                    >
                       <div className="flex justify-between gap-2">
-                        <span className="font-medium">{payment.paymentMethodName} · {payment.status}</span>
-                        <span>{money(payment.totalAmount, payment.currencyCode)}</span>
+                        <span className="font-medium">
+                          {payment.paymentMethodName} · {payment.status}
+                        </span>
+                        <span>
+                          {money(payment.totalAmount, payment.currencyCode)}
+                        </span>
                       </div>
                       <div className="text-muted-foreground">
-                        Receipt {payment.receiptNumber ?? 'pending'} · Journal {payment.journalEntryId ?? 'pending'} · Paid {dateTime(payment.paidAtUtc)}
+                        Receipt {payment.receiptNumber ?? 'pending'} · Journal{' '}
+                        {payment.journalEntryId ?? 'pending'} · Paid{' '}
+                        {dateTime(payment.paidAtUtc)}
                       </div>
                     </div>
                   ))}
                 </div>
               </section>
               <section>
-                <h2 className="mb-2 font-semibold">Exemption workflow history</h2>
+                <h2 className="mb-2 font-semibold">
+                  Exemption workflow history
+                </h2>
                 <div className="space-y-2">
-                  {value.exemptions.length === 0 && <p className="text-sm text-muted-foreground">No exemption activity.</p>}
+                  {value.exemptions.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      No exemption activity.
+                    </p>
+                  )}
                   {value.exemptions.map((exemption) => (
-                    <div key={exemption.id} className="rounded-md border p-3 text-sm">
-                      <div className="font-medium">{exemption.status} · {dateTime(exemption.requestedAtUtc)}</div>
+                    <div
+                      key={exemption.id}
+                      className="rounded-md border p-3 text-sm"
+                    >
+                      <div className="font-medium">
+                        {exemption.status} ·{' '}
+                        {dateTime(exemption.requestedAtUtc)}
+                      </div>
                       <div>{exemption.reason}</div>
-                      <div className="text-muted-foreground">Workflow {exemption.workflowInstanceId ?? exemption.workflowDefinitionId}</div>
+                      <div className="text-muted-foreground">
+                        Workflow{' '}
+                        {exemption.workflowInstanceId ??
+                          exemption.workflowDefinitionId}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -531,7 +636,10 @@ export default function SupplierOnboardingTokensPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(action)} onOpenChange={(open) => !open && closeAction()}>
+      <Dialog
+        open={Boolean(action)}
+        onOpenChange={(open) => !open && closeAction()}
+      >
         <DialogContent className="bg-white dark:bg-slate-950">
           <DialogHeader>
             <DialogTitle>{action ? actionTitles[action] : ''}</DialogTitle>
@@ -542,50 +650,187 @@ export default function SupplierOnboardingTokensPage() {
           </DialogHeader>
           <div className="space-y-4">
             {action === 'issue' && (
-              <div><Label>Registration ID</Label><Input value={registrationId} onChange={(event) => setRegistrationId(event.target.value)} placeholder="Business-partner registration UUID" /></div>
+              <div className="space-y-2">
+                <Label>Eligible supplier application</Label>
+                <Select
+                  value={registrationId}
+                  onValueChange={setRegistrationId}
+                  disabled={busy || issueOptions.isLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an application" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(issueOptions.data ?? []).map((registration) => (
+                      <SelectItem
+                        key={registration.registrationId}
+                        value={registration.registrationId}
+                      >
+                        {registration.registrationNumber} ·{' '}
+                        {registration.applicantName} ·{' '}
+                        {registration.registrationCategory ?? 'Uncategorised'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!issueOptions.isLoading &&
+                  !issueOptions.isError &&
+                  (issueOptions.data?.length ?? 0) === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      No eligible Draft or More-info-required supplier
+                      application is waiting for a token. Existing applications
+                      with tokens must use Reissue instead.
+                    </p>
+                  )}
+                {issueOptions.isError && (
+                  <p className="text-sm text-destructive">
+                    Eligible applications could not be loaded. Refresh and try
+                    again.
+                  </p>
+                )}
+              </div>
             )}
             {action === 'payment' && (
               <>
                 <div>
                   <Label>Payment method</Label>
-                  <Select value={paymentMethodId} onValueChange={setPaymentMethodId}>
-                    <SelectTrigger><SelectValue placeholder="Select an allowed posting-ready method" /></SelectTrigger>
+                  <Select
+                    value={paymentMethodId}
+                    onValueChange={setPaymentMethodId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select an allowed posting-ready method" />
+                    </SelectTrigger>
                     <SelectContent>
                       {(paymentMethods.data ?? []).map((method) => (
-                        <SelectItem key={method.id} value={method.id} disabled={!method.isPostingReady}>
-                          {method.code} · {method.name}{method.isPostingReady ? '' : ' (GL missing)'}
+                        <SelectItem
+                          key={method.id}
+                          value={method.id}
+                          disabled={!method.isPostingReady}
+                        >
+                          {method.code} · {method.name}
+                          {method.isPostingReady ? '' : ' (GL missing)'}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div><Label>Payment reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} /></div>
+                <div>
+                  <Label>Payment reference</Label>
+                  <Input
+                    value={reference}
+                    onChange={(event) => setReference(event.target.value)}
+                  />
+                </div>
               </>
             )}
             {(action === 'reissue' || action === 'exemption') && (
-              <div><Label>{action === 'reissue' ? 'Rotation reason' : 'Exemption reason'}</Label><Textarea value={reason} onChange={(event) => setReason(event.target.value)} /></div>
+              <div>
+                <Label>
+                  {action === 'reissue'
+                    ? 'Rotation reason'
+                    : 'Exemption reason'}
+                </Label>
+                <Textarea
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+              </div>
             )}
             {action === 'reconcile' && (
-              <div><Label>Trusted provider or cashier reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} /></div>
+              <Alert className="border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+                <ShieldCheck className="h-4 w-4" />
+                <AlertTitle>
+                  Independent payment verification required
+                </AlertTitle>
+                <AlertDescription>
+                  Confirm becomes available after both audit fields below are
+                  completed. Use evidence obtained independently from the
+                  provider, bank, POS or official cashier record—not an
+                  unverified reference supplied only by the applicant.
+                </AlertDescription>
+              </Alert>
             )}
-            {(action === 'exemption' || action === 'approve-exemption' || action === 'reject-exemption') && (
-              <div><Label>Shared evidence reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Document or external evidence reference" /></div>
+            {action === 'reconcile' && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-verification-reference">
+                  Provider transaction / cashier receipt reference{' '}
+                  <span aria-hidden="true">*</span>
+                </Label>
+                <Input
+                  id="payment-verification-reference"
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value)}
+                  placeholder="MoMo transaction ID, bank reference, POS or cashier receipt no."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter the independently verifiable transaction or official
+                  receipt reference used to match this payment.
+                </p>
+              </div>
             )}
-            {(action === 'reconcile' || action === 'approve-exemption' || action === 'reject-exemption') && (
-              <div><Label>{action === 'reconcile' ? 'Verification notes' : 'Independent decision comment'}</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
+            {(action === 'exemption' ||
+              action === 'approve-exemption' ||
+              action === 'reject-exemption') && (
+              <div>
+                <Label>Shared evidence reference</Label>
+                <Input
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value)}
+                  placeholder="Document or external evidence reference"
+                />
+              </div>
+            )}
+            {action === 'reconcile' && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-verification-note">
+                  Payment verification note{' '}
+                  <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Textarea
+                  id="payment-verification-note"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="How the amount, payer, date and settlement or receipt were independently confirmed"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Add context when the trusted reference alone does not fully
+                  explain the verification, such as a mismatch, manual or
+                  offline check.
+                </p>
+              </div>
+            )}
+            {(action === 'approve-exemption' ||
+              action === 'reject-exemption') && (
+              <div>
+                <Label>Independent decision comment</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                />
+              </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeAction}>Cancel</Button>
+            <Button variant="outline" onClick={closeAction}>
+              Cancel
+            </Button>
             <Button
               onClick={run}
               disabled={
                 busy ||
                 (action === 'issue' && !registrationId.trim()) ||
                 (action === 'payment' && !paymentMethodId) ||
-                ((action === 'reissue' || action === 'exemption') && !reason.trim()) ||
-                ((action === 'reconcile' || action === 'exemption' || action === 'approve-exemption' || action === 'reject-exemption') && !reference.trim()) ||
-                ((action === 'reconcile' || action === 'approve-exemption' || action === 'reject-exemption') && !notes.trim())
+                ((action === 'reissue' || action === 'exemption') &&
+                  !reason.trim()) ||
+                ((action === 'reconcile' ||
+                  action === 'exemption' ||
+                  action === 'approve-exemption' ||
+                  action === 'reject-exemption') &&
+                  !reference.trim()) ||
+                ((action === 'approve-exemption' ||
+                  action === 'reject-exemption') &&
+                  !notes.trim())
               }
             >
               {busy ? 'Working…' : 'Confirm'}
@@ -594,12 +839,16 @@ export default function SupplierOnboardingTokensPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(plaintextToken)} onOpenChange={(open) => !open && setPlaintextToken(undefined)}>
+      <Dialog
+        open={Boolean(plaintextToken)}
+        onOpenChange={(open) => !open && setPlaintextToken(undefined)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Copy the token now</DialogTitle>
             <DialogDescription>
-              This plaintext value is returned once and is not stored or shown again.
+              This plaintext value is returned once and is not stored or shown
+              again.
             </DialogDescription>
           </DialogHeader>
           <Input readOnly value={plaintextToken ?? ''} className="font-mono" />
@@ -612,7 +861,12 @@ export default function SupplierOnboardingTokensPage() {
             >
               Copy token
             </Button>
-            <Button variant="outline" onClick={() => setPlaintextToken(undefined)}>I have saved it</Button>
+            <Button
+              variant="outline"
+              onClick={() => setPlaintextToken(undefined)}
+            >
+              I have saved it
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

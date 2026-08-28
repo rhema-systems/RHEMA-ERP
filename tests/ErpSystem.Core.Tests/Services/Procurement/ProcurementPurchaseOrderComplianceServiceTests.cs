@@ -74,6 +74,65 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
         fixture.Notifications.Should().BeEmpty();
     }
 
+    [Fact]
+    public void BuildEvidenceCollapsesDuplicateResolvedReferences()
+    {
+        var referenceId = Guid.NewGuid();
+        var checks = new[]
+        {
+            new ProcurementPurchaseOrderComplianceCheckDto
+            {
+                Key = "evaluation",
+                Label = "Approved evaluation",
+                Reference = " EVAL-001 "
+            },
+            new ProcurementPurchaseOrderComplianceCheckDto
+            {
+                Key = "award",
+                Label = "Approved award",
+                Reference = "eval-001"
+            },
+            new ProcurementPurchaseOrderComplianceCheckDto
+            {
+                Key = "source",
+                Label = "Approved source",
+                ReferenceId = referenceId
+            },
+            new ProcurementPurchaseOrderComplianceCheckDto
+            {
+                Key = "empty",
+                Label = "No evidence"
+            }
+        };
+
+        var evidence = ProcurementPurchaseOrderComplianceService
+            .BuildEvidence(checks);
+
+        evidence.Should().HaveCount(2);
+        evidence.Select(item => item.Reference).Should().BeEquivalentTo(
+            "EVAL-001",
+            referenceId.ToString("D"));
+        evidence.Should().OnlyHaveUniqueItems(item => new
+        {
+            item.ReferenceKind,
+            Reference = item.Reference!.ToUpperInvariant()
+        });
+    }
+
+    [Theory]
+    [InlineData(ProcurementCategoryClass.Goods, "GOODS")]
+    [InlineData(ProcurementCategoryClass.Works, "WORKS")]
+    [InlineData(ProcurementCategoryClass.TechnicalServices, "TECHNICAL_SERVICES")]
+    [InlineData(ProcurementCategoryClass.ConsultancyServices, "CONSULTANCY_SERVICES")]
+    [InlineData(ProcurementCategoryClass.GeneralServices, "GENERAL_SERVICES")]
+    public void SupplierCategoryCodeUsesProcurementClassificationRatherThanInventoryCategory(
+        ProcurementCategoryClass category,
+        string expectedCode)
+    {
+        ProcurementPurchaseOrderComplianceService.SupplierCategoryCode(category)
+            .Should().Be(expectedCode);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly ApplicationDbContext _context;

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities;
@@ -190,6 +191,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoiceNumber = await GenerateInvoiceNumberAsync(cancellationToken);
 
             var now = DateTime.UtcNow;
+            var openingExchangeRate = dto.IsOpeningBalance
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
             var invoice = new Invoice
             {
                 Id = Guid.NewGuid(),
@@ -203,8 +212,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Reference = dto.Reference,
                 Notes = dto.Notes,
                 IsOpeningBalance = dto.IsOpeningBalance,
-                CurrencyCode = dto.CurrencyCode,
-                ExchangeRate = dto.ExchangeRate,
+                CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
+                ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate,
+                ExchangeRateId = openingExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
                 PaymentTermId = paymentTerm?.Id ?? customer.PaymentTermId,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
@@ -218,17 +228,31 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Process line items and calculate taxes
             decimal subtotal = 0;
             decimal totalTax = 0;
+            var permitsDisposalAdjustment = await IsApprovedFixedAssetDisposalInvoiceAsync(
+                dto.CustomerId,
+                dto.Reference,
+                cancellationToken);
 
             foreach (var lineDto in dto.LineItems)
             {
+                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
+                    ? parsedType
+                    : LineItemType.Product;
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
                 var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
+                ValidateControlledNegativeInvoiceLine(
+                    lineItemType,
+                    lineDto.TaxTreatment,
+                    lineDto.DiscountPercentage,
+                    lineNetAmount,
+                    permitsDisposalAdjustment);
+
                 // Calculate tax for this line if tax code provided
                 decimal lineTax = 0;
-                if (lineDto.TaxTreatment == TaxTreatment.Standard &&
+                if (lineNetAmount > 0m && lineDto.TaxTreatment == TaxTreatment.Standard &&
                     (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
@@ -242,11 +266,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                     var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
                     lineTax = taxResult.TotalTaxAmount;
                 }
-
-                // Parse LineItemType from string
-                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
-                    ? parsedType
-                    : LineItemType.Product;
 
                 var lineItem = new InvoiceLineItem
                 {
@@ -286,9 +305,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             // Calculate Base Currency Amount
             decimal baseCurrencyAmount;
-            decimal exchangeRate = dto.ExchangeRate;
+            decimal exchangeRate = invoice.ExchangeRate;
 
-            if (string.Equals(dto.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(invoice.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 exchangeRate = 1.0m;
                 baseCurrencyAmount = subtotal + totalTax - dto.DiscountAmount; // Same as TotalAmount
@@ -353,7 +372,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(t => t.Id == TenantId)
                 .FirstOrDefaultAsync(cancellationToken);
             
-             if (tenant == null) throw new InvalidOperationException("Tenant context not found.");
+            if (tenant == null) throw new InvalidOperationException("Tenant context not found.");
+
+            var openingExchangeRate = dto.IsOpeningBalance
+                ? await ResolveOpeningInvoiceExchangeRateAsync(
+                    dto.CurrencyCode,
+                    dto.InvoiceDate,
+                    dto.ExchangeRateId,
+                    dto.ExchangeRate,
+                    cancellationToken)
+                : null;
 
             var now = DateTime.UtcNow;
             invoice.InvoiceDate = dto.InvoiceDate;
@@ -361,6 +389,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
+            invoice.CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
+            invoice.ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate;
+            invoice.ExchangeRateId = openingExchangeRate?.ExchangeRateId;
             invoice.DiscountAmount = dto.DiscountAmount;
             invoice.TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId;
             invoice.UpdatedAt = now;
@@ -379,13 +410,25 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var lineDto in dto.LineItems)
             {
+                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
+                    ? parsedType
+                    : LineItemType.Product;
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
                 var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
+                // A posted disposal invoice is immutable, and general draft edits must never gain
+                // the orchestrator-only negative-line privilege.
+                ValidateControlledNegativeInvoiceLine(
+                    lineItemType,
+                    lineDto.TaxTreatment,
+                    lineDto.DiscountPercentage,
+                    lineNetAmount,
+                    permitsDisposalAdjustment: false);
+
                 decimal lineTax = 0;
-                if (lineDto.TaxTreatment == TaxTreatment.Standard &&
+                if (lineNetAmount > 0m && lineDto.TaxTreatment == TaxTreatment.Standard &&
                     (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
@@ -401,10 +444,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
 
                 // Parse LineItemType from string (mirrors CreateAsync logic)
-                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
-                    ? parsedType
-                    : LineItemType.Product;
-
                 var lineItem = new InvoiceLineItem
                 {
                     Id = lineDto.Id ?? Guid.NewGuid(),
@@ -448,8 +487,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
             else
             {
-                // Keep existing rate unless we want to allow updating it via DTO (which isn't in UpdateDto currently)
-                // Assuming rate implies updating fields that affect total, we re-apply rate.
+                // Governed openings use the approved snapshot resolved above; ordinary draft
+                // invoices retain the editable rate supplied by their existing update contract.
                 invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
             }
 
@@ -694,7 +733,22 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaymentNumber = a.CustomerPayment.PaymentNumber,
                 InvoiceId = a.InvoiceId,
                 AllocatedAmount = a.AllocatedAmount,
+                PaymentCurrencyAmount = a.PaymentCurrencyAmount,
+                InvoiceCurrencyCode = a.InvoiceCurrencyCode,
+                PaymentCurrencyCode = a.PaymentCurrencyCode,
+                IsCrossCurrency = a.IsCrossCurrency,
+                InvoiceSettlementExchangeRateId = a.InvoiceSettlementExchangeRateId,
+                InvoiceSettlementExchangeRate = a.InvoiceSettlementExchangeRate,
+                PaymentExchangeRateId = a.PaymentExchangeRateId,
+                PaymentExchangeRate = a.PaymentExchangeRate,
+                PaymentFunctionalAmount = a.PaymentFunctionalAmount,
+                SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                 DiscountAmount = a.DiscountAmount,
+                DiscountFunctionalAmount = a.DiscountFunctionalAmount,
+                WithholdingTaxAmount = a.WithholdingTaxAmount,
+                WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                VatWithholdingAmount = a.VatWithholdingAmount,
+                VatWithholdingFunctionalAmount = a.VatWithholdingFunctionalAmount,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
                 IsReversal = a.IsReversal
@@ -807,6 +861,11 @@ namespace ErpSystem.Api.Services.Finance.AR
             var postingLines = new List<FinancePostingLineDto>();
             var documentDiscountAmount = RoundMoney(activeLines.Sum(l => l.DiscountAmount) + invoice.DiscountAmount);
             var lineNumber = 1;
+            var permitsDisposalAdjustment = !activeLines.Any(line => line.Quantity * line.UnitPrice < 0m)
+                || await IsApprovedFixedAssetDisposalInvoiceAsync(
+                    invoice.CustomerId,
+                    invoice.Reference,
+                    cancellationToken);
 
             foreach (var line in activeLines)
             {
@@ -814,7 +873,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     throw new InvalidOperationException("AR invoice line discount and tax amounts cannot be negative.");
 
                 var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
-                if (grossAmount <= 0m)
+                if (grossAmount == 0m)
                 {
                     continue;
                 }
@@ -823,18 +882,46 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ?? throw new InvalidOperationException($"No revenue account specified for AR line '{line.Description}'.");
                 await ResolvePostingAccountAsync(revenueAccountId, "revenue account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    revenueAccountId,
-                    $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
-                    debitTransactionAmount: 0m,
-                    creditTransactionAmount: grossAmount,
-                    invoiceCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    invoice.InvoiceDate,
-                    invoice.InvoiceNumber,
-                    lineNumber++,
-                    ResolveLineTag(line)));
+                if (grossAmount < 0m)
+                {
+                    // FIN-LIM-0040: a disposal may record an auctioneer/buyer deduction from the
+                    // amount remitted. It is intentionally a debit to the same proceeds-clearing
+                    // account and is allowed only for the dedicated non-taxable adjustment type;
+                    // ordinary AR users cannot construct arbitrary negative invoice lines.
+                    ValidateControlledNegativeInvoiceLine(
+                        line.LineItemType,
+                        line.TaxTreatment,
+                        line.DiscountPercentage,
+                        grossAmount,
+                        permitsDisposalAdjustment);
+                    postingLines.Add(BuildPostingLine(
+                        revenueAccountId,
+                        $"Asset-sale proceeds deduction - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: Math.Abs(grossAmount),
+                        creditTransactionAmount: 0m,
+                        invoiceCurrency,
+                        functionalCurrency,
+                        exchangeRate,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        "AR-FixedAssetDisposalAdjustment"));
+                }
+                else
+                {
+                    postingLines.Add(BuildPostingLine(
+                        revenueAccountId,
+                        $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: 0m,
+                        creditTransactionAmount: grossAmount,
+                        invoiceCurrency,
+                        functionalCurrency,
+                        exchangeRate,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        ResolveLineTag(line)));
+                }
 
                 if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
                 {
@@ -975,6 +1062,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             Dictionary<Guid, Account> accountCache,
             CancellationToken cancellationToken)
         {
+            var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
+            exchangeRate = rateSnapshot.Rate;
             var migrationClearingAccountId = settings.MigrationClearingAccountId
                 ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AR opening balance posting.");
             await ResolvePostingAccountAsync(
@@ -990,6 +1079,11 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 throw new InvalidOperationException($"Opening-balance customer invoice {invoice.InvoiceNumber} has no positive AR amount to post.");
             }
+            var functionalOpeningAmount = ToFunctionalAmount(
+                openingAmount,
+                invoiceCurrency,
+                functionalCurrency,
+                exchangeRate);
 
             var postingLines = new List<FinancePostingLineDto>
             {
@@ -1004,15 +1098,17 @@ namespace ErpSystem.Api.Services.Finance.AR
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     1,
-                    "AR-Control"),
+                    "AR-Control",
+                    rateSnapshot.ExchangeRateId,
+                    rateSnapshot.Source),
                 BuildPostingLine(
                     migrationClearingAccountId,
                     $"Migration clearing - AR opening balance {invoice.InvoiceNumber}",
                     debitTransactionAmount: 0m,
-                    creditTransactionAmount: openingAmount,
-                    invoiceCurrency,
+                    creditTransactionAmount: functionalOpeningAmount,
                     functionalCurrency,
-                    exchangeRate,
+                    functionalCurrency,
+                    1m,
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     2,
@@ -1386,7 +1482,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             DateTime exchangeRateDate,
             string reference,
             int lineNumber,
-            string transactionTag)
+            string transactionTag,
+            Guid? exchangeRateId = null,
+            string? exchangeRateSource = null)
         {
             var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
             var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
@@ -1399,11 +1497,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 DebitAmount = debitAmount,
                 CreditAmount = creditAmount,
                 TransactionCurrency = transactionCurrency,
+                TransactionDebitAmount = debitTransactionAmount,
+                TransactionCreditAmount = creditTransactionAmount,
                 ForeignCurrencyAmount = isForeign
                     ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
                     : null,
                 ExchangeRate = isForeign ? exchangeRate : null,
-                ExchangeRateSource = isForeign ? "AR invoice exchange-rate snapshot" : null,
+                ExchangeRateId = isForeign ? exchangeRateId : null,
+                ExchangeRateSource = isForeign
+                    ? exchangeRateSource ?? "AR invoice exchange-rate snapshot"
+                    : null,
                 ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
                 SourceReferenceNumber = reference,
                 LineNumber = lineNumber,
@@ -1504,7 +1607,71 @@ namespace ErpSystem.Api.Services.Finance.AR
         private static string ResolveLineTag(InvoiceLineItem line)
             => line.LineItemType == LineItemType.Inventory
                 ? "AR-InventoryRevenue"
-                : "AR-Revenue";
+                : line.LineItemType == LineItemType.FixedAssetDisposal
+                    ? "AR-FixedAssetDisposalProceeds"
+                    : line.LineItemType == LineItemType.FixedAssetDisposalAdjustment
+                        ? "AR-FixedAssetDisposalAdjustment"
+                        : "AR-Revenue";
+
+        private static void ValidateControlledNegativeInvoiceLine(
+            LineItemType lineItemType,
+            TaxTreatment taxTreatment,
+            decimal discountPercentage,
+            decimal lineNetAmount,
+            bool permitsDisposalAdjustment)
+        {
+            if (lineNetAmount >= 0m)
+            {
+                return;
+            }
+
+            // Negative lines have material credit-note implications. The only supported create-
+            // time exception is the disposal proceeds deduction produced by the Finance-owned
+            // orchestrator; all other reductions must use the canonical credit-note workflow.
+            if (!permitsDisposalAdjustment ||
+                lineItemType != LineItemType.FixedAssetDisposalAdjustment ||
+                taxTreatment != TaxTreatment.OutOfScope ||
+                discountPercentage != 0m)
+            {
+                throw new InvalidOperationException(
+                    "Negative AR invoice lines are restricted to non-taxable fixed-asset disposal adjustments. Use the credit-note workflow for other reductions.");
+            }
+        }
+
+        private async Task<bool> IsApprovedFixedAssetDisposalInvoiceAsync(
+            Guid customerId,
+            string? reference,
+            CancellationToken cancellationToken)
+        {
+            const string prefix = "FA-DISPOSAL:";
+            if (string.IsNullOrWhiteSpace(reference) || !reference.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var disposalReference = reference[prefix.Length..].Trim();
+            if (string.IsNullOrWhiteSpace(disposalReference))
+            {
+                return false;
+            }
+
+            // The public AR API can receive a LineItemType string, so the enum alone is not an
+            // authorization boundary. A negative adjustment is accepted only while the Finance
+            // disposal orchestrator has a completed, same-tenant sale for this exact buyer and
+            // immutable disposal reference. This prevents ordinary invoice callers from posing as
+            // the trusted internal workflow merely by supplying the dedicated line type.
+            return await _unitOfWork.Repository<AssetDisposal>()
+                .GetQueryable(disposal =>
+                    disposal.TenantId == TenantId &&
+                    disposal.BuyerBusinessPartnerId == customerId &&
+                    disposal.ReferenceNumber == disposalReference &&
+                    disposal.DisposalType == DisposalType.Sale &&
+                    disposal.Status == AssetDisposalStatus.Completed &&
+                    disposal.CustomerInvoiceId == null &&
+                    disposal.DisposalCost > 0m &&
+                    !disposal.IsDeleted)
+                .AnyAsync(cancellationToken);
+        }
 
         private static bool IsNoTaxTreatment(TaxTreatment treatment)
             => treatment == TaxTreatment.Exempt
@@ -1535,6 +1702,77 @@ namespace ErpSystem.Api.Services.Finance.AR
             => string.IsNullOrWhiteSpace(currencyCode)
                 ? defaultValue.Trim().ToUpperInvariant()
                 : currencyCode.Trim().ToUpperInvariant();
+
+        private async Task<OpeningInvoiceExchangeRateSnapshot> ResolveOpeningInvoiceExchangeRateAsync(
+            string? currencyCode,
+            DateTime invoiceDate,
+            Guid? exchangeRateId,
+            decimal suppliedRate,
+            CancellationToken cancellationToken)
+        {
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var transactionCurrency = NormalizeCurrency(currencyCode, functionalCurrency);
+
+            if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                if (exchangeRateId.HasValue)
+                    throw new InvalidOperationException("Functional-currency AR opening invoices cannot carry foreign exchange-rate evidence.");
+                if (RoundRate(suppliedRate) != 1m)
+                    throw new InvalidOperationException("Functional-currency AR opening invoices must use an exchange rate of 1.");
+                return new OpeningInvoiceExchangeRateSnapshot(null, 1m, transactionCurrency, functionalCurrency, "Functional currency");
+            }
+
+            if (!exchangeRateId.HasValue)
+                throw new InvalidOperationException("Foreign-currency AR opening invoices require an approved exchange-rate record.");
+
+            var quoteSide = settings.DirectionalExchangeRatePolicyEnabled
+                ? settings.ArInvoiceQuoteSide
+                : ExchangeRateQuoteSide.Mid;
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .FirstOrDefaultAsync(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == exchangeRateId.Value &&
+                    !item.IsDeleted);
+
+            if (rate == null ||
+                !rate.IsActive ||
+                rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved) ||
+                rate.Rate <= 0m ||
+                rate.RateType != ExchangeRateType.Daily ||
+                rate.QuoteSide != quoteSide ||
+                !string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                rate.EffectiveDate.Date > invoiceDate.Date ||
+                (rate.EndDate.HasValue && rate.EndDate.Value.Date < invoiceDate.Date))
+            {
+                throw new InvalidOperationException(
+                    "The selected AR opening-invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
+            }
+
+            if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
+                throw new InvalidOperationException("The AR opening-invoice exchange-rate value does not match the approved rate record.");
+
+            return new OpeningInvoiceExchangeRateSnapshot(
+                rate.Id,
+                rate.Rate,
+                transactionCurrency,
+                functionalCurrency,
+                rate.RateSource);
+        }
+
+        private Task<OpeningInvoiceExchangeRateSnapshot> RevalidateOpeningInvoiceExchangeRateAsync(
+            Invoice invoice,
+            CancellationToken cancellationToken)
+            => ResolveOpeningInvoiceExchangeRateAsync(
+                invoice.CurrencyCode,
+                invoice.InvoiceDate,
+                invoice.ExchangeRateId,
+                invoice.ExchangeRate,
+                cancellationToken);
+
+        private static decimal RoundRate(decimal amount)
+            => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
 
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
@@ -1638,6 +1876,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 IsOpeningBalance = invoice.IsOpeningBalance,
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
+                ExchangeRateId = invoice.ExchangeRateId,
                 PaymentTermsDays = invoice.PaymentTermsDays,
                 PaymentTermId = invoice.PaymentTermId,
                 EarlyPaymentDiscountPercentage = invoice.EarlyPaymentDiscountPercentage,
@@ -1673,5 +1912,12 @@ namespace ErpSystem.Api.Services.Finance.AR
         private sealed record TaxPostingBuildResult(
             List<FinancePostingLineDto> Lines,
             List<FinanceTaxCalculationSnapshotDto> Snapshots);
+
+        private sealed record OpeningInvoiceExchangeRateSnapshot(
+            Guid? ExchangeRateId,
+            decimal Rate,
+            string TransactionCurrency,
+            string FunctionalCurrency,
+            string Source);
     }
 }

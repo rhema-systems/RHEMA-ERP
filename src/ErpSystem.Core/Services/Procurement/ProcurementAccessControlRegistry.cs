@@ -36,6 +36,8 @@ public static class ProcurementAccessControlRegistry
     public const string Category = "TDC Procurement";
     public const string InternalAuditRole = "TDC_INTERNAL_AUDIT";
     public const string IctAdministratorRole = "TDC_ICT_ADMINISTRATOR";
+    public const string SupplierPaymentVerifyPermission =
+        "procurement.supplier.payment.verify";
 
     public static IReadOnlyList<ProcurementPermissionDefinition> Permissions { get; } =
     [
@@ -48,6 +50,8 @@ public static class ProcurementAccessControlRegistry
         P("procurement.calendar.run", "Run procurement calendar", "Run tenant-scoped calendar generation, catch-up, reminder, and escalation processing.", true),
         P("procurement.plan.manage", "Manage procurement plans", "Prepare and consolidate procurement plans.", true),
         P("procurement.plan.approve", "Approve procurement plans", "Approve procurement plans within delegated authority.", true),
+        P("procurement.budget.manage", "Manage procurement budgets", "Prepare departmental procurement budgets and submit them to the shared workflow.", true),
+        P("procurement.budget.approve", "Approve procurement budgets", "Approve or reject procurement budgets at an assigned shared workflow step.", true),
         P("procurement.requisition.create", "Create requisitions", "Create and submit procurement requisitions.", true),
         P("procurement.requisition.process", "Process requisitions", "Review and process approved requisitions for sourcing.", true),
         P("procurement.requisition.approve", "Approve requisitions", "Approve requisitions within delegated authority.", true),
@@ -59,6 +63,7 @@ public static class ProcurementAccessControlRegistry
         P("procurement.tender.approve", "Approve tender awards", "Approve tender recommendations and awards within delegated authority.", true),
         P("procurement.supplier.manage", "Manage supplier onboarding", "Prepare supplier onboarding, compliance, AVL, and profile records.", true),
         P("procurement.supplier.review", "Review supplier compliance", "Review supplier due diligence, eligibility, and risk evidence.", false),
+        P(SupplierPaymentVerifyPermission, "Verify supplier onboarding payments", "Independently verify a supplier-onboarding payment claim, post the trusted receipt to Finance, and activate the applicant token.", true),
         P("procurement.supplier.approve", "Approve suppliers", "Approve supplier onboarding and AVL decisions.", true),
         P("procurement.purchase-order.create", "Create purchase orders", "Create purchase orders from approved procurement sources.", true),
         P("procurement.purchase-order.approve", "Approve purchase orders", "Approve purchase orders within delegated authority.", true),
@@ -86,8 +91,8 @@ public static class ProcurementAccessControlRegistry
     [
         R("TDC_REQUISITIONER", "TDC Requisitioner", "User-department requester.", [.. Read, "procurement.requisition.create"]),
         R("TDC_USER_DEPARTMENT_HEAD", "TDC User Department Head", "User-department oversight and requisition approval.", [.. Read, "procurement.requisition.create", "procurement.requisition.approve"]),
-        R("TDC_PROCUREMENT_OFFICER", "TDC Procurement Officer", "Requisition processing, sourcing, tender administration, PO creation, supplier and contract follow-up.", [.. Read, "procurement.plan.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.tender.administer", "procurement.supplier.manage", "procurement.purchase-order.create", "procurement.contract.manage"]),
-        R("TDC_SENIOR_PROCUREMENT_OFFICER", "TDC Senior Procurement Officer", "Senior operational procurement oversight.", [.. Read, "procurement.plan.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.sourcing.approve", "procurement.tender.administer", "procurement.supplier.manage", "procurement.supplier.review", "procurement.purchase-order.create", "procurement.contract.manage"]),
+        R("TDC_PROCUREMENT_OFFICER", "TDC Procurement Officer", "Requisition processing, sourcing, tender administration, PO creation, supplier and contract follow-up.", [.. Read, "procurement.plan.manage", "procurement.budget.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.create", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.tender.administer", "procurement.supplier.manage", SupplierPaymentVerifyPermission, "procurement.purchase-order.create", "procurement.contract.manage"]),
+        R("TDC_SENIOR_PROCUREMENT_OFFICER", "TDC Senior Procurement Officer", "Senior operational procurement oversight.", [.. Read, "procurement.plan.manage", "procurement.budget.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.create", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.sourcing.approve", "procurement.tender.administer", "procurement.supplier.manage", "procurement.supplier.review", "procurement.purchase-order.create", "procurement.contract.manage"]),
         R("TDC_HEAD_OF_PROCUREMENT", "TDC Head of Procurement", "Procurement oversight, sourcing approval, reporting, supplier and contract oversight.", [.. AuditRead, "procurement.plan.manage", "procurement.plan.approve", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.sourcing.approve", "procurement.tender.administer", "procurement.tender.approve", "procurement.supplier.review", "procurement.supplier.approve", "procurement.purchase-order.approve", "procurement.contract.manage", "procurement.contract.approve"]),
         R("TDC_MANAGING_DIRECTOR", "TDC Managing Director", "Head of Entity and delegated executive approver.", [.. AuditRead, "procurement.plan.approve", "procurement.requisition.approve", "procurement.sourcing.approve", "procurement.tender.approve", "procurement.purchase-order.approve", "procurement.contract.approve", "procurement.inventory.disposal.approve"]),
         R("TDC_EXECUTIVE_APPROVER", "TDC Executive Approver", "Executive approval within delegated thresholds.", [.. Read, "procurement.requisition.approve", "procurement.sourcing.approve", "procurement.purchase-order.approve", "procurement.contract.approve"]),
@@ -98,7 +103,7 @@ public static class ProcurementAccessControlRegistry
         R("TDC_OBSERVER", "TDC Procurement Observer", "Non-voting tender and procurement observer.", [.. Read, "procurement.tender.observe"], true),
         R("TDC_STORES_OFFICER", "TDC Stores Officer", "Warehouse receipt, issue, transfer, count, and disposal initiation restricted to assigned locations.", [.. Read, "procurement.inventory.read", "procurement.inventory.receive", "procurement.inventory.issue", "procurement.inventory.transfer", "procurement.inventory.count", "procurement.inventory.adjust.request", "procurement.inventory.disposal.request"]),
         R("TDC_STORES_MANAGER", "TDC Stores Manager", "Stores oversight and controlled warehouse approvals.", [.. AuditRead, "procurement.inventory.read", "procurement.inventory.receive", "procurement.inventory.issue", "procurement.inventory.transfer", "procurement.inventory.count", "procurement.inventory.adjust.request", "procurement.inventory.adjust.approve", "procurement.inventory.master-data.manage", "Inventory.EmergencyOverride", "procurement.inventory.disposal.request", "procurement.inventory.disposal.approve"]),
-        R("TDC_FINANCE_REVIEWER", "TDC Finance Reviewer", "Budget, financial-control, PO, stock-variance, and disposal review.", [.. AuditRead, "procurement.requisition.approve", "procurement.sourcing.approve", "procurement.purchase-order.approve", "procurement.inventory.read", "procurement.inventory.adjust.approve", "procurement.inventory.disposal.approve"]),
+        R("TDC_FINANCE_REVIEWER", "TDC Finance Reviewer", "Budget, financial-control, PO, stock-variance, and disposal review.", [.. AuditRead, "procurement.budget.approve", "procurement.requisition.approve", "procurement.sourcing.approve", "procurement.purchase-order.approve", "procurement.inventory.read", "procurement.inventory.adjust.approve", "procurement.inventory.disposal.approve"]),
         R("TDC_LEGAL_REVIEWER", "TDC Legal Reviewer", "Legal review of sourcing, supplier, award, and contract decisions.", [.. Read, "procurement.sourcing.approve", "procurement.supplier.review", "procurement.contract.approve"]),
         R(InternalAuditRole, "TDC Internal Audit", "Read-only access to procurement, inventory, supplier, contract, approval, evidence, and audit records.", [.. AuditRead, "procurement.tender.observe", "procurement.supplier.review", "procurement.inventory.read"], true),
         R(IctAdministratorRole, "TDC ICT Administrator", "Identity, access, configuration, security, and shared-workflow administration.", ["procurement.access.manage", "procurement.workflow.configure", "procurement.calendar.view", "procurement.calendar.manage", "procurement.calendar.run", "procurement.inventory.master-data.manage"]),
@@ -116,6 +121,7 @@ public static class ProcurementAccessControlRegistry
     public static IReadOnlyList<ProcurementWorkflowTemplate> Workflows { get; } =
     [
         W("TDC_PROCUREMENT_PLAN", "TDC Procurement Plan Approval", "PROCUREMENT_PLAN", "Procurement Plan", "TDC_HEAD_OF_PROCUREMENT", "TDC_MANAGING_DIRECTOR"),
+        W("TDC_PROCUREMENT_BUDGET", "TDC Procurement Budget Approval", "PROCUREMENT_BUDGET", "Procurement Budget", "TDC_PROCUREMENT_OFFICER", "TDC_FINANCE_REVIEWER"),
         W("TDC_PURCHASE_REQUISITION", "TDC Purchase Requisition Approval", "PURCHASE_REQUISITION", "Purchase Requisition", "TDC_REQUISITIONER", "TDC_MANAGING_DIRECTOR"),
         W("TDC_SOURCING", "TDC Sourcing Approval", "PROCUREMENT_SOURCING", "Procurement Sourcing", "TDC_PROCUREMENT_OFFICER", "TDC_HEAD_OF_PROCUREMENT"),
         W("TDC_TENDER_EVALUATION", "TDC Tender Evaluation", "TENDER_EVALUATION", "Tender Evaluation", "TDC_PROCUREMENT_OFFICER", "TDC_EVALUATOR"),
@@ -126,6 +132,7 @@ public static class ProcurementAccessControlRegistry
         W("TDC_SUPPLIER_CHANGE", "TDC Supplier Change Approval", "SUPPLIER_CHANGE", "Supplier Change", "TDC_PROCUREMENT_OFFICER", "TDC_HEAD_OF_PROCUREMENT"),
         W("TDC_STOCK_ADJUSTMENT", "TDC Stock Adjustment Approval", "STOCK_ADJUSTMENT", "Stock Adjustment", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
         W("TDC_INVENTORY_TRANSFER", "TDC Inventory Transfer Approval", "INVENTORY_TRANSFER", "Inventory Transfer", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
+        W("TDC_SUPPLIER_RETURN", "TDC Supplier Return Approval", "SUPPLIER_RETURN", "Supplier Return", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
         W("TDC_DISPOSAL", "TDC Inventory Disposal Approval", "INVENTORY_DISPOSAL", "Inventory Disposal", "TDC_STORES_MANAGER", "TDC_DISPOSAL_COMMITTEE_MEMBER"),
         W("TDC_PROCUREMENT_EXCEPTION", "TDC Procurement Exception Approval", "PROCUREMENT_EXCEPTION", "Procurement Exception", "TDC_HEAD_OF_PROCUREMENT", "TDC_MANAGING_DIRECTOR")
     ];

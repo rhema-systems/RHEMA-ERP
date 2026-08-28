@@ -17,6 +17,24 @@ public class BudgetScenario : TenantEntity
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Human-readable version classification used in official-budget history.
+    /// Original scenarios are created through normal planning; applied requests
+    /// create Virement or Supplementary successors.
+    /// </summary>
+    [Required]
+    [MaxLength(20)]
+    public string VersionType { get; set; } = "Original";
+
+    /// <summary>Monotonically increasing official version within a fiscal year.</summary>
+    public int VersionNumber { get; set; } = 1;
+
+    /// <summary>The official scenario copied to produce this immutable version.</summary>
+    public Guid? ParentScenarioId { get; set; }
+
+    [ForeignKey(nameof(ParentScenarioId))]
+    public virtual BudgetScenario? ParentScenario { get; set; }
+
     [Required]
     public Guid FiscalYearId { get; set; }
 
@@ -91,4 +109,27 @@ public class BudgetScenario : TenantEntity
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public virtual ICollection<BudgetReturn> BudgetReturns { get; set; } = new List<BudgetReturn>();
+    public virtual ICollection<BudgetScenarioControlDimension> ControlDimensions { get; set; } = new List<BudgetScenarioControlDimension>();
+}
+
+/// <summary>
+/// Declares one transaction dimension that forms part of every budget cell in a scenario.
+/// The declaration is scenario-owned so later changes to account defaults cannot silently
+/// change the grain of an adopted budget.
+/// </summary>
+public sealed class BudgetScenarioControlDimension : TenantEntity
+{
+    [Required]
+    public Guid BudgetScenarioId { get; set; }
+
+    [Required]
+    public Guid FinanceDimensionDefinitionId { get; set; }
+
+    public int DisplayOrder { get; set; }
+
+    [ForeignKey(nameof(BudgetScenarioId))]
+    public BudgetScenario BudgetScenario { get; set; } = null!;
+
+    [ForeignKey(nameof(FinanceDimensionDefinitionId))]
+    public FinanceDimensionDefinition FinanceDimensionDefinition { get; set; } = null!;
 }

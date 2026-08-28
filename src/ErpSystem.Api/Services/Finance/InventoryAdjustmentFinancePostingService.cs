@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
@@ -20,15 +22,33 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
 
     public async Task<InventoryAdjustmentFinancePostingResult> PostAsync(StockAdjustment adjustment, CancellationToken cancellationToken = default)
     {
+        var isOpeningStock = adjustment.ReasonCode == StockAdjustmentReasonCodes.InitialStock;
+        if (isOpeningStock &&
+            (adjustment.Status != "Approved" || !adjustment.ApprovedById.HasValue || !adjustment.ApprovedAt.HasValue ||
+             string.IsNullOrWhiteSpace(adjustment.PayloadHash) || string.IsNullOrWhiteSpace(adjustment.IntegrityHash)))
+            throw new InvalidOperationException(
+                "Finance can consume only independently approved, immutable INITIAL_STOCK evidence.");
         var settings = await _db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(x => x.TenantId == adjustment.TenantId && !x.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
         var inventory = settings.ControlAccountInventoryId
             ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
-        var expense = settings.WriteOffExpenseAccountId
-            ?? throw new InvalidOperationException("Write-off Expense Account is not configured in Finance Settings.");
-        var recovery = settings.WriteOffRecoveryAccountId
-            ?? throw new InvalidOperationException("Write-off Recovery Account is not configured in Finance Settings.");
+        // Inventory owns INITIAL_STOCK plus every warehouse/location/item/quantity/unit-cost
+        // lifecycle mutation. Finance consumes only its approved immutable evidence, creates no
+        // Inventory master data, and derives the configured control/clearing accounts. The ordinary
+        // stock-adjustment expense/recovery path below is intentionally unchanged.
+        Guid? migrationClearing = isOpeningStock
+            ? settings.MigrationClearingAccountId
+                ?? throw new InvalidOperationException("Migration Clearing Account is not configured in Finance Settings.")
+            : null;
+        Guid? expense = !isOpeningStock
+            ? settings.WriteOffExpenseAccountId
+                ?? throw new InvalidOperationException("Write-off Expense Account is not configured in Finance Settings.")
+            : null;
+        Guid? recovery = !isOpeningStock
+            ? settings.WriteOffRecoveryAccountId
+                ?? throw new InvalidOperationException("Write-off Recovery Account is not configured in Finance Settings.")
+            : null;
         var currency = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant();
         var lines = new List<FinancePostingLineDto>();
         var number = 1;
@@ -37,31 +57,46 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             var amount = decimal.Round(Math.Abs(item.AdjustmentValue), 2);
             if (amount <= 0) continue;
             var description = $"Stock adjustment {adjustment.AdjustmentNumber} - {item.InventoryItem?.Name ?? item.InventoryItemId.ToString()}";
-            if (item.AdjustmentQuantity < 0)
+            if (isOpeningStock)
             {
-                lines.Add(Line(expense, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber, "INV-ADJ-EXPENSE"));
-                lines.Add(Line(inventory, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber, "INV-ADJ-CONTROL"));
+                if (item.AdjustmentQuantity <= 0 || item.UnitCost <= 0 || item.AdjustmentValue <= 0)
+                    throw new InvalidOperationException("Opening stock can post only positive quantity and unit-cost evidence.");
+                lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
+                    "INV-OPEN-CONTROL", adjustment.AdjustmentDate));
+                lines.Add(Line(migrationClearing!.Value, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
+                    "INV-OPEN-MIGRATION", adjustment.AdjustmentDate));
+            }
+            else if (item.AdjustmentQuantity < 0)
+            {
+                lines.Add(Line(expense!.Value, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
+                    "INV-ADJ-EXPENSE", adjustment.AdjustmentDate));
+                lines.Add(Line(inventory, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
+                    "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
             }
             else
             {
-                lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber, "INV-ADJ-CONTROL"));
-                lines.Add(Line(recovery, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber, "INV-ADJ-RECOVERY"));
+                lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
+                    "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
+                lines.Add(Line(recovery!.Value, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
+                    "INV-ADJ-RECOVERY", adjustment.AdjustmentDate));
             }
         }
         if (lines.Count == 0) throw new InvalidOperationException("The stock adjustment has no non-zero value to post to Finance.");
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "StockAdjustment",
             SourceDocumentId = adjustment.Id,
             SourceDocumentTenantId = adjustment.TenantId,
-            PostingAction = "PostStockAdjustment",
+            PostingAction = isOpeningStock ? "PostOpeningStock" : "PostStockAdjustment",
             SourceDocumentReference = adjustment.AdjustmentNumber,
-            Description = $"Inventory stock adjustment {adjustment.AdjustmentNumber} - {adjustment.ReasonCode}",
+            Description = isOpeningStock
+                ? $"Inventory opening stock {adjustment.AdjustmentNumber} - source schedule {adjustment.Reference}"
+                : $"Inventory stock adjustment {adjustment.AdjustmentNumber} - {adjustment.ReasonCode}",
             PostingDate = adjustment.AdjustmentDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            BookClassification = isOpeningStock ? adjustment.BookClassification : "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"StockAdjustment:{adjustment.TenantId:N}:{adjustment.Id:N}:Post",
             Lines = lines
@@ -82,7 +117,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "StockAdjustment",
             SourceDocumentId = adjustment.Id,
             SourceDocumentTenantId = adjustment.TenantId,
@@ -94,7 +129,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             Description = $"Reversal of inventory stock adjustment {adjustment.AdjustmentNumber}",
             PostingDate = plan.ReversalDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            BookClassification = adjustment.BookClassification,
             FunctionalCurrencyCode = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant(),
             IdempotencyKey = $"StockAdjustment:{adjustment.TenantId:N}:{adjustment.Id:N}:Reverse",
             Lines = plan.ReversalLines
@@ -103,7 +138,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
     }
 
     private static FinancePostingLineDto Line(Guid accountId, string description, decimal debit, decimal credit,
-        string currency, int lineNumber, string reference, string tag) => new()
+        string currency, int lineNumber, string reference, string tag, DateTime exchangeRateDate) => new()
     {
         AccountId = accountId,
         Description = description,
@@ -114,7 +149,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         TransactionCreditAmount = credit,
         ExchangeRate = 1m,
         ExchangeRateSource = "Functional currency",
-        ExchangeRateDate = DateTime.UtcNow,
+        ExchangeRateDate = exchangeRateDate,
         SourceReferenceNumber = reference,
         LineNumber = lineNumber,
         TransactionTag = tag

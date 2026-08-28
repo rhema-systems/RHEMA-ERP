@@ -121,6 +121,7 @@ export default function NewReceiptPage() {
     const searchParams = useSearchParams();
     const preselectedCustomerId = searchParams.get('customerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
+    const existingAdvancePaymentId = searchParams.get('paymentId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
     const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
@@ -135,8 +136,16 @@ export default function NewReceiptPage() {
     const preselectedDescription = searchParams.get('description') || '';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Keep invoice reduction and receipt consumption distinct. They are equal for the common
+    // same-currency path but represent different legal amounts for FIN-LIM-0022 settlements.
     const [allocations, setAllocations] = useState<Record<string, number>>({});
+    const [paymentCurrencyAllocations, setPaymentCurrencyAllocations] = useState<Record<string, number>>({});
     const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
+    // Statutory deductions belong to the invoice allocation, not the receipt header. This is
+    // essential when one receipt settles invoices in different currencies because each row must
+    // retain its own native amount and approved functional conversion.
+    const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
+    const [vatWithholdingAllocations, setVatWithholdingAllocations] = useState<Record<string, number>>({});
 
     // Fetch customers
     const { data: customersData } = useQuery({
@@ -153,6 +162,15 @@ export default function NewReceiptPage() {
         queryKey: ['payment-methods', 'active'],
         queryFn: () => cashManagementDataService.getActivePaymentMethods(),
     });
+
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+    // TDC currently operates in GHS, while the shared Finance module remains tenant-aware. Use
+    // the configured functional currency for rate behavior and labels rather than baking GHS into
+    // a cross-currency workflow that is specifically intended to support other deployments.
+    const functionalCurrencyCode = (financeSettings?.baseCurrency || 'GHS').toUpperCase();
 
     const { data: liquidityAccounts } = useQuery({
         queryKey: ['liquidity-accounts', 'active'],
@@ -194,6 +212,34 @@ export default function NewReceiptPage() {
         },
     });
 
+    const { data: existingAdvancePayment, isLoading: isLoadingAdvancePayment } = useQuery({
+        queryKey: ['customer-payment', existingAdvancePaymentId],
+        queryFn: () => {
+            if (!existingAdvancePaymentId) throw new Error('Customer advance payment id is required.');
+            return arService.getPayment(existingAdvancePaymentId);
+        },
+        enabled: !!existingAdvancePaymentId,
+    });
+
+    useEffect(() => {
+        if (!existingAdvancePaymentId || !existingAdvancePayment) return;
+
+        // The posted receipt is the immutable customer-advance lot. Freeze its origin evidence in
+        // this workspace; only invoice applications are new. Changing header currency/rate here
+        // would destroy the historical carrying value used to calculate realized FX.
+        const remainingAdvance = Math.round((
+            Number(existingAdvancePayment.totalAmount) - Number(existingAdvancePayment.allocatedAmount || 0)
+        ) * 100) / 100;
+        form.setValue('customerId', existingAdvancePayment.customerId);
+        form.setValue('bankAccountId', existingAdvancePayment.bankAccountId || undefined);
+        form.setValue('liquidityAccountId', existingAdvancePayment.liquidityAccountId || undefined);
+        form.setValue('paymentDate', new Date(existingAdvancePayment.paymentDate));
+        form.setValue('totalAmount', remainingAdvance);
+        form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
+        form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('referenceNumber', existingAdvancePayment.paymentNumber);
+    }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
+
     const selectedCustomerId = form.watch('customerId');
     const selectedBankAccountId = form.watch('bankAccountId');
     const selectedLiquidityAccountId = form.watch('liquidityAccountId');
@@ -216,6 +262,7 @@ export default function NewReceiptPage() {
     ) ?? [];
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!paymentMethods?.length) return;
 
         if (selectedPaymentMethodId) {
@@ -233,9 +280,10 @@ export default function NewReceiptPage() {
 
         form.setValue('paymentMethodId', preferredMethod.id);
         form.setValue('paymentMethod', toCustomerPaymentMethod(preferredMethod.type));
-    }, [paymentMethods, selectedPaymentMethodId, form]);
+    }, [paymentMethods, selectedPaymentMethodId, form, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!isDirectBankReceipt || !selectedBankAccountId || !bankAccounts) return;
 
         const account = bankAccounts.find((item) => item.id === selectedBankAccountId);
@@ -250,9 +298,10 @@ export default function NewReceiptPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt]);
+    }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (isDirectBankReceipt || !selectedLiquidityAccountId || !liquidityAccounts) return;
 
         const account = liquidityAccounts.find((item) => item.id === selectedLiquidityAccountId);
@@ -267,23 +316,30 @@ export default function NewReceiptPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt]);
+    }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (isDirectBankReceipt) return;
         const selectionIsEligible = eligibleLiquidityAccounts.some(account => account.id === selectedLiquidityAccountId);
         if (selectionIsEligible) return;
         form.setValue('liquidityAccountId', eligibleLiquidityAccounts[0]?.id);
-    }, [eligibleLiquidityAccounts, form, isDirectBankReceipt, selectedLiquidityAccountId]);
+    }, [eligibleLiquidityAccounts, form, isDirectBankReceipt, selectedLiquidityAccountId, existingAdvancePaymentId]);
 
     useEffect(() => {
         form.setValue('withholdingTaxAccountId', selectedWithholdingTax?.taxReceivableAccountId ?? undefined);
-        if (!selectedWithholdingTax) form.setValue('withholdingTaxAmount', 0);
+        if (!selectedWithholdingTax) {
+            form.setValue('withholdingTaxAmount', 0);
+            setWithholdingAllocations({});
+        }
     }, [form, selectedWithholdingTax]);
 
     useEffect(() => {
         form.setValue('vatWithholdingAccountId', selectedVatWithholdingTax?.taxReceivableAccountId ?? undefined);
-        if (!selectedVatWithholdingTax) form.setValue('vatWithholdingAmount', 0);
+        if (!selectedVatWithholdingTax) {
+            form.setValue('vatWithholdingAmount', 0);
+            setVatWithholdingAllocations({});
+        }
     }, [form, selectedVatWithholdingTax]);
 
     // Fetch outstanding invoices for selected customer
@@ -311,28 +367,28 @@ export default function NewReceiptPage() {
         setIsSubmitting(true);
         try {
             const method = paymentMethods?.find((item) => item.id === data.paymentMethodId);
-            if (data.paymentMethodId && !method) {
+            if (!existingAdvancePaymentId && data.paymentMethodId && !method) {
                 form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
                 return;
             }
 
             const directBankReceipt = method ? directBankMethodTypes.has(method.type) : true;
-            if (directBankReceipt && !data.bankAccountId) {
+            if (!existingAdvancePaymentId && directBankReceipt && !data.bankAccountId) {
                 form.setError('bankAccountId', { type: 'manual', message: `${method?.name ?? 'This method'} requires a bank account` });
                 return;
             }
 
-            if (!directBankReceipt && !data.liquidityAccountId) {
+            if (!existingAdvancePaymentId && !directBankReceipt && !data.liquidityAccountId) {
                 form.setError('liquidityAccountId', { type: 'manual', message: `Select the ${expectedLiquidityType} holding account` });
                 return;
             }
 
-            if (method?.requiresReference && !data.referenceNumber?.trim()) {
+            if (!existingAdvancePaymentId && method?.requiresReference && !data.referenceNumber?.trim()) {
                 form.setError('referenceNumber', { type: 'manual', message: `${method.name} requires a reference number` });
                 return;
             }
 
-            if (method?.type === PaymentMethodType.Cheque && !data.checkNumber?.trim()) {
+            if (!existingAdvancePaymentId && method?.type === PaymentMethodType.Cheque && !data.checkNumber?.trim()) {
                 form.setError('checkNumber', { type: 'manual', message: 'Cheque number is required' });
                 return;
             }
@@ -340,42 +396,97 @@ export default function NewReceiptPage() {
             const invoiceIds = new Set([
                 ...Object.keys(allocations),
                 ...Object.keys(discountAllocations),
+                ...Object.keys(withholdingAllocations),
+                ...Object.keys(vatWithholdingAllocations),
             ]);
 
             const allocationRows = Array.from(invoiceIds)
-                .map(invoiceId => ({
-                    invoiceId,
-                    allocatedAmount: Number(allocations[invoiceId]) || 0,
-                    discountAmount: Number(discountAllocations[invoiceId]) || 0,
-                }))
-                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0);
+                .map(invoiceId => {
+                    const invoice = outstandingInvoices?.find(item => item.id === invoiceId);
+                    const invoiceAmount = Number(allocations[invoiceId]) || 0;
+                    const isCrossCurrency = invoice?.currencyCode !== data.currencyCode;
+                    return {
+                        invoiceId,
+                        // allocatedAmount is always the invoice-currency cash reduction.
+                        allocatedAmount: invoiceAmount,
+                        // Cross-currency receipts must state the cash consumed from the receipt.
+                        paymentCurrencyAmount: isCrossCurrency
+                            ? Number(paymentCurrencyAllocations[invoiceId]) || 0
+                            : invoiceAmount,
+                        discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                        withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
+                        vatWithholdingAmount: Number(vatWithholdingAllocations[invoiceId]) || 0,
+                    };
+                })
+                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0 ||
+                    row.withholdingTaxAmount > 0 || row.vatWithholdingAmount > 0);
 
-            if (data.withholdingTaxAmount > 0 && !data.withholdingTaxId) {
-                toast({ title: 'WHT tax required', description: 'Select the configured WHT receivable tax.', variant: 'destructive' });
-                return;
-            }
-            if (data.vatWithholdingAmount > 0 && !data.vatWithholdingTaxId) {
-                toast({ title: 'VAT withholding tax required', description: 'Select the configured VAT withholding receivable tax.', variant: 'destructive' });
-                return;
-            }
-            if ((data.withholdingTaxAmount > 0 || data.vatWithholdingAmount > 0) && !data.withholdingCertificateNumber?.trim()) {
-                toast({ title: 'Certificate reference required', description: 'Record the customer withholding certificate/reference number.', variant: 'destructive' });
-                return;
-            }
-
-            const totalAllocated = allocationRows.reduce((sum, row) => sum + row.allocatedAmount, 0);
-            const totalReceiptSettlement = data.totalAmount + data.withholdingTaxAmount + data.vatWithholdingAmount;
-            if (totalAllocated > totalReceiptSettlement) {
+            const incompleteCrossCurrencyAllocation = allocationRows.find(row =>
+                row.allocatedAmount > 0 && (row.paymentCurrencyAmount ?? 0) <= 0);
+            if (incompleteCrossCurrencyAllocation) {
                 toast({
-                    title: 'Allocation exceeds receipt',
-                    description: 'Allocated invoice amounts cannot exceed cash received plus withholding suffered.',
+                    title: 'Receipt-currency amount required',
+                    description: 'Enter both the invoice amount settled and the amount consumed from the selected receipt currency.',
                     variant: 'destructive',
                 });
                 return;
             }
 
+            const hasWithholding = allocationRows.some(row => row.withholdingTaxAmount > 0);
+            const hasVatWithholding = allocationRows.some(row => row.vatWithholdingAmount > 0);
+            if (hasWithholding && !data.withholdingTaxId) {
+                toast({ title: 'WHT tax required', description: 'Select the configured WHT receivable tax.', variant: 'destructive' });
+                return;
+            }
+            if (hasVatWithholding && !data.vatWithholdingTaxId) {
+                toast({ title: 'VAT withholding tax required', description: 'Select the configured VAT withholding receivable tax.', variant: 'destructive' });
+                return;
+            }
+            if ((hasWithholding || hasVatWithholding) && !data.withholdingCertificateNumber?.trim()) {
+                toast({ title: 'Certificate reference required', description: 'Record the customer withholding certificate/reference number.', variant: 'destructive' });
+                return;
+            }
+
+            const totalAllocated = allocationRows.reduce((sum, row) => sum + (row.paymentCurrencyAmount ?? row.allocatedAmount), 0);
+            if (totalAllocated > data.totalAmount) {
+                toast({
+                    title: 'Allocation exceeds receipt',
+                    description: 'Receipt-currency cash allocations cannot exceed the cash received.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (existingAdvancePaymentId && allocationRows.some(row =>
+                row.discountAmount > 0 || row.withholdingTaxAmount > 0 || row.vatWithholdingAmount > 0)) {
+                toast({
+                    title: 'Advance application supports cash only',
+                    description: 'Apply the advance amount here, then use the dedicated adjustment workflow for discounts or withholding.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (existingAdvancePaymentId) {
+                if (allocationRows.length === 0) {
+                    toast({ title: 'Allocation required', description: 'Select at least one outstanding customer invoice.', variant: 'destructive' });
+                    return;
+                }
+                await arService.allocatePayment({
+                    customerPaymentId: existingAdvancePaymentId,
+                    allocations: allocationRows,
+                });
+                toast({ title: 'Advance applied', description: 'The customer advance and any realized FX were posted successfully.' });
+                router.push(`/finance/ar/payments/${existingAdvancePaymentId}`);
+                return;
+            }
+
             await arService.createPayment({
                 ...data,
+                // The API derives functional header totals from the per-invoice evidence below.
+                // Sending zero prevents mixed native currencies from being added at the header.
+                withholdingTaxAmount: 0,
+                vatWithholdingAmount: 0,
                 paymentDate: data.paymentDate.toISOString(),
                 transactionReference: data.referenceNumber,
                 allocations: allocationRows.length > 0 ? allocationRows : undefined,
@@ -396,22 +507,32 @@ export default function NewReceiptPage() {
 
     const currentAmount = form.watch('totalAmount');
     const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
-    const totalAllocated = Object.values(allocations).reduce((acc, curr) => acc + curr, 0);
+    // Remaining receipt cash is a payment-currency figure, never a sum of mixed invoice values.
+    const totalAllocated = outstandingInvoices?.reduce((sum, invoice) => {
+        const invoiceAmount = Number(allocations[invoice.id]) || 0;
+        return sum + (invoice.currencyCode === currentCurrencyCode
+            ? invoiceAmount
+            : Number(paymentCurrencyAllocations[invoice.id]) || 0);
+    }, 0) ?? 0;
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
-    const withholdingAmount = form.watch('withholdingTaxAmount') || 0;
-    const vatWithholdingAmount = form.watch('vatWithholdingAmount') || 0;
-    const totalWithholdingSuffered = withholdingAmount + vatWithholdingAmount;
-    const remainingAmount = currentAmount + totalWithholdingSuffered - totalAllocated;
+    const hasLineWithholding = Object.values(withholdingAllocations).some(amount => amount > 0);
+    const hasLineVatWithholding = Object.values(vatWithholdingAllocations).some(amount => amount > 0);
+    const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = () => {
         if (!outstandingInvoices) return;
-        // AR allocation settles the gross receivable: cash plus tax withheld by the customer.
-        let remaining = currentAmount + totalWithholdingSuffered;
+        // Auto-allocation distributes cash only. Statutory deductions require explicit invoice
+        // attribution and therefore remain a maker-entered decision.
+        let remaining = currentAmount;
         const newAllocations: Record<string, number> = {};
         const newDiscountAllocations: Record<string, number> = {};
 
         // Allocate to oldest invoices first
-        const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
+        // Cross-currency rows require an explicit, user-confirmed pair of amounts. Auto allocation
+        // therefore remains deterministic by considering only invoices in the receipt currency.
+        const sortedInvoices = outstandingInvoices
+            .filter(invoice => invoice.currencyCode === currentCurrencyCode)
+            .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
 
         for (const inv of sortedInvoices) {
             if (remaining <= 0) break;
@@ -425,6 +546,7 @@ export default function NewReceiptPage() {
             remaining -= allocateAmount;
         }
         setAllocations(newAllocations);
+        setPaymentCurrencyAllocations({});
         setDiscountAllocations(newDiscountAllocations);
     };
 
@@ -435,9 +557,13 @@ export default function NewReceiptPage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Customer Receipt</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {existingAdvancePaymentId ? 'Apply Customer Advance' : 'Record Customer Receipt'}
+                    </h1>
                     <p className="text-muted-foreground">
-                        Record a receipt from a customer and allocate it to outstanding invoices.
+                        {existingAdvancePaymentId
+                            ? 'Consume the posted receipt currency lot against outstanding customer invoices.'
+                            : 'Record a receipt from a customer and allocate it to outstanding invoices.'}
                     </p>
                 </div>
             </div>
@@ -446,7 +572,7 @@ export default function NewReceiptPage() {
                 {/* Customer receipt details; the API persists receipts as AR payments. */}
                 <Card className="md:col-span-1 h-fit">
                     <CardHeader>
-                        <CardTitle>Receipt Details</CardTitle>
+                        <CardTitle>{existingAdvancePaymentId ? 'Advance Lot' : 'Receipt Details'}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <form id="payment-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -455,7 +581,7 @@ export default function NewReceiptPage() {
                                 <Select
                                     onValueChange={(val) => form.setValue('customerId', val)}
                                     value={form.watch('customerId') || undefined}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select customer" />
@@ -479,7 +605,7 @@ export default function NewReceiptPage() {
                                     <Select
                                         onValueChange={(val) => form.setValue('bankAccountId', val)}
                                         value={form.watch('bankAccountId') || undefined}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select bank account..." />
@@ -503,7 +629,7 @@ export default function NewReceiptPage() {
                                     <Select
                                         onValueChange={(val) => form.setValue('liquidityAccountId', val)}
                                         value={form.watch('liquidityAccountId') || undefined}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder={`Select ${expectedLiquidityType} account...`} />
@@ -537,7 +663,7 @@ export default function NewReceiptPage() {
                                                         "w-full justify-start text-left font-normal",
                                                         !field.value && "text-muted-foreground"
                                                     )}
-                                                    disabled={isSubmitting}
+                                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
                                                     {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
@@ -566,7 +692,7 @@ export default function NewReceiptPage() {
                                         className="pl-14"
                                         step="0.01"
                                         {...form.register('totalAmount')}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     />
                                 </div>
                                 {form.formState.errors.totalAmount && (
@@ -581,10 +707,10 @@ export default function NewReceiptPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === 'GHS'}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} GHS
+                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
@@ -609,14 +735,9 @@ export default function NewReceiptPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <Input
-                                    type="number"
-                                    step="0.01"
-                                    min={0}
-                                    placeholder="WHT amount"
-                                    {...form.register('withholdingTaxAmount')}
-                                    disabled={isSubmitting || !selectedWithholdingTax}
-                                />
+                                <p className="rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                    Select the tax here, then enter the invoice-currency WHT on each allocation row below.
+                                </p>
                                 {selectedWithholdingTax && !selectedWithholdingTax.taxReceivableAccountId && (
                                     <p className="text-xs text-red-600">Receivable account is not configured for this tax.</p>
                                 )}
@@ -640,20 +761,15 @@ export default function NewReceiptPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <Input
-                                    type="number"
-                                    step="0.01"
-                                    min={0}
-                                    placeholder="VAT withholding amount"
-                                    {...form.register('vatWithholdingAmount')}
-                                    disabled={isSubmitting || !selectedVatWithholdingTax}
-                                />
+                                <p className="rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                    Select the tax here, then attribute VAT-WHT to the relevant invoice row below.
+                                </p>
                                 {selectedVatWithholdingTax && !selectedVatWithholdingTax.taxReceivableAccountId && (
                                     <p className="text-xs text-red-600">Receivable account is not configured for this tax.</p>
                                 )}
                             </div>
 
-                            {totalWithholdingSuffered > 0 && (
+                            {(hasLineWithholding || hasLineVatWithholding) && (
                                 <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
                                     <Label htmlFor="withholdingCertificateNumber">Customer certificate/reference</Label>
                                     <Input
@@ -728,9 +844,16 @@ export default function NewReceiptPage() {
                         </form>
                     </CardContent>
                     <CardFooter>
-                        <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
+                        <Button
+                            type="submit"
+                            form="payment-form"
+                            className="w-full"
+                            // Existing advances are immutable currency lots. Wait for that source
+                            // record before permitting any invoice application to be submitted.
+                            disabled={isSubmitting || (!!existingAdvancePaymentId && !existingAdvancePayment)}
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Record Receipt
+                            {isLoadingAdvancePayment ? 'Loading Advance...' : existingAdvancePaymentId ? 'Apply Advance' : 'Record Receipt'}
                         </Button>
                     </CardFooter>
                 </Card>
@@ -768,9 +891,9 @@ export default function NewReceiptPage() {
                                                 Discounts allowed: {formatCurrency(totalDiscounts, currentCurrencyCode)}
                                             </div>
                                         )}
-                                        {totalWithholdingSuffered > 0 && (
+                                        {(hasLineWithholding || hasLineVatWithholding) && (
                                             <div className="text-xs text-muted-foreground">
-                                                Withholding suffered: {formatCurrency(totalWithholdingSuffered, currentCurrencyCode)}
+                                                Withholding suffered is attributed per invoice currency below; Finance calculates the functional total.
                                             </div>
                                         )}
                                     </div>
@@ -786,14 +909,19 @@ export default function NewReceiptPage() {
                                                 <th className="p-3 text-left">Invoice</th>
                                                 <th className="p-3 text-left">Date</th>
                                                 <th className="p-3 text-right">Balance Due</th>
-                                                <th className="p-3 text-right w-[150px]">Allocate</th>
+                                                <th className="p-3 text-right w-[150px]">Invoice Cash</th>
+                                                <th className="p-3 text-right w-[150px]">Receipt Cash</th>
                                                 <th className="p-3 text-right w-[150px]">Discount</th>
+                                                <th className="p-3 text-right w-[140px]">WHT</th>
+                                                <th className="p-3 text-right w-[140px]">VAT-WHT</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {outstandingInvoices.map((inv) => {
                                                 const availableDiscount = Number(inv.discountAmount) || 0;
                                                 const maxCashAllocation = Math.max(inv.balanceAmount - availableDiscount, 0);
+                                                const currentCashAllocation = Number(allocations[inv.id]) || 0;
+                                                const isCrossCurrency = inv.currencyCode !== currentCurrencyCode;
 
                                                 return (
                                                     <tr key={inv.id} className="border-t">
@@ -801,7 +929,7 @@ export default function NewReceiptPage() {
                                                             <div>{inv.invoiceNumber}</div>
                                                             {availableDiscount > 0 && (
                                                                 <div className="text-xs text-emerald-700">
-                                                                    Discount available: {formatCurrency(availableDiscount, currentCurrencyCode)}
+                                                                    Discount available: {formatCurrency(availableDiscount, inv.currencyCode)}
                                                                 </div>
                                                             )}
                                                         </td>
@@ -811,7 +939,7 @@ export default function NewReceiptPage() {
                                                                 <span className="ml-2 text-xs text-red-500 font-bold">Overdue</span>
                                                             )}
                                                         </td>
-                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, currentCurrencyCode)}</td>
+                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, inv.currencyCode)}</td>
                                                         <td className="p-3">
                                                             <Input
                                                                 type="number"
@@ -830,6 +958,34 @@ export default function NewReceiptPage() {
                                                             />
                                                         </td>
                                                         <td className="p-3">
+                                                            {isCrossCurrency ? (
+                                                                <Input
+                                                                    type="number"
+                                                                    className="text-right h-8"
+                                                                    min={0}
+                                                                    value={paymentCurrencyAllocations[inv.id] || ''}
+                                                                    onChange={(e) => {
+                                                                        const val = Number(e.target.value);
+                                                                        setPaymentCurrencyAllocations(prev => ({
+                                                                            ...prev,
+                                                                            [inv.id]: val,
+                                                                        }));
+                                                                    }}
+                                                                    disabled={isSubmitting}
+                                                                    aria-label={`Receipt amount in ${currentCurrencyCode}`}
+                                                                />
+                                                            ) : (
+                                                                <div className="text-right text-muted-foreground">
+                                                                    {formatCurrency(currentCashAllocation, currentCurrencyCode)}
+                                                                </div>
+                                                            )}
+                                                            {isCrossCurrency && (
+                                                                <div className="mt-1 text-right text-xs text-muted-foreground">
+                                                                    {currentCurrencyCode} received for {inv.currencyCode} balance
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3">
                                                             <Input
                                                                 type="number"
                                                                 className="text-right h-8"
@@ -844,6 +1000,34 @@ export default function NewReceiptPage() {
                                                                     }));
                                                                 }}
                                                                 disabled={isSubmitting || availableDiscount <= 0}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                value={withholdingAllocations[inv.id] || ''}
+                                                                onChange={(e) => setWithholdingAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: Number(e.target.value),
+                                                                }))}
+                                                                disabled={isSubmitting || !selectedWithholdingTax}
+                                                                aria-label={`WHT in ${inv.currencyCode} for ${inv.invoiceNumber}`}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                value={vatWithholdingAllocations[inv.id] || ''}
+                                                                onChange={(e) => setVatWithholdingAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: Number(e.target.value),
+                                                                }))}
+                                                                disabled={isSubmitting || !selectedVatWithholdingTax}
+                                                                aria-label={`VAT withholding in ${inv.currencyCode} for ${inv.invoiceNumber}`}
                                                             />
                                                         </td>
                                                     </tr>

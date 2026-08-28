@@ -13,6 +13,7 @@ import {
   FileText,
   Home,
   KeyRound,
+  Landmark,
   Loader2,
   Users,
 } from 'lucide-react';
@@ -28,6 +29,10 @@ import {
 } from '@/components/ui/card';
 import { estatePropertyManagementService } from '@/services/estate-property-management.service';
 import type { FacilitiesProcedure } from '@/services/estate-facilities.service';
+import {
+  getProcedureStageLabel,
+  getProcedureWorkspaceActionLabel,
+} from '@/lib/procedure-workspace';
 
 const procedureIcons: Record<
   string,
@@ -39,6 +44,7 @@ const procedureIcons: Record<
   FileText,
   Home,
   KeyRound,
+  Landmark,
   Users,
 };
 
@@ -54,8 +60,7 @@ const accentClasses: Record<string, string> = {
 
 export default function EstatePropertyManagementPage() {
   const router = useRouter();
-  const [procedures, setProcedures] =
-    React.useState<FacilitiesProcedure[]>([]);
+  const [procedures, setProcedures] = React.useState<FacilitiesProcedure[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
@@ -67,12 +72,18 @@ export default function EstatePropertyManagementPage() {
         const data = await estatePropertyManagementService.getProcedures();
         if (mounted) {
           setProcedures(data);
-          setLoadError(data.length === 0 ? 'No property management workspaces were returned by the API.' : null);
+          setLoadError(
+            data.length === 0
+              ? 'No property management workspaces were returned by the API.'
+              : null
+          );
         }
       } catch {
         if (mounted) {
           setProcedures([]);
-          setLoadError('Unable to load property management workspaces from the API.');
+          setLoadError(
+            'Unable to load property management workspaces from the API.'
+          );
         }
       } finally {
         if (mounted) {
@@ -106,8 +117,9 @@ export default function EstatePropertyManagementPage() {
               Property Management
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-              Property and commercial lifecycle for received units, tenants,
-              occupants, leases, availability, and Finance AR handoffs.
+              Post-handoff property and commercial operations for received
+              units, active leases, occupants, availability, billing, and
+              Finance AR handoffs.
             </p>
           </div>
         </div>
@@ -133,6 +145,15 @@ export default function EstatePropertyManagementPage() {
         </div>
       </div>
 
+      <Card className="border-border bg-card text-card-foreground">
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          Estate casework owns applications, approvals, allocations, and lease
+          preparation. Property Management starts after an approved property or
+          unit is handed over for leasing, occupancy, billing, and ongoing
+          operations.
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {!isLoading && loadError ? (
           <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
@@ -155,6 +176,13 @@ export default function EstatePropertyManagementPage() {
             const Icon = procedureIcons[procedure.icon] || Building2;
             const accent =
               accentClasses[procedure.accent] || accentClasses.teal;
+            const isPropertyUnitRegister =
+              procedure.entityType === 'EstatePropertyManagementPropertyUnit';
+            const isLeaseManagement =
+              procedure.entityType === 'EstatePropertyManagementLease';
+            const isWorkflowManagedRequest =
+              procedure.entityType ===
+              'EstatePropertyManagementListingApplication';
 
             return (
               <Card
@@ -167,7 +195,16 @@ export default function EstatePropertyManagementPage() {
                       <Icon className={`h-5 w-5 ${accent}`} />
                     </div>
                     <Badge variant="secondary">
-                      {procedure.stageCount} stages
+                      {isPropertyUnitRegister
+                        ? 'Estate records'
+                        : isLeaseManagement
+                          ? 'Lease register'
+                          : isWorkflowManagedRequest
+                            ? 'Workflow managed'
+                            : getProcedureStageLabel(
+                                procedure.workspaceType,
+                                procedure.stageCount
+                              )}
                     </Badge>
                   </div>
                   <div>
@@ -182,14 +219,16 @@ export default function EstatePropertyManagementPage() {
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{procedure.entityType}</Badge>
-                    <Badge variant="outline">Property workspace</Badge>
+                    <Badge variant="outline">
+                      {procedure.workspaceType ?? 'Case Workflow'}
+                    </Badge>
                   </div>
                   <Button
                     variant="outline"
                     className="w-full justify-between"
                     onClick={() => openWorkspace(procedure.entityType)}
                   >
-                    Open workspace
+                    {getProcedureWorkspaceActionLabel(procedure.workspaceType)}
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </CardContent>

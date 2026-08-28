@@ -646,6 +646,11 @@ public class ProjectsControllerRouteTests
                     Id = boqItemId,
                     ProjectId = projectId,
                     ProjectPackageId = packageId,
+                    SectionCode = "A",
+                    TradeCode = "CONC",
+                    CostCode = "CC-100",
+                    MeasurementStandard = "Cesmm4",
+                    MeasurementCode = "E20",
                     Description = "Excavation",
                     ItemType = "Item",
                     Quantity = 120,
@@ -665,6 +670,47 @@ public class ProjectsControllerRouteTests
         items.Should().HaveCount(1);
         items![0].Id.Should().Be(boqItemId);
         items[0].Description.Should().Be("Excavation");
+        items[0].SectionCode.Should().Be("A");
+        items[0].TradeCode.Should().Be("CONC");
+        items[0].MeasurementStandard.Should().Be("Cesmm4");
+    }
+
+    [Fact]
+    public async Task GetProjectBoqClassifications_ShouldReturnEffectiveControlledOptions()
+    {
+        var projectId = Guid.NewGuid();
+        var tradeId = Guid.NewGuid();
+        var effectiveAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc);
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetProjectBoqClassificationOptionsAsync(projectId, effectiveAt))
+            .ReturnsAsync(new ProjectBoqClassificationOptionsDto
+            {
+                EffectiveAtUtc = effectiveAt,
+                Trades =
+                [
+                    new ProjectBoqClassificationOptionDto
+                    {
+                        Id = tradeId,
+                        CatalogType = "qs-trades",
+                        Code = "CONC",
+                        Name = "Concrete work"
+                    }
+                ]
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/{projectId}/boq-classifications?effectiveAtUtc={Uri.EscapeDataString(effectiveAt.ToString("O"))}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var options = await response.Content.ReadFromJsonAsync<ProjectBoqClassificationOptionsDto>();
+        options.Should().NotBeNull();
+        options!.EffectiveAtUtc.Should().Be(effectiveAt);
+        options.Trades.Should().ContainSingle();
+        options.Trades[0].Id.Should().Be(tradeId);
+        options.Trades[0].Code.Should().Be("CONC");
     }
 
     [Fact]
@@ -2453,6 +2499,7 @@ public class ProjectsControllerRouteTests
         => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseSetting("CandidatePortal:PortalUrl", "https://candidate.test/");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();

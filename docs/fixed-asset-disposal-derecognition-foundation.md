@@ -42,10 +42,10 @@ Whole-asset write-off/no-proceeds disposal:
 
 Unsupported and rejected or deferred:
 
-- Partial/component disposal.
+- Partial/component disposal was added later under `FIN-LIM-0042`; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
 - Foreign-currency disposal proceeds.
 - Sale proceeds through AR invoice, cash/bank receipt, or tax document creation.
-- Automatic final/partial-period depreciation at disposal.
+- Final/partial-period depreciation at disposal is now implemented under `FIN-LIM-0039`; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - Revaluation surplus transfer within equity on disposal.
 
 ## Validation Rules
@@ -98,19 +98,21 @@ Disposal gain is not classified as revenue. The current chart-of-account enum ha
 
 ## Revaluation Surplus Handling
 
-Batch 21C does not recycle revaluation surplus through profit or loss. Disposal journals do not post to the revaluation surplus account. Equity transfer policy is tracked as `FIN-LIM-0041`.
+The original Batch 21C did not recycle revaluation surplus through profit or loss. The `FIN-LIM-0041` follow-up now transfers the full remaining posted asset-specific surplus directly from the category revaluation-surplus account to the tenant retained-earnings account within the same disposal journal. The approved accounts and amount are frozen on the disposal record, rechecked before posting, and remain entirely outside disposal gain/loss. See `docs/fixed-asset-disposal-revaluation-surplus-policy-foundation.md`.
 
 ## Depreciation Interaction
 
-The disposal service requires depreciation posted through the prior fiscal period when the asset was placed in service before the disposal period. It does not calculate final or partial-period depreciation through the disposal date. That gap is tracked as `FIN-LIM-0039`.
+The disposal service requires depreciation posted through the prior fiscal period and now calculates final depreciation through the disposal date under `FIN-LIM-0039`. Time-based methods use actual inclusive days; units-of-production requires verified usage evidence. The charge and derecognition post atomically.
 
 After a successful disposal, the default book value clears accumulated depreciation and NBV to zero without mutating acquisition cost or prior depreciation schedules.
 
 ## Tax, Proceeds, And FX
 
-Sale proceeds are posted to a configured disposal proceeds clearing account. The batch does not create AR invoices, cash/bank receipts, VAT documents, or statutory sale tax outputs. That gap is tracked as `FIN-LIM-0040`.
+The original Batch 21C posted sale proceeds to a configured disposal proceeds clearing account and deliberately did not create AR invoices, cash/bank receipts, VAT documents, or statutory sale tax outputs. That historical gap was tracked as `FIN-LIM-0040`.
 
-Disposal proceeds must be in the tenant functional currency. Foreign-currency proceeds are rejected and tracked as `FIN-LIM-0043`.
+**Current status (2026-08-13):** `FIN-LIM-0040` is resolved by the subsequent Fixed Asset Sale Settlement Foundation. Approved positive-proceeds sales now create/post a canonical AR invoice and, for immediate collection, an allocated receipt; see `docs/fixed-asset-sale-settlement-foundation.md`.
+
+Disposal proceeds may be denominated in the tenant functional currency or an approved foreign currency. The foreign-currency workflow freezes the tenant-owned Daily rate and native/functional values described in `docs/fixed-asset-foreign-currency-disposal-proceeds-foundation.md`; this resolves `FIN-LIM-0043` without implying AR/cash/tax settlement integration.
 
 ## Workflow And Permissions
 
@@ -322,18 +324,21 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 | Cross-tenant disposal account rejected | `CrossTenantDisposalAccountRejected` |
 | Duplicate disposal is idempotent or safely rejected | `DuplicateDisposalIsIdempotentOrSafelyRejected` |
 | Missing required depreciation blocks disposal | `DisposalWithMissingRequiredDepreciationIsRejected` |
-| Revaluation surplus is not recycled to P&L | `RevaluationSurplusIsNotRecycledToProfitAndLoss` |
+| Revaluation surplus transfers within equity and never affects P&L | `RevaluationSurplusTransfersDirectlyToRetainedEarningsWithoutAffectingProfitAndLoss` |
+| Missing retained-earnings policy blocks applicable disposal | `RevaluedAssetDisposalRequiresConfiguredRetainedEarningsAccount` |
+| Changed policy account invalidates stale approval | `ChangedSurplusPolicyAccountCancelsStaleDisposalApproval` |
+| Changed asset-specific reserve invalidates stale approval | `ChangedRevaluationSurplusBalanceCancelsStaleDisposalApproval` |
 | Foreign-currency proceeds rejected clearly | `ForeignCurrencyProceedsRejectedClearly` |
 | Disposal audit events are emitted | `DisposalAuditEventsAreEmitted` |
 
 ## Limitations Register
 
 - `FIN-LIM-0026`: resolved for whole-asset sale/write-off disposal foundation.
-- `FIN-LIM-0039`: opened for final/partial-period depreciation on disposal.
-- `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
-- `FIN-LIM-0041`: opened for revaluation surplus equity transfer policy.
-- `FIN-LIM-0042`: opened for partial/component disposal.
-- `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
+- `FIN-LIM-0039`: resolved by controlled disposal-date depreciation; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
+- `FIN-LIM-0040`: resolved by the Fixed Asset Sale Settlement Foundation; see `docs/fixed-asset-sale-settlement-foundation.md`.
+- `FIN-LIM-0041`: resolved for full remaining asset-specific surplus transfer directly to retained earnings on whole-asset disposal.
+- `FIN-LIM-0042`: resolved by controlled proportional partial/component derecognition; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
+- `FIN-LIM-0043`: resolved by the foreign-currency disposal proceeds foundation.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open and is the natural next batch.
 
 No remaining disposal limitation blocks fixed asset reporting/reconciliation because unsupported paths either fail clearly or post to controlled clearing accounts.

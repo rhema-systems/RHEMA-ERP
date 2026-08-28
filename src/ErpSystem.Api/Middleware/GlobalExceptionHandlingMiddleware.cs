@@ -16,16 +16,13 @@ public class GlobalExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<GlobalExceptionHandlingMiddleware> _logger;
-    private readonly IWebHostEnvironment _environment;
 
     public GlobalExceptionHandlingMiddleware(
         RequestDelegate next,
-        ILogger<GlobalExceptionHandlingMiddleware> logger,
-        IWebHostEnvironment environment)
+        ILogger<GlobalExceptionHandlingMiddleware> logger)
     {
         _next = next;
         _logger = logger;
-        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -45,6 +42,7 @@ public class GlobalExceptionHandlingMiddleware
         var response = new ErrorResponse
         {
             TraceId = context.TraceIdentifier,
+            CorrelationId = context.TraceIdentifier,
             Instance = context.Request.Path,
             Timestamp = DateTime.UtcNow
         };
@@ -53,38 +51,38 @@ public class GlobalExceptionHandlingMiddleware
         {
             case ValidationException validationEx:
                 response.Title = "Validation Error";
+                response.Code = "VALIDATION_ERROR";
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = "One or more validation errors occurred.";
                 response.Errors = validationEx.Errors;
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
-            case UnauthorizedException unauthorizedEx:
+            case UnauthorizedException:
                 response.Title = "Unauthorized";
+                response.Code = "AUTHENTICATION_REQUIRED";
                 response.Status = (int)HttpStatusCode.Unauthorized;
                 response.Detail = "Authentication is required to access this resource.";
-                context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
                 break;
 
-            case ForbiddenException forbiddenEx:
+            case ForbiddenException:
                 response.Title = "Forbidden";
+                response.Code = "ACCESS_FORBIDDEN";
                 response.Status = (int)HttpStatusCode.Forbidden;
                 response.Detail = "You do not have permission to access this resource.";
-                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                 break;
 
-            case UnauthorizedAccessException unauthorizedAccessEx:
+            case UnauthorizedAccessException:
                 response.Title = "Forbidden";
+                response.Code = "ACCESS_FORBIDDEN";
                 response.Status = (int)HttpStatusCode.Forbidden;
-                response.Detail = unauthorizedAccessEx.Message;
-                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                response.Detail = "You do not have permission to access this resource.";
                 break;
 
             case NotFoundException notFoundEx:
                 response.Title = "Not Found";
+                response.Code = "RESOURCE_NOT_FOUND";
                 response.Status = (int)HttpStatusCode.NotFound;
                 response.Detail = notFoundEx.Message ?? "The requested resource was not found.";
-                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                 break;
 
             // The medical module raises this for domain rejections and missing records. Its own
@@ -97,9 +95,11 @@ public class GlobalExceptionHandlingMiddleware
                 response.Title = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
                     ? "Not Found"
                     : "Unprocessable Entity";
+                response.Code = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
+                    ? "RESOURCE_NOT_FOUND"
+                    : "WORKFLOW_REJECTED";
                 response.Status = (int)medicalStatus;
                 response.Detail = medicalEx.Message;   // safe to display by design
-                context.Response.StatusCode = (int)medicalStatus;
                 break;
 
             // Succession raises this when a request collides with an existing record — a position
@@ -214,37 +214,37 @@ public class GlobalExceptionHandlingMiddleware
 
             case ConflictException conflictEx:
                 response.Title = "Conflict";
+                response.Code = "RESOURCE_CONFLICT";
                 response.Status = (int)HttpStatusCode.Conflict;
                 response.Detail = conflictEx.Message ?? "The request conflicts with the current state of the resource.";
-                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 break;
 
-            case InvalidOperationException invalidOpEx:
+            case InvalidOperationException:
                 response.Title = "Invalid Operation";
+                response.Code = "INVALID_OPERATION";
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = "The operation is not valid for the current state of the object.";
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
-            case ArgumentException argumentEx:
+            case ArgumentException:
                 response.Title = "Bad Request";
+                response.Code = "INVALID_ARGUMENT";
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = "Invalid argument provided.";
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
-            case TimeoutException timeoutEx:
+            case TimeoutException:
                 response.Title = "Request Timeout";
+                response.Code = "REQUEST_TIMEOUT";
                 response.Status = (int)HttpStatusCode.RequestTimeout;
                 response.Detail = "The request timed out. Please try again.";
-                context.Response.StatusCode = (int)HttpStatusCode.RequestTimeout;
                 break;
 
             default:
-                response.Title = "Internal Server Error";
+                response.Title = "We couldn't complete your request";
+                response.Code = "UNEXPECTED_ERROR";
                 response.Status = (int)HttpStatusCode.InternalServerError;
-                response.Detail = "An unexpected error occurred while processing your request.";
-                context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                response.Detail = $"Something went wrong while processing your request. Please try again. If the problem continues, contact your administrator. Reference ID: {response.TraceId}.";
                 break;
         }
 
@@ -260,22 +260,18 @@ public class GlobalExceptionHandlingMiddleware
             return;
         }
 
-        // Only include detailed error information in development
-        if (_environment.IsDevelopment())
-        {
-            response.DeveloperMessage = exception.Message;
-            response.StackTrace = exception.StackTrace;
-        }
-
         try
         {
-            context.Response.ContentType = "application/json";
+            // This middleware owns the public error contract. Never expose exception messages,
+            // stack traces or framework diagnostics, including on Development workstations.
+            context.Response.Clear();
+            context.Response.StatusCode = response.Status;
+            context.Response.ContentType = "application/problem+json";
 
-            // Security: Don't leak sensitive information
             await context.Response.WriteAsync(JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = _environment.IsDevelopment()
+                WriteIndented = false
             }));
         }
         catch (ObjectDisposedException writeEx)
@@ -319,6 +315,11 @@ public class GlobalExceptionHandlingMiddleware
             var shortMessage = exception.Message ?? string.Empty;
 
             var tenantId = currentUser.TenantId ?? Guid.Empty;
+            if (tenantId == Guid.Empty)
+            {
+                return;
+            }
+
             var now = DateTime.UtcNow;
 
             var requestPath = context.Request.Path.Value;
@@ -340,35 +341,6 @@ public class GlobalExceptionHandlingMiddleware
                 requestPath: requestPath);
 
             var repo = unitOfWork.Repository<SystemExceptionLog>();
-            var existing = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Fingerprint == fingerprint);
-
-            if (existing != null && !existing.IsDeleted)
-            {
-                existing.OccurrenceCount += 1;
-                existing.LastOccurredAt = now;
-                existing.Level = level;
-                existing.Logger = loggerName;
-                existing.ShortMessage = Truncate(redactedShort, 1000);
-                existing.FullMessage = redactedFull;
-                existing.ExceptionType = exception.GetType().FullName;
-                existing.StackTrace = redactedStack;
-                existing.TraceId = response.TraceId;
-                existing.RequestMethod = context.Request.Method;
-                existing.RequestPath = requestPath;
-                existing.QueryString = redactedQuery;
-                existing.ReferrerUrl = redactedReferrer;
-                existing.RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
-                existing.UserAgent = redactedUserAgent;
-                existing.UserId = userId;
-                existing.Username = context.User?.FindFirst(ClaimTypes.Name)?.Value;
-                existing.UpdatedAt = now;
-                existing.LastModifiedById = userId;
-
-                await repo.UpdateAsync(existing);
-                await unitOfWork.SaveChangesAsync();
-                return;
-            }
-
             var log = new SystemExceptionLog
             {
                 Id = Guid.NewGuid(),
@@ -397,45 +369,7 @@ public class GlobalExceptionHandlingMiddleware
             };
 
             await repo.AddAsync(log);
-
-            try
-            {
-                await unitOfWork.SaveChangesAsync();
-            }
-            catch (Exception saveEx)
-            {
-                // If we hit the unique fingerprint constraint due to a race, retry by updating the existing row.
-                _logger.LogDebug(saveEx, "Exception log insert failed; attempting fingerprint dedup update");
-
-                var again = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Fingerprint == fingerprint);
-                if (again == null)
-                {
-                    throw;
-                }
-
-                again.OccurrenceCount += 1;
-                again.LastOccurredAt = now;
-                again.Level = level;
-                again.Logger = loggerName;
-                again.ShortMessage = Truncate(redactedShort, 1000);
-                again.FullMessage = redactedFull;
-                again.ExceptionType = exception.GetType().FullName;
-                again.StackTrace = redactedStack;
-                again.TraceId = response.TraceId;
-                again.RequestMethod = context.Request.Method;
-                again.RequestPath = requestPath;
-                again.QueryString = redactedQuery;
-                again.ReferrerUrl = redactedReferrer;
-                again.RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
-                again.UserAgent = redactedUserAgent;
-                again.UserId = userId;
-                again.Username = context.User?.FindFirst(ClaimTypes.Name)?.Value;
-                again.UpdatedAt = now;
-                again.LastModifiedById = userId;
-
-                await repo.UpdateAsync(again);
-                await unitOfWork.SaveChangesAsync();
-            }
+            await unitOfWork.SaveChangesAsync();
         }
         catch (Exception ex)
         {
@@ -647,16 +581,14 @@ public class ConflictException : Exception
 public class ErrorResponse
 {
     public string Title { get; set; } = string.Empty;
+    public string Code { get; set; } = "UNEXPECTED_ERROR";
     public int Status { get; set; }
     public string Detail { get; set; } = string.Empty;
     public string Instance { get; set; } = string.Empty;
     public string TraceId { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
     public Dictionary<string, string[]>? Errors { get; set; }
-
-    // Development-only properties
-    public string? DeveloperMessage { get; set; }
-    public string? StackTrace { get; set; }
 }
 
 // Extension method for easy registration

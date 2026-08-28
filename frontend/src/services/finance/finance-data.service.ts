@@ -16,6 +16,8 @@ import type {
     SaveFinanceCloseTemplateVersion,
     JournalEntry,
     JournalEntryAttachment,
+    FinanceBudgetControlEvaluation,
+    FinanceBudgetOverrideRequest,
     FinanceJournalAuditLog,
     FinanceSettings,
     SegmentStructure,
@@ -29,6 +31,16 @@ import type {
     CreateExchangeRateDto,
     CreateJournalEntryDto,
     CreateOpeningBalanceBatchDto,
+    CreateFixedAssetOpeningBalanceBatchDto,
+    CreateBankAccountOpeningBalanceDto,
+    CreateResidualGlEquityOpeningBalanceDto,
+    CreateSupplierAdvanceOpeningBalanceDto,
+    CreateCustomerAdvanceOpeningBalanceDto,
+    CreateApWithholdingOpeningBalanceDto,
+    CreateArWithholdingOpeningBalanceDto,
+    SpecializedOpeningBalanceOptions,
+    GovernedOpeningBalanceOptions,
+    GovernedOpeningBalanceOptionsRequest,
     UpdateOpeningBalanceBatchDto,
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
@@ -38,6 +50,7 @@ import type {
     OpeningBalanceBatch,
     OpeningBalanceDiagnostic,
     OpeningBalanceValidationResult,
+    SubledgerOpeningBalanceReadiness,
     ReverseSubledgerAdjustmentJournalDto,
     CreateFiscalYearDto,
     BalanceSheetReportDto,
@@ -56,8 +69,20 @@ import type {
     SubledgerModule,
     TrialBalanceReportDto,
     TrialBalanceRequestDto,
+    FinanceDimensionDefinition,
+    FinanceDimensionValue,
+    FinanceDimensionAccountRule,
+    UpsertFinanceDimensionDefinition,
+    UpsertFinanceDimensionValue,
+    UpsertFinanceDimensionAccountRule,
 } from '@/types/finance';
+import type {
+    CreateOpeningStockAdjustmentDto,
+    GovernedInventoryOpeningResult,
+    OpeningStockOptions,
+} from '@/lib/finance/opening-balance-governance';
 import { appendFinanceSegmentFilters } from '@/lib/finance/report-segment-filters';
+import { appendFinanceDimensionFilters } from '@/lib/finance/report-dimension-filters';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
 import { apiService } from '@/services/api.service';
@@ -129,6 +154,52 @@ class FinanceDataService {
 
     async getAccountById(id: string): Promise<Account> {
         return apiService.get<Account>(`/finance/accounts/${id}`);
+    }
+
+    // ===== CODING DIMENSIONS =====
+
+    async getFinanceDimensions(includeInactive = false): Promise<FinanceDimensionDefinition[]> {
+        const suffix = includeInactive ? '?includeInactive=true' : '';
+        return apiService.get<FinanceDimensionDefinition[]>(`/finance/dimensions${suffix}`);
+    }
+
+    async createFinanceDimension(dto: UpsertFinanceDimensionDefinition): Promise<FinanceDimensionDefinition> {
+        return apiService.post<FinanceDimensionDefinition>('/finance/dimensions', dto);
+    }
+
+    async updateFinanceDimension(id: string, dto: UpsertFinanceDimensionDefinition): Promise<FinanceDimensionDefinition> {
+        return apiService.put<FinanceDimensionDefinition>(`/finance/dimensions/${id}`, dto);
+    }
+
+    async createFinanceDimensionValue(
+        definitionId: string,
+        dto: UpsertFinanceDimensionValue,
+    ): Promise<FinanceDimensionValue> {
+        return apiService.post<FinanceDimensionValue>(`/finance/dimensions/${definitionId}/values`, dto);
+    }
+
+    async updateFinanceDimensionValue(
+        definitionId: string,
+        valueId: string,
+        dto: UpsertFinanceDimensionValue,
+    ): Promise<FinanceDimensionValue> {
+        return apiService.put<FinanceDimensionValue>(`/finance/dimensions/${definitionId}/values/${valueId}`, dto);
+    }
+
+    async getFinanceDimensionRules(accountId?: string): Promise<FinanceDimensionAccountRule[]> {
+        const suffix = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+        return apiService.get<FinanceDimensionAccountRule[]>(`/finance/dimensions/rules${suffix}`);
+    }
+
+    async createFinanceDimensionRule(dto: UpsertFinanceDimensionAccountRule): Promise<FinanceDimensionAccountRule> {
+        return apiService.post<FinanceDimensionAccountRule>('/finance/dimensions/rules', dto);
+    }
+
+    async updateFinanceDimensionRule(
+        id: string,
+        dto: UpsertFinanceDimensionAccountRule,
+    ): Promise<FinanceDimensionAccountRule> {
+        return apiService.put<FinanceDimensionAccountRule>(`/finance/dimensions/rules/${id}`, dto);
     }
 
     async createAccount(dto: CreateAccountDto): Promise<Account> {
@@ -254,9 +325,10 @@ class FinanceDataService {
         return apiService.get<FiscalPeriod>(`/finance/fiscal-periods/${id}`);
     }
 
-    async openFiscalPeriod(id: string, reason: string, affectedPeriodAssessment: string): Promise<FinancePeriodReopenRequest> {
-        // Opening a certified period is a maker-checker request, never a direct state change.
-        return this.requestFiscalPeriodReopen(id, reason, affectedPeriodAssessment);
+    async openFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+        // Future-to-Open is a first-use lifecycle transition. Certified Closed periods continue
+        // through requestFiscalPeriodReopen so their signed close evidence remains protected.
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/open`, { reason });
     }
 
     async evaluateFiscalPeriodClose(id: string): Promise<FinanceCloseWorkspace> {
@@ -501,6 +573,14 @@ class FinanceDataService {
         return normalizeJournalEntry(raw);
     }
 
+    async getJournalEntryBudgetControl(id: string): Promise<FinanceBudgetControlEvaluation> {
+        return apiService.get<FinanceBudgetControlEvaluation>(`/finance/journal-entries/${id}/budget-control`);
+    }
+
+    async requestJournalEntryBudgetOverride(id: string, reason: string): Promise<FinanceBudgetOverrideRequest> {
+        return apiService.post<FinanceBudgetOverrideRequest>(`/finance/journal-entries/${id}/budget-override`, { reason });
+    }
+
     async withdrawJournalEntryApproval(id: string, reason?: string): Promise<JournalEntry> {
         const raw = await apiService.post<any>(`/finance/journal-entries/${id}/withdraw-approval`, {
             reason: reason || 'Approval request withdrawn.',
@@ -522,6 +602,64 @@ class FinanceDataService {
 
     async createOpeningBalanceBatch(dto: CreateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
         return apiService.post<OpeningBalanceBatch>('/finance/opening-balances', dto);
+    }
+
+    async createFixedAssetOpeningBalanceBatch(dto: CreateFixedAssetOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/fixed-assets', dto);
+    }
+
+    async createBankAccountOpeningBalance(dto: CreateBankAccountOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/bank-accounts', dto);
+    }
+
+    async createResidualGlEquityOpeningBalance(dto: CreateResidualGlEquityOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/residual-gl-equity', dto);
+    }
+
+    async getGovernedOpeningBalanceOptions(request: GovernedOpeningBalanceOptionsRequest): Promise<GovernedOpeningBalanceOptions> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('openingDate', request.openingDate);
+        queryParams.append('fiscalPeriodId', request.fiscalPeriodId);
+        queryParams.append('bookClassification', request.bookClassification);
+
+        return apiService.get<GovernedOpeningBalanceOptions>(`/finance/opening-balances/governed-options?${queryParams}`);
+    }
+
+    async getOpeningStockOptions(): Promise<OpeningStockOptions> {
+        // Inventory owns opening-stock masters, readiness and workflow. Finance consumes this
+        // typed boundary only; it does not duplicate Inventory lookups or accept account IDs.
+        return apiService.get<OpeningStockOptions>('/inventory/adjustments/opening-stock/options');
+    }
+
+    async createOpeningStockAdjustment(dto: CreateOpeningStockAdjustmentDto): Promise<GovernedInventoryOpeningResult> {
+        return apiService.post<GovernedInventoryOpeningResult>('/inventory/adjustments/opening-stock', dto);
+    }
+
+    // These specialised cutover endpoints create canonical AP/AR facts and a controlled
+    // opening batch together. Callers must never recreate them as freehand GL lines because
+    // later allocation, certificate and remittance workflows depend on the source linkage.
+    async createSupplierAdvanceOpeningBalance(dto: CreateSupplierAdvanceOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/supplier-advances', dto);
+    }
+
+    async createCustomerAdvanceOpeningBalance(dto: CreateCustomerAdvanceOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/customer-advances', dto);
+    }
+
+    async createApWithholdingOpeningBalance(dto: CreateApWithholdingOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/ap-withholding', dto);
+    }
+
+    async createArWithholdingOpeningBalance(dto: CreateArWithholdingOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/ar-withholding', dto);
+    }
+
+    async getSpecializedOpeningBalanceOptions(): Promise<SpecializedOpeningBalanceOptions> {
+        return apiService.get<SpecializedOpeningBalanceOptions>('/finance/opening-balances/specialized-options');
+    }
+
+    async getSubledgerOpeningBalanceReadiness(): Promise<SubledgerOpeningBalanceReadiness> {
+        return apiService.get<SubledgerOpeningBalanceReadiness>('/finance/opening-balances/subledger-readiness');
     }
 
     async getOpeningBalanceBatches(): Promise<OpeningBalanceBatch[]> {
@@ -608,6 +746,7 @@ class FinanceDataService {
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<TrialBalanceReportDto>(`/finance/statements/trial-balance?${queryParams}`);
     }
@@ -622,6 +761,7 @@ class FinanceDataService {
         if (params.accountIds && params.accountIds.length > 0) {
             params.accountIds.forEach(accountId => queryParams.append('accountIds', accountId));
         }
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<DetailedLedgerReportDto>(`/finance/statements/detailed-ledger?${queryParams}`);
     }
@@ -635,6 +775,7 @@ class FinanceDataService {
         if (params.layoutId) queryParams.append('layoutId', params.layoutId);
         if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
     }
@@ -647,6 +788,7 @@ class FinanceDataService {
         if (params.layoutId) queryParams.append('layoutId', params.layoutId);
         if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
     }

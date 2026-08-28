@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces.QuantitySurvey;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -30,6 +31,7 @@ public class TenderBidService : ITenderBidService
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IQuantitySurveyTenderBoqSubmissionService _quantitySurveyTenderBoqSubmissions;
 
     public TenderBidService(
         ITenderBidRepository bidRepository,
@@ -50,6 +52,7 @@ public class TenderBidService : ITenderBidService
         IProcurementTenderControlService tenderControlService,
         IProcurementTenderDocumentControlService tenderDocumentControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IQuantitySurveyTenderBoqSubmissionService quantitySurveyTenderBoqSubmissions,
         ILogger<TenderBidService> logger)
     {
         _bidRepository = bidRepository;
@@ -70,6 +73,7 @@ public class TenderBidService : ITenderBidService
         _tenderControlService = tenderControlService;
         _tenderDocumentControlService = tenderDocumentControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _quantitySurveyTenderBoqSubmissions = quantitySurveyTenderBoqSubmissions;
         _logger = logger;
     }
 
@@ -84,7 +88,7 @@ public class TenderBidService : ITenderBidService
             var items = await _bidItemRepository.GetByBidIdAsync(id);
             var documents = await _bidDocumentRepository.GetByBidIdAsync(id);
 
-            return MapToDetailDto(bid, tender, items, documents);
+            return await ProtectFinancialProposalAsync(MapToDetailDto(bid, tender, items, documents));
         }
         catch (Exception ex)
         {
@@ -108,7 +112,7 @@ public class TenderBidService : ITenderBidService
             var items = await _bidItemRepository.GetByBidIdAsync(bid.Id);
             var documents = await _bidDocumentRepository.GetByBidIdAsync(bid.Id);
 
-            return MapToDetailDto(bidWithAllData, tender, items, documents);
+            return await ProtectFinancialProposalAsync(MapToDetailDto(bidWithAllData, tender, items, documents));
         }
         catch (Exception ex)
         {
@@ -132,7 +136,7 @@ public class TenderBidService : ITenderBidService
                 var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
                 var completedPayment = payments.FirstOrDefault(p => p.Status == "Completed");
 
-                items.Add(MapToSummaryDto(bid, tender, completedPayment));
+                items.Add(await ProtectFinancialProposalAsync(MapToSummaryDto(bid, tender, completedPayment)));
             }
 
             return new PagedResult<TenderBidSummaryDto>
@@ -164,7 +168,7 @@ public class TenderBidService : ITenderBidService
                 var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
                 var completedPayment = payments.FirstOrDefault(p => p.Status == "Completed");
 
-                summaries.Add(MapToSummaryDto(bid, tender, completedPayment));
+                summaries.Add(await ProtectFinancialProposalAsync(MapToSummaryDto(bid, tender, completedPayment)));
             }
 
             return summaries;
@@ -184,32 +188,6 @@ public class TenderBidService : ITenderBidService
             var bids = await _bidRepository.GetByBusinessPartnerIdAsync(businessPartnerId);
             var bidList = bids.ToList();
 
-            // Also get bids for tenders where the current user is assigned via TenderAssignment
-            var assignments = await _assignmentRepository.GetByBusinessPartnerIdAsync(businessPartnerId);
-
-            // Filter assignments for the current user
-            var userAssignments = assignments.Where(a =>
-                a.AssignmentType == "AllUsers" ||
-                a.AssignedToUserId == _currentUserProvider.UserId
-            ).ToList();
-
-            // Get tender IDs from assignments
-            var assignedTenderIds = userAssignments.Select(a => a.TenderId).Distinct().ToList();
-
-            // Get bids for assigned tenders (that aren't already in the list)
-            foreach (var tenderId in assignedTenderIds)
-            {
-                var tenderBids = await _bidRepository.GetByTenderIdAsync(tenderId);
-                foreach (var tenderBid in tenderBids)
-                {
-                    // Only add if not already in the list (avoid duplicates)
-                    if (!bidList.Any(b => b.Id == tenderBid.Id))
-                    {
-                        bidList.Add(tenderBid);
-                    }
-                }
-            }
-
             var summaries = new List<TenderBidSummaryDto>();
 
             foreach (var bid in bidList)
@@ -220,7 +198,7 @@ public class TenderBidService : ITenderBidService
                 var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId);
                 var completedPayment = payments.FirstOrDefault(p => p.Status == "Completed");
 
-                summaries.Add(MapToSummaryDto(bid, tender, completedPayment));
+                summaries.Add(await ProtectFinancialProposalAsync(MapToSummaryDto(bid, tender, completedPayment)));
             }
 
             return summaries.OrderByDescending(s => s.SubmittedDate);
@@ -287,8 +265,8 @@ public class TenderBidService : ITenderBidService
                 throw new InvalidOperationException("Bids can only be submitted for published tenders");
             }
 
-            var isNctOrIct = await _tenderControlService.IsNctOrIctAsync(tender.Id);
-            if (!isNctOrIct && DateTime.UtcNow > tender.SubmissionDeadline)
+            var usesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
+            if (!usesControlledTenderLifecycle && DateTime.UtcNow > tender.SubmissionDeadline)
             {
                 throw new InvalidOperationException("Tender submission deadline has passed");
             }
@@ -562,8 +540,8 @@ public class TenderBidService : ITenderBidService
             await _tenderDocumentControlService.EnsureSubmissionReadyAsync(
                 ProcurementTenderDocumentSourceType.Tender, tender.Id, bid.BusinessPartnerId,
                 Guid.NewGuid().ToString("N"));
-            var isNctOrIct = await _tenderControlService.IsNctOrIctAsync(tender.Id);
-            if (!isNctOrIct && submittedAtUtc > tender.SubmissionDeadline)
+            var usesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
+            if (!usesControlledTenderLifecycle && submittedAtUtc > tender.SubmissionDeadline)
             {
                 throw new InvalidOperationException("Tender submission deadline has passed");
             }
@@ -581,6 +559,12 @@ public class TenderBidService : ITenderBidService
             {
                 throw new InvalidOperationException("All bid items must have valid unit price (greater than 0) and offered quantity (greater than 0) before submission");
             }
+
+            // Project-linked tenders must pass the shared QS intake gate. Non-project
+            // procurement remains unchanged; the gate is a deliberate no-op there.
+            await _quantitySurveyTenderBoqSubmissions.EnsureReadyForTenderSubmissionAsync(
+                id,
+                Guid.NewGuid().ToString("N"));
 
             bid.Status = "Submitted";
             bid.SubmittedDate = submittedAtUtc;
@@ -690,10 +674,10 @@ public class TenderBidService : ITenderBidService
         {
             var bid = await _bidRepository.GetWithAllRelatedDataAsync(id)
                 ?? throw new InvalidOperationException($"Bid with ID {id} not found");
-            if (await _tenderControlService.IsNctOrIctAsync(bid.TenderId))
+            if (await _tenderControlService.IsControlledTenderMethodAsync(bid.TenderId))
                 throw new ProcurementTenderControlConflictException(
                     "TENDER_STATUTORY_OPENING_REQUIRED",
-                    "NCT/ICT bids can be opened only through the signed public-opening control.");
+                    "NCT, ICT, QBS, and QCBS bids can be opened only through the signed public-opening control.");
 
             if (bid.Status != "Submitted")
             {
@@ -727,10 +711,10 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            if (await _tenderControlService.IsNctOrIctAsync(tenderId))
+            if (await _tenderControlService.IsControlledTenderMethodAsync(tenderId))
                 throw new ProcurementTenderControlConflictException(
                     "TENDER_STATUTORY_OPENING_REQUIRED",
-                    "NCT/ICT bids can be opened only through the signed public-opening control.");
+                    "NCT, ICT, QBS, and QCBS bids can be opened only through the signed public-opening control.");
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var submittedBids = bids.Where(b => b.Status == "Submitted").ToList();
 
@@ -769,22 +753,31 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
-
-            return bids
-                .OrderBy(b => b.SubmittedDate)
-                .Select(b => new SupplierBidListItemDto
-                {
-                    BidNumber = b.BidNumber,
-                    BusinessPartnerName = b.BusinessPartner?.PartnerName ?? "Unknown",
-                    BusinessPartnerCode = b.BusinessPartner?.PartnerCode ?? "N/A",
-                    SubmittedDate = b.SubmittedDate,
-                    Status = b.Status,
-                    OpenedDate = b.OpenedDate,
-                    TotalBidAmount = b.TotalBidAmount,
-                    Currency = b.Currency
-                })
+            var bids = (await _bidRepository.GetByTenderIdAsync(tenderId))
+                .OrderBy(bid => bid.SubmittedDate)
                 .ToList();
+            var result = new List<SupplierBidListItemDto>(bids.Count);
+            foreach (var bid in bids)
+            {
+                var item = new SupplierBidListItemDto
+                {
+                    BidNumber = bid.BidNumber,
+                    BusinessPartnerName = bid.BusinessPartner?.PartnerName ?? "Unknown",
+                    BusinessPartnerCode = bid.BusinessPartner?.PartnerCode ?? "N/A",
+                    SubmittedDate = bid.SubmittedDate,
+                    Status = bid.Status,
+                    OpenedDate = bid.OpenedDate,
+                    TotalBidAmount = bid.TotalBidAmount,
+                    Currency = bid.Currency
+                };
+                if (await ShouldConcealFinancialProposalAsync(tenderId, bid.Id))
+                {
+                    item.TotalBidAmount = 0m;
+                    item.Currency = null;
+                }
+                result.Add(item);
+            }
+            return result;
         }
         catch (Exception ex)
         {
@@ -950,7 +943,9 @@ public class TenderBidService : ITenderBidService
     }
 
     // Bid Documents
-    public async Task<TenderBidDocumentDto> UploadBidDocumentAsync(Guid bidId, UploadBidDocumentDto dto, string filePath, string? fileType, long? fileSize)
+    public async Task<TenderBidDocumentDto> UploadBidDocumentAsync(Guid bidId, UploadBidDocumentDto dto,
+        string logicalFileReference, string? fileType, long? fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId)
     {
         try
         {
@@ -964,11 +959,14 @@ public class TenderBidService : ITenderBidService
                 TenderBidId = bidId,
                 DocumentName = dto.DocumentName,
                 DocumentType = dto.DocumentType,
-                FilePath = filePath,
+                FilePath = logicalFileReference,
                 FileType = fileType,
                 FileSize = fileSize,
                 UploadedDate = DateTime.UtcNow,
                 UploadedById = _currentUserProvider.UserId,
+                FileUploadRecordId = fileUploadRecordId,
+                CentralDocumentRecordId = centralDocumentRecordId,
+                CentralDocumentVersionId = centralDocumentVersionId,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -1223,6 +1221,47 @@ public class TenderBidService : ITenderBidService
         return await _bidRepository.GenerateBidNumberAsync();
     }
 
+    private async Task<bool> ShouldConcealFinancialProposalAsync(Guid tenderId, Guid bidId) =>
+        !_currentUserProvider.IsExternalUser &&
+        await _tenderControlService.ShouldConcealFinancialProposalAsync(tenderId, bidId);
+
+    private async Task<TenderBidSummaryDto> ProtectFinancialProposalAsync(TenderBidSummaryDto value)
+    {
+        if (!await ShouldConcealFinancialProposalAsync(value.TenderId, value.Id)) return value;
+        value.TotalBidAmount = 0m;
+        value.Currency = null;
+        value.FinancialScore = null;
+        value.CombinedScore = null;
+        return value;
+    }
+
+    private async Task<TenderBidDetailDto> ProtectFinancialProposalAsync(TenderBidDetailDto value)
+    {
+        if (!await ShouldConcealFinancialProposalAsync(value.TenderId, value.Id)) return value;
+        value.TotalBidAmount = 0m;
+        value.Currency = null;
+        value.PaymentTerms = null;
+        value.CommercialProposal = null;
+        value.PriceScore = null;
+        value.FinancialScore = null;
+        value.CombinedScore = null;
+        value.Evaluations.Clear();
+        foreach (var item in value.Items)
+        {
+            item.UnitPrice = 0m;
+            item.TotalPrice = 0m;
+        }
+        value.Documents = value.Documents.Where(IsExplicitTechnicalProposalDocument).ToList();
+        return value;
+    }
+
+    private static bool IsExplicitTechnicalProposalDocument(TenderBidDocumentDto document)
+    {
+        var marker = $"{document.DocumentType} {document.DocumentName}";
+        return marker.Contains("technical", StringComparison.OrdinalIgnoreCase) ||
+               marker.Contains("qualification", StringComparison.OrdinalIgnoreCase);
+    }
+
     // Mapping methods
     private static TenderBidSummaryDto MapToSummaryDto(TenderBid bid, Tender? tender, TenderPayment? payment)
     {
@@ -1336,7 +1375,10 @@ public class TenderBidService : ITenderBidService
             FileType = document.FileType,
             FileSize = document.FileSize,
             UploadedDate = document.UploadedDate,
-            UploadedByName = string.Empty // Would need to fetch from User entity
+            UploadedByName = string.Empty, // Would need to fetch from User entity
+            FileUploadRecordId = document.FileUploadRecordId,
+            CentralDocumentRecordId = document.CentralDocumentRecordId,
+            CentralDocumentVersionId = document.CentralDocumentVersionId
         };
     }
 

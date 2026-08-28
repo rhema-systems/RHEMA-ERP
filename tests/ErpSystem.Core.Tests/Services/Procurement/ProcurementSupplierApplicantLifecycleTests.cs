@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
@@ -6,10 +8,12 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
+using ErpSystem.Data.Repositories.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -20,6 +24,228 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementSupplierApplicantLifecycleTests
 {
+    [Fact]
+    public async Task ExternalStatusHistoryDoesNotRequireAnInternalUserForeignKey()
+    {
+        await using var fixture = new Fixture();
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationNumber = "APP26EXT01",
+            ApplicantName = "External Applicant",
+            ApplicantEmail = "external.history@example.test",
+            PartnerType = "Supplier",
+            Status = "Draft",
+            CreatedAt = DateTime.UtcNow
+        };
+        fixture.Context.BusinessPartnerRegistrations.Add(registration);
+        await fixture.Context.SaveChangesAsync();
+
+        var repository = new BusinessPartnerRegistrationRepository(
+            fixture.Context,
+            NullLogger<BusinessPartnerRegistrationRepository>.Instance);
+        await repository.UpdateStatusAsync(
+            registration.Id,
+            "Submitted",
+            changedById: null,
+            "Submitted by verified supplier applicant");
+        await fixture.Context.SaveChangesAsync();
+
+        var history = await fixture.Context.BusinessPartnerRegistrationStatusHistories
+            .SingleAsync(item => item.RegistrationId == registration.Id);
+        history.ChangedById.Should().BeNull();
+        history.ToStatus.Should().Be("Submitted");
+    }
+
+    [Fact]
+    public async Task ExistingErpIdentityCannotStartSupplierApplication()
+    {
+        await using var fixture = new Fixture();
+        fixture.Context.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "internal.admin@example.test",
+            NormalizedUserName = "INTERNAL.ADMIN@EXAMPLE.TEST",
+            Email = "internal.admin@example.test",
+            NormalizedEmail = "INTERNAL.ADMIN@EXAMPLE.TEST",
+            EmailConfirmed = true,
+            FirstName = "Internal",
+            LastName = "Administrator",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            AuthenticationProvider = AuthenticationProvider.LDAP,
+            CreatedAt = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var prepare = () => fixture.Service.PrepareVerificationChallengeAsync(
+            fixture.TenantId,
+            ProcurementSupplierApplicantVerificationChannel.Email,
+            "INTERNAL.ADMIN@example.test");
+        (await prepare.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should()
+            .Be("SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED");
+
+        var create = () => fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "INTERNAL.ADMIN@example.test",
+                CompanyName = "Unsafe Supplier",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
+            },
+            "existing-internal-identity");
+
+        (await create.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should()
+            .Be("SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED");
+        (await fixture.Context.BusinessPartnerRegistrations.AnyAsync())
+            .Should().BeFalse();
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.AnyAsync())
+            .Should().BeFalse();
+        (await fixture.Context.ProcurementSupplierOnboardingTokens.AnyAsync())
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ApplicationTokenDeliveryAcceptsUppercaseOnboardingHash()
+    {
+        await using var fixture = new Fixture();
+        var issued = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "token-delivery@example.test",
+                CompanyName = "Token Delivery Supplier",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Services
+            },
+            "issue-token-delivery-test");
+        const string plaintextToken = "Application_Token-Case-Safe-001";
+        var token = await fixture.Context.ProcurementSupplierOnboardingTokens
+            .SingleAsync(item => item.Id == issued.TokenId);
+        token.TokenHashSha256 = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(plaintextToken)));
+        await fixture.Context.SaveChangesAsync();
+
+        var delivery = await fixture.Service.DeliverApplicationTokenAsync(
+            token.Id,
+            plaintextToken,
+            "deliver-uppercase-token");
+
+        delivery.ApplicantAccessFound.Should().BeTrue();
+        delivery.Delivered.Should().BeTrue();
+        delivery.Status.Should().Be("Sent");
+        fixture.DeliveredMessages.Should().ContainSingle(message =>
+            message.Contains(plaintextToken, StringComparison.Ordinal));
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.TokenId == token.Id);
+        access.NotificationAttemptCount.Should().Be(1);
+        access.LastNotificationStatus.Should().Be("ApplicationTokenSent");
+    }
+
+    [Fact]
+    public async Task PaidVerifiedApplicationWithholdsTokenAndCreatesOnlyPaymentSession()
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SeedSystemActor();
+
+        var issued = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "paid-applicant@example.test",
+                CompanyName = "Paid Applicant Limited",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Services
+            },
+            "paid-verified-application");
+
+        issued.PlaintextToken.Should().BeNull();
+        issued.TokenStatus.Should()
+            .Be(ProcurementSupplierOnboardingTokenStatus.AwaitingPayment);
+        issued.RestrictedSession.Should().NotBeNull();
+        issued.RestrictedSession!.PaymentOnly.Should().BeTrue();
+        issued.RestrictedSession.TokenId.Should().Be(issued.TokenId);
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync();
+        var registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync();
+        var session = await fixture.Context.ProcurementSupplierApplicantSessions
+            .SingleAsync();
+        issued.RestrictedSession.SessionId.Should().Be(session.Id);
+        issued.RestrictedSession.ApplicantActorId.Should().Be(access.Id);
+        registration.CreatedBy.Should().Be("Verified Supplier Applicant");
+        registration.CreatedById.Should().Be(access.Id);
+        access.CreatedById.Should().Be(access.Id);
+        session.CreatedById.Should().Be(access.Id);
+        access.Id.Should().NotBe(fixture.ActorId,
+            "a pre-approval applicant must not borrow the tenant administrator identity");
+    }
+
+    [Fact]
+    public async Task ReverifiedPaidContactResumesOneApplicationAndRotatesRestrictedSession()
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SeedSystemActor();
+
+        var first = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Sms,
+                Contact = "024 123 4567",
+                CompanyName = "Recoverable Supplier Limited",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Services
+            },
+            "paid-recovery-first");
+        first.RestrictedSession.Should().NotBeNull();
+        var firstSession = first.RestrictedSession!;
+
+        var preparation = await fixture.Service.PrepareVerificationChallengeAsync(
+            fixture.TenantId,
+            ProcurementSupplierApplicantVerificationChannel.Sms,
+            "+233 24 123 4567");
+        preparation.ResumesExistingApplication.Should().BeTrue();
+        preparation.NormalizedContact.Should().Be("+233241234567");
+
+        var resumed = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Sms,
+                Contact = "+233 24 123 4567",
+                CompanyName = "A changed name must not create a duplicate",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
+            },
+            "paid-recovery-second");
+
+        resumed.ResumedExistingApplication.Should().BeTrue();
+        resumed.RegistrationId.Should().Be(first.RegistrationId);
+        resumed.TokenId.Should().Be(first.TokenId);
+        resumed.PlaintextToken.Should().BeNull();
+        resumed.RestrictedSession.Should().NotBeNull();
+        resumed.RestrictedSession!.PaymentOnly.Should().BeTrue();
+        resumed.RestrictedSession.SessionReference.Should()
+            .NotBe(firstSession.SessionReference);
+        (await fixture.Context.BusinessPartnerRegistrations.CountAsync()).Should().Be(1);
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.CountAsync()).Should().Be(1);
+        (await fixture.Context.ProcurementSupplierOnboardingTokens.CountAsync()).Should().Be(1);
+
+        var sessions = await fixture.Context.ProcurementSupplierApplicantSessions
+            .OrderBy(item => item.IssuedAtUtc)
+            .ToListAsync();
+        sessions.Should().HaveCount(2);
+        sessions.Single(item => item.SessionReference == firstSession.SessionReference)
+            .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Revoked);
+        sessions.Single(item => item.SessionReference == resumed.RestrictedSession.SessionReference)
+            .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Active);
+    }
+
     [Fact]
     public async Task VerifiedContactMigratesRetainedDraftWithoutReplacingAuditOwner()
     {
@@ -67,7 +293,8 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         var access = await fixture.Context.ProcurementSupplierApplicantAccesses
             .SingleAsync();
         access.RegistrationId.Should().Be(registration.Id);
-        access.CreatedById.Should().Be(fixture.ActorId);
+        access.CreatedById.Should().Be(access.Id);
+        access.Id.Should().NotBe(fixture.ActorId);
     }
 
     [Fact]
@@ -146,20 +373,6 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             .SingleAsync(item => item.Id == issued.RegistrationId);
         registration.ApplicantEmail.Should().Be(expectedEmail);
         registration.ApplicantPhone.Should().Be(expectedPhone);
-
-        var duplicate = () => fixture.Service.CreateVerifiedApplicationAsync(
-            new VerifyAndIssueSupplierApplicantTokenRequest
-            {
-                TenantId = fixture.TenantId,
-                Channel = channel,
-                Contact = contact,
-                CompanyName = "Duplicate Applicant",
-                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
-            },
-            "duplicate-contact");
-        (await duplicate.Should()
-                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
-            .Which.Code.Should().Be("SUPPLIER_APPLICANT_ACTIVE_APPLICATION_EXISTS");
 
         var firstSession = await fixture.Service.StartSessionAsync(
             new StartSupplierApplicantSessionRequest
@@ -352,6 +565,264 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
     }
 
     [Fact]
+    public async Task ApprovalPreflightRejectsExistingErpIdentityBeforeProvisioning()
+    {
+        await using var fixture = new Fixture();
+        var subject = fixture.SeedApprovedApplication();
+        fixture.Context.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "approved@example.test",
+            NormalizedUserName = "APPROVED@EXAMPLE.TEST",
+            Email = "approved@example.test",
+            NormalizedEmail = "APPROVED@EXAMPLE.TEST",
+            EmailConfirmed = true,
+            FirstName = "Existing",
+            LastName = "Administrator",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            AuthenticationProvider = AuthenticationProvider.LDAP,
+            CreatedAt = DateTime.UtcNow.AddDays(-30)
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var validate = () => fixture.Service
+            .ValidateApprovedSupplierProvisioningAsync(
+                subject.RegistrationId,
+                fixture.ActorId,
+                "approval-identity-preflight");
+
+        var exception = (await validate.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which;
+        exception.Code.Should().Be("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS");
+        exception.Message.Should().Contain("existing ERP account");
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.SingleAsync())
+            .ApprovedUserId.Should().BeNull();
+        (await fixture.Context.BusinessPartnerUsers.AnyAsync())
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CorrectedVerifiedContactIsAtomicAuditedAndProvisionsSupplier()
+    {
+        await using var fixture = new Fixture();
+        var subject = fixture.SeedApprovedApplication();
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.RegistrationId == subject.RegistrationId);
+        access.Status =
+            ProcurementSupplierApplicantAccessStatus.ApprovedPendingCredentialDelivery;
+        access.TerminalOutcome = "Approved";
+        access.TerminalAtUtc = DateTime.UtcNow.AddMinutes(-1);
+        var registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync(item => item.Id == subject.RegistrationId);
+        registration.RegistrationDataJson =
+            "{\"email\":\"approved@example.test\",\"companyName\":\"Approved Supplier\"}";
+        var partner = await fixture.Context.BusinessPartners
+            .SingleAsync(item => item.Id == subject.BusinessPartnerId);
+        partner.PrimaryEmail = "approved@example.test";
+        await fixture.Context.SaveChangesAsync();
+
+        fixture.Context.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "approved@example.test",
+            NormalizedUserName = "APPROVED@EXAMPLE.TEST",
+            Email = "approved@example.test",
+            NormalizedEmail = "APPROVED@EXAMPLE.TEST",
+            FirstName = "Existing",
+            LastName = "Administrator",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow.AddDays(-10)
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.CorrectVerifiedContactAndRetryAsync(
+            subject.RegistrationId,
+            new CorrectSupplierApplicantVerifiedContactRequest
+            {
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = " SUPPLIER.OWNER@EXAMPLE.TEST ",
+                Reason = "Replace approved@example.test with SUPPLIER.OWNER@EXAMPLE.TEST after supplier verification."
+            },
+            fixture.ActorId,
+            "correct-approved-contact");
+
+        result.ContactCorrected.Should().BeTrue();
+        result.ProvisioningRetried.Should().BeTrue();
+        result.CredentialDelivered.Should().BeTrue();
+        result.MaskedContact.Should().Be("su***@example.test");
+        access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.RegistrationId == subject.RegistrationId);
+        access.VerifiedContact.Should().Be("supplier.owner@example.test");
+        access.VerifiedContactMasked.Should().Be("su***@example.test");
+        access.VerifiedContactHashSha256.Should().HaveLength(64);
+        access.IntegrityHash.Should().HaveLength(64);
+        access.Status.Should()
+            .Be(ProcurementSupplierApplicantAccessStatus.CredentialDelivered);
+        registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync(item => item.Id == subject.RegistrationId);
+        registration.ApplicantEmail.Should().Be("supplier.owner@example.test");
+        registration.RegistrationDataJson.Should()
+            .Contain("supplier.owner@example.test")
+            .And.Contain("Approved Supplier");
+        partner = await fixture.Context.BusinessPartners
+            .SingleAsync(item => item.Id == subject.BusinessPartnerId);
+        partner.PrimaryEmail.Should().Be("supplier.owner@example.test");
+        var supplierUser = await fixture.Context.Users
+            .SingleAsync(item => item.Id == access.ApprovedUserId);
+        supplierUser.Email.Should().Be("supplier.owner@example.test");
+        fixture.DeliveredMessages.Should().ContainSingle(message =>
+            message.Contains("supplier.owner@example.test", StringComparison.Ordinal) &&
+            message.Contains(
+                "https://supplier-portal.example.test/login",
+                StringComparison.Ordinal));
+
+        var correctionEvent = fixture.RecordedControlEvents.Single(item =>
+            item.Action == "ApplicantVerifiedContactCorrected");
+        var eventJson = System.Text.Json.JsonSerializer.Serialize(correctionEvent);
+        eventJson.Should().NotContain("approved@example.test");
+        eventJson.Should().NotContain("supplier.owner@example.test");
+        correctionEvent.Reason.Should().Contain("[redacted contact]");
+        fixture.ContactCorrectionStore.Verify(item =>
+            item.SetVerifiedContactCorrectionContextAsync(
+                access.Id,
+                fixture.ActorId,
+                access.VerifiedContactHashSha256,
+                It.IsAny<CancellationToken>()), Times.Once);
+        fixture.ContactCorrectionStore.Verify(item =>
+            item.ClearVerifiedContactCorrectionContextAsync(
+                It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ContactCorrectionRejectsErpIdentityAndAnotherActiveApplication()
+    {
+        await using var fixture = new Fixture();
+        var subject = fixture.SeedApprovedApplication();
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.RegistrationId == subject.RegistrationId);
+        access.Status =
+            ProcurementSupplierApplicantAccessStatus.ApprovedPendingCredentialDelivery;
+        access.TerminalOutcome = "Approved";
+        access.TerminalAtUtc = DateTime.UtcNow;
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "internal@example.test",
+            NormalizedUserName = "INTERNAL@EXAMPLE.TEST",
+            Email = "internal@example.test",
+            NormalizedEmail = "INTERNAL@EXAMPLE.TEST",
+            FirstName = "Internal",
+            LastName = "User",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var identityConflict = () => fixture.Service
+            .PrepareVerifiedContactCorrectionAsync(
+                subject.RegistrationId,
+                new PrepareSupplierApplicantContactCorrectionRequest
+                {
+                    Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                    Contact = "internal@example.test"
+                },
+                fixture.ActorId,
+                "contact-conflict-identity");
+        (await identityConflict.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should().Be("SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED");
+
+        await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "other.applicant@example.test",
+                CompanyName = "Other Applicant",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
+            },
+            "other-active-application");
+        var applicationConflict = () => fixture.Service
+            .PrepareVerifiedContactCorrectionAsync(
+                subject.RegistrationId,
+                new PrepareSupplierApplicantContactCorrectionRequest
+                {
+                    Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                    Contact = "other.applicant@example.test"
+                },
+                fixture.ActorId,
+                "contact-conflict-application");
+        (await applicationConflict.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should().Be("SUPPLIER_APPLICANT_CONTACT_IN_USE");
+    }
+
+    [Fact]
+    public async Task ContactCorrectionChannelSwitchRemovesOnlyMatchingOldContact()
+    {
+        await using var fixture = new Fixture();
+        var subject = fixture.SeedApprovedApplication();
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.RegistrationId == subject.RegistrationId);
+        access.Status =
+            ProcurementSupplierApplicantAccessStatus.ApprovedPendingCredentialDelivery;
+        access.TerminalOutcome = "Approved";
+        access.TerminalAtUtc = DateTime.UtcNow;
+        var registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync(item => item.Id == subject.RegistrationId);
+        registration.ApplicantEmail = "approved@example.test";
+        registration.RegistrationDataJson =
+            "{\"email\":\"approved@example.test\",\"phone\":null," +
+            "\"contactPersonEmail\":\"genuine.contact@example.test\"}";
+        var partner = await fixture.Context.BusinessPartners
+            .SingleAsync(item => item.Id == subject.BusinessPartnerId);
+        partner.PrimaryEmail = "approved@example.test";
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.CorrectVerifiedContactAndRetryAsync(
+            subject.RegistrationId,
+            new CorrectSupplierApplicantVerifiedContactRequest
+            {
+                Channel = ProcurementSupplierApplicantVerificationChannel.Sms,
+                Contact = "+233 24 555 0199",
+                Reason = "Move credential delivery to the supplier-owned verified phone."
+            },
+            fixture.ActorId,
+            "correct-channel-switch");
+
+        result.CredentialDelivered.Should().BeTrue();
+        registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync(item => item.Id == subject.RegistrationId);
+        registration.ApplicantEmail.Should().BeNull();
+        registration.ApplicantPhone.Should().Be("+233245550199");
+        using (var registrationData = System.Text.Json.JsonDocument.Parse(
+                   registration.RegistrationDataJson))
+        {
+            var root = registrationData.RootElement;
+            root.GetProperty("email").ValueKind.Should()
+                .Be(System.Text.Json.JsonValueKind.Null);
+            root.GetProperty("phone").GetString().Should().Be("+233245550199");
+            root.GetProperty("contactPersonEmail").GetString().Should()
+                .Be("genuine.contact@example.test");
+        }
+        partner = await fixture.Context.BusinessPartners
+            .SingleAsync(item => item.Id == subject.BusinessPartnerId);
+        partner.PrimaryEmail.Should().BeNull();
+        partner.PrimaryPhone.Should().Be("+233245550199");
+        access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.RegistrationId == subject.RegistrationId);
+        var supplierUser = await fixture.Context.Users
+            .SingleAsync(item => item.Id == access.ApprovedUserId);
+        supplierUser.Email.Should().BeNull();
+        supplierUser.PhoneNumber.Should().Be("+233245550199");
+    }
+
+    [Fact]
     public async Task ActivationRetryResumesStrictlyMatchedPartialIdentity()
     {
         await using var fixture = new Fixture
@@ -494,6 +965,7 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
 
     private sealed class Fixture : IAsyncDisposable
     {
+        private readonly bool _paid;
         private Guid _currentTenantId;
         private Guid _currentUserId;
         private bool _external;
@@ -514,11 +986,15 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         public bool FailRoleAssignmentOnce { get; set; }
         public string LastTemporaryPassword { get; private set; } = string.Empty;
         public List<string> DeliveredMessages { get; } = [];
+        public List<ProcurementControlEventWriteRequest> RecordedControlEvents { get; } = [];
+        public Mock<IProcurementSupplierApplicantContactCorrectionStore>
+            ContactCorrectionStore { get; } = new();
         public ApplicationDbContext Context { get; }
         public ProcurementSupplierApplicantAccessService Service { get; }
 
-        public Fixture()
+        public Fixture(bool paid = false)
         {
+            _paid = paid;
             _currentTenantId = TenantId;
             _currentUserId = ActorId;
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -660,6 +1136,8 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             events.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
                     It.IsAny<CancellationToken>()))
+                .Callback<ProcurementControlEventWriteRequest, CancellationToken>(
+                    (request, _) => RecordedControlEvents.Add(request))
                 .ReturnsAsync(new ProcurementControlEventDto());
 
             var access = new Mock<IProcurementAccessControlService>();
@@ -673,16 +1151,37 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     ActorUserId = ActorId
                 });
 
+            ContactCorrectionStore.SetupGet(item => item.HasRequiredTransaction)
+                .Returns(true);
+            ContactCorrectionStore.Setup(item =>
+                    item.SetVerifiedContactCorrectionContextAsync(
+                        It.IsAny<Guid>(),
+                        It.IsAny<Guid>(),
+                        It.IsAny<string>(),
+                        It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            ContactCorrectionStore.Setup(item =>
+                    item.ClearVerifiedContactCorrectionContextAsync(
+                        It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             Service = new ProcurementSupplierApplicantAccessService(
                 _unitOfWork,
                 _tokenService.Object,
                 _registrations.Object,
+                ContactCorrectionStore.Object,
                 events.Object,
                 access.Object,
                 current.Object,
                 _userManager.Object,
                 _roleManager.Object,
                 _notifications.Object,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["FrontendUrl"] = "https://supplier-portal.example.test/"
+                    })
+                    .Build(),
                 Options.Create(new SupplierApplicantAccessOptions()),
                 NullLogger<ProcurementSupplierApplicantAccessService>.Instance);
         }
@@ -812,7 +1311,7 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     It.IsAny<Guid>()))
                 .ReturnsAsync((Guid id, UpdateBusinessPartnerRegistrationDto request, Guid _) =>
                     Detail(id, request.CompanyName, request.Email, _registrationStatus));
-            _registrations.Setup(item => item.SubmitForReviewAsync(
+            _registrations.Setup(item => item.SubmitExternalApplicantForReviewAsync(
                     It.IsAny<Guid>(), It.IsAny<Guid>()))
                 .Callback(() => _registrationStatus = "Submitted")
                 .Returns(Task.CompletedTask);
@@ -846,7 +1345,9 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     new ProcurementSupplierOnboardingTokenIssueResultDto
                     {
                         Token = _tokens[registrationId],
-                        PlaintextToken = "one-time-application-token"
+                        PlaintextToken = _paid
+                            ? null
+                            : "one-time-application-token"
                     });
             _tokenService.Setup(item => item.ValidateApplicantTokenAsync(
                     It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -866,15 +1367,24 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             TokenReference = $"TOK-{registrationId:N}"[..20],
             TokenHashSha256 = new string('d', 64),
             TokenLastFour = "1234",
-            Status = ProcurementSupplierOnboardingTokenStatus.Active,
-            PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.NotRequired,
+            Generation = 1,
+            Status = _paid
+                ? ProcurementSupplierOnboardingTokenStatus.AwaitingPayment
+                : ProcurementSupplierOnboardingTokenStatus.Active,
+            PaymentStatus = _paid
+                ? ProcurementSupplierOnboardingPaymentStatus.Pending
+                : ProcurementSupplierOnboardingPaymentStatus.NotRequired,
             IssuedAtUtc = DateTime.UtcNow,
             SourceConfigurationProfileId = Guid.NewGuid(),
             SourceConfigurationProfileCode = "TDC-PROCUREMENT",
             SourceConfigurationProfileVersion = 1,
             SourceConfigurationDecisionId = Guid.NewGuid(),
-            FeeMode = ProcurementSupplierOnboardingFeeMode.Free,
+            FeeMode = _paid
+                ? ProcurementSupplierOnboardingFeeMode.Paid
+                : ProcurementSupplierOnboardingFeeMode.Free,
             FeeType = "Supplier application token",
+            FeeAmount = _paid ? 100m : 0m,
+            TotalAmount = _paid ? 100m : 0m,
             CurrencyCode = "GHS",
             ReceiptNumberFormat = "SUP-{#####}",
             ExemptionRule = "Controlled",

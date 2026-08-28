@@ -103,15 +103,17 @@ The diagnostics cover:
 
 ## Subledger Opening Migration Decision
 
-GL trial-balance opening balances are supported through controlled opening-balance batches.
+GL trial-balance opening balances are supported through controlled opening-balance batches. The same workspace now exposes consolidated subledger readiness and can prepare controlled GL evidence from selected fixed-asset opening register records.
 
 GL-only opening balances are not sufficient for subledger sign-off where open source balances exist:
 
-- AP opening invoices must be loaded as posted AP source documents if production cutover needs AP aging.
-- AR opening invoices must be loaded as posted AR source documents if production cutover needs AR aging.
-- Fixed asset opening registers must be loaded through fixed asset opening/import source records that reconcile to posted GL if production cutover needs asset register reporting.
+- AP opening invoices must be loaded through the existing canonical AP opening-invoice path if production cutover needs AP aging.
+- AR opening invoices must be loaded through the existing canonical AR opening-invoice path if production cutover needs AR aging.
+- Fixed asset opening registers must be imported as opening book values and posted through the generated, maker-checker-controlled fixed-asset opening batch if production cutover needs asset register reporting.
+- Unapplied supplier/customer advances must be prepared through **Advances & WHT** so they remain available as individually allocatable advance lots without replaying historical cash.
+- Unremitted AP WHT and outstanding AR WHT certificates must be prepared through the same workspace so statutory evidence survives cutover and reconciles to the tax control accounts.
 
-Unsupported AP/AR/fixed-asset opening imports must remain rejected by the GL-only opening-balance flow.
+Generic GL lines still cannot masquerade as subledger evidence. TDC confirmed the specialised cutover shape, and `FIN-LIM-0048` implementation now covers it; representative-data rehearsal and accountant sign-off remain under `FIN-LIM-0017`.
 
 ## Final Migration/Sign-Off Checklist
 
@@ -231,4 +233,4 @@ Focused tests are in `ControlledOpeningBalancePostingTests`:
 - `FIN-LIM-0007`: resolved for tenant-safe back-reference diagnostics and repair.
 - `FIN-LIM-0008`: resolved for bank snapshot diagnostics and rebuild.
 - `FIN-LIM-0017`: materially narrowed but still open until production migration execution and accountant sign-off evidence are completed.
-- `FIN-LIM-0048`: open for AP/AR/fixed-asset subledger opening-document migration where production cutover requires open subledger source balances.
+- `FIN-LIM-0048`: implementation resolved for canonical AP/AR opening invoices, controlled fixed-asset register-to-GL evidence, unapplied advances, and WHT/certificate opening records. Representative-data rehearsal remains a `FIN-LIM-0017` acceptance activity.

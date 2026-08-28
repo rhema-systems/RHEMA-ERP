@@ -11,6 +11,72 @@ public sealed class FinanceConcurrencyHardeningTests
 {
     [Fact]
     [Trait("Category", "Architecture")]
+    [Trait("Batch", "QuantitySurveyFinalAcceptance")]
+    public void ApPaymentReversal_ShouldStartSerializableTransactionInsideSqlServerExecutionStrategy()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "AP",
+            "VendorPaymentService.cs"));
+        var reversal = ExtractMember(
+            source,
+            "public Task<VendorPaymentDto> ReversePaymentAsync",
+            "public Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync");
+
+        var strategyIndex = reversal.IndexOf("ExecuteInStrategyAsync", StringComparison.Ordinal);
+        var transactionIndex = reversal.IndexOf("BeginTransactionAsync", StringComparison.Ordinal);
+
+        strategyIndex.Should().BeGreaterThan(-1, "SQL Server retry handling must own the complete AP reversal unit");
+        transactionIndex.Should().BeGreaterThan(strategyIndex, "the serializable transaction must be created inside the execution strategy");
+        reversal.Should().Contain("IsolationLevel.Serializable", "invoice settlement and compensating GL writes must remain serialized");
+        reversal.Should().Contain("RollbackAsync", "a failed reversal attempt must release its transaction before retry or failure audit");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinancePeriodCloseIssue32")]
+    public void PeriodCloseTransactions_ShouldStartInsideSqlServerExecutionStrategy()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Fiscal",
+            "FiscalPeriodService.cs"));
+        var templateControl = ExtractMember(
+            source,
+            "private async Task<T> ExecuteCloseTemplateControlAsync<T>",
+            "private async Task EnsureDefaultCloseTemplatesAsync");
+        var periodControl = ExtractMember(
+            source,
+            "private async Task<T> ExecutePeriodCloseControlAsync<T>",
+            "private async Task<FinanceCloseCycle> GetOrCreateActiveCloseCycleAsync");
+
+        foreach (var control in new[] { templateControl, periodControl })
+        {
+            var strategyIndex = control.IndexOf("ExecuteInStrategyAsync", StringComparison.Ordinal);
+            var transactionIndex = control.IndexOf("BeginTransactionAsync", StringComparison.Ordinal);
+            strategyIndex.Should().BeGreaterThan(-1, "SQL Server retry handling must own the complete close-control unit");
+            transactionIndex.Should().BeGreaterThan(strategyIndex, "the user transaction must be created inside the execution strategy");
+            control.Should().Contain("IsolationLevel.Serializable", "period-close decisions still require serializable isolation");
+            control.Should().Contain("AcquireTransactionLockAsync", "the transaction-scoped application lock remains the concurrency boundary");
+            control.Should().Contain("RollbackAsync", "a failed retry attempt must release transaction state before it can be repeated");
+        }
+
+        periodControl.Should().Contain("FIN:CLOSE:", "evaluation, certification, close and reopen actions must share a period lock");
+        templateControl.Should().Contain("FIN:CLOSE-TEMPLATE:", "template version allocation must retain its tenant-wide lock");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
     public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseAtomicBalanceDeltas()
     {
@@ -574,7 +640,7 @@ public sealed class FinanceConcurrencyHardeningTests
         var atomicMethod = ExtractMember(
             source,
             "private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync",
-            "private IQueryable<WorkflowApproval> QueryPendingApprovals");
+            "internal IQueryable<WorkflowApproval> QueryPendingApprovals");
 
         processMethod.Should().Contain("ProcessWorkflowAndOutcomeAtomicallyAsync",
             "controller actions must not finalize workflow state separately from the Finance outcome");
@@ -685,6 +751,37 @@ public sealed class FinanceConcurrencyHardeningTests
             "manual certificate numbers must remain tenant-unique");
         coreMethod.Should().Contain("GenerateCertificateNumberAsync",
             "automatic numbering must be calculated inside the serialized transaction");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Contract", "FIN-INT-007")]
+    public void ProcurementAssetDraft_ShouldReserveAcceptedQuantityAtomically()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "FixedAssets",
+            "ProcurementFixedAssetCapitalizationAdapter.cs"));
+        var createMethod = ExtractMember(
+            source,
+            "public async Task<ProcurementFixedAssetCapitalizationDto> CreateDraftAsync",
+            "private async Task<ProcurementFixedAssetCapitalizationDto> CreateDraftCoreAsync");
+
+        createMethod.Should().Contain("CreateExecutionStrategy()",
+            "SQL Server transient retry handling must own the Finance reservation transaction");
+        createMethod.Should().Contain("BeginTransactionAsync(IsolationLevel.Serializable",
+            "availability and reservation must be serialized for concurrent Finance users");
+        createMethod.Should().Contain("CreateDraftCoreAsync",
+            "ambient and adapter-owned transactions must execute the same source-validation logic");
+        createMethod.Should().Contain("CommitAsync(cancellationToken)",
+            "the asset draft and accepted-unit reservation must commit together");
+        createMethod.Should().Contain("RollbackAsync(cancellationToken)",
+            "a failed handoff must not leave an orphaned asset draft or source reservation");
     }
 
     [Fact]

@@ -22,6 +22,10 @@ public interface IProcurementReceiptInspectionStore
 {
     bool HasRequiredTransaction { get; }
     Task SetMutationContextAsync(Guid inspectionCaseId, CancellationToken cancellationToken = default);
+    Task SetWorkflowRebindContextAsync(
+        Guid inspectionCaseId,
+        Guid workflowDefinitionId,
+        CancellationToken cancellationToken = default);
     Task ClearMutationContextAsync(CancellationToken cancellationToken = default);
 }
 

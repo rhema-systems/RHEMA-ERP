@@ -204,43 +204,87 @@ public class RoleController : ControllerBase
                 return NotFound($"Role with ID {id} not found");
             }
 
-            if (role.IsSystemRole || Constants.Roles.IsProtectedSystemRole(role.Name))
+            var isProtectedSystemRole =
+                role.IsSystemRole || Constants.Roles.IsProtectedSystemRole(role.Name);
+            if (isProtectedSystemRole &&
+                (!string.Equals(
+                        (request.Name ?? string.Empty).Trim(),
+                        role.Name,
+                        StringComparison.Ordinal) ||
+                 !string.Equals(
+                        (request.Description ?? string.Empty).Trim(),
+                        (role.Description ?? string.Empty).Trim(),
+                        StringComparison.Ordinal)))
             {
-                return BadRequest($"'{role.Name}' is a protected system role and cannot be modified.");
+                return BadRequest(
+                    $"'{role.Name}' is a protected system role. Its name and description are locked, but its permission assignments can be updated.");
             }
 
-            if (Constants.Roles.IsProtectedSystemRole(request.Name))
+            if (!isProtectedSystemRole &&
+                Constants.Roles.IsProtectedSystemRole(request.Name))
             {
                 return BadRequest($"'{request.Name}' is reserved for a protected system role and cannot be assigned to a custom role.");
             }
+
+            if (!isProtectedSystemRole && string.IsNullOrWhiteSpace(request.Name))
+            {
+                return BadRequest("Role name is required.");
+            }
+
+            var currentRoleWithPermissions =
+                await _rolePermissionService.GetRoleWithPermissionsByIdAsync(id);
+            var oldPermissions = currentRoleWithPermissions?.RolePermissions
+                .Select(item => item.Permission.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray() ?? [];
 
             // Capture old values for audit logging
             var oldValues = new
             {
                 Name = role.Name,
                 Description = role.Description,
-                IsSystemRole = role.IsSystemRole
+                IsSystemRole = role.IsSystemRole,
+                Permissions = oldPermissions
             };
 
-            role.Name = request.Name;
-            role.Description = request.Description;
-
-            var updatedRole = await _roleService.UpdateRoleAsync(role);
-
-            // Handle permissions update
-            if (request.Permissions != null)
+            var requestedPermissionNames = (request.Permissions ?? [])
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var permissions = (await _permissionService.GetAllPermissionsAsync())
+                .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First(),
+                    StringComparer.OrdinalIgnoreCase);
+            var unknownPermissions = requestedPermissionNames
+                .Where(name => !permissions.ContainsKey(name))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (unknownPermissions.Length > 0)
             {
-                var permissions = await _permissionService.GetAllPermissionsAsync();
-                var permissionIds = permissions
-                    .Where(p => request.Permissions.Contains(p.Name))
-                    .Select(p => p.Id)
-                    .ToList();
-
-                await _permissionService.UpdateRolePermissionsAsync(
-                    updatedRole.Id,
-                    permissionIds,
-                    _currentUserService.UserName);
+                return BadRequest(new
+                {
+                    Message = "One or more selected permissions do not exist.",
+                    UnknownPermissions = unknownPermissions
+                });
             }
+
+            var updatedRole = role;
+            if (!isProtectedSystemRole)
+            {
+                role.Name = request.Name.Trim();
+                role.Description = request.Description;
+                updatedRole = await _roleService.UpdateRoleAsync(role);
+            }
+
+            await _permissionService.UpdateRolePermissionsAsync(
+                updatedRole.Id,
+                requestedPermissionNames.Select(name => permissions[name].Id),
+                _currentUserService.UserName);
 
             // Log audit trail for role update
             try
@@ -255,7 +299,7 @@ public class RoleController : ControllerBase
                 await _auditLogService.LogUserActionAsync(
                     Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null ?? Guid.Empty,
                     _currentUserService.UserName ?? "Unknown",
-                    "Update",
+                    isProtectedSystemRole ? "UpdatePermissions" : "Update",
                     "Role",
                     id.ToString(),
                     oldValues,

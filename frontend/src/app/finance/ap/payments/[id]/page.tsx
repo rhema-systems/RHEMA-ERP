@@ -46,6 +46,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
 import { workflowApiService } from '@/services/workflow-api.service';
 import { InvoicePaymentSodControl } from '@/components/finance/InvoicePaymentSodControl';
+import { SupplierDebitNoteApplicationsCard } from '@/components/finance/ap/SupplierDebitNoteApplicationsCard';
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
@@ -397,9 +398,9 @@ export default function VendorPaymentDetailsPage() {
                             <p className="font-semibold text-green-600">{formatCurrency(payment.allocatedAmount, payment.currencyCode)}</p>
                         </div>
                         <div>
-                            <p className="text-xs text-muted-foreground uppercase font-bold mb-2">WHT Withheld</p>
+                            <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Functional WHT (GHS)</p>
                             <p className={payment.withholdingTaxAmount > 0 ? 'font-semibold text-orange-600' : 'font-semibold text-muted-foreground'}>
-                                {payment.withholdingTaxAmount > 0 ? formatCurrency(payment.withholdingTaxAmount, payment.currencyCode) : '-'}
+                                {payment.withholdingTaxAmount > 0 ? formatCurrency(payment.withholdingTaxAmount, 'GHS') : '-'}
                             </p>
                         </div>
                         <div>
@@ -430,13 +431,18 @@ export default function VendorPaymentDetailsPage() {
                                         {format(new Date(alloc.allocationDate), 'MMM dd, yyyy')}
                                     </div>
                                     <div className="col-span-2 text-right text-muted-foreground">
-                                        {alloc.discountAmount > 0 ? formatCurrency(alloc.discountAmount, payment.currencyCode) : '-'}
+                                        {alloc.discountAmount > 0 ? formatCurrency(alloc.discountAmount, alloc.invoiceCurrencyCode || payment.currencyCode) : '-'}
                                     </div>
                                     <div className="col-span-2 text-right text-orange-600">
-                                        {alloc.withholdingTaxAmount > 0 ? formatCurrency(alloc.withholdingTaxAmount, payment.currencyCode) : '-'}
+                                        {alloc.withholdingTaxAmount > 0 ? formatCurrency(alloc.withholdingTaxAmount, alloc.invoiceCurrencyCode || payment.currencyCode) : '-'}
                                     </div>
                                     <div className="col-span-2 text-right font-medium">
-                                        {formatCurrency(alloc.allocatedAmount, payment.currencyCode)}
+                                        <div>{formatCurrency(alloc.allocatedAmount, alloc.invoiceCurrencyCode || payment.currencyCode)}</div>
+                                        {alloc.isCrossCurrency && (
+                                            <div className="text-xs font-normal text-muted-foreground">
+                                                from {formatCurrency(alloc.paymentCurrencyAmount, alloc.paymentCurrencyCode || payment.currencyCode)}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -470,6 +476,12 @@ export default function VendorPaymentDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <SupplierDebitNoteApplicationsCard
+                payment={payment}
+                canProcess={canSubmitPayment}
+                onChanged={refetch}
+            />
 
             <Card className="no-print">
                 <CardHeader>

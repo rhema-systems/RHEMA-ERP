@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "tdc.qs.design-extraction.v1",
+  "exchangeId": "36d72e90-7755-4f0c-aedb-94930d299a67",
+  "generatedAtUtc": "2026-08-10T12:00:00Z",
+  "adapterProfileCode": "IFC4.QS.APPROVED",
+  "adapterVersion": "1.2.0",
+  "projectReference": "TDC-DEV-001",
+  "baseBoqVersionNumber": 3,
+  "designComparison": {
+    "previousDrawing": {
+      "drawingNumber": "A-201",
+      "revision": "R1"
+    },
+    "revisedDrawing": {
+      "drawingNumber": "A-201",
+      "revision": "R2"
+    }
+  },
+  "sourceArtifacts": [
+    {
+      "artifactRole": "PreviousDesign",
+      "originalFileName": "TDC-DEV-001-A-201-R1.ifc",
+      "mediaType": "application/x-step",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "artifactRole": "RevisedDesign",
+      "originalFileName": "TDC-DEV-001-A-201-R2.ifc",
+      "mediaType": "application/x-step",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "artifactRole": "NormalizedLines",
+      "originalFileName": "TDC-DEV-001-A-201-R2-quantities.csv",
+      "mediaType": "text/csv",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ],
+  "lines": [
+    {
+      "externalLineId": "IFC-WALL-001",
+      "boqLineKey": "65f36dfb-9dbf-4ef8-b9ad-6d940922726c",
+      "boqItemCode": "A-WALL-100",
+      "description": "200 mm block wall",
+      "unitCode": "m2",
+      "previousQuantity": 120.500000,
+      "revisedQuantity": 128.750000,
+      "changeType": "Modified",
+      "measurementCode": "SMM7.F10",
+      "sourceElementIds": ["2ADz5YQnX7N9H4rKm1"],
+      "extractionMethod": "ModelProperty",
+      "confidencePercent": 100,
+      "comment": "Wall extent increased at grid C."
+    },
+    {
+      "externalLineId": "IFC-DOOR-004",
+      "boqLineKey": "073f8278-ab3d-41b5-868e-ac3e92db350a",
+      "boqItemCode": "A-DOOR-040",
+      "description": "Internal timber door set",
+      "unitCode": "nr",
+      "previousQuantity": 45.000000,
+      "revisedQuantity": 0.000000,
+      "changeType": "Removed",
+      "measurementCode": "SMM7.L20",
+      "sourceElementIds": ["3FQ4p7Mxj1Dk2L8sZ0"],
+      "extractionMethod": "VendorTakeoff",
+      "confidencePercent": 98,
+      "comment": "Door type replaced by the new schedule."
+    },
+    {
+      "externalLineId": "IFC-DOOR-008",
+      "boqLineKey": null,
+      "boqItemCode": null,
+      "description": "Fire-rated steel door set",
+      "unitCode": "nr",
+      "previousQuantity": 0.000000,
+      "revisedQuantity": 15.000000,
+      "changeType": "Added",
+      "measurementCode": "SMM7.L20",
+      "sourceElementIds": ["1Ks9F2mV8Qx4P0eYb6"],
+      "extractionMethod": "VendorTakeoff",
+      "confidencePercent": 96,
+      "comment": "New item requires independent BoQ mapping."
+    }
+  ],
+  "controlTotals": {
+    "lineCount": 3,
+    "previousQuantityTotal": 165.500000,
+    "revisedQuantityTotal": 143.750000,
+    "netQuantityChange": -21.750000
+  },
+  "normalizedPayloadSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+}

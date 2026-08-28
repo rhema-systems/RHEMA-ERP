@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import {
   Building2,
   CalendarDays,
@@ -34,6 +35,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import {
   externalEstateListingsService,
+  type ExternalCustomerProfile,
   type ExternalEstateListing,
   type ExternalListingRequest,
 } from '@/services/external-estate-listings.service';
@@ -49,6 +51,28 @@ function formatMoney(value?: number | null, currency = 'GHS') {
   }).format(value);
 }
 
+function formatLeaseTerm(months?: number | null) {
+  if (!months) return 'Duration on request';
+  if (months % 12 === 0) {
+    const years = months / 12;
+    return `${years} year${years === 1 ? '' : 's'}`;
+  }
+  return `${months} month${months === 1 ? '' : 's'}`;
+}
+
+function listingPriceSummary(listing: ExternalEstateListing) {
+  if (listing.externalListingType === 'Rent') {
+    return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  if (listing.externalListingType === 'SaleAndRent') {
+    return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Rent ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  return formatMoney(
+    listing.externalSalePrice ?? listing.externalListingPrice,
+    listing.externalListingCurrency
+  );
+}
+
 function listingTypeLabel(value: string) {
   if (value === 'SaleAndRent') return 'Sale and rent';
   if (value === 'Sale') return 'For sale';
@@ -56,7 +80,9 @@ function listingTypeLabel(value: string) {
   return value;
 }
 
-function availableIntents(listing?: ExternalEstateListing | null): ListingIntent[] {
+function availableIntents(
+  listing?: ExternalEstateListing | null
+): ListingIntent[] {
   if (!listing) return [];
   if (listing.externalListingType === 'SaleAndRent') return ['Rent', 'Sale'];
   return listing.externalListingType === 'Sale' ? ['Sale'] : ['Rent'];
@@ -83,7 +109,9 @@ function areaLabel(listing: ExternalEstateListing) {
 function locationLabel(listing: ExternalEstateListing) {
   return (
     listing.location ||
-    [listing.town, listing.district, listing.region].filter(Boolean).join(', ') ||
+    [listing.town, listing.district, listing.region]
+      .filter(Boolean)
+      .join(', ') ||
     'Location not recorded'
   );
 }
@@ -107,6 +135,12 @@ function listingFallbackImage(listing: ExternalEstateListing) {
   return '/images/estate/listing-apartment-fallback.png';
 }
 
+function isLandListing(listing?: ExternalEstateListing | null) {
+  if (!listing) return false;
+  const assetType = String(listing.assetType).toLowerCase();
+  return assetType === '0' || assetType === 'land';
+}
+
 function ListingImage({ listing }: { listing: ExternalEstateListing }) {
   const [imageUrl, setImageUrl] = React.useState<string | null>(null);
 
@@ -116,7 +150,8 @@ function ListingImage({ listing }: { listing: ExternalEstateListing }) {
 
     const load = async () => {
       try {
-        const blob = await externalEstateListingsService.getListingImage(listing);
+        const blob =
+          await externalEstateListingsService.getListingImage(listing);
         if (!blob || !active) return;
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
@@ -171,21 +206,27 @@ function ListingStat({
       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
       <div className="min-w-0">
         <div className="text-xs text-slate-500">{label}</div>
-        <div className="truncate text-sm font-medium text-slate-900">{value}</div>
+        <div className="truncate text-sm font-medium text-slate-900">
+          {value}
+        </div>
       </div>
     </div>
   );
 }
 
 export default function ExternalPropertyListingsPage() {
+  const [customerProfiles, setCustomerProfiles] = React.useState<
+    ExternalCustomerProfile[]
+  >([]);
+  const [selectedCustomerId, setSelectedCustomerId] = React.useState('');
+  const [areProfilesLoading, setAreProfilesLoading] = React.useState(true);
   const [listings, setListings] = React.useState<ExternalEstateListing[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [location, setLocation] = React.useState('');
   const [listingType, setListingType] = React.useState('all');
-  const [requestIntent, setRequestIntent] = React.useState<ListingIntent>('Rent');
-  const [applicantName, setApplicantName] = React.useState('');
-  const [contact, setContact] = React.useState('');
+  const [requestIntent, setRequestIntent] =
+    React.useState<ListingIntent>('Rent');
   const [offerAmount, setOfferAmount] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
@@ -194,12 +235,25 @@ export default function ExternalPropertyListingsPage() {
     React.useState<ExternalListingRequest | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
+  const selectedCustomer = React.useMemo(
+    () =>
+      customerProfiles.find((profile) => profile.id === selectedCustomerId) ||
+      null,
+    [customerProfiles, selectedCustomerId]
+  );
+  const applicantName = selectedCustomer?.partnerName || '';
+  const contact =
+    selectedCustomer?.primaryEmail || selectedCustomer?.primaryPhone || '';
+
   const selected = React.useMemo(
     () => listings.find((listing) => listing.id === selectedId) || listings[0],
     [listings, selectedId]
   );
 
-  const requestOptions = React.useMemo(() => availableIntents(selected), [selected]);
+  const requestOptions = React.useMemo(
+    () => availableIntents(selected),
+    [selected]
+  );
 
   const loadListings = React.useCallback(async () => {
     setIsLoading(true);
@@ -209,20 +263,46 @@ export default function ExternalPropertyListingsPage() {
         search,
         location,
         listingType,
+        businessPartnerId: selectedCustomerId || undefined,
         take: 120,
       });
       setListings(data);
       setSelectedId((current) =>
         current && data.some((listing) => listing.id === current)
           ? current
-          : data[0]?.id ?? null
+          : (data[0]?.id ?? null)
       );
     } catch {
       setError('Could not load property listings.');
     } finally {
       setIsLoading(false);
     }
-  }, [listingType, location, search]);
+  }, [listingType, location, search, selectedCustomerId]);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    const loadProfiles = async () => {
+      try {
+        const profiles =
+          await externalEstateListingsService.getCustomerProfiles();
+        if (!mounted) return;
+        setCustomerProfiles(profiles);
+        setSelectedCustomerId((current) => current || profiles[0]?.id || '');
+      } catch {
+        if (mounted) {
+          setError('Could not load the Business Partners linked to your account.');
+        }
+      } finally {
+        if (mounted) setAreProfilesLoading(false);
+      }
+    };
+
+    void loadProfiles();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     void loadListings();
@@ -238,8 +318,8 @@ export default function ExternalPropertyListingsPage() {
     event.preventDefault();
     if (!selected) return;
 
-    if (!applicantName.trim() || !contact.trim()) {
-      setError('Enter your name and contact before submitting the request.');
+    if (!selectedCustomer) {
+      setError('Select the Business Partner placing this request.');
       return;
     }
     if (
@@ -258,8 +338,7 @@ export default function ExternalPropertyListingsPage() {
         selected.id,
         {
           requestType: requestIntent,
-          applicantName: applicantName.trim(),
-          contact: contact.trim(),
+          businessPartnerId: selectedCustomer.id,
           offerAmount:
             requestIntent === 'Sale' ? Number(offerAmount) : undefined,
           message: message.trim(),
@@ -267,8 +346,13 @@ export default function ExternalPropertyListingsPage() {
       );
       setCreatedRequest(created);
       setMessage('');
-    } catch {
-      setError('Could not submit request for this listing.');
+      await loadListings();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Could not submit request for this listing.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -282,7 +366,8 @@ export default function ExternalPropertyListingsPage() {
             Property Listings
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Browse available estate units and submit a purchase bid or rental request.
+            Browse available estate units and submit a purchase bid or rental
+            request.
           </p>
         </div>
         <Badge variant="outline" className="w-fit">
@@ -353,8 +438,8 @@ export default function ExternalPropertyListingsPage() {
         </Alert>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="grid auto-rows-max content-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {isLoading ? (
             <div className="col-span-full flex items-center justify-center gap-2 rounded-md border py-16 text-sm text-slate-500">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -400,10 +485,7 @@ export default function ExternalPropertyListingsPage() {
                   </div>
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="font-semibold text-slate-900">
-                      {formatMoney(
-                        listing.externalListingPrice,
-                        listing.externalListingCurrency
-                      )}
+                      {listingPriceSummary(listing)}
                     </span>
                     <span className="text-slate-500">{areaLabel(listing)}</span>
                   </div>
@@ -445,24 +527,60 @@ export default function ExternalPropertyListingsPage() {
                       label="Location"
                       value={locationLabel(selected)}
                     />
-                    <ListingStat icon={Ruler} label="Area" value={areaLabel(selected)} />
+                    <ListingStat
+                      icon={Ruler}
+                      label="Area"
+                      value={areaLabel(selected)}
+                    />
                     <ListingStat
                       icon={CalendarDays}
                       label="Published"
                       value={formatPublishedDate(selected.externalPublishedAt)}
                     />
+                    {selected.externalListingType !== 'Sale' ? (
+                      <ListingStat
+                        icon={CalendarDays}
+                        label="Rental duration"
+                        value={formatLeaseTerm(
+                          selected.externalLeaseTermMonths
+                        )}
+                      />
+                    ) : null}
+                    {selected.externalListingType !== 'Sale' &&
+                    isLandListing(selected) ? (
+                      <ListingStat
+                        icon={FileText}
+                        label="Annual ground rent"
+                        value={formatMoney(
+                          selected.groundRentPayable,
+                          selected.externalListingCurrency
+                        )}
+                      />
+                    ) : null}
                   </div>
 
                   <div className="rounded-md bg-slate-50 p-4">
-                    <div className="text-xs text-slate-500">Listed price</div>
+                    <div className="text-xs text-slate-500">
+                      {requestIntent === 'Sale'
+                        ? 'Sale price'
+                        : 'Rent per month'}
+                    </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
                       {formatMoney(
-                        selected.externalListingPrice,
+                        requestIntent === 'Sale'
+                          ? (selected.externalSalePrice ??
+                              selected.externalListingPrice)
+                          : (selected.externalMonthlyRent ??
+                              selected.externalListingPrice),
                         selected.externalListingCurrency
                       )}
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
-                      {listingTypeLabel(selected.externalListingType)}
+                      {requestIntent === 'Rent'
+                        ? `${formatLeaseTerm(
+                            selected.externalLeaseTermMonths
+                          )} · billing starts after agreement and move-in`
+                        : listingTypeLabel(selected.externalListingType)}
                     </div>
                   </div>
 
@@ -473,12 +591,59 @@ export default function ExternalPropertyListingsPage() {
                   ) : null}
                 </div>
 
+                {areProfilesLoading ? (
+                  <div className="flex items-center justify-center gap-2 rounded-md border py-8 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading Business Partners
+                  </div>
+                ) : customerProfiles.length === 0 ? (
+                  <Alert>
+                    <Building2 className="h-4 w-4" />
+                    <AlertTitle>Business Partner required</AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p>
+                        Register and obtain approval for a Customer Business
+                        Partner before submitting a property transaction.
+                      </p>
+                      <Button asChild size="sm" variant="outline">
+                        <Link href="/external-portal/business-partner">
+                          Open Business Partner Registration
+                        </Link>
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                ) : (
                 <form className="space-y-4" onSubmit={submitRequest}>
+                  <div className="space-y-2">
+                    <Label>Business Partner</Label>
+                    <Select
+                      value={selectedCustomerId}
+                      onValueChange={setSelectedCustomerId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select customer account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {customerProfiles.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>
+                            {profile.partnerName} ·{' '}
+                            {profile.customerAccountNumber}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-slate-500">
+                      Select the customer or company represented in this
+                      transaction.
+                    </p>
+                  </div>
                   <div className="space-y-2">
                     <Label>Request type</Label>
                     <Select
                       value={requestIntent}
-                      onValueChange={(value) => setRequestIntent(value as ListingIntent)}
+                      onValueChange={(value) =>
+                        setRequestIntent(value as ListingIntent)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -495,32 +660,37 @@ export default function ExternalPropertyListingsPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Name</Label>
+                    <Label>Customer name</Label>
                     <div className="relative">
                       <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <Input
                         value={applicantName}
-                        onChange={(event) => setApplicantName(event.target.value)}
-                        className="pl-9"
+                        className="bg-slate-50 pl-9"
+                        readOnly
                         required
                       />
                     </div>
+                    <p className="text-xs text-slate-500">
+                      From your registered customer profile.
+                    </p>
                   </div>
                   <div className="space-y-2">
-                    <Label>Phone or email</Label>
+                    <Label>Registered contact</Label>
                     <div className="relative">
                       <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <Input
                         value={contact}
-                        onChange={(event) => setContact(event.target.value)}
-                        className="pl-9"
+                        className="bg-slate-50 pl-9"
+                        readOnly
                         required
                       />
                     </div>
                   </div>
                   {requestIntent === 'Sale' ? (
                     <div className="space-y-2">
-                      <Label>Bid amount ({selected.externalListingCurrency || 'GHS'})</Label>
+                      <Label>
+                        Bid amount ({selected.externalListingCurrency || 'GHS'})
+                      </Label>
                       <Input
                         type="number"
                         min="0.01"
@@ -541,7 +711,10 @@ export default function ExternalPropertyListingsPage() {
                       placeholder="Preferred viewing time, financing, lease period, or other notes."
                     />
                   </div>
-                  <Button className="w-full" disabled={isSubmitting}>
+                  <Button
+                    className="w-full"
+                    disabled={isSubmitting || requestOptions.length === 0}
+                  >
                     {isSubmitting ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -550,6 +723,7 @@ export default function ExternalPropertyListingsPage() {
                     {requestIntent === 'Sale' ? 'Submit bid' : 'Submit request'}
                   </Button>
                 </form>
+                )}
               </>
             ) : (
               <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">

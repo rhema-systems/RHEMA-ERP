@@ -26,6 +26,22 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal DefaultResidualValuePercent { get; set; } = 0; // e.g. 10%
 
+        /// <summary>
+        /// Default annual percentage applied to opening carrying value for diminishing-balance
+        /// assets. It is deliberately stored separately from useful life so TDC can approve the
+        /// consumption rate that best represents a category instead of deriving an opaque rate.
+        /// </summary>
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DefaultDiminishingBalanceRatePercent { get; set; }
+
+        /// <summary>
+        /// Default lifetime output/capacity for units-of-production assets. Individual assets copy
+        /// this value at creation and may override it before capitalization where equipment-specific
+        /// engineering evidence provides a better estimate.
+        /// </summary>
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DefaultLifetimeProductionCapacity { get; set; }
+
         // --- GL Account Mapping ---
         // These accounts are critical for automating the financial impact of assets in this category.
 

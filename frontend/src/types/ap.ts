@@ -3,10 +3,26 @@ export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
 export type InvoiceMatchingStatus = 'Unmatched' | 'TwoWayMatched' | 'ThreeWayMatched' | 'MatchException';
 export type VendorPaymentStatus = 'Draft' | 'PendingAuthorization' | 'Authorized' | 'Processed' | 'Cleared' | 'Voided' | 'Failed' | 'Reconciled' | 'Reversed';
 export type VendorPaymentMethod = 'BankTransfer' | 'Cheque' | 'Cash' | 'WireTransfer' | 'MobileMoney' | 'DirectDebit' | 'Other';
+export type SupplierDebitNoteStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Posted' | 'Rejected' | 'Cancelled' | 'Reversed';
 export type PaymentBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Processing' | 'Completed' | 'PartiallyCompleted' | 'Cancelled';
 export type VendorInvoiceMatchExceptionStatus = 'PendingApproval' | 'Approved' | 'Rejected' | 'Cancelled' | 'Expired';
 export type VendorInvoiceMatchExceptionEvidenceKind = 'WorkflowEvidenceDocument' | 'CentralDocument';
 export type VendorInvoiceMatchCorrectiveActionStatus = 'Planned' | 'Completed';
+export type ProcurementAcceptedSupplyKind =
+    | 'GoodsReceiptInspection'
+    | 'ServiceCompletion'
+    | 'WorksPaymentCertificate';
+
+/**
+ * Finance-owned, read-only projection of Procurement's canonical Supplier master.
+ * `id` is Supplier.Id and is the identity AP reports and invoice commands submit.
+ */
+export interface ApInvoiceSupplier {
+    id: string;
+    code: string;
+    name: string;
+    paymentTermId?: string | null;
+}
 
 export interface VendorInvoice {
     id: string;
@@ -27,6 +43,7 @@ export interface VendorInvoice {
     balanceAmount: number;
     currencyCode: string;
     exchangeRate: number;
+    exchangeRateId?: string;
     baseCurrencyAmount: number;
     paymentTermsDays: number;
     earlyPaymentDiscountPercentage: number;
@@ -43,6 +60,11 @@ export interface VendorInvoice {
     matchingPriceTolerancePercent: number;
     matchingQuantityTolerancePercent: number;
     matchExceptionControlEventId?: string;
+    acceptedSupplyKind?: ProcurementAcceptedSupplyKind;
+    acceptedSupplySourceId?: string;
+    acceptedSupplySourceReference?: string;
+    acceptedSupplySnapshotHash?: string;
+    acceptedSupplyValidatedAtUtc?: string;
     status: VendorInvoiceStatus;
     approvalStatus: string;
     expenseAccountId?: string;
@@ -52,6 +74,7 @@ export interface VendorInvoice {
     notes?: string;
     reference?: string;
     isOpeningBalance: boolean;
+    journalEntryId?: string;
     approvedByUserId?: string;
     approvedAt?: string;
     lineItems: VendorInvoiceLineItem[];
@@ -256,11 +279,14 @@ export interface VendorInvoiceCreateRequest {
     supplierInvoiceNumber?: string;
     supplierId: string;
     purchaseOrderId?: string;
+    acceptedSupplyKind?: ProcurementAcceptedSupplyKind;
+    acceptedSupplySourceId?: string;
     invoiceDate: string;
     receivedDate?: string;
     dueDate?: string;
     currencyCode?: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentTermsDays?: number;
     paymentTermId?: string;
     earlyPaymentDiscountPercentage?: number;
@@ -278,6 +304,29 @@ export interface VendorInvoiceCreateRequest {
     lineItems: VendorInvoiceLineItemCreateRequest[];
 }
 
+export interface ProcurementAcceptedSupplyOption {
+    kind: ProcurementAcceptedSupplyKind;
+    sourceId: string;
+    sourceReference: string;
+    label: string;
+    category: string;
+    purchaseOrderId?: string;
+    businessPartnerId: string;
+    currencyCode: string;
+    acceptedAmount?: number;
+    acceptedAtUtc: string;
+    sourceIntegrityHash: string;
+}
+
+export interface ProcurementAcceptedSupplyOptions {
+    purchaseOrderId: string;
+    category: string;
+    ready: boolean;
+    options: ProcurementAcceptedSupplyOption[];
+    blockedReasons: string[];
+    worksHandoffRoute: string;
+}
+
 export interface VendorInvoiceUpdateRequest extends VendorInvoiceCreateRequest {
     id: string;
 }
@@ -288,6 +337,7 @@ export interface VendorInvoiceLineItem {
     lineItemType: string;
     glAccountId?: string;
     glAccountName?: string;
+    budgetEntryId?: string;
     purchaseOrderItemId?: string;
     description: string;
     quantity: number;
@@ -311,6 +361,7 @@ export interface VendorInvoiceLineItem {
 export interface VendorInvoiceLineItemCreateRequest {
     lineItemType?: string;
     glAccountId?: string;
+    budgetEntryId?: string;
     purchaseOrderItemId?: string;
     description: string;
     quantity?: number;
@@ -328,6 +379,32 @@ export interface VendorInvoiceLineItemCreateRequest {
     expirationDate?: string;
 }
 
+export interface ApBudgetDimensionAssignment {
+    financeDimensionDefinitionId: string;
+    financeDimensionValueId: string;
+    dimensionCode: string;
+    dimensionName: string;
+    valueCode: string;
+    valueName: string;
+}
+
+export interface ApBudgetCell {
+    budgetScenarioId: string;
+    budgetScenarioName: string;
+    budgetEntryId: string;
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    fiscalPeriodId: string;
+    fiscalPeriodCode: string;
+    functionalCurrencyCode: string;
+    approvedAmount: number;
+    postedActualAmount: number;
+    reservedAmount: number;
+    availableAmount: number;
+    dimensionAssignments: ApBudgetDimensionAssignment[];
+}
+
 export interface VendorPayment {
     id: string;
     paymentNumber: string;
@@ -342,6 +419,8 @@ export interface VendorPayment {
     paymentMethodName?: string;
     currencyCode: string;
     exchangeRate: number;
+    /** Approved rate-master row frozen when this payment was recorded. */
+    exchangeRateId?: string;
     bankAccountId?: string;
     bankAccountName?: string;
     chequeNumber?: string;
@@ -387,6 +466,150 @@ export interface VendorPayment {
     notes?: string;
     createdAt: string;
     allocations: VendorPaymentAllocation[];
+    supplierDebitNoteApplications?: SupplierDebitNoteApplication[];
+}
+
+export interface SupplierDebitNoteLine {
+    id: string;
+    originalVendorInvoiceLineItemId?: string;
+    originalFinancePurchaseOrderItemId?: string;
+    glAccountId?: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxGroupId?: string;
+    taxRate: number;
+    taxAmount: number;
+    discountPercentage: number;
+    discountAmount: number;
+    lineTotal: number;
+}
+
+export interface SupplierDebitNoteApplication {
+    id: string;
+    supplierDebitNoteId: string;
+    debitNoteNumber: string;
+    supplierCreditNoteReference?: string;
+    vendorPaymentId: string;
+    paymentNumber: string;
+    vendorInvoiceId: string;
+    invoiceNumber: string;
+    applicationAmount: number;
+    functionalAmount: number;
+    currencyCode: string;
+    exchangeRate: number;
+    applicationDate: string;
+    notes?: string;
+    isReversal: boolean;
+    originalApplicationId?: string;
+    paymentPostingEventId?: string;
+    paymentJournalEntryId?: string;
+    appliedAt?: string;
+    createdAt: string;
+    createdBy?: string;
+}
+
+export interface SupplierDebitNote {
+    id: string;
+    debitNoteNumber: string;
+    supplierCreditNoteReference?: string;
+    /** Finance-owned business-partner identity used to create and approve the debit note. */
+    vendorId: string;
+    /** Canonical Procurement supplier identity used by AP invoices and payments. */
+    supplierId: string;
+    vendorName: string;
+    supplierReturnId?: string;
+    originalVendorInvoiceId?: string;
+    originalVendorInvoiceNumber?: string;
+    debitNoteDate: string;
+    reason?: string;
+    notes?: string;
+    currencyCode: string;
+    exchangeRate: number;
+    subTotal: number;
+    taxAmount: number;
+    discountAmount: number;
+    totalAmount: number;
+    baseCurrencyAmount: number;
+    appliedAmount: number;
+    remainingAmount: number;
+    applicationStatus: string;
+    journalEntryId?: string;
+    postingEventId?: string;
+    workflowInstanceId?: string;
+    submittedById?: string;
+    submittedAt?: string;
+    approvedById?: string;
+    approvedAt?: string;
+    rejectedById?: string;
+    rejectedAt?: string;
+    rejectionReason?: string;
+    approvalSource: string;
+    reversalJournalEntryId?: string;
+    reversalPostingEventId?: string;
+    reversedAt?: string;
+    reversedById?: string;
+    reversalReason?: string;
+    status: number;
+    statusName: SupplierDebitNoteStatus;
+    lineItems: SupplierDebitNoteLine[];
+    applications: SupplierDebitNoteApplication[];
+    createdAt: string;
+    rowVersion: string;
+}
+
+/**
+ * Explicit bridge between Finance's business-partner master and Procurement's supplier master.
+ * The identifiers are intentionally kept separate; clients must not infer identity from names or codes.
+ */
+export interface ApSupplierIdentity {
+    businessPartnerId: string;
+    supplierId: string;
+    displayName: string;
+    isVerified: boolean;
+}
+
+export interface SupplierDebitNoteLineRequest {
+    originalVendorInvoiceLineItemId?: string;
+    glAccountId?: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxGroupId?: string;
+    taxRate?: number;
+    taxAmount?: number;
+    discountPercentage?: number;
+    discountAmount?: number;
+    lineTotal?: number;
+}
+
+export interface SupplierDebitNoteCreateRequest {
+    vendorId: string;
+    originalVendorInvoiceId?: string;
+    supplierCreditNoteReference?: string;
+    debitNoteDate: string;
+    reason: string;
+    notes?: string;
+    currencyCode: string;
+    exchangeRate: number;
+    lines: SupplierDebitNoteLineRequest[];
+}
+
+export interface SupplierDebitNoteUpdateRequest extends SupplierDebitNoteCreateRequest {
+    rowVersion: string;
+}
+
+export interface SupplierDebitNoteApplicationRequest {
+    supplierDebitNoteId: string;
+    vendorInvoiceId: string;
+    applicationAmount: number;
+    notes?: string;
+}
+
+export interface SupplierDebitNoteApplicationResult {
+    paymentId: string;
+    totalSupplierCreditsApplied: number;
+    applications: SupplierDebitNoteApplication[];
 }
 
 export interface VendorPaymentCreateRequest {
@@ -397,6 +620,8 @@ export interface VendorPaymentCreateRequest {
     paymentMethodId?: string;
     currencyCode?: string;
     exchangeRate?: number;
+    /** Optional approved rate selected by the UI; the API resolves the daily rate when omitted. */
+    exchangeRateId?: string;
     bankAccountId?: string;
     chequeNumber?: string;
     transactionReference?: string;
@@ -417,8 +642,21 @@ export interface VendorPaymentAllocation {
     vendorInvoiceId: string;
     invoiceNumber: string;
     allocatedAmount: number;
+    /** Amount consumed from the payment/bank currency; differs from allocatedAmount for FX settlement. */
+    paymentCurrencyAmount: number;
+    invoiceCurrencyCode: string;
+    paymentCurrencyCode: string;
+    isCrossCurrency: boolean;
+    invoiceSettlementExchangeRateId?: string;
+    invoiceSettlementExchangeRate: number;
+    paymentExchangeRateId?: string;
+    paymentExchangeRate: number;
+    paymentFunctionalAmount: number;
+    settlementFunctionalAmount: number;
     discountAmount: number;
+    discountFunctionalAmount: number;
     withholdingTaxAmount: number;
+    withholdingTaxFunctionalAmount: number;
     allocationDate: string;
     notes?: string;
     isReversal: boolean;
@@ -430,6 +668,9 @@ export interface VendorPaymentAllocation {
 export interface VendorPaymentAllocationCreateRequest {
     vendorInvoiceId: string;
     allocatedAmount: number;
+    /** Required when the payment currency and invoice currency differ. */
+    paymentCurrencyAmount?: number;
+    invoiceSettlementExchangeRateId?: string;
     discountAmount?: number;
     withholdingTaxAmount?: number;
     notes?: string;
@@ -689,6 +930,13 @@ export interface SupplierDetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals: Array<{
+        currencyCode: string;
+        openingBalance: number;
+        totalDebits: number;
+        totalCredits: number;
+        closingBalance: number;
+    }>;
     warnings: string[];
     suppliers: SupplierDetailedLedgerAccount[];
 }
@@ -853,6 +1101,8 @@ export interface OutstandingVendorInvoice {
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
+    /** Currency of the invoice balance, used to expose cross-currency settlement explicitly. */
+    currencyCode: string;
     daysOverdue: number;
     earlyPaymentDiscountPercentage?: number;
     earlyPaymentDiscountDueDate?: string;

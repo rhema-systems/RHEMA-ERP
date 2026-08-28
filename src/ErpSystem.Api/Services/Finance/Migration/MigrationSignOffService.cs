@@ -1728,14 +1728,54 @@ public sealed class MigrationSignOffService : IMigrationSignOffService
                 continue;
             }
 
-            item.PostedGlBalance = await _db.AccountTransactions
+            var postedLines = await _db.AccountTransactions
                 .AsNoTracking()
                 .Where(t =>
                     t.TenantId == tenantId &&
                     t.AccountId == bank.GLAccountId.Value &&
                     t.PostingStatus == PostedStatus &&
                     !t.IsDeleted)
-                .SumAsync(t => t.DebitAmount - t.CreditAmount, cancellationToken);
+                .Select(t => new
+                {
+                    t.DebitAmount,
+                    t.CreditAmount,
+                    t.FunctionalCurrencyCode,
+                    t.TransactionCurrency,
+                    t.TransactionDebitAmount,
+                    t.TransactionCreditAmount
+                })
+                .ToListAsync(cancellationToken);
+
+            var bankCurrency = bank.Currency.Trim().ToUpperInvariant();
+            var missingNativeEvidence = false;
+            decimal postedBankCurrencyBalance = 0m;
+            foreach (var line in postedLines)
+            {
+                if (string.Equals(line.TransactionCurrency, bankCurrency, StringComparison.OrdinalIgnoreCase) &&
+                    line.TransactionDebitAmount.HasValue && line.TransactionCreditAmount.HasValue)
+                {
+                    postedBankCurrencyBalance += line.TransactionDebitAmount.Value - line.TransactionCreditAmount.Value;
+                }
+                else if (string.Equals(line.FunctionalCurrencyCode, bankCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    postedBankCurrencyBalance += line.DebitAmount - line.CreditAmount;
+                }
+                else
+                {
+                    missingNativeEvidence = true;
+                }
+            }
+            item.PostedGlBalance = RoundMoney(postedBankCurrencyBalance);
+
+            if (missingNativeEvidence)
+            {
+                item.Status = "MissingCurrencyEvidence";
+                item.Severity = "Critical";
+                item.CanRepair = false;
+                item.Message = $"One or more posted bank GL lines lack {bankCurrency} transaction-currency evidence; snapshot repair was refused.";
+                items.Add(item);
+                continue;
+            }
 
             item.Variance = RoundMoney(bank.CurrentBalance - item.PostedGlBalance);
             if (item.Variance != 0m || bank.AvailableBalance != item.PostedGlBalance)

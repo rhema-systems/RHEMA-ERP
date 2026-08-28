@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.QuantitySurvey;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -51,6 +53,53 @@ public class Contract : TenantEntity
 
     [Column(TypeName = "decimal(5,2)")]
     public decimal RetentionPercentage { get; set; } = 0; // % held until completion (common: 5-10%)
+
+    // QS commercial terms. The Procurement contract remains the canonical record;
+    // QS-0520 extends it rather than introducing a parallel contract master.
+    public Guid? PaymentTermId { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ProvisionalSumAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ContingencyAmount { get; set; }
+
+    public int? DefectsLiabilityDays { get; set; }
+
+    [MaxLength(2000)]
+    public string? RetentionClause { get; set; }
+
+    public bool AllowSectionalTakeover { get; set; }
+
+    [MaxLength(2000)]
+    public string? SectionalTakeoverClause { get; set; }
+
+    public bool AllowSubcontracting { get; set; }
+
+    public Guid? SubcontractPaymentTermId { get; set; }
+
+    [MaxLength(2000)]
+    public string? SubcontractTerms { get; set; }
+
+    public int? ClaimNoticePeriodDays { get; set; }
+
+    [MaxLength(2000)]
+    public string? ClaimClause { get; set; }
+
+    public Guid? CommercialTermsContractDocumentId { get; set; }
+    public Guid? CommercialTermsConfigurationProfileId { get; set; }
+    public Guid? ContractControlsDecisionId { get; set; }
+    public Guid? RetentionDecisionId { get; set; }
+    public Guid? CommercialTermsClientRequestId { get; set; }
+
+    [MaxLength(64)]
+    public string? CommercialTermsRequestHash { get; set; }
+
+    [MaxLength(64)]
+    public string? CommercialTermsPolicyHash { get; set; }
+
+    public DateTime? CommercialTermsConfiguredAt { get; set; }
+    public Guid? CommercialTermsConfiguredById { get; set; }
 
     // Timeline
     public DateTime? StartDate { get; set; }
@@ -106,6 +155,13 @@ public class Contract : TenantEntity
     public virtual Tender Tender { get; set; } = null!;
     public virtual BusinessPartner BusinessPartner { get; set; } = null!;
     public virtual TenderBid? TenderBid { get; set; }
+    public virtual PaymentTerm? PaymentTerm { get; set; }
+    public virtual PaymentTerm? SubcontractPaymentTerm { get; set; }
+    public virtual ContractDocument? CommercialTermsContractDocument { get; set; }
+    public virtual QuantitySurveyConfigurationProfile? CommercialTermsConfigurationProfile { get; set; }
+    public virtual QuantitySurveyConfigurationDecision? ContractControlsDecision { get; set; }
+    public virtual QuantitySurveyConfigurationDecision? RetentionDecision { get; set; }
+    public virtual ApplicationUser? CommercialTermsConfiguredBy { get; set; }
     public virtual ApplicationUser? SignedBy { get; set; }
     public new virtual ApplicationUser? CreatedBy { get; set; }
 

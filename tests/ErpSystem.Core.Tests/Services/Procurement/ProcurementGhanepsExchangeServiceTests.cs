@@ -471,6 +471,7 @@ public sealed class ProcurementGhanepsExchangeServiceTests
                 ExpectedRowVersion = accepted.RowVersion
             },
             "compliance-reconciliation");
+        await fixture.PublishReplacementProfileWithSameMappingAsync();
 
         var result = await fixture.Service.GetAwardComplianceAsync(
             ProcurementGhanepsSourceType.Tender,
@@ -1978,6 +1979,60 @@ public sealed class ProcurementGhanepsExchangeServiceTests
             await Context.SaveChangesAsync();
         }
 
+        public async Task PublishReplacementProfileWithSameMappingAsync()
+        {
+            Profile.LifecycleStatus = ProcurementConfigurationProfileStatus.Retired;
+            Profile.EffectiveTo = DateTime.UtcNow.AddSeconds(-1);
+            var replacement = new ProcurementConfigurationProfile
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ProfileKey = Profile.ProfileKey,
+                ProfileCode = Profile.ProfileCode,
+                Name = Profile.Name,
+                Version = Profile.Version + 1,
+                LifecycleStatus = ProcurementConfigurationProfileStatus.Published,
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                IsDefault = true,
+                PublishedAt = DateTime.UtcNow,
+                PublishedById = Guid.NewGuid(),
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            var replacementDecision = new ProcurementConfigurationDecision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ProfileId = replacement.Id,
+                DecisionKey = "DEC-009",
+                SchemaVersion = Decision.SchemaVersion,
+                OwnerGroup = Decision.OwnerGroup,
+                Status = ProcurementConfigurationDecisionStatus.Approved,
+                ApprovalStatus = ProcurementConfigurationApprovalStatus.Approved,
+                EvidenceStatus = ProcurementConfigurationEvidenceStatus.Verified,
+                ValueJson = Decision.ValueJson,
+                DecisionDate = DateTime.UtcNow,
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                ApprovedById = Guid.NewGuid(),
+                ApprovedAt = DateTime.UtcNow,
+                ApprovalReference = "DEC009-REPLACEMENT",
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            Context.Update(Profile);
+            Context.AddRange(replacement, replacementDecision,
+                new ProcurementConfigurationEvidenceLink
+                {
+                    TenantId = TenantId,
+                    ProfileId = replacement.Id,
+                    DecisionId = replacementDecision.Id,
+                    EvidenceType = "ApprovalMinute",
+                    ExternalReference = "evidence://dec009/replacement",
+                    Checksum = new string('8', 64),
+                    UploadedById = Guid.NewGuid(),
+                    UploadedAt = DateTime.UtcNow
+                });
+            await Context.SaveChangesAsync();
+        }
+
         public async Task SeedAwardLineageAsync(bool blockLatest)
         {
             Tender.Status = "Awarded";
@@ -2129,6 +2184,11 @@ public sealed class ProcurementGhanepsExchangeServiceTests
             Func<Task> operation,
             CancellationToken cancellationToken = default) =>
             inner.ExecuteInStrategyAsync(operation, cancellationToken);
+        public Task ExecuteInTransactionAsync(
+            Func<CancellationToken, Task> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteInTransactionAsync(operation, cancellationToken);
+        public void ClearChangeTracker() => inner.ClearChangeTracker();
         public Task<T> ExecuteInStrategyAsync<T>(
             Func<Task<T>> operation,
             CancellationToken cancellationToken = default) =>

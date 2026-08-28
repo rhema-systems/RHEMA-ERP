@@ -55,48 +55,55 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             .ToListAsync();
 
         var glLines = await LoadPostedFixedAssetGlLinesAsync(BuildAsOfQuery(query));
-        var items = assets.Select(a =>
-        {
-            var bookValue = SelectBookValue(a, requestedBook);
-            var cost = RoundMoney(bookValue?.AcquisitionCost ?? a.AcquisitionCost);
-            var accumulatedDepreciation = RoundMoney(bookValue?.AccumulatedDepreciation ?? a.AcquisitionCost - a.NetBookValue);
-            var assetCostGl = RoundMoney(glLines
-                .Where(line => line.AccountId == a.Category.AssetAccountId && IsAssetRelated(line, a))
-                .Sum(line => line.DebitAmount - line.CreditAmount));
-            var accumulatedDepreciationGl = RoundMoney(glLines
-                .Where(line => line.AccountId == a.Category.AccumulatedDepreciationAccountId && IsAssetRelated(line, a))
-                .Sum(line => line.CreditAmount - line.DebitAmount));
-
-            return new FixedAssetRegisterItemDto
+        // This is an accounting-book register, not the operational asset-master catalogue.
+        // A master without a value for the requested book must not contribute plausible but
+        // unposted cost/NBV to Finance reports or reconciliation totals.
+        var items = assets
+            .Select(asset => new { Asset = asset, BookValue = SelectBookValue(asset, requestedBook) })
+            .Where(item => item.BookValue != null)
+            .Select(item =>
             {
-                Id = a.Id,
-                BookValueId = bookValue?.Id,
-                CategoryId = a.FixedAssetCategoryId,
-                AssetCode = a.AssetCode,
-                Name = a.Name,
-                CategoryName = a.Category?.Name ?? "Unknown",
-                AcquisitionDate = a.PurchaseDate,
-                CapitalizationDate = bookValue?.CapitalizationDate ?? a.CapitalizationDate,
-                Cost = cost,
-                AccumulatedDepreciation = accumulatedDepreciation,
-                NetBookValue = RoundMoney(bookValue?.NetBookValue ?? a.NetBookValue),
-                BookClassification = bookValue?.BookClassification ?? requestedBook ?? "IFRS",
-                Status = a.Status,
-                SerialNumber = a.SerialNumber,
-                Location = a.Location,
-                CurrentSegmentString = a.CurrentSegmentString,
-                SourceDocumentType = bookValue?.SourceDocumentType ?? a.SourceDocumentType,
-                SourceDocumentId = bookValue?.SourceDocumentId ?? a.SourceDocumentId,
-                SourceDocumentLineId = bookValue?.SourceDocumentLineId ?? a.SourceDocumentLineId,
-                JournalEntryId = bookValue?.CapitalizationJournalEntryId ?? a.JournalEntryId,
-                PostingEventId = bookValue?.CapitalizationPostingEventId ?? a.PostingEventId,
-                PostedGlCostMovement = assetCostGl,
-                PostedGlAccumulatedDepreciationMovement = accumulatedDepreciationGl,
-                ReconciliationVariance = RoundMoney(assetCostGl - cost),
-                HasPostedGlReference = (bookValue?.CapitalizationJournalEntryId ?? a.JournalEntryId).HasValue
-                    && (bookValue?.CapitalizationPostingEventId ?? a.PostingEventId).HasValue
-            };
-        }).ToList();
+                var a = item.Asset;
+                var bookValue = item.BookValue!;
+                var cost = RoundMoney(bookValue.AcquisitionCost);
+                var accumulatedDepreciation = RoundMoney(bookValue.AccumulatedDepreciation);
+                var assetCostGl = RoundMoney(glLines
+                    .Where(line => line.AccountId == a.Category.AssetAccountId && IsAssetRelated(line, a))
+                    .Sum(line => line.DebitAmount - line.CreditAmount));
+                var accumulatedDepreciationGl = RoundMoney(glLines
+                    .Where(line => line.AccountId == a.Category.AccumulatedDepreciationAccountId && IsAssetRelated(line, a))
+                    .Sum(line => line.CreditAmount - line.DebitAmount));
+
+                return new FixedAssetRegisterItemDto
+                {
+                    Id = a.Id,
+                    BookValueId = bookValue.Id,
+                    CategoryId = a.FixedAssetCategoryId,
+                    AssetCode = a.AssetCode,
+                    Name = a.Name,
+                    CategoryName = a.Category?.Name ?? "Unknown",
+                    AcquisitionDate = a.PurchaseDate,
+                    CapitalizationDate = bookValue.CapitalizationDate ?? a.CapitalizationDate,
+                    Cost = cost,
+                    AccumulatedDepreciation = accumulatedDepreciation,
+                    NetBookValue = RoundMoney(bookValue.NetBookValue),
+                    BookClassification = bookValue.BookClassification,
+                    Status = a.Status,
+                    SerialNumber = a.SerialNumber,
+                    Location = a.Location,
+                    CurrentSegmentString = a.CurrentSegmentString,
+                    SourceDocumentType = bookValue.SourceDocumentType ?? a.SourceDocumentType,
+                    SourceDocumentId = bookValue.SourceDocumentId ?? a.SourceDocumentId,
+                    SourceDocumentLineId = bookValue.SourceDocumentLineId ?? a.SourceDocumentLineId,
+                    JournalEntryId = bookValue.CapitalizationJournalEntryId ?? a.JournalEntryId,
+                    PostingEventId = bookValue.CapitalizationPostingEventId ?? a.PostingEventId,
+                    PostedGlCostMovement = assetCostGl,
+                    PostedGlAccumulatedDepreciationMovement = accumulatedDepreciationGl,
+                    ReconciliationVariance = RoundMoney(assetCostGl - cost),
+                    HasPostedGlReference = (bookValue.CapitalizationJournalEntryId ?? a.JournalEntryId).HasValue
+                        && (bookValue.CapitalizationPostingEventId ?? a.PostingEventId).HasValue
+                };
+            }).ToList();
 
         await RecordReportAuditAsync(
             FinanceAuditEvents.FixedAssetRegisterReportGenerated,
@@ -337,15 +344,27 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                 Name = d.FixedAsset?.Name ?? "Unknown",
                 DisposalDate = d.DisposalDate,
                 DisposalType = d.DisposalType,
+                DisposalScope = d.DisposalScope,
+                DisposedPortionPercent = d.DisposedPortionPercent,
+                ComponentReference = d.ComponentReference,
+                AllocationEvidenceReference = d.AllocationEvidenceReference,
                 SaleProceeds = d.SaleProceeds,
                 DisposalCost = d.DisposalCost,
                 NetProceeds = d.NetProceeds,
+                ProceedsCurrencyCode = d.ProceedsCurrencyCode,
+                ProceedsFunctionalAmount = d.ProceedsFunctionalAmount,
+                ProceedsExchangeRateId = d.ProceedsExchangeRateId,
+                ProceedsExchangeRateValue = d.ProceedsExchangeRateValue,
+                ProceedsExchangeRateSource = d.ProceedsExchangeRateSource,
+                ProceedsExchangeRateDate = d.ProceedsExchangeRateDate,
                 CostAtDisposal = d.CostAtDisposal,
                 AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
                 AccumulatedImpairmentAtDisposal = d.AccumulatedImpairmentAtDisposal,
                 RevaluationSurplusAtDisposal = d.RevaluationSurplusAtDisposal,
+                RevaluationSurplusTransferAmount = d.RevaluationSurplusTransferAmount,
                 NetBookValue = d.NetBookValueAtDisposal,
                 GainLoss = d.GainOrLoss,
+                RemainingNetBookValue = d.RemainingNetBookValueAfterDisposal,
                 BuyerName = d.BuyerName,
                 JournalEntryId = d.JournalEntryId,
                 PostingEventId = d.PostingEventId,
@@ -556,7 +575,11 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             if (category.RevaluationSurplusAccountId.HasValue)
             {
                 AddReconciliationRow(rows, diagnostics, "Revaluation Surplus", category.RevaluationSurplusAccountId.Value, accounts, glLines,
-                    RoundMoney(valuations.Where(v => assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied)),
+                    // Completed disposal transfers reduce the asset-specific reserve directly in
+                    // equity. Subtract the retained transfer evidence so subledger reconciliation
+                    // follows the same balance as the posted revaluation-surplus account.
+                    RoundMoney(valuations.Where(v => assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied)
+                        - disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.RevaluationSurplusTransferAmount)),
                     valuations.Count(v => v.ValuationType == ValuationType.Revaluation && assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)),
                     0,
                     0,
@@ -586,8 +609,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             if (category.DisposalProceedsClearingAccountId.HasValue)
             {
                 AddReconciliationRow(rows, diagnostics, "Disposal Proceeds Clearing", category.DisposalProceedsClearingAccountId.Value, accounts, glLines,
-                    RoundMoney(disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.NetProceeds)),
-                    disposals.Count(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id) && d.NetProceeds > 0m),
+                    // GL reconciliation must aggregate functional values; adding USD and GHS native
+                    // amounts would produce a plausible-looking but meaningless control total.
+                    RoundMoney(disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.ProceedsFunctionalAmount)),
+                    disposals.Count(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id) && d.ProceedsFunctionalAmount > 0m),
                     0,
                     0,
                     BalanceConvention.DebitMinusCredit);
@@ -842,7 +867,9 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     private IQueryable<AssetDepreciationSchedule> BuildDepreciationQuery(FixedAssetReportQueryDto query)
     {
         var dbQuery = _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == TenantId);
+            // Reversed schedules remain immutable source evidence, but current depreciation and
+            // reconciliation reports must follow the net accounting position after correction.
+            .Where(s => s.TenantId == TenantId && !s.IsDeleted && !s.IsReversed);
 
         if (query.AssetId.HasValue)
             dbQuery = dbQuery.Where(s => s.FixedAssetId == query.AssetId.Value);
@@ -1020,8 +1047,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     }
 
     private static bool IsDepreciationLineRelated(AccountTransaction transaction, AssetDepreciationSchedule schedule)
-        => transaction.SourceDocumentType == SourceDocumentTypeDepreciationRun &&
+        => (transaction.SourceDocumentType == SourceDocumentTypeDepreciationRun ||
+            transaction.SourceDocumentType == SourceDocumentTypeDisposal) &&
            (transaction.SourceDocumentId == schedule.FixedAssetDepreciationRunId ||
+            transaction.SourceDocumentId == schedule.AssetDisposalId ||
             NotesContainId(transaction.Notes, "ScheduleId", schedule.Id) ||
             NotesContainId(transaction.Notes, "FixedAssetId", schedule.FixedAssetId));
 

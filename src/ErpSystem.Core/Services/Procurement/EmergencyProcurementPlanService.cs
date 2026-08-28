@@ -7,13 +7,17 @@ using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
 
-public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
+public partial class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
 {
     private readonly IEmergencyProcurementPlanRepository _planRepository;
     private readonly IEmergencyProcurementItemRepository _itemRepository;
     private readonly IEmergencySupplierRepository _supplierRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IProcurementAccessControlService _accessControl;
+    private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementSodGuardService _sodGuard;
+    private readonly IWorkflowService _workflowService;
     private readonly ILogger<EmergencyProcurementPlanService> _logger;
 
     public EmergencyProcurementPlanService(
@@ -22,6 +26,10 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
         IEmergencySupplierRepository supplierRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IProcurementAccessControlService accessControl,
+        IProcurementControlEventService controlEvents,
+        IProcurementSodGuardService sodGuard,
+        IWorkflowService workflowService,
         ILogger<EmergencyProcurementPlanService> logger)
     {
         _planRepository = planRepository;
@@ -29,17 +37,23 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
         _supplierRepository = supplierRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _accessControl = accessControl;
+        _controlEvents = controlEvents;
+        _sodGuard = sodGuard;
+        _workflowService = workflowService;
         _logger = logger;
     }
 
     public async Task<EmergencyProcurementPlanDetailDto?> GetByIdAsync(Guid id)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, id.ToString("N"), NewCorrelation(), CancellationToken.None);
         var plan = await _planRepository.GetWithFullDetailsAsync(id);
         return plan == null ? null : MapToDetailDto(plan);
     }
 
     public async Task<EmergencyProcurementPlanDto?> GetByPlanNumberAsync(string planNumber)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, planNumber, NewCorrelation(), CancellationToken.None);
         var plan = await _planRepository.GetByPlanCodeAsync(planNumber);
         return plan == null ? null : MapToDto(plan);
     }
@@ -47,6 +61,7 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     public async Task<PagedResult<EmergencyProcurementPlanDto>> GetPlansAsync(
         int page, int pageSize, string? search = null, string? status = null, string? emergencyType = null)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, "list", NewCorrelation(), CancellationToken.None);
         var result = await _planRepository.GetPlansAsync(page, pageSize, search, status, null, emergencyType);
         return new PagedResult<EmergencyProcurementPlanDto>
         {
@@ -59,24 +74,28 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
 
     public async Task<IEnumerable<EmergencyProcurementPlanDto>> GetByEmergencyTypeAsync(string emergencyType)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, emergencyType, NewCorrelation(), CancellationToken.None);
         var plans = await _planRepository.GetByEmergencyTypeAsync(emergencyType);
         return plans.Select(MapToDto);
     }
 
     public async Task<IEnumerable<EmergencyProcurementPlanDto>> GetActivePlansAsync()
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, "active", NewCorrelation(), CancellationToken.None);
         var plans = await _planRepository.GetActivePlansAsync();
         return plans.Select(MapToDto);
     }
 
     public async Task<IEnumerable<EmergencyProcurementPlanDto>> GetTriggeredPlansAsync()
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, "triggered", NewCorrelation(), CancellationToken.None);
         var result = await _planRepository.GetPlansAsync(1, 1000, null, "Triggered", null, null);
         return result.Items.Select(MapToDto);
     }
 
     public async Task<EmergencyProcurementPlanDetailDto> CreateAsync(CreateEmergencyProcurementPlanDto dto)
     {
+        await EnsureEmergencyCapabilityAsync(ManagePermission, "new", NewCorrelation(), CancellationToken.None);
         var planCode = await _planRepository.GeneratePlanCodeAsync();
         var plan = new EmergencyProcurementPlan
         {
@@ -156,6 +175,8 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     {
         var plan = await _planRepository.GetByIdAsync(id);
         if (plan == null) throw new KeyNotFoundException($"Emergency plan with ID {id} not found");
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
 
         plan.Title = dto.Title;
         plan.Description = dto.Description;
@@ -183,6 +204,8 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     {
         var plan = await _planRepository.GetByIdAsync(id);
         if (plan == null) throw new KeyNotFoundException($"Emergency plan with ID {id} not found");
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
 
         plan.IsDeleted = true;
         plan.UpdatedAt = DateTime.UtcNow;
@@ -192,48 +215,36 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
 
     public async Task<EmergencyProcurementPlanDetailDto> ActivateAsync(Guid id)
     {
-        var plan = await _planRepository.GetByIdAsync(id);
-        if (plan == null) throw new KeyNotFoundException($"Emergency plan with ID {id} not found");
-
-        plan.Status = "Active";
-        plan.UpdatedAt = DateTime.UtcNow;
-        await _planRepository.UpdateAsync(plan);
-        await _unitOfWork.SaveChangesAsync();
-
-        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve plan");
+        var plan = await RequirePlanAsync(id, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        return await RejectDirectLifecycleAsync(plan, "EmergencyDirectActivationDenied",
+            "EMERGENCY_DIRECT_ACTIVATION_DISABLED",
+            "Direct activation is disabled. Prepare the requisition exception, obtain Internal Audit vouching, and complete the configured MD/Board workflow.");
     }
 
     public async Task<EmergencyProcurementPlanDetailDto> TriggerAsync(Guid id)
     {
-        var plan = await _planRepository.GetByIdAsync(id);
-        if (plan == null) throw new KeyNotFoundException($"Emergency plan with ID {id} not found");
-
-        plan.Status = "Triggered";
-        plan.Notes = $"{plan.Notes}\nTriggered on {DateTime.UtcNow:yyyy-MM-dd HH:mm}";
-        plan.UpdatedAt = DateTime.UtcNow;
-
-        await _planRepository.UpdateAsync(plan);
-        await _unitOfWork.SaveChangesAsync();
-        _logger.LogWarning("Emergency procurement plan {PlanCode} triggered", plan.PlanCode);
-
-        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve plan");
+        var plan = await RequirePlanAsync(id, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        return await RejectDirectLifecycleAsync(plan, "EmergencyDirectTriggerDenied",
+            "EMERGENCY_DIRECT_TRIGGER_DISABLED",
+            "Direct triggering is disabled. Only an approved governed emergency-purchase exception can be triggered.");
     }
 
     public async Task<EmergencyProcurementPlanDetailDto> DeactivateAsync(Guid id)
     {
-        var plan = await _planRepository.GetByIdAsync(id);
-        if (plan == null) throw new KeyNotFoundException($"Emergency plan with ID {id} not found");
-
-        plan.Status = "Inactive";
-        plan.UpdatedAt = DateTime.UtcNow;
-        await _planRepository.UpdateAsync(plan);
-        await _unitOfWork.SaveChangesAsync();
-
-        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve plan");
+        var plan = await RequirePlanAsync(id, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        return await RejectDirectLifecycleAsync(plan, "EmergencyDirectDeactivationDenied",
+            "EMERGENCY_DIRECT_DEACTIVATION_DISABLED",
+            "Direct deactivation is disabled because approved emergency-purchase lineage is immutable.");
     }
 
     public async Task<EmergencyProcurementItemDto> AddItemAsync(Guid planId, CreateEmergencyProcurementItemDto dto)
     {
+        var plan = await RequirePlanAsync(planId, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
         var item = new EmergencyProcurementItem
         {
             EmergencyProcurementPlanId = planId,
@@ -259,6 +270,9 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     {
         var item = await _itemRepository.GetByIdAsync(itemId);
         if (item == null) throw new KeyNotFoundException($"Item with ID {itemId} not found");
+        var plan = await RequirePlanAsync(item.EmergencyProcurementPlanId, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
 
         item.ItemDescription = dto.ItemDescription;
         item.Specifications = dto.Specifications;
@@ -282,6 +296,9 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     {
         var item = await _itemRepository.GetByIdAsync(itemId);
         if (item == null) throw new KeyNotFoundException($"Item with ID {itemId} not found");
+        var plan = await RequirePlanAsync(item.EmergencyProcurementPlanId, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
 
         item.IsDeleted = true;
         item.UpdatedAt = DateTime.UtcNow;
@@ -291,12 +308,16 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
 
     public async Task<IEnumerable<EmergencyProcurementItemDto>> GetCriticalItemsAsync(Guid planId)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, planId.ToString("N"), NewCorrelation(), CancellationToken.None);
         var items = await _itemRepository.GetCriticalItemsAsync(planId);
         return items.Select(MapToItemDto);
     }
 
     public async Task<EmergencySupplierDto> AddSupplierAsync(Guid planId, CreateEmergencySupplierDto dto)
     {
+        var plan = await RequirePlanAsync(planId, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
         var supplier = new EmergencySupplier
         {
             EmergencyProcurementPlanId = planId,
@@ -325,6 +346,9 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     {
         var supplier = await _supplierRepository.GetByIdAsync(supplierId);
         if (supplier == null) throw new KeyNotFoundException($"Supplier with ID {supplierId} not found");
+        var plan = await RequirePlanAsync(supplier.EmergencyProcurementPlanId, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
 
         supplier.SupplierId = dto.SupplierId;
         supplier.SupplierName = dto.SupplierName;
@@ -350,6 +374,9 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
     {
         var supplier = await _supplierRepository.GetByIdAsync(supplierId);
         if (supplier == null) throw new KeyNotFoundException($"Supplier with ID {supplierId} not found");
+        var plan = await RequirePlanAsync(supplier.EmergencyProcurementPlanId, CancellationToken.None);
+        await EnsureEmergencyCapabilityAsync(ManagePermission, plan.PlanCode, NewCorrelation(), CancellationToken.None);
+        EnsureDraft(plan);
 
         supplier.IsDeleted = true;
         supplier.UpdatedAt = DateTime.UtcNow;
@@ -359,12 +386,14 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
 
     public async Task<IEnumerable<EmergencySupplierDto>> GetActiveSuppliersAsync(Guid planId)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, planId.ToString("N"), NewCorrelation(), CancellationToken.None);
         var suppliers = await _supplierRepository.GetActiveSuppliersByPlanIdAsync(planId);
         return suppliers.Select(MapToSupplierDto);
     }
 
     public async Task<IEnumerable<EmergencySupplierDto>> GetSuppliersByCategoryAsync(string category)
     {
+        await EnsureEmergencyCapabilityAsync(ReadPermission, category, NewCorrelation(), CancellationToken.None);
         // Get all suppliers and filter by items provided
         var allPlans = await _planRepository.GetActivePlansAsync();
         var allSuppliers = new List<EmergencySupplier>();
@@ -405,6 +434,21 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
             CriticalItemCount = plan.CriticalItems?.Count(i => !i.IsDeleted) ?? 0,
             EmergencySupplierCount = plan.EmergencySuppliers?.Count(s => !s.IsDeleted) ?? 0,
             CreatedAt = plan.CreatedAt
+            ,PurchaseRequisitionId = plan.PurchaseRequisitionId
+            ,PurchaseRequisitionNumber = plan.PurchaseRequisition?.RequisitionNumber
+            ,ExceptionRuleId = plan.ExceptionRuleId
+            ,ExceptionRuleCode = plan.ExceptionRule?.RuleCode
+            ,ExceptionRuleName = plan.ExceptionRule?.ExceptionName
+            ,WorkflowInstanceId = plan.WorkflowInstanceId
+            ,CentralDocumentVersionId = plan.CentralDocumentVersionId
+            ,EvidenceReference = plan.EvidenceReference
+            ,ApprovalAuthority = plan.ApprovalAuthority
+            ,ApprovalReference = plan.ApprovalReference
+            ,InternalAuditVouchedAtUtc = plan.InternalAuditVouchedAtUtc
+            ,SubmittedForApprovalAtUtc = plan.SubmittedForApprovalAtUtc
+            ,ExceptionalSourcingTenderId = plan.ExceptionalSourcingTenderId
+            ,FiledAtUtc = plan.FiledAtUtc
+            ,RowVersion = Convert.ToBase64String(plan.RowVersion)
         };
     }
 
@@ -439,6 +483,26 @@ public class EmergencyProcurementPlanService : IEmergencyProcurementPlanService
             RapidProcurementProcess = plan.RapidProcurementProcess,
             EscalationContacts = plan.EscalationContacts,
             Notes = plan.Notes,
+            PurchaseRequisitionId = plan.PurchaseRequisitionId,
+            PurchaseRequisitionNumber = plan.PurchaseRequisition?.RequisitionNumber,
+            ExceptionRuleId = plan.ExceptionRuleId,
+            ExceptionRuleCode = plan.ExceptionRule?.RuleCode,
+            ExceptionRuleName = plan.ExceptionRule?.ExceptionName,
+            WorkflowInstanceId = plan.WorkflowInstanceId,
+            CentralDocumentVersionId = plan.CentralDocumentVersionId,
+            EvidenceReference = plan.EvidenceReference,
+            ApprovalAuthority = plan.ApprovalAuthority,
+            ApprovalReference = plan.ApprovalReference,
+            InternalAuditVouchedAtUtc = plan.InternalAuditVouchedAtUtc,
+            SubmittedForApprovalAtUtc = plan.SubmittedForApprovalAtUtc,
+            ExceptionalSourcingTenderId = plan.ExceptionalSourcingTenderId,
+            FiledAtUtc = plan.FiledAtUtc,
+            RowVersion = Convert.ToBase64String(plan.RowVersion),
+            ExceptionJustification = plan.ExceptionJustification,
+            InternalAuditVouchNote = plan.InternalAuditVouchNote,
+            PostAwardJustification = plan.PostAwardJustification,
+            PostAwardCentralDocumentVersionId = plan.PostAwardCentralDocumentVersionId,
+            PostAwardEvidenceReference = plan.PostAwardEvidenceReference,
             CriticalItems = plan.CriticalItems?.Where(i => !i.IsDeleted).Select(MapToItemDto).ToList() ?? new(),
             EmergencySuppliers = plan.EmergencySuppliers?.Where(s => !s.IsDeleted).Select(MapToSupplierDto).ToList() ?? new()
         };

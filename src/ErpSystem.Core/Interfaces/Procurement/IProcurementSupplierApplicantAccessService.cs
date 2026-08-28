@@ -1,15 +1,26 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
 public interface IProcurementSupplierApplicantAccessService
 {
+    Task<SupplierApplicantVerificationPreparationDto> PrepareVerificationChallengeAsync(
+        Guid tenantId,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string contact,
+        CancellationToken cancellationToken = default);
     Task<SupplierApplicantTokenIssueDto> CreateVerifiedApplicationAsync(
         VerifyAndIssueSupplierApplicantTokenRequest request,
         string correlationId,
         CancellationToken cancellationToken = default);
     Task<SupplierApplicantSessionDto> StartSessionAsync(
         StartSupplierApplicantSessionRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+    Task<SupplierApplicantTokenDeliveryDto> DeliverApplicationTokenAsync(
+        Guid tokenId,
+        string plaintextToken,
         string correlationId,
         CancellationToken cancellationToken = default);
     Task<SupplierApplicantSessionDto> ValidateSessionAsync(
@@ -35,6 +46,11 @@ public interface IProcurementSupplierApplicantAccessService
         Guid actorUserId,
         string correlationId,
         CancellationToken cancellationToken = default);
+    Task ValidateApprovedSupplierProvisioningAsync(
+        Guid registrationId,
+        Guid actorUserId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
     Task ProvisionApprovedSupplierAsync(
         Guid registrationId,
         Guid businessPartnerId,
@@ -57,6 +73,18 @@ public interface IProcurementSupplierApplicantAccessService
     Task<SupplierApplicantAccessSummaryDto> GetSummaryAsync(
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SupplierApplicantAccessListItemDto>> GetHistoryAsync(
+        CancellationToken cancellationToken = default);
+    Task<SupplierApplicantContactCorrectionPreparationDto> PrepareVerifiedContactCorrectionAsync(
+        Guid registrationId,
+        PrepareSupplierApplicantContactCorrectionRequest request,
+        Guid actorUserId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+    Task<SupplierApplicantContactCorrectionResultDto> CorrectVerifiedContactAndRetryAsync(
+        Guid registrationId,
+        CorrectSupplierApplicantVerifiedContactRequest request,
+        Guid actorUserId,
+        string correlationId,
         CancellationToken cancellationToken = default);
 }
 

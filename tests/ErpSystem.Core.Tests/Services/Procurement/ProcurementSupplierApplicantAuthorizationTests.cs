@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -167,12 +168,19 @@ public sealed class ProcurementSupplierApplicantAuthorizationTests
                 Mock.Of<IUnitOfWork>(),
                 Mock.Of<IProcurementSupplierOnboardingTokenService>(),
                 Mock.Of<IBusinessPartnerRegistrationService>(),
+                Mock.Of<IProcurementSupplierApplicantContactCorrectionStore>(),
                 Mock.Of<IProcurementControlEventService>(),
                 Access.Object,
                 current.Object,
                 userManager.Object,
                 roleManager.Object,
                 Mock.Of<INotificationService>(),
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["FrontendUrl"] = "https://supplier-portal.example.test"
+                    })
+                    .Build(),
                 Options.Create(new SupplierApplicantAccessOptions()),
                 NullLogger<ProcurementSupplierApplicantAccessService>.Instance);
         }

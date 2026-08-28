@@ -4,6 +4,11 @@ namespace ErpSystem.Core.Services.Projects;
 
 public static class ProjectCatalogDefaults
 {
+    public const string QuantitySurveySections = "qs-sections";
+    public const string QuantitySurveyTrades = "qs-trades";
+    public const string QuantitySurveyCostCodes = "qs-cost-codes";
+    public const string QuantitySurveyMeasurementCodes = "qs-measurement-codes";
+
     public static List<ProjectCatalogGroupDto> GetRecommendedCatalogs() =>
     [
         Create("methodologies", "Methodologies", "Waterfall", "Agile", "Hybrid", "Program", "Internal"),
@@ -42,8 +47,21 @@ public static class ProjectCatalogDefaults
         Create("asset-link-types", "Asset Link Types", "Asset", "Equipment", "Installation", "Transfer", "Maintenance"),
         Create("asset-link-statuses", "Asset Link Statuses", "Linked", "Reserved", "Installed", "Transferred", "Returned"),
         Create("document-categories", "Document Categories", "Charter", "Plan", "Requirements", "Design", "Minutes", "Contracts", "Drawings", "Reports", "AcceptanceCertificates", "RiskLogs", "ChangeApprovals", "ClosureDocuments", "ExternalSubmissions", "FieldEvidence", "General"),
-        Create("document-types", "Document Types", "Attachment", "Evidence", "Approval", "Reference", "Contract", "Drawing", "Minutes", "PortalAttachment", "MobileEvidence", "Photo")
+        Create("document-types", "Document Types", "Attachment", "Evidence", "Approval", "Reference", "Contract", "Drawing", "Minutes", "PortalAttachment", "MobileEvidence", "Photo"),
+        Create(QuantitySurveySections, "QS Sections"),
+        Create(QuantitySurveyTrades, "QS Trades"),
+        Create(QuantitySurveyCostCodes, "QS Cost Codes"),
+        Create(QuantitySurveyMeasurementCodes, "QS Measurement Codes")
     ];
+
+    public static bool IsQuantitySurveyCatalogType(string? catalogType)
+    {
+        var normalized = NormalizeCatalogType(catalogType);
+        return normalized is QuantitySurveySections
+            or QuantitySurveyTrades
+            or QuantitySurveyCostCodes
+            or QuantitySurveyMeasurementCodes;
+    }
 
     private static ProjectCatalogGroupDto Create(string key, string displayName, params string[] items) =>
         new()

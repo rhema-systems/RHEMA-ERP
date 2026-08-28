@@ -15,6 +15,8 @@ import { Download, Loader2, Printer } from 'lucide-react';
 import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
 import { ReportSegmentFilters } from '@/components/finance/reports/ReportSegmentFilters';
 import { AppliedReportSegmentFilters } from '@/components/finance/reports/AppliedReportSegmentFilters';
+import { ReportDimensionFilters } from '@/components/finance/reports/ReportDimensionFilters';
+import { AppliedReportDimensionFilters } from '@/components/finance/reports/AppliedReportDimensionFilters';
 import { FinancialStatementLayoutRows } from '@/components/finance/reports/FinancialStatementLayoutRows';
 import {
     buildFinanceSegmentFilters,
@@ -22,6 +24,12 @@ import {
     type ReportSegmentSelections,
 } from '@/lib/finance/report-segment-filters';
 import type { FinanceSegmentFilterDto, FinancialStatementLayoutSummaryDto, SegmentStructure } from '@/types/finance';
+import {
+    buildFinanceDimensionFilters,
+    toFinanceDimensionFilterQueryParameters,
+    type ReportDimensionSelections,
+} from '@/lib/finance/report-dimension-filters';
+import type { FinanceDimensionDefinition, FinanceDimensionFilterDto } from '@/types/finance';
 
 export default function BalanceSheetPage() {
     const [asAtDate, setAsAtDate] = useState(new Date().toISOString().split('T')[0]);
@@ -37,6 +45,10 @@ export default function BalanceSheetPage() {
     const [segmentSelections, setSegmentSelections] = useState<ReportSegmentSelections>({});
     const [appliedSegmentFilters, setAppliedSegmentFilters] = useState<FinanceSegmentFilterDto[]>([]);
     const [segmentLoadError, setSegmentLoadError] = useState<string | null>(null);
+    const [transactionDimensions, setTransactionDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [dimensionSelections, setDimensionSelections] = useState<ReportDimensionSelections>({});
+    const [appliedDimensionFilters, setAppliedDimensionFilters] = useState<FinanceDimensionFilterDto[]>([]);
+    const [dimensionLoadError, setDimensionLoadError] = useState<string | null>(null);
     const [report, setReport] = useState<BalanceSheetReportDto | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +59,7 @@ export default function BalanceSheetPage() {
     const loadInitialReport = async () => {
         try {
             setLoading(true);
-            const [settingsData, books, dimensions, layoutOptions] = await Promise.all([
+            const [settingsData, books, dimensions, layoutOptions, transactionDimensionOptions] = await Promise.all([
                 financeDataService.getFinanceSettings(),
                 financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
                 financeDataService.getReportingDimensions().catch((err) => {
@@ -56,16 +68,22 @@ export default function BalanceSheetPage() {
                     return [] as SegmentStructure[];
                 }),
                 financeDataService.getFinancialStatementLayouts('BalanceSheet').catch(() => []),
+                financeDataService.getFinanceDimensions(true).catch(() => {
+                    setDimensionLoadError('Transaction-dimension filters could not be loaded.');
+                    return [];
+                }),
             ]);
             setSettings(settingsData);
             if (books.length > 0) setAccountingBooks(books);
             setReportingDimensions(dimensions);
             setLayouts(layoutOptions.filter((layout) => layout.isActive && layout.publishedVersionNumber));
+            setTransactionDimensions(transactionDimensionOptions);
             const data = await financeDataService.getBalanceSheet({
                 asAtDate,
                 bookClassification,
                 includeAccountDetails: true,
                 segmentFilters: [],
+                dimensionFilters: [],
                 useDefaultLayout: true,
             });
             setReport(data);
@@ -82,11 +100,13 @@ export default function BalanceSheetPage() {
             setRunning(true);
             setError(null);
             const segmentFilters = buildFinanceSegmentFilters(reportingDimensions, segmentSelections);
+            const dimensionFilters = buildFinanceDimensionFilters(transactionDimensions, dimensionSelections);
             const data = await financeDataService.getBalanceSheet({
                 asAtDate,
                 bookClassification,
                 includeAccountDetails: true,
                 segmentFilters,
+                dimensionFilters,
                 layoutId: layoutSelection !== 'default' && layoutSelection !== 'legacy'
                     ? layoutSelection
                     : undefined,
@@ -94,6 +114,7 @@ export default function BalanceSheetPage() {
             });
             setReport(data);
             setAppliedSegmentFilters(segmentFilters);
+            setAppliedDimensionFilters(dimensionFilters);
         } catch (err) {
             console.error('Error loading balance sheet report:', err);
             setError('Could not generate the balance sheet.');
@@ -118,11 +139,16 @@ export default function BalanceSheetPage() {
                 : undefined,
             useDefaultLayout: layoutSelection === 'default',
             ...toFinanceSegmentFilterQueryParameters(appliedSegmentFilters),
+            ...toFinanceDimensionFilterQueryParameters(appliedDimensionFilters),
         };
     };
 
     const updateSegmentSelection = (segmentStructureId: string, value: string) => {
         setSegmentSelections((current) => ({ ...current, [segmentStructureId]: value }));
+    };
+
+    const updateDimensionSelection = (definitionId: string, valueCode: string) => {
+        setDimensionSelections((current) => ({ ...current, [definitionId]: valueCode }));
     };
 
     const printReport = async () => {
@@ -244,18 +270,35 @@ export default function BalanceSheetPage() {
                             onSelectionChange={updateSegmentSelection}
                             disabled={running}
                         />
+                        <ReportDimensionFilters
+                            definitions={transactionDimensions}
+                            selections={dimensionSelections}
+                            onSelectionChange={updateDimensionSelection}
+                            disabled={running}
+                        />
                         <Button onClick={runReport} disabled={running}>
                             {running && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Run Report
                         </Button>
                     </div>
                     {segmentLoadError && <div className="mt-4 text-sm text-amber-700">{segmentLoadError}</div>}
+                    {dimensionLoadError && <div className="mt-4 text-sm text-amber-700">{dimensionLoadError}</div>}
                     {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
                     <AppliedReportSegmentFilters
                         dimensions={reportingDimensions}
                         appliedFilters={appliedSegmentFilters}
                         pendingFilters={buildFinanceSegmentFilters(reportingDimensions, segmentSelections)}
                     />
+                    <AppliedReportDimensionFilters
+                        definitions={transactionDimensions}
+                        appliedFilters={appliedDimensionFilters}
+                        pendingFilters={buildFinanceDimensionFilters(transactionDimensions, dimensionSelections)}
+                    />
+                    {appliedDimensionFilters.length > 0 && (
+                        <p className="mt-3 text-xs text-amber-700">
+                            Transaction-dimension totals include only ledger lines carrying the selected immutable coding. Operational adapters remain outside this view until individually certified. Analytical slices may not present a balanced statement unless the selected dimension is governed as Balancing.
+                        </p>
+                    )}
                 </CardContent>
             </Card>
 

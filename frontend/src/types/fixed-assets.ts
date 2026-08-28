@@ -20,7 +20,11 @@ export type FixedAssetStatus =
   | 'HeldForSale'
   | 'WrittenOff'
   | 'UnderConstruction'
-  | 'OnHold';
+  | 'OnHold'
+  | 'Acquired'
+  | 'Capitalized'
+  | 'PendingApproval'
+  | 'Rejected';
 
 export interface FixedAssetCategory {
   id: string;
@@ -30,6 +34,8 @@ export interface FixedAssetCategory {
   defaultMethod: DepreciationMethod;
   defaultUsefulLifeMonths: number;
   defaultResidualValuePercent: number;
+  defaultDiminishingBalanceRatePercent: number;
+  defaultLifetimeProductionCapacity: number;
   assetAccountId: string;
   accumulatedDepreciationAccountId: string;
   depreciationExpenseAccountId: string;
@@ -48,6 +54,8 @@ export interface CreateFixedAssetCategoryDto {
   defaultMethod: DepreciationMethod;
   defaultUsefulLifeMonths: number;
   defaultResidualValuePercent: number;
+  defaultDiminishingBalanceRatePercent: number;
+  defaultLifetimeProductionCapacity: number;
   assetAccountId: string;
   accumulatedDepreciationAccountId: string;
   depreciationExpenseAccountId: string;
@@ -65,10 +73,15 @@ export interface FixedAsset {
   name: string;
   description?: string;
   location?: string;
+  currentCustodianId?: string;
+  currentCustodianName?: string;
+  currentSegmentString?: string;
+  currentSegmentLookupValueId?: string;
   fixedAssetCategoryId: string;
   fixedAssetCategoryName?: string;
   purchaseDate: string;
   placedInServiceDate?: string;
+  capitalizationDate?: string;
   purchasePrice: number;
   installationCost: number;
   taxAmount: number;
@@ -78,8 +91,23 @@ export interface FixedAsset {
   depreciationConvention: DepreciationConvention;
   usefulLifeMonths: number;
   residualValue: number;
+  diminishingBalanceRatePercent: number;
+  lifetimeProductionCapacity: number;
+  accumulatedProductionUnits: number;
   status: FixedAssetStatus;
   disposalDate?: string;
+  functionalCurrencyCode: string;
+  transactionCurrencyCode?: string;
+  sourceDocumentType?: string;
+  sourceDocumentId?: string;
+  sourceDocumentLineId?: string;
+  journalEntryId?: string;
+  postingEventId?: string;
+  capitalizedAt?: string;
+  capitalizationReversalJournalEntryId?: string;
+  capitalizationReversalPostingEventId?: string;
+  capitalizationReversedAt?: string;
+  capitalizationReversalReason?: string;
   maintenanceAssetId?: string;
   serialNumber?: string;
   createdAt: string;
@@ -103,6 +131,9 @@ export interface FixedAssetBookValue {
   remainingUsefulLifeMonths?: number;
   depreciationMethod: DepreciationMethod;
   depreciationConvention: DepreciationConvention;
+  diminishingBalanceRatePercent: number;
+  lifetimeProductionCapacity: number;
+  accumulatedProductionUnits: number;
   placedInServiceDate?: string;
   openingAsOfDate?: string;
   openingYtdDepreciation: number;
@@ -110,6 +141,62 @@ export interface FixedAssetBookValue {
   openingPostedToGl: boolean;
   openingPostedDate?: string;
   openingSource: string;
+  capitalizationDate?: string;
+  capitalizationJournalEntryId?: string;
+  capitalizationPostingEventId?: string;
+  capitalizationReversalJournalEntryId?: string;
+  capitalizationReversalPostingEventId?: string;
+  capitalizationReversedAt?: string;
+  sourceDocumentType?: string;
+  sourceDocumentId?: string;
+  sourceDocumentLineId?: string;
+}
+
+export type FixedAssetCapitalizationReversalStatus =
+  | 'PendingApproval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Posted'
+  | 'Failed';
+
+/**
+ * Immutable maker-checker evidence for FR-GL-008/FR-GL-010. The original and
+ * reversal posting IDs let the workspace show the exact ledger lineage instead
+ * of presenting a destructive "undo" action.
+ */
+export interface FixedAssetCapitalizationReversal {
+  id: string;
+  fixedAssetId: string;
+  assetCode: string;
+  assetName: string;
+  originalPostingEventId: string;
+  originalJournalEntryId: string;
+  reversalPostingEventId?: string;
+  reversalJournalEntryId?: string;
+  status: FixedAssetCapitalizationReversalStatus;
+  reason: string;
+  impactAssessment: string;
+  requestedReversalDate: string;
+  requestedByUserId: string;
+  requestedByUserName: string;
+  requestedAt: string;
+  reviewedByUserId?: string;
+  reviewedByUserName?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  postedAt?: string;
+  failureReason?: string;
+}
+
+export interface RequestFixedAssetCapitalizationReversalDto {
+  reversalDate: string;
+  reason: string;
+  impactAssessment: string;
+}
+
+export interface ReviewFixedAssetCapitalizationReversalDto {
+  approved: boolean;
+  reviewComment: string;
 }
 
 export interface CreateFixedAssetDto {
@@ -128,6 +215,8 @@ export interface CreateFixedAssetDto {
   depreciationConvention: DepreciationConvention;
   usefulLifeMonths: number;
   residualValue: number;
+  diminishingBalanceRatePercent: number;
+  lifetimeProductionCapacity: number;
   maintenanceAssetId?: string;
   serialNumber?: string;
 }
@@ -143,21 +232,93 @@ export interface RunDepreciationDto {
   postToGl: boolean;
   postingDate?: string;
   bookClassification?: string;
+  productionUsageEntries?: FixedAssetProductionUsage[];
+}
+
+export interface FixedAssetProductionUsage {
+  fixedAssetId: string;
+  bookClassification?: string;
+  unitsConsumed: number;
+  evidenceReference: string;
+  evidenceNotes?: string;
 }
 
 export interface AssetDepreciationSchedule {
   id: string;
   fixedAssetId: string;
+  fixedAssetDepreciationRunId?: string;
   accountingBookId?: string;
   bookClassification: string;
   fiscalPeriodId: string;
   depreciationAmount: number;
+  depreciationMethodSnapshot: DepreciationMethod;
+  diminishingBalanceRatePercentSnapshot: number;
+  lifetimeProductionCapacitySnapshot: number;
+  periodProductionUnits: number;
+  cumulativeProductionUnitsBefore: number;
+  cumulativeProductionUnitsAfter: number;
+  productionEvidenceReference?: string;
+  productionEvidenceNotes?: string;
   accumulatedDepreciation: number;
   netBookValue: number;
   isPosted: boolean;
   postedDate?: string;
   journalEntryId?: string;
   isProjected: boolean;
+  correctionSequence: number;
+  isReversed: boolean;
+  reversedAt?: string;
+  reversalJournalEntryId?: string;
+  reversalPostingEventId?: string;
+  depreciationReversalId?: string;
+}
+
+export type FixedAssetDepreciationReversalStatus =
+  | 'PendingApproval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Posted'
+  | 'Failed';
+
+/**
+ * Maker-checker and journal lineage for a posted depreciation correction.
+ * Original run evidence is retained even after the compensating entry is posted.
+ */
+export interface FixedAssetDepreciationReversal {
+  id: string;
+  originalDepreciationRunId: string;
+  periodCode: string;
+  bookClassification: string;
+  totalDepreciationAmount: number;
+  originalCorrectionSequence: number;
+  originalPostingEventId: string;
+  originalJournalEntryId: string;
+  reversalPostingEventId?: string;
+  reversalJournalEntryId?: string;
+  status: FixedAssetDepreciationReversalStatus;
+  reason: string;
+  impactAssessment: string;
+  requestedReversalDate: string;
+  requestedByUserId: string;
+  requestedByUserName: string;
+  requestedAt: string;
+  reviewedByUserId?: string;
+  reviewedByUserName?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  postedAt?: string;
+  failureReason?: string;
+}
+
+export interface RequestFixedAssetDepreciationReversalDto {
+  reversalDate: string;
+  reason: string;
+  impactAssessment: string;
+}
+
+export interface ReviewFixedAssetDepreciationReversalDto {
+  approved: boolean;
+  reviewComment: string;
 }
 
 export interface FixedAssetGlAccountOption {
@@ -190,7 +351,8 @@ export type AssetTransferStatus =
 export type AssetTransferType =
   | 'Internal'
   | 'External'
-  | 'Custodial';
+  | 'Custodial'
+  | 'GlReclassification';
 
 export interface AssetTransfer {
   id: string;
@@ -206,6 +368,30 @@ export interface AssetTransfer {
   toLocation: string;
   toCustodianId?: string;
   toCustodianName?: string;
+  fromSegmentString?: string;
+  fromSegmentLookupValueId?: string;
+  toSegmentString?: string;
+  toSegmentLookupValueId?: string;
+  fromFixedAssetCategoryId?: string;
+  fromFixedAssetCategoryName?: string;
+  toFixedAssetCategoryId?: string;
+  toFixedAssetCategoryName?: string;
+  accountingBookId?: string;
+  bookClassification: string;
+  fromAssetAccountId?: string;
+  toAssetAccountId?: string;
+  fromAccumulatedDepreciationAccountId?: string;
+  toAccumulatedDepreciationAccountId?: string;
+  fromAccumulatedImpairmentAccountId?: string;
+  toAccumulatedImpairmentAccountId?: string;
+  fromRevaluationSurplusAccountId?: string;
+  toRevaluationSurplusAccountId?: string;
+  reclassificationAssetCarryingAmount: number;
+  reclassificationAccumulatedDepreciation: number;
+  reclassificationAccumulatedImpairment: number;
+  reclassificationRevaluationSurplus: number;
+  accountingDate?: string;
+  fiscalPeriodId?: string;
   reason?: string;
   transferCost?: number;
   requestedById?: string;
@@ -213,8 +399,16 @@ export interface AssetTransfer {
   approvedById?: string;
   approvedByName?: string;
   approvedAt?: string;
+  completedAt?: string;
+  postedAt?: string;
+  failedAt?: string;
   comments?: string;
+  failureReason?: string;
   referenceNumber?: string;
+  idempotencyKey?: string;
+  workflowInstanceId?: string;
+  journalEntryId?: string;
+  postingEventId?: string;
   createdAt: string;
 }
 
@@ -224,8 +418,15 @@ export interface RequestAssetTransferDto {
   transferType: AssetTransferType;
   toLocation: string;
   toCustodianId?: string;
+  toSegmentString?: string;
+  toSegmentLookupValueId?: string;
+  toFixedAssetCategoryId?: string;
+  accountingBookId?: string;
+  bookClassification?: string;
+  accountingDate?: string;
   reason?: string;
   transferCost?: number;
+  idempotencyKey?: string;
 }
 
 export interface ApproveAssetTransferDto {
@@ -246,6 +447,14 @@ export type AssetDisposalStatus =
   | 'Rejected'
   | 'Cancelled';
 
+export type AssetDisposalScope = 'WholeAsset' | 'PartialPortion' | 'Component';
+
+export type AssetDisposalSettlementMode = 'NotApplicable' | 'CreditSale' | 'ImmediateReceipt';
+
+export type AssetDisposalSettlementStatus = 'NotApplicable' | 'Pending' | 'Invoiced' | 'Settled' | 'Failed';
+
+export type AssetDisposalSaleTaxTreatment = 'Standard' | 'Exempt' | 'ZeroRated' | 'OutOfScope';
+
 export interface AssetDisposal {
   id: string;
   fixedAssetId: string;
@@ -253,13 +462,63 @@ export interface AssetDisposal {
   assetCode?: string;
   disposalDate: string;
   disposalType: DisposalType;
+  disposalScope: AssetDisposalScope;
+  disposedPortionPercent: number;
+  componentReference?: string;
+  componentDescription?: string;
+  allocationEvidenceReference?: string;
+  allocationEvidenceNotes?: string;
   status: AssetDisposalStatus;
   reason?: string;
   saleProceeds: number;
   disposalCost: number;
+  netProceeds: number;
+  proceedsCurrencyCode: string;
+  proceedsFunctionalAmount: number;
+  proceedsExchangeRateId?: string;
+  proceedsExchangeRateValue: number;
+  proceedsExchangeRateSource: string;
+  proceedsExchangeRateDate: string;
+  proceedsExchangeRateType: string;
+  proceedsExchangeRateQuoteSide: string;
   netBookValueAtDisposal: number;
+  finalDepreciationAmount: number;
+  finalDepreciationFromDate?: string;
+  finalDepreciationToDate?: string;
+  finalDepreciationPeriodDays: number;
+  finalDepreciationEligibleDays: number;
+  finalDepreciationProrationBasis?: string;
+  finalDepreciationMethodSnapshot?: DepreciationMethod;
+  finalDepreciationScheduleId?: string;
+  finalDepreciationProductionUnits: number;
+  finalDepreciationDiminishingRatePercent: number;
+  finalDepreciationLifetimeProductionCapacity: number;
+  finalDepreciationCumulativeProductionUnitsBefore: number;
+  finalDepreciationCumulativeProductionUnitsAfter: number;
+  finalDepreciationEvidenceReference?: string;
+  finalDepreciationEvidenceNotes?: string;
   gainOrLoss: number;
+  remainingNetBookValueAfterDisposal: number;
+  revaluationSurplusAtDisposal: number;
+  revaluationSurplusAccountId?: string;
+  retainedEarningsAccountId?: string;
+  revaluationSurplusTransferAmount: number;
   buyerName?: string;
+  buyerBusinessPartnerId?: string;
+  settlementMode: AssetDisposalSettlementMode;
+  settlementStatus: AssetDisposalSettlementStatus;
+  saleTaxGroupId?: string;
+  saleTaxTreatment: AssetDisposalSaleTaxTreatment;
+  settlementPaymentTermId?: string;
+  settlementPaymentMethodId?: string;
+  settlementBankAccountId?: string;
+  settlementLiquidityAccountId?: string;
+  settlementReference?: string;
+  customerInvoiceId?: string;
+  customerPaymentId?: string;
+  settlementInvoiceAmount: number;
+  settlementTaxAmount: number;
+  settlementCompletedAt?: string;
   referenceNumber?: string;
   requestedById?: string;
   requestedByName?: string;
@@ -274,10 +533,30 @@ export interface RequestAssetDisposalDto {
   fixedAssetId: string;
   disposalDate: string;
   disposalType: DisposalType;
+  disposalScope: AssetDisposalScope;
+  disposedPortionPercent: number;
+  componentReference?: string;
+  componentDescription?: string;
+  allocationEvidenceReference?: string;
+  allocationEvidenceNotes?: string;
   reason?: string;
   saleProceeds: number;
   disposalCost: number;
+  proceedsCurrencyCode?: string;
+  proceedsExchangeRateId?: string;
   buyerName?: string;
+  buyerBusinessPartnerId?: string;
+  settlementMode?: AssetDisposalSettlementMode;
+  saleTaxGroupId?: string;
+  saleTaxTreatment?: AssetDisposalSaleTaxTreatment;
+  settlementPaymentTermId?: string;
+  settlementPaymentMethodId?: string;
+  settlementBankAccountId?: string;
+  settlementLiquidityAccountId?: string;
+  settlementReference?: string;
+  finalDepreciationProductionUnits?: number;
+  finalDepreciationEvidenceReference?: string;
+  finalDepreciationEvidenceNotes?: string;
 }
 
 export interface ApproveAssetDisposalDto {
@@ -366,6 +645,8 @@ export interface CreateAssetValuationDto {
   valuationDate: string;
   valuationType: ValuationType;
   fairValue: number;
+  sourceImpairmentValuationId?: string;
+  unimpairedCarryingAmountCap?: number;
   revisedUsefulLifeMonths?: number;
   valuerName?: string;
   valuationMethod?: string;
@@ -400,6 +681,9 @@ export interface AssetValuation {
   revaluationDeficit: number;
   impairmentLoss: number;
   impairmentReversal: number;
+  sourceImpairmentValuationId?: string;
+  outstandingImpairmentBefore: number;
+  unimpairedCarryingAmountCap: number;
   revisedUsefulLifeMonths?: number;
   valuerName?: string;
   valuationMethod?: string;
@@ -407,9 +691,44 @@ export interface AssetValuation {
   reason?: string;
   notes?: string;
   isPostedToGL: boolean;
+  isCorrected: boolean;
+  correctionId?: string;
+  correctedAt?: string;
   journalEntryId?: string;
   postedDate?: string;
   createdAt: string;
+}
+
+export interface RequestAssetValuationCorrectionDto {
+  reason: string;
+  impactAssessment: string;
+  reversalDate?: string;
+}
+
+export interface ReviewAssetValuationCorrectionDto {
+  approved: boolean;
+  reviewComment: string;
+}
+
+export interface AssetValuationCorrection {
+  id: string;
+  originalValuationId: string;
+  fixedAssetId: string;
+  assetCode?: string;
+  valuationType: string;
+  status: 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted';
+  reason: string;
+  impactAssessment: string;
+  requestedReversalDate: string;
+  requestedByUserName: string;
+  requestedAt: string;
+  reviewedByUserName?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  originalJournalEntryId: string;
+  reversalJournalEntryId?: string;
+  postedAt?: string;
+  failureReason?: string;
 }
 
 export interface BulkOperationResult<T> {

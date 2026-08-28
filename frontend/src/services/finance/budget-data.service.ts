@@ -17,7 +17,9 @@ import type {
     BudgetAuditEvent,
     AdoptBudgetScenarioDto,
     ConsolidatedBudgetView,
-    BudgetScenarioComparison
+    BudgetScenarioComparison,
+    BudgetRevision,
+    CreateBudgetRevisionDto
 } from '@/types/budget';
 
 import { apiService } from '@/services/api.service';
@@ -158,6 +160,36 @@ class BudgetDataService {
         return apiService.get<BudgetScenarioComparison>(
             `/budget/scenarios/${baseScenarioId}/compare/${comparisonScenarioId}`
         );
+    }
+
+    // ===== CONTROLLED BUDGET REVISIONS =====
+
+    async getRevisions(fiscalYearId?: string): Promise<BudgetRevision[]> {
+        const query = fiscalYearId ? `?fiscalYearId=${encodeURIComponent(fiscalYearId)}` : '';
+        return apiService.get<BudgetRevision[]>(`/budget/revisions${query}`);
+    }
+
+    async getRevision(id: string): Promise<BudgetRevision> {
+        return apiService.get<BudgetRevision>(`/budget/revisions/${id}`);
+    }
+
+    async createRevision(dto: CreateBudgetRevisionDto): Promise<BudgetRevision> {
+        return apiService.post<BudgetRevision>('/budget/revisions', dto);
+    }
+
+    async updateRevision(
+        id: string,
+        dto: CreateBudgetRevisionDto & { rowVersion: string }
+    ): Promise<BudgetRevision> {
+        return apiService.put<BudgetRevision>(`/budget/revisions/${id}`, dto);
+    }
+
+    async submitRevision(id: string, rowVersion: string): Promise<BudgetRevision> {
+        return apiService.post<BudgetRevision>(`/budget/revisions/${id}/submit`, { rowVersion });
+    }
+
+    async applyRevision(id: string, rowVersion: string): Promise<BudgetRevision> {
+        return apiService.post<BudgetRevision>(`/budget/revisions/${id}/apply`, { rowVersion });
     }
 }
 

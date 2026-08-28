@@ -1,6 +1,8 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.EntityFrameworkCore;
@@ -10,11 +12,14 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public class ProcurementBudgetService : IProcurementBudgetService
 {
+    private const string WorkflowEntityType = "ProcurementBudget";
     private readonly IProcurementBudgetRepository _budgetRepository;
     private readonly IProcurementBudgetAllocationRepository _allocationRepository;
     private readonly IProcurementBudgetRevisionRepository _revisionRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<ProcurementBudgetService> _logger;
 
     public ProcurementBudgetService(
@@ -23,6 +28,8 @@ public class ProcurementBudgetService : IProcurementBudgetService
         IProcurementBudgetRevisionRepository revisionRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<ProcurementBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
@@ -30,6 +37,8 @@ public class ProcurementBudgetService : IProcurementBudgetService
         _revisionRepository = revisionRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
     }
 
@@ -79,47 +88,80 @@ public class ProcurementBudgetService : IProcurementBudgetService
 
     public async Task<ProcurementBudgetDetailDto> CreateAsync(CreateProcurementBudgetDto dto)
     {
-        var budgetCode = await _budgetRepository.GenerateBudgetCodeAsync(dto.FiscalYear, dto.DepartmentId);
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new UnauthorizedAccessException("A tenant context is required to create a procurement budget.");
 
-        var budget = new ProcurementBudget
+        async Task<ProcurementBudgetDetailDto> CreateUnderNumberLockAsync()
         {
-            BudgetCode = budgetCode,
-            Title = dto.Title,
-            Description = dto.Description,
-            DepartmentId = dto.DepartmentId,
-            ProcurementPlanId = dto.ProcurementPlanId,
-            FiscalYear = dto.FiscalYear,
-            AllocatedAmount = dto.AllocatedAmount,
-            Currency = dto.Currency,
-            ControlLevel = dto.ControlLevel,
-            WarningThresholdPercent = dto.WarningThresholdPercent,
-            EffectiveDate = dto.EffectiveDate,
-            ExpiryDate = dto.ExpiryDate,
-            Notes = dto.Notes,
-            Status = "Draft",
-            TenantId = _currentUserProvider.TenantId
-        };
+            await _unitOfWork.AcquireTransactionLockAsync(
+                $"procurement-budget-number:{tenantId:N}:{dto.FiscalYear}");
 
-        await _budgetRepository.AddAsync(budget);
+            var budgetCode = await _budgetRepository.GenerateBudgetCodeAsync(dto.FiscalYear, tenantId);
 
-        foreach (var allocationDto in dto.Allocations)
-        {
-            var allocation = new ProcurementBudgetAllocation
+            var budget = new ProcurementBudget
             {
-                ProcurementBudgetId = budget.Id,
-                CategoryName = allocationDto.CategoryName,
-                CategoryDescription = allocationDto.CategoryDescription,
-                AllocatedAmount = allocationDto.AllocatedAmount,
-                Notes = allocationDto.Notes,
-                TenantId = _currentUserProvider.TenantId
+                BudgetCode = budgetCode,
+                Title = dto.Title,
+                Description = dto.Description,
+                DepartmentId = dto.DepartmentId,
+                ProcurementPlanId = dto.ProcurementPlanId,
+                FiscalYear = dto.FiscalYear,
+                AllocatedAmount = dto.AllocatedAmount,
+                Currency = dto.Currency,
+                ControlLevel = dto.ControlLevel,
+                WarningThresholdPercent = dto.WarningThresholdPercent,
+                EffectiveDate = dto.EffectiveDate,
+                ExpiryDate = dto.ExpiryDate,
+                Notes = dto.Notes,
+                Status = "Draft",
+                TenantId = tenantId
             };
-            await _allocationRepository.AddAsync(allocation);
+
+            await _budgetRepository.AddAsync(budget);
+
+            foreach (var allocationDto in dto.Allocations)
+            {
+                var allocation = new ProcurementBudgetAllocation
+                {
+                    ProcurementBudgetId = budget.Id,
+                    CategoryName = allocationDto.CategoryName,
+                    CategoryDescription = allocationDto.CategoryDescription,
+                    AllocatedAmount = allocationDto.AllocatedAmount,
+                    Notes = allocationDto.Notes,
+                    TenantId = tenantId
+                };
+                await _allocationRepository.AddAsync(allocation);
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+            _logger.LogInformation("Created procurement budget {BudgetCode}", budgetCode);
+
+            return await GetByIdAsync(budget.Id)
+                ?? throw new InvalidOperationException("Failed to retrieve created budget");
         }
 
-        await _unitOfWork.SaveChangesAsync();
-        _logger.LogInformation("Created procurement budget {BudgetCode}", budgetCode);
+        if (_unitOfWork.HasActiveTransaction)
+            return await CreateUnderNumberLockAsync();
 
-        return await GetByIdAsync(budget.Id) ?? throw new InvalidOperationException("Failed to retrieve created budget");
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                var result = await CreateUnderNumberLockAsync();
+                await _unitOfWork.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync();
+                else
+                    _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
     }
 
     public async Task<ProcurementBudgetDetailDto> UpdateAsync(Guid id, CreateProcurementBudgetDto dto)
@@ -148,20 +190,59 @@ public class ProcurementBudgetService : IProcurementBudgetService
         return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve updated budget");
     }
 
-    public async Task<ProcurementBudgetDetailDto> ApproveAsync(Guid id)
+    public async Task<ProcurementBudgetDetailDto> SubmitForApprovalAsync(Guid id)
     {
         var budget = await _budgetRepository.GetByIdAsync(id);
         if (budget == null) throw new KeyNotFoundException($"Budget with ID {id} not found");
+        if (budget.Status != "Draft") throw new InvalidOperationException("Only draft budgets can be submitted for approval.");
 
         var currentUserId = _currentUserProvider.UserId;
-        budget.Status = "Approved";
-        budget.ApprovedById = currentUserId != Guid.Empty ? currentUserId : null;
-        budget.ApprovedDate = DateTime.UtcNow;
+        if (currentUserId == Guid.Empty) throw new UnauthorizedAccessException("User not authenticated.");
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(WorkflowEntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the procurement budget workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType)
+            .ApplySubmitOutcome(budget, workflowResult.Outcome, currentUserId);
+        budget.UpdatedAt = DateTime.UtcNow;
+        await _budgetRepository.UpdateAsync(budget);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Procurement budget {BudgetCode} submitted to shared workflow", budget.BudgetCode);
+        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve budget");
+    }
+
+    public async Task<ProcurementBudgetDetailDto> ApproveAsync(Guid id, ApproveProcurementBudgetDto dto)
+    {
+        var budget = await _budgetRepository.GetByIdAsync(id);
+        if (budget == null) throw new KeyNotFoundException($"Budget with ID {id} not found");
+        if (!string.Equals(budget.Status, "Submitted", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(budget.Status, "UnderReview", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only a submitted procurement budget can be approved or rejected.");
+
+        var currentUserId = _currentUserProvider.UserId;
+        if (currentUserId == Guid.Empty) throw new UnauthorizedAccessException("User not authenticated.");
+        if (!await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, id, currentUserId))
+            throw new UnauthorizedAccessException("You are not assigned to the active procurement budget workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            WorkflowEntityType,
+            id,
+            currentUserId,
+            dto.IsApproved ? "Approve" : "Reject",
+            dto.Comments);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the procurement budget workflow decision.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(budget, workflowResult.Outcome, currentUserId, dto.Comments);
         budget.UpdatedAt = DateTime.UtcNow;
 
         await _budgetRepository.UpdateAsync(budget);
         await _unitOfWork.SaveChangesAsync();
 
+        _logger.LogInformation("Procurement budget {BudgetCode} workflow decision resulted in {Status}", budget.BudgetCode, budget.Status);
         return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve budget");
     }
 
@@ -424,6 +505,14 @@ public class ProcurementBudgetService : IProcurementBudgetService
     {
         var budget = await _budgetRepository.GetByIdAsync(budgetId);
         if (budget == null) throw new KeyNotFoundException($"Budget with ID {budgetId} not found");
+
+        if (budget.TenantId != _currentUserProvider.TenantId || budget.IsDeleted)
+            throw new KeyNotFoundException($"Budget with ID {budgetId} not found");
+        if (!string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only an approved or active procurement budget can be linked to a plan.");
+        if (budget.ProcurementPlanId.HasValue && budget.ProcurementPlanId.Value != planId)
+            throw new InvalidOperationException("The procurement budget is already linked to another plan.");
 
         budget.ProcurementPlanId = planId;
         budget.UpdatedAt = DateTime.UtcNow;

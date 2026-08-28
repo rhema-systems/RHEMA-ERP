@@ -24,6 +24,7 @@ import {
   type ProcedureCaseDocument,
   type ProcedureCaseSummary,
 } from '@/services/procedure-case.service';
+import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
 
 const ProcedurePdfViewer = dynamic(() => import('@/components/procedures/ProcedurePdfViewer'), {
   ssr: false,
@@ -38,6 +39,7 @@ interface ProcedureCaseWorkspaceProps {
   module: 'Legal' | 'Estate' | 'Facilities' | 'PropertyManagement' | 'Planning';
   entityType: string;
   defaultTitle: string;
+  workspaceType?: string;
 }
 
 const LAND_FEE_ENTITY_TYPES = new Set([
@@ -47,6 +49,8 @@ const LAND_FEE_ENTITY_TYPES = new Set([
 ]);
 
 const CHANGE_OF_USE_ENTITY_TYPES = new Set(['EstateChangeOfUse']);
+
+const GENERATED_DOCUMENT_MODULES = new Set(['Estate', 'Legal']);
 
 const CALCULATED_PROCEDURE_FIELD_KEYS = new Set([
   'plotSizeHectares',
@@ -121,9 +125,33 @@ const resolveProcedurePortalRecipient = (procedureCase: ProcedureCaseDetail): st
   return applicantName.includes('@') ? applicantName : '';
 };
 
-export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: ProcedureCaseWorkspaceProps) {
+export function ProcedureCaseWorkspace({
+  module,
+  entityType,
+  defaultTitle,
+  workspaceType,
+}: ProcedureCaseWorkspaceProps) {
   const searchParams = useSearchParams();
+  const terminology = getProcedureWorkspaceTerminology(workspaceType);
   const requestedCaseId = searchParams.get('caseId');
+  const prefillSignature = searchParams.toString();
+  const prefilledCase = React.useMemo(() => ({
+    title: searchParams.get('title') || defaultTitle,
+    referenceNumber: searchParams.get('referenceNumber') || '',
+    applicantName: searchParams.get('applicantName') || '',
+    sourceDepartment: searchParams.get('sourceDepartment') || '',
+    receivedDate: searchParams.get('receivedDate') || '',
+    description: searchParams.get('description') || '',
+  }), [defaultTitle, prefillSignature, searchParams]);
+  const prefilledFieldValues = React.useMemo(() => {
+    const values: Record<string, string | null> = {};
+    searchParams.forEach((value, key) => {
+      if (key.startsWith('field_')) {
+        values[key.slice('field_'.length)] = value;
+      }
+    });
+    return values;
+  }, [prefillSignature, searchParams]);
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
   const [selectedCase, setSelectedCase] = React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -144,13 +172,21 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     notes: '',
   });
   const [newCase, setNewCase] = React.useState({
-    title: defaultTitle,
-    referenceNumber: '',
-    applicantName: '',
-    sourceDepartment: '',
-    receivedDate: '',
-    description: '',
+    title: prefilledCase.title,
+    referenceNumber: prefilledCase.referenceNumber,
+    applicantName: prefilledCase.applicantName,
+    sourceDepartment: prefilledCase.sourceDepartment,
+    receivedDate: prefilledCase.receivedDate,
+    description: prefilledCase.description,
   });
+  const appliedPrefillSignatureRef = React.useRef('');
+  const supportsGeneratedDocuments = GENERATED_DOCUMENT_MODULES.has(module);
+  const generatedDocumentSourceLabel =
+    module === 'Legal'
+      ? 'Source: Legal Department -> Central DMS'
+      : 'Source: Estate / Facility -> Central DMS';
+  const generatedDocumentPreparedBy =
+    selectedCase?.sourceDepartment || (module === 'Legal' ? 'Legal Department' : 'Estate Section');
 
   const currentStageItems = React.useMemo(
     () => selectedCase?.checklistItems.filter((item) => item.stageIndex === selectedCase.currentStageIndex) ?? [],
@@ -179,7 +215,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
         setSelectedCase(detail);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load procedure cases.');
+      setError(err instanceof Error ? err.message : 'Unable to load workspace records.');
     } finally {
       setIsLoading(false);
     }
@@ -190,14 +226,39 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
   }, [loadCases]);
 
   React.useEffect(() => {
-    if (module !== 'Estate') {
+    if (requestedCaseId || appliedPrefillSignatureRef.current === prefillSignature) {
+      return;
+    }
+
+    const hasPrefill =
+      Boolean(prefilledCase.referenceNumber) ||
+      Boolean(prefilledCase.applicantName) ||
+      Boolean(prefilledCase.sourceDepartment) ||
+      Boolean(prefilledCase.receivedDate) ||
+      Boolean(prefilledCase.description) ||
+      Object.keys(prefilledFieldValues).length > 0;
+    if (!hasPrefill) {
+      return;
+    }
+
+    appliedPrefillSignatureRef.current = prefillSignature;
+    setNewCase(prefilledCase);
+  }, [
+    prefillSignature,
+    prefilledCase,
+    prefilledFieldValues,
+    requestedCaseId,
+  ]);
+
+  React.useEffect(() => {
+    if (!supportsGeneratedDocuments) {
       return;
     }
 
     let mounted = true;
     const loadTemplates = async () => {
       try {
-        const templates = await documentManagementService.getGenerationTemplates('Estate');
+        const templates = await documentManagementService.getGenerationTemplates(module);
         if (!mounted) {
           return;
         }
@@ -206,7 +267,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
         setSelectedGenerationTemplate((current) => current || templates[0]?.templateCode || '');
       } catch (err) {
         if (mounted) {
-          setError(err instanceof Error ? err.message : 'Unable to load Estate document templates.');
+          setError(err instanceof Error ? err.message : `Unable to load ${module} document templates.`);
         }
       }
     };
@@ -216,7 +277,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     return () => {
       mounted = false;
     };
-  }, [module]);
+  }, [module, supportsGeneratedDocuments]);
 
   React.useEffect(() => {
     if (!selectedCase || (!LAND_FEE_ENTITY_TYPES.has(entityType) && !CHANGE_OF_USE_ENTITY_TYPES.has(entityType))) {
@@ -291,7 +352,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       const detail = await procedureCaseService.getCase(id);
       setSelectedCase(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to open procedure case.');
+      setError(err instanceof Error ? err.message : 'Unable to open the workspace record.');
     } finally {
       setIsSaving(false);
     }
@@ -305,7 +366,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
         module,
         entityType,
         ...newCase,
-        fieldValues: {},
+        fieldValues: prefilledFieldValues,
       });
       setSelectedCase(created);
       setNewCase({
@@ -318,7 +379,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       });
       await loadCases();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create procedure case.');
+      setError(err instanceof Error ? err.message : 'Unable to create the workspace record.');
     } finally {
       setIsSaving(false);
     }
@@ -447,7 +508,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     setDocumentFiles((current) => ({ ...current, [documentId]: file }));
   };
 
-  const generateEstateDocument = async () => {
+  const generateProcedureDocument = async () => {
     if (!selectedCase || !selectedGenerationTemplate) {
       return;
     }
@@ -470,27 +531,84 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     };
 
     setMergeAlias('ApplicantName', 'applicantName');
-    setMergeAlias('PropertyNumber', 'propertyNumber');
+    setMergeAlias('PropertyNumber', 'propertyNumber', 'housePlotShopNumber', 'unitNumber');
+    setMergeAlias('HousePlotShopNumber', 'housePlotShopNumber', 'propertyNumber', 'unitNumber');
+    setMergeAlias('TransferorName', 'transferorName', 'oldLesseeName');
+    setMergeAlias('TransfereeName', 'transfereeName', 'newLesseeName');
+    setMergeAlias('NewLesseeAddress', 'newLesseeAddress', 'addressOnRecord');
+    setMergeAlias('TransferEffectiveDate', 'transferEffectiveDate');
+    setMergeAlias('TransferDeclarationReference', 'transferDeclarationReference');
+    setMergeAlias('VoluntaryVacationReference', 'voluntaryVacationReference');
+    setMergeAlias('HosFormReference', 'hosFormReference');
+    setMergeAlias('HouseType', 'houseType');
+    setMergeAlias('PurchaseAmount', 'purchaseAmount', 'sellingPrice', 'considerationAmount');
+    setMergeAlias('PurchaseDate', 'purchaseDate');
+    setMergeAlias('SopSectionReference', 'sopSectionReference');
+    setMergeAlias('ApprovedFeeScheduleReference', 'approvedFeeScheduleReference', 'approvedRateReference');
+    setMergeAlias('DocumentTemplateReference', 'documentTemplateReference');
+    setMergeAlias('FinanceReference', 'financeReference', 'feeReference');
+    setMergeAlias('LegalReference', 'legalReference');
+    setMergeAlias('RecordsReference', 'estateRecordsReference', 'recordsUpdateReference', 'registerReference');
+    setMergeAlias('ReportReference', 'reportingReference', 'quarterlyReportReference', 'boardSubmissionReference');
+    setMergeAlias('OfferLetterReference', 'offerLetterReference');
+    setMergeAlias('RightOfEntryReference', 'rightOfEntryReference');
+    setMergeAlias('LeaseRequestFormReference', 'leaseRequestFormReference');
+    setMergeAlias('RegisteredLeaseReference', 'registeredLeaseReference');
     setMergeAlias('LandUse', 'landUse');
     setMergeAlias('Premium', 'landManagementFeePayable', 'renewalPremium', 'transferFeePayable');
     setMergeAlias('GroundRent', 'groundRentPayable', 'improvedGroundRent');
+    setMergeAlias('PaymentFrequency', 'paymentFrequency');
+    setMergeAlias('LeaseTerm', 'leaseTerm', 'leaseTermYears');
+    setMergeAlias('MoveInDate', 'moveInDate', 'dateOfTenancy', 'leaseCommencementDate');
+    setMergeAlias('OriginalLeaseReference', 'originalLeaseReference', 'registeredLeaseReference');
+    setMergeAlias('VariationReason', 'variationReason', 'leaseVariationReason');
+    setMergeAlias('VendorName', 'vendorName', 'ownerName');
+    setMergeAlias('AgreedAmount', 'agreedAmount', 'considerationAmount', 'purchaseAmount');
+    setMergeAlias('PaymentBasis', 'paymentBasis', 'vendorPaymentMethod');
+    setMergeAlias('ApprovalReference', 'approvalReference', 'mdApprovalReference');
     setMergeAlias('OfferExpiryDate', 'offerExpiryDate', 'paymentDeadline');
     setMergeAlias('CaseReference', 'referenceNumber', 'fileReference');
+    setMergeAlias('InstrumentType', 'instrumentType', 'transferProcessType', 'mortgageType', 'housingRequestType');
+    setMergeAlias('ScheduleReference', 'scheduleReference');
+    setMergeAlias('ClientExecutionDate', 'clientExecutionDate');
+    setMergeAlias('MortgageeName', 'mortgageeName');
+    setMergeAlias('PaymentReceiptReference', 'paymentReceiptReference', 'transferFeeReceipt', 'feeReference');
+    setMergeAlias('MortgageLetterReference', 'mortgageLetterReference');
+    setMergeAlias('MdApprovalReference', 'mdApprovalReference', 'approvalReference');
+    setMergeAlias('TransferFeeReceipt', 'transferFeeReceipt', 'paymentReceiptReference');
+    setMergeAlias('TerminationReason', 'terminationReason');
+    setMergeAlias('SiteReportReference', 'siteReportReference');
+    setMergeAlias('NoticePostingStartDate', 'noticePostingStartDate');
+    setMergeAlias('NoticePostingEndDate', 'noticePostingEndDate');
+    setMergeAlias('RecognitionApplicantName', 'recognitionApplicantName', 'applicantName');
+    setMergeAlias('RecognitionPaymentStatus', 'recognitionPaymentStatus', 'paymentStatus');
+    setMergeAlias('RecognitionDocumentReference', 'recognitionDocumentReference');
+    setMergeAlias('SignatureStatus', 'signatureStatus');
+    setMergeAlias('AssignorName', 'assignorName', 'transferorName');
+    setMergeAlias('AssigneeName', 'assigneeName', 'transfereeName');
+    setMergeAlias('VestingInstrumentReference', 'vestingInstrumentReference');
+    setMergeAlias('ConsentDecision', 'consentDecision');
+    setMergeAlias('CourtName', 'courtName');
+    setMergeAlias('CaseNumber', 'caseNumber');
+    setMergeAlias('CourtProcessType', 'courtProcessType');
+    setMergeAlias('ServiceDate', 'serviceDate');
+    setMergeAlias('ResponseDeadline', 'responseDeadline');
+    setMergeAlias('FilingReference', 'filingReference');
 
     setIsGeneratingDocument(true);
     setError(null);
     try {
       const result = await documentManagementService.generateDocumentFromTemplate({
         templateCode: selectedGenerationTemplate,
-        sourceModule: 'Estate',
-        sourceLabel: 'Source: Estate / Facility -> Central DMS',
+        sourceModule: module,
+        sourceLabel: generatedDocumentSourceLabel,
         sourceEntityType: entityType,
         sourceRecordReference: selectedCase.referenceNumber || selectedCase.title,
         sourceRecordId: selectedCase.id,
         caseTitle: selectedCase.title,
         caseReference: selectedCase.referenceNumber || selectedCase.title,
         applicantName: selectedCase.applicantName || undefined,
-        preparedBy: selectedCase.sourceDepartment || 'Estate Section',
+        preparedBy: generatedDocumentPreparedBy,
         purpose: selectedCase.currentStageName,
         mergeValues,
       });
@@ -502,7 +620,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       }));
       setIsGeneratedViewerOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to generate Estate document.');
+      setError(err instanceof Error ? err.message : `Unable to generate ${module} document.`);
     } finally {
       setIsGeneratingDocument(false);
     }
@@ -625,7 +743,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <CardTitle>Live Case Workspace</CardTitle>
+            <CardTitle>{terminology.title}</CardTitle>
           </div>
           <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
             {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
@@ -643,12 +761,16 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
           <div className="space-y-4">
             <div className="rounded-md border border-border bg-background p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">Cases</h2>
+                <h2 className="text-sm font-semibold">
+                  {terminology.collectionLabel}
+                </h2>
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
               </div>
               <div className="space-y-2">
                 {cases.length === 0 && !isLoading ? (
-                  <p className="text-sm text-muted-foreground">No cases opened for this procedure yet.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {terminology.emptyMessage}
+                  </p>
                 ) : null}
                 {cases.map((procedureCase) => (
                   <button
@@ -675,7 +797,9 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
             </div>
 
             <div className="rounded-md border border-border bg-background p-4">
-              <h2 className="text-sm font-semibold">Open Case</h2>
+              <h2 className="text-sm font-semibold">
+                {terminology.createHeading}
+              </h2>
               <div className="mt-3 space-y-3">
                 <Input value={newCase.title} onChange={(event) => setNewCase({ ...newCase, title: event.target.value })} />
                 <Input placeholder="Reference number" value={newCase.referenceNumber} onChange={(event) => setNewCase({ ...newCase, referenceNumber: event.target.value })} />
@@ -685,7 +809,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                 <Textarea placeholder="Description" value={newCase.description} onChange={(event) => setNewCase({ ...newCase, description: event.target.value })} />
                 <Button className="w-full gap-2" onClick={() => void createCase()} disabled={isSaving}>
                   <Plus className="h-4 w-4" />
-                  Create case
+                  {terminology.createLabel}
                 </Button>
               </div>
             </div>
@@ -733,7 +857,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                 />
               </div>
 
-              {module === 'Estate' ? (
+              {supportsGeneratedDocuments ? (
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <h2 className="text-sm font-semibold">Generated Documents</h2>
@@ -755,7 +879,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                       </Select>
                       <Button
                         className="gap-2"
-                        onClick={() => void generateEstateDocument()}
+                        onClick={() => void generateProcedureDocument()}
                         disabled={!selectedGenerationTemplate || isGeneratingDocument}
                       >
                         {isGeneratingDocument ? (
@@ -1023,7 +1147,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
             </div>
           ) : (
             <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
-              Select or create a case to start work.
+              {terminology.selectMessage}
             </div>
           )}
         </div>

@@ -92,6 +92,25 @@ public sealed class ProcurementTenderDocumentControlServiceTests
     }
 
     [Fact]
+    public async Task SupplierOnlyDispatchDoesNotRequireAnExternalEmailCollection()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var register = await fixture.BindAsync("bind-supplier-only-dispatch");
+        await fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, amountPaid: 0m),
+            "issue-supplier-only-dispatch");
+
+        var ready = await fixture.Service.EnsureDispatchReadyAsync(
+            ProcurementTenderDocumentSourceType.Tender,
+            fixture.Tender.Id,
+            [fixture.Supplier.Id],
+            null!,
+            "dispatch-supplier-only");
+
+        ready.Ready.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task MandatoryApprovedChangeAcknowledgementBlocksSubmissionUntilAcknowledged()
     {
         await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);

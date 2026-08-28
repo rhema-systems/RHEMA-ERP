@@ -79,6 +79,14 @@ public sealed class ProcurementSupplierDueDiligenceController : ControllerBase
         ExecuteAsync(async () => Ok(await _service.ApproveAsync(
             id, request, CorrelationId, cancellationToken)));
 
+    [HttpPost("{id:guid}/supersede-stale")]
+    public Task<IActionResult> SupersedeStale(
+        Guid id,
+        [FromBody] ProcurementSupplierDueDiligenceLifecycleRequest request,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(async () => Ok(await _service.SupersedeStaleAsync(
+            id, request, CorrelationId, cancellationToken)));
+
     [HttpPost("{id:guid}/reject")]
     public Task<IActionResult> Reject(
         Guid id,

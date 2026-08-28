@@ -1,4 +1,8 @@
 import { compatibleApiService as apiService } from './compatibleApiService';
+import {
+  resolveProcedureWorkspaceType,
+  type ProcedureWorkspaceType,
+} from '@/lib/procedure-workspace';
 
 export interface EstateProcedure {
   title: string;
@@ -8,6 +12,7 @@ export interface EstateProcedure {
   icon: string;
   stageCount: number;
   accent: string;
+  workspaceType?: ProcedureWorkspaceType;
 }
 
 interface ApiResponse<T> {
@@ -22,7 +27,13 @@ export function findEstateProcedure(entityType: string, procedures: EstateProced
 class EstateProcedureService {
   async getProcedures(): Promise<EstateProcedure[]> {
     const response = await apiService.get<ApiResponse<EstateProcedure[]>>('/estate/procedures');
-    return response.data || [];
+    return (response.data || []).map((procedure) => ({
+      ...procedure,
+      workspaceType: resolveProcedureWorkspaceType(
+        procedure.entityType,
+        procedure.workspaceType
+      ),
+    }));
   }
 }
 

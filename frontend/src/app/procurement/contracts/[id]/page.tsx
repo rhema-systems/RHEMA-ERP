@@ -1,30 +1,83 @@
- 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, FileSignature, Calendar, DollarSign, Building, CheckCircle, Clock, FileText, Edit, Plus, Trash2, XCircle, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  ArrowLeft,
+  FileSignature,
+  Calendar,
+  DollarSign,
+  Building,
+  CheckCircle,
+  Clock,
+  FileText,
+  Edit,
+  Plus,
+  Trash2,
+  XCircle,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
 import { toast } from 'sonner';
-import { contractService, type ContractDto, type ContractMilestoneDto, type ContractAmendmentDto, type CreateContractMilestoneDto, type CreateContractAmendmentDto, type UpdateContractDto } from '@/services/contractService';
+import {
+  contractService,
+  type ContractDto,
+  type ContractMilestoneDto,
+  type ContractAmendmentDto,
+  type CreateContractMilestoneDto,
+  type CreateContractAmendmentDto,
+  type UpdateContractDto,
+} from '@/services/contractService';
 import { ContractActivationGate } from '@/components/procurement/ContractActivationGate';
 import { ContractOperationsDashboard } from '@/components/procurement/ContractOperationsDashboard';
 import { WorksCloseoutWorkspace } from '@/components/procurement/WorksCloseoutWorkspace';
+import { QuantitySurveyContractCommercialTermsPanel } from '@/components/quantity-survey/QuantitySurveyContractCommercialTermsPanel';
 import { format } from 'date-fns';
 
 export default function ContractDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const contractId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
+  const searchParams = useSearchParams();
+  const contractId = Array.isArray(params?.id)
+    ? params.id[0]
+    : (params?.id ?? '');
   const [contract, setContract] = useState<ContractDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,15 +88,19 @@ export default function ContractDetailPage() {
 
   // Milestone dialog
   const [showMilestoneDialog, setShowMilestoneDialog] = useState(false);
-  const [milestoneData, setMilestoneData] = useState<CreateContractMilestoneDto>({
-    milestoneName: '', sequenceNumber: 1, paymentPercentage: 0
-  });
+  const [milestoneData, setMilestoneData] =
+    useState<CreateContractMilestoneDto>({
+      milestoneName: '',
+      sequenceNumber: 1,
+      paymentPercentage: 0,
+    });
 
   // Amendment dialog
   const [showAmendmentDialog, setShowAmendmentDialog] = useState(false);
-  const [amendmentData, setAmendmentData] = useState<CreateContractAmendmentDto>({
-    amendmentType: 'ValueChange'
-  });
+  const [amendmentData, setAmendmentData] =
+    useState<CreateContractAmendmentDto>({
+      amendmentType: 'ValueChange',
+    });
 
   // Document dialog
   const [showDocumentDialog, setShowDocumentDialog] = useState(false);
@@ -74,7 +131,11 @@ export default function ContractDetailPage() {
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return '-';
-    try { return format(new Date(dateString), 'dd MMM yyyy'); } catch { return dateString; }
+    try {
+      return format(new Date(dateString), 'dd MMM yyyy');
+    } catch {
+      return dateString;
+    }
   };
 
   const formatCurrency = (amount: number, currency: string = 'USD') => {
@@ -82,21 +143,52 @@ export default function ContractDetailPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
-      'Draft': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
-      'PendingSignature': { variant: 'secondary', className: 'bg-yellow-100 text-yellow-800' },
-      'Active': { variant: 'default', className: 'bg-green-100 text-green-800' },
-      'Completed': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
-      'Terminated': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
-      'Suspended': { variant: 'secondary', className: 'bg-orange-100 text-orange-800' },
-      'Pending': { variant: 'secondary', className: 'bg-yellow-100 text-yellow-800' },
-      'Approved': { variant: 'default', className: 'bg-green-100 text-green-800' },
-      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
-      'Invoiced': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
-      'Paid': { variant: 'default', className: 'bg-emerald-100 text-emerald-800' },
+    const config: Record<
+      string,
+      {
+        variant: 'default' | 'secondary' | 'destructive' | 'outline';
+        className: string;
+      }
+    > = {
+      Draft: { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
+      PendingSignature: {
+        variant: 'secondary',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      Active: { variant: 'default', className: 'bg-green-100 text-green-800' },
+      Completed: { variant: 'default', className: 'bg-blue-100 text-blue-800' },
+      Terminated: {
+        variant: 'destructive',
+        className: 'bg-red-100 text-red-800',
+      },
+      Suspended: {
+        variant: 'secondary',
+        className: 'bg-orange-100 text-orange-800',
+      },
+      Pending: {
+        variant: 'secondary',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      Approved: {
+        variant: 'default',
+        className: 'bg-green-100 text-green-800',
+      },
+      Rejected: {
+        variant: 'destructive',
+        className: 'bg-red-100 text-red-800',
+      },
+      Invoiced: { variant: 'default', className: 'bg-blue-100 text-blue-800' },
+      Paid: {
+        variant: 'default',
+        className: 'bg-emerald-100 text-emerald-800',
+      },
     };
     const c = config[status] || { variant: 'outline' as const, className: '' };
-    return <Badge variant={c.variant} className={c.className}>{status}</Badge>;
+    return (
+      <Badge variant={c.variant} className={c.className}>
+        {status}
+      </Badge>
+    );
   };
 
   // Edit contract
@@ -148,7 +240,11 @@ export default function ContractDetailPage() {
       await contractService.addMilestone(contract.id, milestoneData);
       toast.success('Milestone added successfully');
       setShowMilestoneDialog(false);
-      setMilestoneData({ milestoneName: '', sequenceNumber: contract.milestones.length + 1, paymentPercentage: 0 });
+      setMilestoneData({
+        milestoneName: '',
+        sequenceNumber: contract.milestones.length + 1,
+        paymentPercentage: 0,
+      });
       loadContract(contract.id);
     } catch (error: any) {
       toast.error(error.message || 'Failed to add milestone');
@@ -162,7 +258,10 @@ export default function ContractDetailPage() {
     try {
       const contractId = contract.id;
       setSaving(true);
-      await contractService.updateMilestoneStatus(milestone.id, { status: 'Completed', actualDate: new Date().toISOString() });
+      await contractService.updateMilestoneStatus(milestone.id, {
+        status: 'Completed',
+        actualDate: new Date().toISOString(),
+      });
       toast.success('Milestone marked as completed');
       loadContract(contractId);
     } catch (error: any) {
@@ -205,7 +304,10 @@ export default function ContractDetailPage() {
     }
   };
 
-  const handleProcessAmendment = async (amendmentId: string, approved: boolean) => {
+  const handleProcessAmendment = async (
+    amendmentId: string,
+    approved: boolean
+  ) => {
     if (!contract) return;
     try {
       const contractId = contract.id;
@@ -238,7 +340,11 @@ export default function ContractDetailPage() {
 
   // Contract status actions
   const handleCompleteContract = async () => {
-    if (!contract || !confirm('Are you sure you want to mark this contract as completed?')) return;
+    if (
+      !contract ||
+      !confirm('Are you sure you want to mark this contract as completed?')
+    )
+      return;
     try {
       setSaving(true);
       await contractService.completeContract(contract.id);
@@ -277,7 +383,12 @@ export default function ContractDetailPage() {
     }
     try {
       setSaving(true);
-      await contractService.uploadDocument(contract.id, documentFile, documentType, documentDescription || undefined);
+      await contractService.uploadDocument(
+        contract.id,
+        documentFile,
+        documentType,
+        documentDescription || undefined
+      );
       toast.success('Document uploaded successfully');
       setShowDocumentDialog(false);
       setDocumentFile(null);
@@ -324,8 +435,13 @@ export default function ContractDetailPage() {
         <div className="text-center py-12">
           <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
           <p className="text-gray-500">Contract not found</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.push('/procurement/contracts')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />Back to Contracts
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={() => router.push('/procurement/contracts')}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Contracts
           </Button>
         </div>
       </div>
@@ -337,8 +453,12 @@ export default function ContractDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={() => router.push('/procurement/contracts')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />Back
+          <Button
+            variant="outline"
+            onClick={() => router.push('/procurement/contracts')}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
           </Button>
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -354,89 +474,208 @@ export default function ContractDetailPage() {
 
           {/* Action Buttons */}
           {(contract.status === 'Draft' || contract.status === 'Active') && (
-            <Button variant="outline" size="sm" onClick={handleEditContract} disabled={saving}>
-              <Edit className="h-4 w-4 mr-1" />Edit
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleEditContract}
+              disabled={saving}
+            >
+              <Edit className="h-4 w-4 mr-1" />
+              Edit
             </Button>
           )}
-          {contract.status === 'Active' && contract.contractType.toLowerCase() !== 'works' && (
-            <>
-              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={handleCompleteContract} disabled={saving}>
-                <CheckCircle2 className="h-4 w-4 mr-1" />Complete
-              </Button>
-              <Button size="sm" variant="destructive" onClick={() => setShowTerminateDialog(true)} disabled={saving}>
-                <XCircle className="h-4 w-4 mr-1" />Terminate
-              </Button>
-            </>
-          )}
-          {contract.status === 'Active' && contract.contractType.toLowerCase() === 'works' && (
-            <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">
-              Complete or terminate through Works closeout
-            </Badge>
-          )}
+          {contract.status === 'Active' &&
+            contract.contractType.toLowerCase() !== 'works' && (
+              <>
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700"
+                  onClick={handleCompleteContract}
+                  disabled={saving}
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                  Complete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setShowTerminateDialog(true)}
+                  disabled={saving}
+                >
+                  <XCircle className="h-4 w-4 mr-1" />
+                  Terminate
+                </Button>
+              </>
+            )}
+          {contract.status === 'Active' &&
+            contract.contractType.toLowerCase() === 'works' && (
+              <Badge
+                variant="outline"
+                className="border-orange-300 bg-orange-50 text-orange-800"
+              >
+                Complete or terminate through Works closeout
+              </Badge>
+            )}
         </div>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500 flex items-center gap-2"><DollarSign className="h-4 w-4" />Contract Value</CardTitle></CardHeader>
-          <CardContent><p className="text-xl font-bold text-green-600">{formatCurrency(contract.contractValue, contract.currency)}</p></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-gray-500 flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              Contract Value
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold text-green-600">
+              {formatCurrency(contract.contractValue, contract.currency)}
+            </p>
+          </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500 flex items-center gap-2"><Building className="h-4 w-4" />Business Partner</CardTitle></CardHeader>
-          <CardContent><p className="text-lg font-semibold">{contract.businessPartnerName}</p></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-gray-500 flex items-center gap-2">
+              <Building className="h-4 w-4" />
+              Business Partner
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-lg font-semibold">
+              {contract.businessPartnerName}
+            </p>
+          </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500 flex items-center gap-2"><Calendar className="h-4 w-4" />Period</CardTitle></CardHeader>
-          <CardContent><p className="text-sm">{formatDate(contract.startDate)} - {formatDate(contract.endDate)}</p></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-gray-500 flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              Period
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm">
+              {formatDate(contract.startDate)} - {formatDate(contract.endDate)}
+            </p>
+          </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500 flex items-center gap-2"><CheckCircle className="h-4 w-4" />Milestones</CardTitle></CardHeader>
-          <CardContent><p className="text-xl font-bold">{contract.completedMilestones} / {contract.totalMilestones}</p></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-gray-500 flex items-center gap-2">
+              <CheckCircle className="h-4 w-4" />
+              Milestones
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">
+              {contract.completedMilestones} / {contract.totalMilestones}
+            </p>
+          </CardContent>
         </Card>
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="details" className="space-y-4">
+      <Tabs
+        defaultValue={
+          searchParams.get('tab') === 'works-closeout' &&
+          contract.contractType.toLowerCase() === 'works'
+            ? 'works-closeout'
+            : 'details'
+        }
+        className="space-y-4"
+      >
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
-          <TabsTrigger value="activation">Approval &amp; activation</TabsTrigger>
+          <TabsTrigger value="activation">
+            Approval &amp; activation
+          </TabsTrigger>
           <TabsTrigger value="operations">Operations</TabsTrigger>
           {contract.contractType.toLowerCase() === 'works' && (
-            <TabsTrigger value="works-closeout">Works closeout</TabsTrigger>
+            <>
+              <TabsTrigger value="commercial-terms">Commercial terms</TabsTrigger>
+              <TabsTrigger value="works-closeout">Works closeout</TabsTrigger>
+            </>
           )}
-          <TabsTrigger value="milestones">Milestones ({contract.milestones.length})</TabsTrigger>
-          <TabsTrigger value="amendments">Amendments ({contract.amendments.length})</TabsTrigger>
-          <TabsTrigger value="documents">Documents ({contract.documents.length})</TabsTrigger>
+          <TabsTrigger value="milestones">
+            Milestones ({contract.milestones.length})
+          </TabsTrigger>
+          <TabsTrigger value="amendments">
+            Amendments ({contract.amendments.length})
+          </TabsTrigger>
+          <TabsTrigger value="documents">
+            Documents ({contract.documents.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="details">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
-              <CardHeader><CardTitle>Contract Information</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Contract Information</CardTitle>
+              </CardHeader>
               <CardContent className="space-y-3">
-                <InfoRow label="Contract Number" value={contract.contractNumber} />
+                <InfoRow
+                  label="Contract Number"
+                  value={contract.contractNumber}
+                />
                 <InfoRow label="Title" value={contract.contractTitle} />
                 <InfoRow label="Type" value={contract.contractType} />
                 <InfoRow label="Tender Number" value={contract.tenderNumber} />
-                <InfoRow label="Created" value={formatDate(contract.createdAt)} />
-                <InfoRow label="Created By" value={contract.createdByName || '-'} />
+                <InfoRow
+                  label="Created"
+                  value={formatDate(contract.createdAt)}
+                />
+                <InfoRow
+                  label="Created By"
+                  value={contract.createdByName || '-'}
+                />
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Financial Details</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Financial Details</CardTitle>
+              </CardHeader>
               <CardContent className="space-y-3">
-                <InfoRow label="Contract Value" value={formatCurrency(contract.contractValue, contract.currency)} />
-                <InfoRow label="Payment Terms" value={contract.paymentTerms || '-'} />
-                <InfoRow label="Retention %" value={`${contract.retentionPercentage}%`} />
-                <InfoRow label="Total Paid" value={formatCurrency(contract.totalPaidAmount, contract.currency)} />
-                <InfoRow label="Remaining" value={formatCurrency(contract.remainingAmount, contract.currency)} />
+                <InfoRow
+                  label="Contract Value"
+                  value={formatCurrency(
+                    contract.contractValue,
+                    contract.currency
+                  )}
+                />
+                <InfoRow
+                  label="Payment Terms"
+                  value={contract.paymentTerms || '-'}
+                />
+                <InfoRow
+                  label="Retention %"
+                  value={`${contract.retentionPercentage}%`}
+                />
+                <InfoRow
+                  label="Total Paid"
+                  value={formatCurrency(
+                    contract.totalPaidAmount,
+                    contract.currency
+                  )}
+                />
+                <InfoRow
+                  label="Remaining"
+                  value={formatCurrency(
+                    contract.remainingAmount,
+                    contract.currency
+                  )}
+                />
               </CardContent>
             </Card>
             {contract.scopeOfWork && (
               <Card className="md:col-span-2">
-                <CardHeader><CardTitle>Scope of Work</CardTitle></CardHeader>
-                <CardContent><p className="whitespace-pre-wrap">{contract.scopeOfWork}</p></CardContent>
+                <CardHeader>
+                  <CardTitle>Scope of Work</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="whitespace-pre-wrap">{contract.scopeOfWork}</p>
+                </CardContent>
               </Card>
             )}
           </div>
@@ -456,28 +695,50 @@ export default function ContractDetailPage() {
         </TabsContent>
 
         {contract.contractType.toLowerCase() === 'works' && (
-          <TabsContent value="works-closeout">
-            <WorksCloseoutWorkspace
-              contractId={contract.id}
-              documents={contract.documents}
-              onContractChanged={() => loadContract(contract.id)}
-            />
-          </TabsContent>
+          <>
+            <TabsContent value="commercial-terms">
+              <QuantitySurveyContractCommercialTermsPanel
+                contractId={contract.id}
+                onContractChanged={() => loadContract(contract.id)}
+              />
+            </TabsContent>
+            <TabsContent value="works-closeout">
+              <WorksCloseoutWorkspace
+                contractId={contract.id}
+                documents={contract.documents}
+                onContractChanged={() => loadContract(contract.id)}
+              />
+            </TabsContent>
+          </>
         )}
 
         <TabsContent value="milestones">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Contract Milestones</CardTitle>
-              {(contract.status === 'Draft' || contract.status === 'Active') && (
-                <Button size="sm" onClick={() => { setMilestoneData({ milestoneName: '', sequenceNumber: contract.milestones.length + 1, paymentPercentage: 0 }); setShowMilestoneDialog(true); }}>
-                  <Plus className="h-4 w-4 mr-1" />Add Milestone
+              {(contract.status === 'Draft' ||
+                contract.status === 'Active') && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setMilestoneData({
+                      milestoneName: '',
+                      sequenceNumber: contract.milestones.length + 1,
+                      paymentPercentage: 0,
+                    });
+                    setShowMilestoneDialog(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Milestone
                 </Button>
               )}
             </CardHeader>
             <CardContent>
               {contract.milestones.length === 0 ? (
-                <p className="text-center py-4 text-gray-500">No milestones defined</p>
+                <p className="text-center py-4 text-gray-500">
+                  No milestones defined
+                </p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -495,20 +756,42 @@ export default function ContractDetailPage() {
                     {contract.milestones.map((m) => (
                       <TableRow key={m.id}>
                         <TableCell>{m.sequenceNumber}</TableCell>
-                        <TableCell><p className="font-medium">{m.milestoneName}</p><p className="text-xs text-gray-500">{m.description}</p></TableCell>
+                        <TableCell>
+                          <p className="font-medium">{m.milestoneName}</p>
+                          <p className="text-xs text-gray-500">
+                            {m.description}
+                          </p>
+                        </TableCell>
                         <TableCell>{formatDate(m.plannedDate)}</TableCell>
                         <TableCell>{m.paymentPercentage}%</TableCell>
-                        <TableCell>{formatCurrency(m.paymentAmount, contract.currency)}</TableCell>
+                        <TableCell>
+                          {formatCurrency(m.paymentAmount, contract.currency)}
+                        </TableCell>
                         <TableCell>{getStatusBadge(m.status)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            {m.status === 'Pending' && contract.status === 'Active' && (
-                              <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => handleCompleteMilestone(m)} disabled={saving}>
-                                <CheckCircle2 className="h-3 w-3" />
-                              </Button>
-                            )}
-                            {(contract.status === 'Draft' || (contract.status === 'Active' && m.status === 'Pending')) && (
-                              <Button size="sm" variant="ghost" className="h-7 px-2 text-red-600 hover:text-red-700" onClick={() => handleDeleteMilestone(m.id)} disabled={saving}>
+                            {m.status === 'Pending' &&
+                              contract.status === 'Active' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2"
+                                  onClick={() => handleCompleteMilestone(m)}
+                                  disabled={saving}
+                                >
+                                  <CheckCircle2 className="h-3 w-3" />
+                                </Button>
+                              )}
+                            {(contract.status === 'Draft' ||
+                              (contract.status === 'Active' &&
+                                m.status === 'Pending')) && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-red-600 hover:text-red-700"
+                                onClick={() => handleDeleteMilestone(m.id)}
+                                disabled={saving}
+                              >
                                 <Trash2 className="h-3 w-3" />
                               </Button>
                             )}
@@ -527,9 +810,11 @@ export default function ContractDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Contract Amendments</CardTitle>
-              {(contract.status === 'Draft' || contract.status === 'Active') && (
+              {(contract.status === 'Draft' ||
+                contract.status === 'Active') && (
                 <Button size="sm" onClick={() => setShowAmendmentDialog(true)}>
-                  <Plus className="h-4 w-4 mr-1" />Request Amendment
+                  <Plus className="h-4 w-4 mr-1" />
+                  Request Amendment
                 </Button>
               )}
             </CardHeader>
@@ -552,26 +837,54 @@ export default function ContractDetailPage() {
                   <TableBody>
                     {contract.amendments.map((a) => (
                       <TableRow key={a.id}>
-                        <TableCell className="font-mono">{a.amendmentNumber}</TableCell>
+                        <TableCell className="font-mono">
+                          {a.amendmentNumber}
+                        </TableCell>
                         <TableCell>{a.amendmentType}</TableCell>
                         <TableCell>{a.reason || '-'}</TableCell>
-                        <TableCell>{a.valueChange ? formatCurrency(a.valueChange, contract.currency) : '-'}</TableCell>
+                        <TableCell>
+                          {a.valueChange
+                            ? formatCurrency(a.valueChange, contract.currency)
+                            : '-'}
+                        </TableCell>
                         <TableCell>{getStatusBadge(a.status)}</TableCell>
                         <TableCell>{formatDate(a.requestedDate)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
                             {a.status === 'Pending' && (
                               <>
-                                <Button size="sm" variant="outline" className="h-7 px-2 text-green-600" onClick={() => handleProcessAmendment(a.id, true)} disabled={saving}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-green-600"
+                                  onClick={() =>
+                                    handleProcessAmendment(a.id, true)
+                                  }
+                                  disabled={saving}
+                                >
                                   <CheckCircle2 className="h-3 w-3" />
                                 </Button>
-                                <Button size="sm" variant="outline" className="h-7 px-2 text-red-600" onClick={() => handleProcessAmendment(a.id, false)} disabled={saving}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-red-600"
+                                  onClick={() =>
+                                    handleProcessAmendment(a.id, false)
+                                  }
+                                  disabled={saving}
+                                >
                                   <XCircle className="h-3 w-3" />
                                 </Button>
                               </>
                             )}
                             {a.status === 'Pending' && (
-                              <Button size="sm" variant="ghost" className="h-7 px-2 text-red-600 hover:text-red-700" onClick={() => handleDeleteAmendment(a.id)} disabled={saving}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-red-600 hover:text-red-700"
+                                onClick={() => handleDeleteAmendment(a.id)}
+                                disabled={saving}
+                              >
                                 <Trash2 className="h-3 w-3" />
                               </Button>
                             )}
@@ -590,15 +903,19 @@ export default function ContractDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Contract Documents</CardTitle>
-              {(contract.status === 'Draft' || contract.status === 'Active') && (
+              {(contract.status === 'Draft' ||
+                contract.status === 'Active') && (
                 <Button size="sm" onClick={() => setShowDocumentDialog(true)}>
-                  <Plus className="h-4 w-4 mr-1" />Upload Document
+                  <Plus className="h-4 w-4 mr-1" />
+                  Upload Document
                 </Button>
               )}
             </CardHeader>
             <CardContent>
               {contract.documents.length === 0 ? (
-                <p className="text-center py-4 text-gray-500">No documents uploaded</p>
+                <p className="text-center py-4 text-gray-500">
+                  No documents uploaded
+                </p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -613,12 +930,24 @@ export default function ContractDetailPage() {
                   <TableBody>
                     {contract.documents.map((d) => (
                       <TableRow key={d.id}>
-                        <TableCell className="font-medium">{d.fileName}</TableCell>
+                        <TableCell className="font-medium">
+                          {d.fileName}
+                        </TableCell>
                         <TableCell>{d.documentType}</TableCell>
-                        <TableCell>{d.fileSize ? `${(d.fileSize / 1024).toFixed(1)} KB` : '-'}</TableCell>
+                        <TableCell>
+                          {d.fileSize
+                            ? `${(d.fileSize / 1024).toFixed(1)} KB`
+                            : '-'}
+                        </TableCell>
                         <TableCell>{formatDate(d.createdAt)}</TableCell>
                         <TableCell className="text-right">
-                          <Button size="sm" variant="ghost" className="h-7 px-2 text-red-600 hover:text-red-700" onClick={() => handleDeleteDocument(d.id)} disabled={saving}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-red-600 hover:text-red-700"
+                            onClick={() => handleDeleteDocument(d.id)}
+                            disabled={saving}
+                          >
                             <Trash2 className="h-3 w-3" />
                           </Button>
                         </TableCell>
@@ -642,15 +971,29 @@ export default function ContractDetailPage() {
           <div className="grid grid-cols-4 gap-4 py-4">
             <div className="col-span-3">
               <Label>Contract Title</Label>
-              <Input value={editData.contractTitle || ''} onChange={(e) => setEditData({ ...editData, contractTitle: e.target.value })} />
+              <Input
+                value={editData.contractTitle || ''}
+                onChange={(e) =>
+                  setEditData({ ...editData, contractTitle: e.target.value })
+                }
+              />
             </div>
             <div>
               <Label>Contract Type</Label>
-              <Select value={editData.contractType || ''} onValueChange={(v) => setEditData({ ...editData, contractType: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={editData.contractType || ''}
+                onValueChange={(v) =>
+                  setEditData({ ...editData, contractType: v })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="FixedPrice">Fixed Price</SelectItem>
-                  <SelectItem value="TimeAndMaterials">Time & Materials</SelectItem>
+                  <SelectItem value="TimeAndMaterials">
+                    Time & Materials
+                  </SelectItem>
                   <SelectItem value="CostPlus">Cost Plus</SelectItem>
                   <SelectItem value="UnitPrice">Unit Price</SelectItem>
                 </SelectContent>
@@ -658,69 +1001,180 @@ export default function ContractDetailPage() {
             </div>
             <div>
               <Label>Contract Value ({contract?.currency || 'USD'})</Label>
-              <Input type="number" step="0.01" value={editData.contractValue || ''} onChange={(e) => setEditData({ ...editData, contractValue: parseFloat(e.target.value) || 0 })} />
+              <Input
+                type="number"
+                step="0.01"
+                value={editData.contractValue || ''}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    contractValue: parseFloat(e.target.value) || 0,
+                  })
+                }
+              />
             </div>
             <div>
               <Label>Start Date</Label>
-              <Input type="date" value={editData.startDate || ''} onChange={(e) => {
-                const newStartDate = e.target.value;
-                const duration = newStartDate && editData.endDate
-                  ? Math.ceil((new Date(editData.endDate).getTime() - new Date(newStartDate).getTime()) / (1000 * 60 * 60 * 24))
-                  : editData.durationDays;
-                setEditData({ ...editData, startDate: newStartDate, durationDays: duration && duration > 0 ? duration : undefined });
-              }} />
+              <Input
+                type="date"
+                value={editData.startDate || ''}
+                onChange={(e) => {
+                  const newStartDate = e.target.value;
+                  const duration =
+                    newStartDate && editData.endDate
+                      ? Math.ceil(
+                          (new Date(editData.endDate).getTime() -
+                            new Date(newStartDate).getTime()) /
+                            (1000 * 60 * 60 * 24)
+                        )
+                      : editData.durationDays;
+                  setEditData({
+                    ...editData,
+                    startDate: newStartDate,
+                    durationDays:
+                      duration && duration > 0 ? duration : undefined,
+                  });
+                }}
+              />
             </div>
             <div>
               <Label>End Date</Label>
-              <Input type="date" value={editData.endDate || ''} onChange={(e) => {
-                const newEndDate = e.target.value;
-                const duration = editData.startDate && newEndDate
-                  ? Math.ceil((new Date(newEndDate).getTime() - new Date(editData.startDate).getTime()) / (1000 * 60 * 60 * 24))
-                  : editData.durationDays;
-                setEditData({ ...editData, endDate: newEndDate, durationDays: duration && duration > 0 ? duration : undefined });
-              }} />
+              <Input
+                type="date"
+                value={editData.endDate || ''}
+                onChange={(e) => {
+                  const newEndDate = e.target.value;
+                  const duration =
+                    editData.startDate && newEndDate
+                      ? Math.ceil(
+                          (new Date(newEndDate).getTime() -
+                            new Date(editData.startDate).getTime()) /
+                            (1000 * 60 * 60 * 24)
+                        )
+                      : editData.durationDays;
+                  setEditData({
+                    ...editData,
+                    endDate: newEndDate,
+                    durationDays:
+                      duration && duration > 0 ? duration : undefined,
+                  });
+                }}
+              />
             </div>
             <div>
               <Label>Duration (Days)</Label>
-              <Input type="number" value={editData.durationDays || ''} readOnly className="bg-gray-100" />
+              <Input
+                type="number"
+                value={editData.durationDays || ''}
+                readOnly
+                className="bg-gray-100"
+              />
             </div>
             <div>
               <Label>Warranty (Days)</Label>
-              <Input type="number" value={editData.warrantyPeriodDays || ''} onChange={(e) => setEditData({ ...editData, warrantyPeriodDays: parseInt(e.target.value) || 0 })} />
+              <Input
+                type="number"
+                value={editData.warrantyPeriodDays || ''}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    warrantyPeriodDays: parseInt(e.target.value) || 0,
+                  })
+                }
+              />
             </div>
             <div>
               <Label>Retention %</Label>
-              <Input type="number" step="0.01" min="0" max="100" value={editData.retentionPercentage || ''} onChange={(e) => setEditData({ ...editData, retentionPercentage: parseFloat(e.target.value) || 0 })} />
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={editData.retentionPercentage || ''}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    retentionPercentage: parseFloat(e.target.value) || 0,
+                  })
+                }
+              />
             </div>
             <div className="col-span-2">
               <Label>Payment Terms</Label>
-              <Input value={editData.paymentTerms || ''} onChange={(e) => setEditData({ ...editData, paymentTerms: e.target.value })} placeholder="e.g., Net 30, Net 60" />
+              <Input
+                value={editData.paymentTerms || ''}
+                onChange={(e) =>
+                  setEditData({ ...editData, paymentTerms: e.target.value })
+                }
+                placeholder="e.g., Net 30, Net 60"
+              />
             </div>
             <div className="col-span-2">
               <Label>Scope of Work</Label>
-              <Textarea rows={3} value={editData.scopeOfWork || ''} onChange={(e) => setEditData({ ...editData, scopeOfWork: e.target.value })} placeholder="Describe the scope of work..." />
+              <Textarea
+                rows={3}
+                value={editData.scopeOfWork || ''}
+                onChange={(e) =>
+                  setEditData({ ...editData, scopeOfWork: e.target.value })
+                }
+                placeholder="Describe the scope of work..."
+              />
             </div>
             <div className="col-span-2">
               <Label>Deliverables</Label>
-              <Textarea rows={3} value={editData.deliverables || ''} onChange={(e) => setEditData({ ...editData, deliverables: e.target.value })} placeholder="List the deliverables..." />
+              <Textarea
+                rows={3}
+                value={editData.deliverables || ''}
+                onChange={(e) =>
+                  setEditData({ ...editData, deliverables: e.target.value })
+                }
+                placeholder="List the deliverables..."
+              />
             </div>
             <div className="col-span-2">
               <Label>Special Conditions</Label>
-              <Textarea rows={2} value={editData.specialConditions || ''} onChange={(e) => setEditData({ ...editData, specialConditions: e.target.value })} placeholder="Any special terms..." />
+              <Textarea
+                rows={2}
+                value={editData.specialConditions || ''}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    specialConditions: e.target.value,
+                  })
+                }
+                placeholder="Any special terms..."
+              />
             </div>
             <div className="col-span-2">
               <Label>Penalty Clause</Label>
-              <Textarea rows={2} value={editData.penaltyClause || ''} onChange={(e) => setEditData({ ...editData, penaltyClause: e.target.value })} placeholder="Penalties for non-compliance..." />
+              <Textarea
+                rows={2}
+                value={editData.penaltyClause || ''}
+                onChange={(e) =>
+                  setEditData({ ...editData, penaltyClause: e.target.value })
+                }
+                placeholder="Penalties for non-compliance..."
+              />
             </div>
             <div className="col-span-4">
               <Label>Notes</Label>
-              <Textarea rows={2} value={editData.notes || ''} onChange={(e) => setEditData({ ...editData, notes: e.target.value })} placeholder="Additional notes..." />
+              <Textarea
+                rows={2}
+                value={editData.notes || ''}
+                onChange={(e) =>
+                  setEditData({ ...editData, notes: e.target.value })
+                }
+                placeholder="Additional notes..."
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDialog(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+              Cancel
+            </Button>
             <Button onClick={handleSaveContract} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save Changes
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save
+              Changes
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -731,36 +1185,87 @@ export default function ContractDetailPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Milestone</DialogTitle>
-            <DialogDescription>Add a new milestone to the contract</DialogDescription>
+            <DialogDescription>
+              Add a new milestone to the contract
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
               <Label>Milestone Name *</Label>
-              <Input value={milestoneData.milestoneName} onChange={(e) => setMilestoneData({ ...milestoneData, milestoneName: e.target.value })} />
+              <Input
+                value={milestoneData.milestoneName}
+                onChange={(e) =>
+                  setMilestoneData({
+                    ...milestoneData,
+                    milestoneName: e.target.value,
+                  })
+                }
+              />
             </div>
             <div>
               <Label>Description</Label>
-              <Textarea value={milestoneData.description || ''} onChange={(e) => setMilestoneData({ ...milestoneData, description: e.target.value })} />
+              <Textarea
+                value={milestoneData.description || ''}
+                onChange={(e) =>
+                  setMilestoneData({
+                    ...milestoneData,
+                    description: e.target.value,
+                  })
+                }
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Sequence #</Label>
-                <Input type="number" value={milestoneData.sequenceNumber} onChange={(e) => setMilestoneData({ ...milestoneData, sequenceNumber: parseInt(e.target.value) || 1 })} />
+                <Input
+                  type="number"
+                  value={milestoneData.sequenceNumber}
+                  onChange={(e) =>
+                    setMilestoneData({
+                      ...milestoneData,
+                      sequenceNumber: parseInt(e.target.value) || 1,
+                    })
+                  }
+                />
               </div>
               <div>
                 <Label>Payment %</Label>
-                <Input type="number" value={milestoneData.paymentPercentage} onChange={(e) => setMilestoneData({ ...milestoneData, paymentPercentage: parseFloat(e.target.value) || 0 })} />
+                <Input
+                  type="number"
+                  value={milestoneData.paymentPercentage}
+                  onChange={(e) =>
+                    setMilestoneData({
+                      ...milestoneData,
+                      paymentPercentage: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                />
               </div>
             </div>
             <div>
               <Label>Planned Date</Label>
-              <Input type="date" value={milestoneData.plannedDate || ''} onChange={(e) => setMilestoneData({ ...milestoneData, plannedDate: e.target.value })} />
+              <Input
+                type="date"
+                value={milestoneData.plannedDate || ''}
+                onChange={(e) =>
+                  setMilestoneData({
+                    ...milestoneData,
+                    plannedDate: e.target.value,
+                  })
+                }
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowMilestoneDialog(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowMilestoneDialog(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={handleAddMilestone} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Add Milestone
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Add
+              Milestone
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -776,8 +1281,15 @@ export default function ContractDetailPage() {
           <div className="space-y-4 py-4">
             <div>
               <Label>Amendment Type</Label>
-              <Select value={amendmentData.amendmentType} onValueChange={(v) => setAmendmentData({ ...amendmentData, amendmentType: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={amendmentData.amendmentType}
+                onValueChange={(v) =>
+                  setAmendmentData({ ...amendmentData, amendmentType: v })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ValueChange">Value Change</SelectItem>
                   <SelectItem value="ScopeChange">Scope Change</SelectItem>
@@ -789,31 +1301,68 @@ export default function ContractDetailPage() {
             </div>
             <div>
               <Label>Reason</Label>
-              <Textarea value={amendmentData.reason || ''} onChange={(e) => setAmendmentData({ ...amendmentData, reason: e.target.value })} />
+              <Textarea
+                value={amendmentData.reason || ''}
+                onChange={(e) =>
+                  setAmendmentData({ ...amendmentData, reason: e.target.value })
+                }
+              />
             </div>
             {amendmentData.amendmentType === 'ValueChange' && (
               <div>
                 <Label>New Value</Label>
-                <Input type="number" value={amendmentData.newValue || ''} onChange={(e) => setAmendmentData({ ...amendmentData, newValue: parseFloat(e.target.value) || 0 })} />
+                <Input
+                  type="number"
+                  value={amendmentData.newValue || ''}
+                  onChange={(e) =>
+                    setAmendmentData({
+                      ...amendmentData,
+                      newValue: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                />
               </div>
             )}
             {amendmentData.amendmentType === 'TimeExtension' && (
               <div>
                 <Label>New End Date</Label>
-                <Input type="date" value={amendmentData.newEndDate || ''} onChange={(e) => setAmendmentData({ ...amendmentData, newEndDate: e.target.value })} />
+                <Input
+                  type="date"
+                  value={amendmentData.newEndDate || ''}
+                  onChange={(e) =>
+                    setAmendmentData({
+                      ...amendmentData,
+                      newEndDate: e.target.value,
+                    })
+                  }
+                />
               </div>
             )}
             {amendmentData.amendmentType === 'ScopeChange' && (
               <div>
                 <Label>Scope Changes</Label>
-                <Textarea value={amendmentData.scopeChanges || ''} onChange={(e) => setAmendmentData({ ...amendmentData, scopeChanges: e.target.value })} />
+                <Textarea
+                  value={amendmentData.scopeChanges || ''}
+                  onChange={(e) =>
+                    setAmendmentData({
+                      ...amendmentData,
+                      scopeChanges: e.target.value,
+                    })
+                  }
+                />
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAmendmentDialog(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowAmendmentDialog(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={handleCreateAmendment} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Submit Amendment
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Submit Amendment
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -824,18 +1373,37 @@ export default function ContractDetailPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
-              <AlertCircle className="h-5 w-5" />Terminate Contract
+              <AlertCircle className="h-5 w-5" />
+              Terminate Contract
             </DialogTitle>
-            <DialogDescription>This action cannot be undone. Please provide a reason for termination.</DialogDescription>
+            <DialogDescription>
+              This action cannot be undone. Please provide a reason for
+              termination.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Label>Reason for Termination *</Label>
-            <Textarea rows={3} value={terminateReason} onChange={(e) => setTerminateReason(e.target.value)} placeholder="Explain why this contract is being terminated..." />
+            <Textarea
+              rows={3}
+              value={terminateReason}
+              onChange={(e) => setTerminateReason(e.target.value)}
+              placeholder="Explain why this contract is being terminated..."
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowTerminateDialog(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleTerminateContract} disabled={saving || !terminateReason.trim()}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Terminate Contract
+            <Button
+              variant="outline"
+              onClick={() => setShowTerminateDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleTerminateContract}
+              disabled={saving || !terminateReason.trim()}
+            >
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Terminate Contract
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -846,13 +1414,17 @@ export default function ContractDetailPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Upload Document</DialogTitle>
-            <DialogDescription>Upload a document to this contract</DialogDescription>
+            <DialogDescription>
+              Upload a document to this contract
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
               <Label>Document Type</Label>
               <Select value={documentType} onValueChange={setDocumentType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Contract">Contract</SelectItem>
                   <SelectItem value="Amendment">Amendment</SelectItem>
@@ -873,7 +1445,9 @@ export default function ContractDetailPage() {
                 onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
               />
-              <p className="text-xs text-gray-500 mt-1">Supported: PDF, Word, Excel, Images (max 20MB)</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Supported: PDF, Word, Excel, Images (max 20MB)
+              </p>
             </div>
             <div>
               <Label>Description</Label>
@@ -886,9 +1460,21 @@ export default function ContractDetailPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowDocumentDialog(false); setDocumentFile(null); }}>Cancel</Button>
-            <Button onClick={handleUploadDocument} disabled={saving || !documentFile}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Upload Document
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDocumentDialog(false);
+                setDocumentFile(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleUploadDocument}
+              disabled={saving || !documentFile}
+            >
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Upload Document
             </Button>
           </DialogFooter>
         </DialogContent>

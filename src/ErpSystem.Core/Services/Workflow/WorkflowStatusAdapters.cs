@@ -115,6 +115,8 @@ public sealed class LegalProcedureWorkflowStatusAdapter : IWorkflowStatusAdapter
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]
     {
         "LegalProcedure",
+        "LegalOpinionAdvisory",
+        "LegalExternalCounsel",
         "LegalMortgage",
         "LegalMortgageInPrinciple",
         "LegalCourtProcess",
@@ -177,9 +179,13 @@ public sealed class EstateFacilitiesWorkflowStatusAdapter : IWorkflowStatusAdapt
         "EstatePropertyManagementLease",
         "EstatePropertyManagementTenantOccupant",
         "EstatePropertyManagementBillingServiceCharge",
+        "EstatePropertyManagementGroundRent",
+        "EstatePropertyManagementListingApplication",
         "EstatePropertyManagementOccupancyAvailability",
         "EstatePropertyManagementMoveInMoveOutHandover",
         "EstatePropertyManagementDocumentRecordIndex",
+        "EstateFacilityPropertySite",
+        "EstateFacilityLease",
         "EstateFacilityMaintenance",
         "EstateFacilityComplaint",
         "EstateFacilityServiceProvider",
@@ -722,6 +728,63 @@ public sealed class ProcurementPlanWorkflowStatusAdapter : IWorkflowStatusAdapte
 
     private static ProcurementPlan RequireProcurementPlan(object entity)
         => entity as ProcurementPlan ?? throw new InvalidOperationException("Expected ProcurementPlan entity.");
+}
+
+/// <summary>
+/// Keeps procurement-budget lifecycle state aligned with the shared workflow
+/// engine. Budget approval must never be a direct status mutation.
+/// </summary>
+public sealed class ProcurementBudgetWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ProcurementBudget",
+        "Procurement Budget",
+        "PROCUREMENT_BUDGET"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => Apply(RequireBudget(entity), outcome, userId);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(RequireBudget(entity), outcome, userId, rejectionReason);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+    {
+        var budget = RequireBudget(entity);
+        budget.Status = "Draft";
+        budget.ApprovedById = null;
+        budget.ApprovedDate = null;
+    }
+
+    private static void Apply(ProcurementBudget budget, WorkflowOutcome outcome, Guid? userId, string? comment = null)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                budget.Status = "Approved";
+                budget.ApprovedById = userId;
+                budget.ApprovedDate = DateTime.UtcNow;
+                break;
+            case WorkflowOutcome.Rejected:
+                budget.Status = "Rejected";
+                budget.ApprovedById = null;
+                budget.ApprovedDate = null;
+                if (!string.IsNullOrWhiteSpace(comment))
+                    budget.Notes = string.IsNullOrWhiteSpace(budget.Notes)
+                        ? $"Workflow rejection: {comment.Trim()}"
+                        : $"{budget.Notes}{Environment.NewLine}Workflow rejection: {comment.Trim()}";
+                break;
+            default:
+                budget.Status = "Submitted";
+                budget.ApprovedById = null;
+                budget.ApprovedDate = null;
+                break;
+        }
+    }
+
+    private static ProcurementBudget RequireBudget(object entity)
+        => entity as ProcurementBudget ?? throw new InvalidOperationException("Expected ProcurementBudget entity.");
 }
 
 public sealed class PayrollRunWorkflowStatusAdapter : IWorkflowStatusAdapter

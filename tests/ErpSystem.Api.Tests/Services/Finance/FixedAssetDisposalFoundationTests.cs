@@ -1,12 +1,14 @@
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.FixedAssets;
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -149,11 +151,14 @@ public sealed class FixedAssetDisposalFoundationTests
         var fixture = await SeedDisposalFoundationAsync(db, tenantId, acquisitionCost: 1200m, accumulatedDepreciation: 200m, netBookValue: 1000m);
         var services = CreateServices(db, tenantId);
 
-        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 200m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 1000m, CreditAmount = 0m });
+        completed.FinalDepreciationAmount.Should().Be(32.26m);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 32.26m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 0m, CreditAmount = 32.26m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.26m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 967.74m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1200m });
     }
 
@@ -167,13 +172,14 @@ public sealed class FixedAssetDisposalFoundationTests
         var fixture = await SeedDisposalFoundationAsync(db, tenantId, acquisitionCost: 1200m, accumulatedDepreciation: 200m, netBookValue: 1000m);
         var services = CreateServices(db, tenantId);
 
-        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture.Asset.Id, 1100m));
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture, 1100m));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 200m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.26m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.ProceedsClearing.Id, DebitAmount = 1100m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1200m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.GainOnDisposal.Id, DebitAmount = 0m, CreditAmount = 100m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.GainOnDisposal.Id, DebitAmount = 0m, CreditAmount = 132.26m });
+        completed.GainOrLoss.Should().Be(132.26m);
     }
 
     [Fact]
@@ -186,13 +192,156 @@ public sealed class FixedAssetDisposalFoundationTests
         var fixture = await SeedDisposalFoundationAsync(db, tenantId, acquisitionCost: 1200m, accumulatedDepreciation: 200m, netBookValue: 1000m);
         var services = CreateServices(db, tenantId);
 
-        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture.Asset.Id, 900m));
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture, 900m));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 200m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 232.26m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.ProceedsClearing.Id, DebitAmount = 900m, CreditAmount = 0m });
-        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 100m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 67.74m, CreditAmount = 0m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1200m });
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task CreditSaleCreatesLinkedArInvoiceAgainstTheDisposalClearingAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture, 1100m));
+
+        completed.SettlementStatus.Should().Be(AssetDisposalSettlementStatus.Invoiced);
+        completed.CustomerInvoiceId.Should().NotBeNull();
+        completed.SettlementInvoiceAmount.Should().Be(1100m);
+        services.InvoiceService.Verify(service => service.CreateAsync(
+            It.Is<InvoiceCreateDto>(invoice =>
+                invoice.CustomerId == fixture.Buyer.Id &&
+                invoice.Reference!.StartsWith("FA-DISPOSAL:") &&
+                invoice.LineItems.Count == 1 &&
+                invoice.LineItems[0].LineItemType == nameof(LineItemType.FixedAssetDisposal) &&
+                invoice.LineItems[0].GLAccountId == fixture.Accounts.ProceedsClearing.Id &&
+                invoice.LineItems[0].UnitPrice == 1100m),
+            It.IsAny<CancellationToken>()), Times.Once);
+        services.PaymentService.Verify(service => service.CreateAsync(
+            It.IsAny<PaymentCreateDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ImmediateSaleCreatesAndPostsReceiptAllocatedToLinkedInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var method = new ErpSystem.Core.Entities.Finance.PaymentMethod
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Name = "Bank Transfer", Code = "BANK",
+            Type = PaymentMethodType.BankTransfer, IsActive = true, RequiresBankAccount = true,
+            RequiresReference = true, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        var bank = new BankAccount
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "001234", AccountName = "Disposal Receipts",
+            BankName = "Test Bank", Currency = "GHS", AccountType = BankAccountType.Checking,
+            GLAccountId = fixture.Accounts.ProceedsClearing.Id, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        db.PaymentMethods.Add(method);
+        db.BankAccounts.Add(bank);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture, 1100m);
+        request.SettlementMode = AssetDisposalSettlementMode.ImmediateReceipt;
+        request.SettlementPaymentMethodId = method.Id;
+        request.SettlementBankAccountId = bank.Id;
+        request.SettlementReference = "BANK-ADVICE-001";
+
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, request);
+
+        completed.SettlementStatus.Should().Be(AssetDisposalSettlementStatus.Settled);
+        completed.CustomerInvoiceId.Should().NotBeNull();
+        completed.CustomerPaymentId.Should().NotBeNull();
+        services.PaymentService.Verify(service => service.CreateAsync(
+            It.Is<PaymentCreateDto>(payment =>
+                payment.CustomerId == fixture.Buyer.Id &&
+                payment.TotalAmount == 1100m &&
+                payment.BankAccountId == bank.Id &&
+                payment.TransactionReference == "BANK-ADVICE-001" &&
+                payment.Allocations != null &&
+                payment.Allocations.Count == 1 &&
+                payment.Allocations[0].InvoiceId == completed.CustomerInvoiceId &&
+                payment.Allocations[0].AllocatedAmount == 1100m),
+            It.IsAny<CancellationToken>()), Times.Once);
+        services.PaymentService.Verify(service => service.PostAsync(
+            completed.CustomerPaymentId!.Value, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ImmediateSaleRejectsBankDestinationForCashMethodBeforeApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var cashMethod = new ErpSystem.Core.Entities.Finance.PaymentMethod
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Name = "Cash", Code = "CASH",
+            Type = PaymentMethodType.Cash, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        var bank = new BankAccount
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "001234", AccountName = "Disposal Receipts",
+            BankName = "Test Bank", Currency = "GHS", AccountType = BankAccountType.Checking,
+            GLAccountId = fixture.Accounts.ProceedsClearing.Id, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        db.AddRange(cashMethod, bank);
+        await db.SaveChangesAsync();
+        var request = RequestSale(fixture, 1100m);
+        request.SettlementMode = AssetDisposalSettlementMode.ImmediateReceipt;
+        request.SettlementPaymentMethodId = cashMethod.Id;
+        request.SettlementBankAccountId = bank.Id;
+
+        var action = () => CreateServices(db, tenantId).Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*liquidity holding account*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ImmediateSaleRejectsReceivingBankInDifferentCurrencyBeforeApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var method = new ErpSystem.Core.Entities.Finance.PaymentMethod
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Name = "Bank Transfer", Code = "BANK",
+            Type = PaymentMethodType.BankTransfer, IsActive = true, RequiresBankAccount = true,
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        var usdBank = new BankAccount
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "USD-001", AccountName = "USD Receipts",
+            BankName = "Test Bank", Currency = "USD", AccountType = BankAccountType.Checking,
+            GLAccountId = fixture.Accounts.ProceedsClearing.Id, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        db.AddRange(method, usdBank);
+        await db.SaveChangesAsync();
+        var request = RequestSale(fixture, 1100m);
+        request.SettlementMode = AssetDisposalSettlementMode.ImmediateReceipt;
+        request.SettlementPaymentMethodId = method.Id;
+        request.SettlementBankAccountId = usdBank.Id;
+
+        var action = () => CreateServices(db, tenantId).Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*currencies must match*");
     }
 
     [Fact]
@@ -214,6 +363,112 @@ public sealed class FixedAssetDisposalFoundationTests
         asset.BookValues.Single().AcquisitionCost.Should().Be(1200m);
         asset.BookValues.Single().AccumulatedDepreciation.Should().Be(0m);
         asset.BookValues.Single().NetBookValue.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task PartialDisposalAllocatesPostingLayersAndKeepsRemainderActive()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(
+            db, tenantId, acquisitionCost: 1200m, accumulatedDepreciation: 200m, netBookValue: 1000m);
+        var services = CreateServices(db, tenantId);
+        var request = RequestWriteOff(fixture.Asset.Id);
+        request.DisposalScope = AssetDisposalScope.PartialPortion;
+        request.DisposedPortionPercent = 25m;
+        request.AllocationEvidenceReference = "TDC-ENG-2026-041";
+        request.AllocationEvidenceNotes = "Engineering quantity survey identifies one quarter of the installation.";
+
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, request);
+
+        completed.DisposalScope.Should().Be(AssetDisposalScope.PartialPortion);
+        completed.DisposedPortionPercent.Should().Be(25m);
+        completed.AcquisitionCostAllocated.Should().Be(300m);
+        completed.AccumulatedDepreciationAtDisposal.Should().Be(58.07m);
+        completed.NetBookValueAtDisposal.Should().Be(241.93m);
+        completed.RemainingAcquisitionCostAfterDisposal.Should().Be(900m);
+        completed.FinalDepreciationAmount.Should().Be(8.07m);
+        completed.RemainingAccumulatedDepreciationAfterDisposal.Should().Be(150m);
+        completed.RemainingNetBookValueAfterDisposal.Should().Be(750m);
+
+        var asset = await db.FixedAssets.Include(a => a.BookValues).SingleAsync(a => a.Id == fixture.Asset.Id);
+        asset.Status.Should().Be(FixedAssetStatus.Active);
+        asset.DisposalDate.Should().BeNull();
+        asset.AcquisitionCost.Should().Be(900m);
+        asset.NetBookValue.Should().Be(750m);
+        asset.BookValues.Single().AccumulatedDepreciation.Should().Be(150m);
+
+        var lines = await PostedLinesAsync(db);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 8.07m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 58.07m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 241.93m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 300m });
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetPartialDisposalAllocationCalculated)).Should().Be(1);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetPartialDisposalAllocationPosted)).Should().Be(1);
+
+        // The disposal-linked schedule covers only the portion that left service. The ordinary
+        // period run must still calculate the retained asset's charge instead of treating the
+        // disposal schedule as a duplicate full-asset schedule.
+        var retainedSchedules = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.OpenPeriod.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+        retainedSchedules.Should().ContainSingle();
+        retainedSchedules.Single().DepreciationAmount.Should().Be(75m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ComponentDisposalRequiresAndPersistsComponentAllocationEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var request = RequestWriteOff(fixture.Asset.Id);
+        request.DisposalScope = AssetDisposalScope.Component;
+        request.DisposedPortionPercent = 20m;
+
+        var missingEvidence = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+        await missingEvidence.Should().ThrowAsync<InvalidOperationException>().WithMessage("*allocation evidence*");
+
+        request.ComponentReference = "LIFT-MOTOR-01";
+        request.ComponentDescription = "East-wing lift traction motor";
+        request.AllocationEvidenceReference = "VALUATION-TDC-2026-109";
+        var requested = await services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        requested.DisposalScope.Should().Be(AssetDisposalScope.Component);
+        requested.ComponentReference.Should().Be("LIFT-MOTOR-01");
+        requested.ComponentDescription.Should().Be("East-wing lift traction motor");
+        requested.AllocationEvidenceReference.Should().Be("VALUATION-TDC-2026-109");
+        requested.DisposedPortionPercent.Should().Be(20m);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100)]
+    [InlineData(120)]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task PartialDisposalRejectsInvalidPercentage(decimal percentage)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var request = RequestWriteOff(fixture.Asset.Id);
+        request.DisposalScope = AssetDisposalScope.PartialPortion;
+        request.DisposedPortionPercent = percentage;
+        request.AllocationEvidenceReference = "ALLOC-001";
+
+        var act = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*percentage*");
     }
 
     [Fact]
@@ -333,9 +588,7 @@ public sealed class FixedAssetDisposalFoundationTests
         fixture.Asset.BookValues.Single().LastDepreciationDate = null;
         await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId);
-        var requested = await RequestAndApproveAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
-
-        var act = () => services.Disposals.CompleteDisposalAsync(requested.Id);
+        var act = () => services.Disposals.RequestDisposalAsync(RequestWriteOff(fixture.Asset.Id), fixture.RequestedBy.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*depreciation must be posted*");
@@ -345,7 +598,106 @@ public sealed class FixedAssetDisposalFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
     [Trait("Category", "FixedAssets")]
-    public async Task RevaluationSurplusIsNotRecycledToProfitAndLoss()
+    public async Task DisposalPostsActualDaysDepreciationAndCreatesReportableScheduleAtomically()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            accumulatedDepreciation: 200m,
+            netBookValue: 1000m);
+        var services = CreateServices(db, tenantId);
+
+        var requested = await services.Disposals.RequestDisposalAsync(RequestWriteOff(fixture.Asset.Id), fixture.RequestedBy.Id);
+
+        // July has 31 days and the disposal date is inclusive, so 10/31 of the normal GHS 100
+        // monthly straight-line charge is the immutable maker-checker snapshot.
+        requested.FinalDepreciationAmount.Should().Be(32.26m);
+        requested.FinalDepreciationFromDate.Should().Be(new DateTime(2026, 7, 1));
+        requested.FinalDepreciationToDate.Should().Be(new DateTime(2026, 7, 10));
+        requested.FinalDepreciationEligibleDays.Should().Be(10);
+        requested.FinalDepreciationPeriodDays.Should().Be(31);
+        requested.FinalDepreciationProrationBasis.Should().Be("ActualDaysInclusive");
+
+        var approved = await services.Disposals.ApproveDisposalAsync(
+            requested.Id,
+            fixture.Approver.Id,
+            new ApproveAssetDisposalDto { Comments = "Approved final depreciation and disposal." });
+        var completed = await services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        var schedule = await db.AssetDepreciationSchedules.SingleAsync(s => s.AssetDisposalId == completed.Id);
+        schedule.Id.Should().Be(completed.FinalDepreciationScheduleId!.Value);
+        schedule.DepreciationAmount.Should().Be(32.26m);
+        schedule.IsPosted.Should().BeTrue();
+        schedule.JournalEntryId.Should().Be(completed.JournalEntryId);
+        schedule.PostingEventId.Should().Be(completed.PostingEventId);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task CurrentPeriodFullDepreciationMustBeReversedBeforeMidPeriodDisposal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var currentSchedule = SeedPostedDepreciationSchedule(db, fixture, 100m);
+        currentSchedule.FiscalPeriodId = fixture.OpenPeriod.Id;
+        currentSchedule.PostingDate = new DateTime(2026, 7, 31);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+
+        var act = () => services.Disposals.RequestDisposalAsync(RequestWriteOff(fixture.Asset.Id), fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*current-period depreciation schedule*Reverse*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetDisposalBlockedMissingDepreciation)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task UnitsOfProductionDisposalRequiresAndPersistsVerifiedUsageEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            accumulatedDepreciation: 200m,
+            netBookValue: 1000m,
+            depreciationMethod: DepreciationMethod.UnitsOfProduction,
+            lifetimeProductionCapacity: 10000m);
+        var services = CreateServices(db, tenantId);
+        var missingEvidence = RequestWriteOff(fixture.Asset.Id);
+
+        var missingAct = () => services.Disposals.RequestDisposalAsync(missingEvidence, fixture.RequestedBy.Id);
+        await missingAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*production usage*");
+
+        var dto = RequestWriteOff(fixture.Asset.Id);
+        dto.FinalDepreciationProductionUnits = 500m;
+        dto.FinalDepreciationEvidenceReference = "METER-2026-07-10";
+        dto.FinalDepreciationEvidenceNotes = "Signed disposal meter reading.";
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, dto);
+
+        completed.FinalDepreciationAmount.Should().Be(50m);
+        completed.FinalDepreciationProrationBasis.Should().Be("ProductionUsage");
+        var schedule = await db.AssetDepreciationSchedules.SingleAsync(s => s.AssetDisposalId == completed.Id);
+        schedule.PeriodProductionUnits.Should().Be(500m);
+        schedule.ProductionEvidenceReference.Should().Be("METER-2026-07-10");
+        schedule.ProductionEvidenceNotes.Should().Be("Signed disposal meter reading.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task RevaluationSurplusTransfersDirectlyToRetainedEarningsWithoutAffectingProfitAndLoss()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -354,29 +706,194 @@ public sealed class FixedAssetDisposalFoundationTests
         await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId);
 
-        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().NotContain(l => l.AccountId == fixture.Accounts.RevaluationSurplus.Id);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.RevaluationSurplus.Id, DebitAmount = 300m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.RetainedEarnings.Id, DebitAmount = 0m, CreditAmount = 300m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1500m });
+        completed.FinalDepreciationAmount.Should().Be(41.94m);
+        completed.GainOrLoss.Should().Be(-1258.06m);
+        completed.RevaluationSurplusTransferAmount.Should().Be(300m);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetDisposalRevaluationSurplusTransferred)).Should().Be(1);
     }
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
     [Trait("Category", "FixedAssets")]
-    public async Task ForeignCurrencyProceedsRejectedClearly()
+    public async Task RevaluedAssetDisposalRequiresConfiguredRetainedEarningsAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId, netBookValue: 1300m);
+        SeedPostedRevaluation(db, fixture, surplus: 300m);
+        (await db.FinanceSettings.SingleAsync()).RetainedEarningsAccountId = null;
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+
+        var act = () => services.Disposals.RequestDisposalAsync(RequestWriteOff(fixture.Asset.Id), fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*retained earnings disposal-transfer account is required*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedSurplusPolicyAccountCancelsStaleDisposalApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId, netBookValue: 1300m);
+        SeedPostedRevaluation(db, fixture, surplus: 300m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var approved = await RequestAndApproveAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+
+        // Finance configuration can change legitimately, but an old checker decision must never
+        // be silently rebuilt with the replacement retained-earnings account.
+        var replacementRetainedEarnings = SeedAccount(db, tenantId, "3199", AccountType.Equity);
+        (await db.FinanceSettings.SingleAsync()).RetainedEarningsAccountId = replacementRetainedEarnings.Id;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*policy accounts changed*");
+        var cancelled = await db.AssetDisposals.SingleAsync(d => d.Id == approved.Id);
+        cancelled.Status.Should().Be(AssetDisposalStatus.Cancelled);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedRevaluationSurplusBalanceCancelsStaleDisposalApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId, netBookValue: 1300m);
+        SeedPostedRevaluation(db, fixture, surplus: 300m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var approved = await RequestAndApproveAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+
+        // A posted valuation after checker approval changes the equity reserve that the disposal
+        // would derecognise. The service must invalidate the stale approval instead of silently
+        // transferring an amount that the checker never reviewed.
+        SeedPostedRevaluation(db, fixture, surplus: 50m);
+        await db.SaveChangesAsync();
+
+        var act = () => services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*revaluation surplus changed*");
+        var cancelled = await db.AssetDisposals.SingleAsync(d => d.Id == approved.Id);
+        cancelled.Status.Should().Be(AssetDisposalStatus.Cancelled);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyProceedsPreserveNativeEvidenceAndPostFunctionalValue()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        SeedAccountCurrencyLink(db, fixture.Accounts.ProceedsClearing, "USD");
+        var rate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId);
-        var dto = RequestSale(fixture.Asset.Id, 900m);
+        var dto = RequestSale(fixture, 100m);
         dto.ProceedsCurrencyCode = "USD";
+        dto.ProceedsExchangeRateId = rate.Id;
 
-        var act = () => services.Disposals.RequestDisposalAsync(dto, fixture.RequestedBy.Id);
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, dto);
+        var proceedsLine = (await PostedLinesAsync(db)).Single(line => line.TransactionTag == "FA-DisposalProceeds");
+
+        completed.NetProceeds.Should().Be(100m);
+        completed.ProceedsCurrencyCode.Should().Be("USD");
+        completed.ProceedsFunctionalAmount.Should().Be(1500m);
+        completed.ProceedsExchangeRateId.Should().Be(rate.Id);
+        completed.GainOrLoss.Should().Be(532.26m);
+        proceedsLine.DebitAmount.Should().Be(1500m);
+        proceedsLine.TransactionCurrency.Should().Be("USD");
+        proceedsLine.TransactionDebitAmount.Should().Be(100m);
+        proceedsLine.ExchangeRateId.Should().Be(rate.Id);
+        proceedsLine.ExchangeRate.Should().Be(15m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyRateApprovalDriftCancelsDisposalBeforePosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        SeedAccountCurrencyLink(db, fixture.Accounts.ProceedsClearing, "USD");
+        var rate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture, 100m);
+        request.ProceedsCurrencyCode = "USD";
+        request.ProceedsExchangeRateId = rate.Id;
+        var approved = await RequestAndApproveAsync(services.Disposals, fixture, request);
+
+        rate.ApprovalStatus = RateApprovalStatus.Rejected;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*selected exchange rate*");
+        (await db.AssetDisposals.SingleAsync(item => item.Id == approved.Id)).Status.Should().Be(AssetDisposalStatus.Cancelled);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyProceedsRequireTenantApprovedEffectiveRate()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        SeedAccountCurrencyLink(db, fixture.Accounts.ProceedsClearing, "USD");
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherTenantRate = SeedExchangeRate(db, otherTenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture, 100m);
+        request.ProceedsCurrencyCode = "USD";
+        request.ProceedsExchangeRateId = otherTenantRate.Id;
+
+        var act = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Foreign-currency disposal proceeds*");
+            .WithMessage("*selected exchange rate*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyProceedsRequireAuthorizedClearingAccountCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var rate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture, 100m);
+        request.ProceedsCurrencyCode = "USD";
+        request.ProceedsExchangeRateId = rate.Id;
+
+        var act = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*clearing account is not authorized for USD*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -389,7 +906,7 @@ public sealed class FixedAssetDisposalFoundationTests
         var fixture = await SeedDisposalFoundationAsync(db, tenantId);
         var services = CreateServices(db, tenantId);
 
-        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture.Asset.Id, 1100m));
+        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestSale(fixture, 1100m));
 
         var actions = await db.AuditLogs
             .Where(a => a.TenantId == tenantId)
@@ -415,13 +932,18 @@ public sealed class FixedAssetDisposalFoundationTests
         ProceedsCurrencyCode = "GHS"
     };
 
-    private static RequestAssetDisposalDto RequestSale(Guid assetId, decimal proceeds) => new()
+    private static RequestAssetDisposalDto RequestSale(DisposalFixture fixture, decimal proceeds) => new()
     {
-        FixedAssetId = assetId,
+        FixedAssetId = fixture.Asset.Id,
         DisposalDate = new DateTime(2026, 7, 10),
         DisposalType = DisposalType.Sale,
         Reason = "Approved sale disposal.",
-        BuyerName = "Buyer Ltd",
+        BuyerName = fixture.Buyer.PartnerName,
+        BuyerBusinessPartnerId = fixture.Buyer.Id,
+        SettlementMode = AssetDisposalSettlementMode.CreditSale,
+        // Existing disposal-basis tests are intentionally non-taxable. Dedicated settlement tests
+        // below exercise the statutory treatment contract without changing their GL expectations.
+        SaleTaxTreatment = TaxTreatment.OutOfScope,
         SaleProceeds = proceeds,
         DisposalCost = 0m,
         ProceedsCurrencyCode = "GHS"
@@ -512,13 +1034,64 @@ public sealed class FixedAssetDisposalFoundationTests
                 WorkflowInstanceId = Guid.NewGuid()
             });
 
+        var invoiceService = new Mock<IInvoiceService>();
+        var createdInvoices = new Dictionary<Guid, InvoiceDto>();
+        invoiceService.Setup(x => x.CreateAsync(It.IsAny<InvoiceCreateDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InvoiceCreateDto dto, CancellationToken _) =>
+            {
+                var subtotal = dto.LineItems.Sum(line => line.Quantity * line.UnitPrice);
+                var invoice = new InvoiceDto
+                {
+                    Id = Guid.NewGuid(),
+                    InvoiceNumber = $"INV-{Guid.NewGuid():N}"[..20],
+                    CustomerId = dto.CustomerId,
+                    InvoiceDate = dto.InvoiceDate,
+                    SubTotal = subtotal,
+                    TotalAmount = subtotal,
+                    BalanceAmount = subtotal,
+                    CurrencyCode = dto.CurrencyCode,
+                    Status = "Draft"
+                };
+                createdInvoices[invoice.Id] = invoice;
+                return invoice;
+            });
+        invoiceService.Setup(x => x.SendInvoiceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+            {
+                var invoice = createdInvoices[id];
+                invoice.Status = "Sent";
+                return invoice;
+            });
+
+        var paymentService = new Mock<IPaymentService>();
+        paymentService.Setup(x => x.CreateAsync(It.IsAny<PaymentCreateDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PaymentCreateDto dto, CancellationToken _) => new CustomerPaymentDto
+            {
+                Id = Guid.NewGuid(),
+                PaymentNumber = $"RCP-{Guid.NewGuid():N}"[..20],
+                CustomerId = dto.CustomerId,
+                PaymentDate = dto.PaymentDate,
+                TotalAmount = dto.TotalAmount,
+                CurrencyCode = dto.CurrencyCode,
+                Status = "Pending"
+            });
+        paymentService.Setup(x => x.PostAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => new CustomerPaymentDto
+            {
+                Id = id,
+                PaymentNumber = $"RCP-{id:N}"[..20],
+                Status = "Posted"
+            });
+
         var disposalService = new AssetDisposalService(
             db,
             currentUser.Object,
             numbering.Object,
             workflow.Object,
             postingEngine,
-            auditService);
+            auditService,
+            invoiceService.Object,
+            paymentService.Object);
 
         var transferService = new AssetTransferService(
             db,
@@ -543,7 +1116,7 @@ public sealed class FixedAssetDisposalFoundationTests
             financePostingEngine: postingEngine,
             financeAuditService: auditService);
 
-        return new ServiceFixture(disposalService, transferService, depreciationService, valuationService);
+        return new ServiceFixture(disposalService, transferService, depreciationService, valuationService, invoiceService, paymentService);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
@@ -572,7 +1145,9 @@ public sealed class FixedAssetDisposalFoundationTests
         decimal accumulatedDepreciation = 200m,
         decimal? netBookValue = null,
         DateTime? lastDepreciationDate = null,
-        bool closeDisposalPeriod = false)
+        bool closeDisposalPeriod = false,
+        DepreciationMethod depreciationMethod = DepreciationMethod.StraightLine,
+        decimal lifetimeProductionCapacity = 0m)
     {
         SeedTenant(db, tenantId, codePrefix);
         var previousPeriod = SeedPeriod(db, tenantId, new DateTime(2026, 6, 1), new DateTime(2026, 6, 30), "2026-06", isOpen: true);
@@ -584,7 +1159,8 @@ public sealed class FixedAssetDisposalFoundationTests
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            BaseCurrency = "GHS"
+            BaseCurrency = "GHS",
+            RetainedEarningsAccountId = accounts.RetainedEarnings.Id
         });
 
         var category = new FixedAssetCategory
@@ -611,6 +1187,20 @@ public sealed class FixedAssetDisposalFoundationTests
 
         var requestedBy = SeedEmployee(db, tenantId, $"{codePrefix}-REQ", "Request", "User");
         var approver = SeedEmployee(db, tenantId, $"{codePrefix}-APR", "Approve", "User");
+        var buyer = new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PartnerCode = $"BUY-{codePrefix}-{tenantId.ToString("N")[..4]}",
+            PartnerName = "Buyer Ltd",
+            PartnerType = "Customer",
+            CustomerAccountNumber = $"CUS-{tenantId.ToString("N")[..6]}",
+            Currency = "GHS",
+            RegistrationStatus = "Approved",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
         var capitalizedAt = isCapitalized ? new DateTime(2026, 6, 30) : (DateTime?)null;
         var journalEntryId = isCapitalized ? Guid.NewGuid() : (Guid?)null;
         var postingEventId = isCapitalized ? Guid.NewGuid() : (Guid?)null;
@@ -634,8 +1224,9 @@ public sealed class FixedAssetDisposalFoundationTests
             NetBookValue = nbv,
             UsefulLifeMonths = 12,
             ResidualValue = 0m,
-            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationMethod = depreciationMethod,
             DepreciationConvention = DepreciationConvention.FullMonth,
+            LifetimeProductionCapacity = lifetimeProductionCapacity,
             Status = status,
             FunctionalCurrencyCode = "GHS",
             TransactionCurrencyCode = "GHS",
@@ -662,8 +1253,9 @@ public sealed class FixedAssetDisposalFoundationTests
             ResidualValue = 0m,
             UsefulLifeMonths = 12,
             RemainingUsefulLifeMonths = 10,
-            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationMethod = depreciationMethod,
             DepreciationConvention = DepreciationConvention.FullMonth,
+            LifetimeProductionCapacity = lifetimeProductionCapacity,
             PlacedInServiceDate = asset.PlacedInServiceDate,
             CapitalizationDate = asset.CapitalizationDate,
             CapitalizationJournalEntryId = journalEntryId,
@@ -675,11 +1267,12 @@ public sealed class FixedAssetDisposalFoundationTests
         };
 
         asset.BookValues.Add(bookValue);
+        db.BusinessPartners.Add(buyer);
         db.FixedAssetCategories.Add(category);
         db.FixedAssets.Add(asset);
         await db.SaveChangesAsync();
 
-        return new DisposalFixture(openPeriod, previousPeriod, book, asset, category, accounts, requestedBy, approver);
+        return new DisposalFixture(openPeriod, previousPeriod, book, asset, category, accounts, requestedBy, approver, buyer);
     }
 
     private static void SeedPostedImpairment(ApplicationDbContext db, DisposalFixture fixture, decimal amount)
@@ -789,6 +1382,54 @@ public sealed class FixedAssetDisposalFoundationTests
         });
     }
 
+    private static ExchangeRate SeedExchangeRate(ApplicationDbContext db, Guid tenantId, string currency, decimal rate)
+    {
+        var exchangeRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = currency,
+            Rate = rate,
+            InverseRate = 1m / rate,
+            EffectiveDate = new DateTime(2026, 7, 10),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana test fixture",
+            ApprovalStatus = RateApprovalStatus.Approved,
+            IsActive = true,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.ExchangeRates.Add(exchangeRate);
+        return exchangeRate;
+    }
+
+    private static void SeedAccountCurrencyLink(ApplicationDbContext db, Account account, string currency)
+    {
+        // Foreign proceeds are held in the existing disposal clearing account, so the fixture
+        // models the same explicit account/currency authorization required in production.
+        account.IsMultiCurrency = true;
+        db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+        {
+            Id = Guid.NewGuid(),
+            TenantId = account.TenantId,
+            AccountId = account.Id,
+            LinkedCurrencyCode = currency,
+            TransactionRateType = "Daily",
+            TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
+            RevaluationRateType = "Month-End",
+            RevaluationQuoteSide = ExchangeRateQuoteSide.Mid,
+            RevaluationRequired = true,
+            IsActive = true,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+    }
+
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId, DateTime start, DateTime end, string code, bool isOpen)
     {
         var period = new FiscalPeriod
@@ -862,7 +1503,8 @@ public sealed class FixedAssetDisposalFoundationTests
             SeedAccount(db, tenantId, $"32{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Equity),
             SeedAccount(db, tenantId, $"78{codePrefix[..Math.Min(2, codePrefix.Length)]}3", AccountType.Expense),
             SeedAccount(db, tenantId, $"78{codePrefix[..Math.Min(2, codePrefix.Length)]}4", AccountType.Expense),
-            SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}8", AccountType.Asset));
+            SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}8", AccountType.Asset),
+            SeedAccount(db, tenantId, $"31{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Equity));
     }
 
     private static Account SeedAccount(ApplicationDbContext db, Guid tenantId, string accountNumber, AccountType accountType)
@@ -888,7 +1530,9 @@ public sealed class FixedAssetDisposalFoundationTests
         AssetDisposalService Disposals,
         AssetTransferService Transfers,
         FixedAssetDepreciationService Depreciation,
-        AssetValuationService Valuations);
+        AssetValuationService Valuations,
+        Mock<IInvoiceService> InvoiceService,
+        Mock<IPaymentService> PaymentService);
 
     private sealed record DisposalFixture(
         FiscalPeriod OpenPeriod,
@@ -898,7 +1542,8 @@ public sealed class FixedAssetDisposalFoundationTests
         FixedAssetCategory Category,
         DisposalAccounts Accounts,
         Employee RequestedBy,
-        Employee Approver);
+        Employee Approver,
+        BusinessPartner Buyer);
 
     private sealed record DisposalAccounts(
         Account Asset,
@@ -910,5 +1555,6 @@ public sealed class FixedAssetDisposalFoundationTests
         Account RevaluationSurplus,
         Account RevaluationLoss,
         Account ImpairmentLoss,
-        Account AccumulatedImpairment);
+        Account AccumulatedImpairment,
+        Account RetainedEarnings);
 }

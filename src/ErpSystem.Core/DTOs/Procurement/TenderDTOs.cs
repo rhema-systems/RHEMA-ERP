@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Procurement;
 
@@ -23,6 +24,7 @@ public class TenderDto
     public Guid? SourcePurchaseRequisitionId { get; set; }
     public Guid? SourcingReleaseId { get; set; }
     public Guid? SourcingCaseId { get; set; }
+    public ProcurementMethodType? SourcingMethod { get; set; }
 
     // Workflow display helpers (optional)
     public string? CurrentWorkflowStepName { get; set; }
@@ -62,6 +64,7 @@ public class TenderDetailDto
     public Guid? SourcePurchaseRequisitionId { get; set; }
     public Guid? SourcingReleaseId { get; set; }
     public Guid? SourcingCaseId { get; set; }
+    public ProcurementMethodType? SourcingMethod { get; set; }
 
     // Eligibility
     public decimal? MinimumPerformanceRating { get; set; }
@@ -370,6 +373,9 @@ public class TenderDocumentDto
     public DateTime UploadedDate { get; set; }
     public string? UploadedByName { get; set; }
     public bool IsPublic { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
 }
 
 /// <summary>

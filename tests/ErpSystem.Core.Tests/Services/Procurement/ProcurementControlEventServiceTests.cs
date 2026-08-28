@@ -59,17 +59,22 @@ public sealed class ProcurementControlEventServiceTests
     }
 
     [Fact]
-    public async Task RepeatedIdenticalEventIsIdempotentButKeyReuseWithDifferentPayloadConflicts()
+    public async Task RepeatedBusinessEventWithLaterRetryTimestampIsIdempotentButDifferentPayloadConflicts()
     {
         await using var fixture = new Fixture();
         var request = Request("event-idempotent");
 
         var first = await fixture.Service.RecordAsync(request);
-        var retry = await fixture.Service.RecordAsync(request);
-        request.Action = "DifferentAction";
-        var conflict = () => fixture.Service.RecordAsync(request);
+        var retryRequest = Request("event-idempotent") with
+        {
+            OccurredAtUtc = OccurredAt.AddMinutes(5)
+        };
+        var retry = await fixture.Service.RecordAsync(retryRequest);
+        retryRequest.Action = "DifferentAction";
+        var conflict = () => fixture.Service.RecordAsync(retryRequest);
 
         retry.Id.Should().Be(first.Id);
+        retry.OccurredAtUtc.Should().Be(OccurredAt);
         (await fixture.Context.ProcurementControlEvents.CountAsync()).Should().Be(1);
         await conflict.Should().ThrowAsync<ProcurementControlEventConflictException>();
     }
@@ -137,6 +142,41 @@ public sealed class ProcurementControlEventServiceTests
         var query = () => fixture.Service.GetSummaryAsync();
 
         await query.Should().ThrowAsync<ProcurementControlEventAuthorizationException>();
+    }
+
+    [Fact]
+    public async Task RealWriterPersistsEveryRequiredSemanticOperation()
+    {
+        await using var fixture = new Fixture();
+        var actions = new (string Action, AuditOperationKind Operation)[]
+        {
+            ("Created", AuditOperationKind.Create),
+            ("Updated", AuditOperationKind.Update),
+            ("InvoiceMatchExceptionApproved", AuditOperationKind.Approve),
+            ("InvoiceMatchExceptionRejected", AuditOperationKind.Reject),
+            ("OverrideSourcingMethod", AuditOperationKind.Override),
+            ("PostStockAdjustment", AuditOperationKind.Post),
+            ("ReverseStockAdjustment", AuditOperationKind.Reverse),
+            ("Dispatch", AuditOperationKind.Dispatch),
+            ("Receive", AuditOperationKind.Receive)
+        };
+
+        foreach (var (action, expected) in actions)
+        {
+            var key = $"semantic-{(int)expected}";
+            var request = Request(key);
+            request.Action = action;
+
+            var recorded = await fixture.Service.RecordAsync(request);
+
+            recorded.Operation.Should().Be(expected);
+        }
+
+        var persisted = await fixture.Context.ProcurementControlEvents
+            .OrderBy(item => item.Operation)
+            .Select(item => item.Operation)
+            .ToListAsync();
+        persisted.Should().Equal(actions.Select(item => item.Operation).OrderBy(item => item));
     }
 
     private static ProcurementControlEventWriteRequest Request(string key) => new()

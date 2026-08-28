@@ -11,6 +11,9 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrencyAmount } from '@/lib/currency';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 import type { FinancePagedResult, WhtRemittance, WhtRemittanceLiability } from '@/types/tax';
 
 function dateInput(date: Date) {
@@ -39,6 +42,8 @@ function statusClass(status: string) {
 }
 
 export default function WhtRemittancesPage() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [fromDate, setFromDate] = useState(monthStart);
     const [toDate, setToDate] = useState(today);
     const [liabilities, setLiabilities] = useState<WhtRemittanceLiability[]>([]);
@@ -147,7 +152,21 @@ export default function WhtRemittancesPage() {
                         <p className="text-muted-foreground">Group posted AP WHT liabilities and retain submission/payment evidence without creating a second GL posting.</p>
                     </div>
                 </div>
-                <Button variant="outline" onClick={load} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+                <div className="flex flex-wrap gap-2">
+                    {canExport && (
+                        <ReportPdfActions
+                            reportName="WHT remittance register"
+                            onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                DOCUMENT_TYPES.financeTaxWhtRemittanceRegister,
+                                { fromDate, toDate })}
+                            onPrint={() => documentOutputService.printReportDocument(
+                                DOCUMENT_TYPES.financeTaxWhtRemittanceRegister,
+                                { fromDate, toDate })}
+                            disabled={loading || !fromDate || !toDate}
+                        />
+                    )}
+                    <Button variant="outline" onClick={load} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+                </div>
             </div>
 
             <Card>

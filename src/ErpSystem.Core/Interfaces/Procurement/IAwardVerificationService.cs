@@ -116,7 +116,10 @@ public interface IAwardVerificationService
     /// <summary>
     /// Upload a document for a verification item result
     /// </summary>
-    Task<TenderAwardVerificationItemDocumentDto> UploadDocumentAsync(Guid itemResultId, UploadVerificationDocumentDto dto);
+    Task<TenderAwardVerificationItemDocumentDto> UploadDocumentAsync(Guid itemResultId,
+        UploadVerificationDocumentDto dto, string fileName, string logicalFileReference,
+        string? contentType, long fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId);
 
     /// <summary>
     /// Get documents for a verification item result
@@ -135,4 +138,3 @@ public interface IAwardVerificationService
 
     #endregion
 }
-

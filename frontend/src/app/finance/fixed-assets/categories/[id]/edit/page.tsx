@@ -51,6 +51,8 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
           defaultMethod: category.defaultMethod,
           defaultUsefulLifeMonths: category.defaultUsefulLifeMonths,
           defaultResidualValuePercent: category.defaultResidualValuePercent,
+          defaultDiminishingBalanceRatePercent: category.defaultDiminishingBalanceRatePercent,
+          defaultLifetimeProductionCapacity: category.defaultLifetimeProductionCapacity,
           assetAccountId: category.assetAccountId,
           accumulatedDepreciationAccountId: category.accumulatedDepreciationAccountId,
           depreciationExpenseAccountId: category.depreciationExpenseAccountId,
@@ -181,12 +183,44 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
                 <SelectItem value="StraightLine">Straight Line</SelectItem>
                 <SelectItem value="DecliningBalance">Declining Balance</SelectItem>
                 <SelectItem value="DoubleDecliningBalance">Double Declining Balance</SelectItem>
-                <SelectItem value="SumOfYearsDigits">Sum of Years Digits</SelectItem>
                 <SelectItem value="UnitsOfProduction">Units of Production</SelectItem>
-                <SelectItem value="None">None</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          {(formData.defaultMethod === 'DecliningBalance' ||
+            formData.defaultMethod === 'DoubleDecliningBalance') && (
+            <div className="space-y-2">
+              <Label htmlFor="defaultDiminishingRate">Default Annual Rate (%)</Label>
+              <Input
+                id="defaultDiminishingRate"
+                type="number"
+                min={0}
+                max={100}
+                step="0.0001"
+                value={formData.defaultDiminishingBalanceRatePercent}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  defaultDiminishingBalanceRatePercent: Number(e.target.value),
+                })}
+              />
+            </div>
+          )}
+          {formData.defaultMethod === 'UnitsOfProduction' && (
+            <div className="space-y-2">
+              <Label htmlFor="defaultProductionCapacity">Default Lifetime Capacity</Label>
+              <Input
+                id="defaultProductionCapacity"
+                type="number"
+                min={0}
+                step="0.0001"
+                value={formData.defaultLifetimeProductionCapacity}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  defaultLifetimeProductionCapacity: Number(e.target.value),
+                })}
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="defaultLife">Default Useful Life (months)</Label>
             <Input

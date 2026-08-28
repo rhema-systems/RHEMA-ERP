@@ -275,6 +275,8 @@ public partial class ProjectService
 
     private async Task<ProjectDevelopmentProfile> UpsertDevelopmentProfileEntityAsync(Project project, UpsertProjectDevelopmentProfileDto dto)
     {
+        EnsureProjectIsMutable(project);
+
         var repository = _unitOfWork.Repository<ProjectDevelopmentProfile>();
         var profile = await repository.FirstOrDefaultAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId);
         var previousLandReference = profile?.LandReference;
@@ -361,6 +363,7 @@ public partial class ProjectService
             && !asset.IsDeleted
             && asset.AssetType == EstateManagedAssetType.Land
             && asset.Status == EstateManagedAssetStatus.LandBank
+            && !asset.IsPublishedToExternalPortal
             && asset.IsReadyForProjectManagement);
 
         var readyAssetList = readyLandAssets.ToList();

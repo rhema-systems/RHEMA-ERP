@@ -7,8 +7,10 @@ import {
     PartnerDetailedLedgerReport,
 } from '@/components/finance/PartnerDetailedLedgerReport';
 import { arService } from '@/services/ar-service';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function CustomerDetailedLedgerPage() {
+    const { hasPermission } = useAuth();
     const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
     const [partnersLoading, setPartnersLoading] = useState(true);
 
@@ -57,6 +59,7 @@ export default function CustomerDetailedLedgerPage() {
             backHref="/finance/ar/reports"
             partners={partners}
             partnersLoading={partnersLoading}
+            canExport={hasPermission('Finance.Reports.Export')}
             loadReport={async (params): Promise<DetailedLedgerReport> => {
                 const report = await arService.getCustomerDetailedLedger({
                     fromDate: params.fromDate,
@@ -87,6 +90,18 @@ export default function CustomerDetailedLedgerPage() {
                     })),
                 };
             }}
+            downloadPdf={(params) => arService.downloadCustomerStatementPdf({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                customerIds: params.partnerIds,
+                showCustomerCurrency: params.showPartnerCurrency,
+            })}
+            printPdf={(params) => arService.printCustomerStatement({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                customerIds: params.partnerIds,
+                showCustomerCurrency: params.showPartnerCurrency,
+            })}
         />
     );
 }

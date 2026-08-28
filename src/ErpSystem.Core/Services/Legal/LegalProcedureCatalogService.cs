@@ -6,78 +6,17 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 {
     private static readonly LegalProcedureCatalogItem[] Procedures =
     [
-        new(
-            "Legal Department Procedure Manual",
-            "LegalProcedure",
-            "Source: Legal - Procedure Manual",
-            "General legal intake, review, drafting, approval, execution, and record keeping workflow.",
-            "BookOpen",
-            6,
-            "slate"),
-        new(
-            "Mortgages",
-            "LegalMortgage",
-            "Source: Legal - Mortgages",
-            "Mortgage request review, document preparation, execution support, and completion tracking.",
-            "FileSignature",
-            7,
-            "cyan"),
-        new(
-            "Mortgage In Principle",
-            "LegalMortgageInPrinciple",
-            "Source: Legal - Mortgage In Principle",
-            "Initial mortgage review, legal checks, recommendation, and approval routing.",
-            "FileCheck2",
-            5,
-            "emerald"),
-        new(
-            "Court Processes",
-            "LegalCourtProcess",
-            "Source: Legal - Court Processes",
-            "Court process receipt, review, response preparation, filing, hearing, and follow-up.",
-            "Scale",
-            7,
-            "violet"),
-        new(
-            "Other Court Processes",
-            "LegalOtherCourtProcess",
-            "Source: Legal - Other Court Processes",
-            "Non-standard court matters routed for legal action, evidence handling, and closure.",
-            "Gavel",
-            6,
-            "purple"),
-        new(
-            "Termination / Recognition",
-            "LegalTerminationRecognition",
-            "Source: Legal - Termination / Recognition",
-            "Termination and recognition requests reviewed through legal validation and approval stages.",
-            "ShieldCheck",
-            7,
-            "amber"),
-        new(
-            "Assignment / Sublease / Vesting",
-            "LegalAssignmentSubleaseVesting",
-            "Source: Legal - Assignment / Sublease / Vesting",
-            "Instrument review, party verification, drafting, consent checks, and completion workflow.",
-            "Landmark",
-            8,
-            "teal"),
-        new(
-            "Leases / Deed of Variation / Renewal / Sublease",
-            "LegalLeaseVariationRenewalSublease",
-            "Source: Legal - Leases / Variation / Renewal / Sublease",
-            "Lease drafting, variation, renewal, sublease review, approval, execution, and filing.",
-            "FileText",
-            8,
-            "sky"),
-        new(
-            "Transfers",
-            "LegalTransfer",
-            "Source: Legal - Transfers",
-            "Transfer request validation, document review, approval, execution, registration, and records.",
-            "BadgeCheck",
-            7,
-            "blue")
+        new("Legal Department Procedure Manual", "LegalProcedure", "Source: Legal - Procedure Manual", "General legal intake, review, drafting, approval, execution, and record keeping through configured workflows.", "BookOpen", 6, "slate"),
+        new("Legal Opinions / Advisory", "LegalOpinionAdvisory", "Source: Legal - Advisory / Opinion Requests", "Legal opinion requests, issue summaries, research notes, advice memos, confidentiality, approvals, and closure routed through configured workflows.", "MessageSquare", 5, "indigo"),
+        new("External Counsel Management", "LegalExternalCounsel", "Source: Legal - External Counsel / Law Firm Oversight", "External counsel instructions, retainers, matter assignment, fees, performance, invoices, and closeout routed through configured workflows.", "Briefcase", 5, "zinc"),
+        new("Mortgages", "LegalMortgage", "Source: Legal - Mortgages", "Mortgage request review, document preparation, execution support, and completion tracking through configured workflows.", "FileSignature", 6, "cyan"),
+        new("Mortgage In Principle", "LegalMortgageInPrinciple", "Source: Legal - Mortgage In Principle", "Initial mortgage review, legal checks, recommendation, and approval routing through configured workflows.", "FileCheck2", 5, "emerald"),
+        new("Court Processes", "LegalCourtProcess", "Source: Legal - Court Processes", "Court process receipt, review, response preparation, filing, hearing, and follow-up through configured workflows.", "Scale", 7, "violet"),
+        new("Other Court Processes", "LegalOtherCourtProcess", "Source: Legal - Other Court Processes", "Non-standard court matters routed for configured legal action, evidence handling, and closure.", "Gavel", 5, "purple"),
+        new("Termination / Recognition", "LegalTerminationRecognition", "Source: Legal - Termination / Recognition", "Termination and recognition requests reviewed through configured legal workflows.", "ShieldCheck", 8, "amber"),
+        new("Assignment / Sublease / Vesting", "LegalAssignmentSubleaseVesting", "Source: Legal - Assignment / Sublease / Vesting", "Instrument review, party verification, drafting, consent checks, and completion through configured workflows.", "Landmark", 6, "teal"),
+        new("Leases / Deed of Variation / Renewal / Sublease", "LegalLeaseVariationRenewalSublease", "Source: Legal - Leases / Variation / Renewal / Sublease", "Lease drafting, variation, renewal, sublease review, approval, execution, and filing through configured workflows.", "FileText", 7, "sky"),
+        new("Transfers", "LegalTransfer", "Source: Legal - Transfers", "Transfer request validation, document review, approval, execution, registration, and records through configured workflows.", "BadgeCheck", 8, "blue")
     ];
 
     public IReadOnlyList<LegalProcedureCatalogItem> GetProcedures() => Procedures;
@@ -92,275 +31,471 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             return null;
         }
 
-        return procedure.EntityType switch
-        {
-            "LegalMortgage" => Mortgage(procedure),
-            "LegalMortgageInPrinciple" => MortgageInPrinciple(procedure),
-            "LegalCourtProcess" => CourtProcess(procedure, "Writ of summons"),
-            "LegalOtherCourtProcess" => CourtProcess(procedure, "Other court process"),
-            "LegalTerminationRecognition" => TerminationRecognition(procedure),
-            "LegalAssignmentSubleaseVesting" => AssignmentSubleaseVesting(procedure),
-            "LegalLeaseVariationRenewalSublease" => LeaseVariationRenewalSublease(procedure),
-            "LegalTransfer" => Transfer(procedure),
-            _ => General(procedure)
-        };
+        var stages = BuildStages(procedure.EntityType);
+
+        return new LegalProcedureWorkspace(
+            procedure with { StageCount = stages.Count },
+            stages,
+            BuildDocuments(procedure.EntityType),
+            BuildFields(procedure.EntityType),
+            BuildOutputs(procedure.EntityType),
+            BuildHandoffs(procedure.EntityType));
     }
 
-    private static LegalProcedureWorkspace General(LegalProcedureCatalogItem procedure) =>
-        Workspace(
-            procedure,
+    private static IReadOnlyList<LegalWorkspaceStage> BuildStages(string entityType)
+    {
+        if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase))
+        {
+            return
             [
-                Stage("Receive and register", "Legal Registry / Legal Admin Assistant", "Receive the request, open the legal matter, and attach the property file or court docket.", "Record reference, source department, applicant, and received date.", "Confirm the request is addressed to the Head of Legal.", "Attach the property file, court process, or supporting documents."),
-                Stage("Minute and assign", "Head of Legal", "Classify the matter and minute it to the Legal Officer, Legal Admin Assistant, or Secretary.", "Confirm procedure type and priority.", "Assign responsible officer.", "Set drafting, payment, filing, or approval instructions."),
-                Stage("Due diligence", "Legal Officer", "Review ownership, payment, cadastral, schedule, site report, court deadline, and supporting-document completeness.", "Check payments and arrears.", "Confirm cadastral plan, schedule, or site report where applicable.", "Raise gaps with Estate, Registry, Finance, or the applicant."),
-                Stage("Draft and vet", "Legal Admin Assistant / Secretary / Legal Officer", "Prepare the legal instrument or court process and complete legal review.", "Draft the required instrument or process.", "Send draft to the Legal Officer for vetting.", "Correct and approve the final draft."),
-                Stage("Approve and execute", "Head of Legal / Managing Director", "Route the approved document for signature, sealing, client execution, or court filing.", "Obtain Head of Legal signature.", "Route to the Managing Director where required.", "Capture client, witness, or filing execution where required."),
-                Stage("Dispatch and records", "Legal Admin Assistant / Estate Records", "Release completed documents and return the file for records update.", "Date and seal final documents.", "Dispatch applicant, court, or Lands Commission copies.", "Return the file to Estate or Registry for records amendment.")
-            ],
-            [
-                Doc("Request memo", "Receive and register", true),
-                Doc("Property file or court docket", "Receive and register", true),
-                Doc("Payment evidence or fee approval", "Due diligence", false),
-                Doc("Cadastral plan, site report, or schedule", "Due diligence", false),
-                Doc("Draft instrument or court process", "Draft and vet", true)
-            ],
-            CommonFields("Procedure type"),
-            ["Approved legal instrument or court process", "Signed dispatch copy", "Updated legal register", "Returned property file or court docket"],
-            CommonHandoffs(true));
+                Stage("Registry Receipt", "Registry", "Court process is received and service details are captured.", ["Record service date", "Attach served process", "Create legal registry entry"]),
+                Stage("Legal Admin Recording", "Legal Admin Assistant", "Process is received by Legal Admin and recorded for routing.", ["Open matter record", "Assign legal reference", "Forward to Secretary"]),
+                Stage("Secretary Routing", "Secretary", "Secretary forwards the process for Head of Legal assignment.", ["Confirm docket type", "Prepare routing note", "Send to Head of Legal"]),
+                Stage("Head of Legal Assignment", "Head of Legal", "Head of Legal assigns the matter to a Legal Officer.", ["Select Legal Officer", "Set response deadline", "Record assignment note"]),
+                Stage("Court Jacket Opening", "Legal Officer", "Legal Officer opens or requests a court jacket for the matter.", ["Open court jacket", "Attach source evidence", "Return jacket to Legal Officer"]),
+                Stage("Process Preparation", "Legal Officer", "Legal Officer prepares response or court process for filing.", ["Draft response", "Review legal position", "Send to Legal Admin for filing"]),
+                Stage("Court Filing", "Legal Admin Assistant", "Legal Admin files process at court and records filing evidence.", ["File at court", "Upload filing receipt", "Update next hearing / follow-up"])
+            ];
+        }
 
-    private static LegalProcedureWorkspace Mortgage(LegalProcedureCatalogItem procedure) =>
-        Workspace(
-            procedure,
+        if (string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
+        {
+            return
             [
-                Stage("Receive mortgage file", "Head of Legal", "Receive the property file from Estate and minute it for consent-to-mortgage action.", "Confirm the request is for consent to mortgage.", "Identify lessee, property, and mortgagee details.", "Minute payment follow-up to the Legal Admin Assistant."),
-                Stage("Client payment follow-up", "Legal Admin Assistant", "Call the client to make payment within the payment window and attach evidence to the file.", "Notify client of payable fees.", "Track the 30-day payment window.", "Verify receipt with Finance."),
-                Stage("Draft consent", "Legal Admin Assistant", "Prepare the draft consent to mortgage letter after payment confirmation.", "Use the approved consent template.", "Capture lease, property, and mortgagee references.", "Send draft to Legal Officer for vetting."),
-                Stage("Vetting", "Legal Officer", "Review the draft consent and confirm that legal conditions are satisfied.", "Check ownership and encumbrance position.", "Confirm lease references.", "Approve or return draft corrections."),
-                Stage("Final signatures", "Head of Legal / Managing Director", "Finalize the letterhead copy and route it for Head of Legal and Managing Director signature.", "Print approved final copy.", "Obtain Head of Legal signature.", "Route for Managing Director signature where required."),
-                Stage("Release and return file", "Legal Admin Assistant", "Date, seal, release the consent to the client, and return the file to Estate.", "Date and seal final consent.", "Call client for collection.", "Record dispatch and return file to Estate.")
-            ],
-            [
-                Doc("Property file", "Receive mortgage file", true),
-                Doc("Consent to mortgage request", "Receive mortgage file", true),
-                Doc("Payment receipt", "Client payment follow-up", true),
-                Doc("Existing lease document", "Receive mortgage file", true),
-                Doc("Mortgagee details", "Receive mortgage file", true)
-            ],
-            MortgageFields("Mortgagee / bank name"),
-            ["Consent to mortgage letter", "Signed and sealed client copy", "File return note to Estate"],
-            CommonHandoffs(true));
+                Stage("Registry Receipt", "Registry", "Other court process is received and registered.", ["Record service date", "Attach document", "Create registry entry"]),
+                Stage("Legal Admin Recording", "Legal Admin Assistant", "Legal Admin records the process and forwards it.", ["Assign legal reference", "Update process register", "Forward to Secretary"]),
+                Stage("Secretary Assignment", "Secretary", "Secretary sends the process to the assigned Legal Officer.", ["Confirm assigned officer", "Set action deadline", "Forward process"]),
+                Stage("Legal Action Preparation", "Legal Officer", "Legal Officer prepares any required legal response or action.", ["Review process", "Prepare action", "Send to Legal Admin if filing is needed"]),
+                Stage("Court Filing / Closeout", "Legal Admin Assistant", "Legal Admin files any process at court and closes or follows up.", ["File at court", "Upload evidence", "Record closeout or next action"])
+            ];
+        }
 
-    private static LegalProcedureWorkspace MortgageInPrinciple(LegalProcedureCatalogItem procedure) =>
-        Workspace(
-            procedure,
+        if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            return
             [
-                Stage("Minute file for payment", "Head of Legal", "Receive the mortgage-in-principle request and minute it for payment follow-up.", "Confirm request category.", "Assign Legal Admin Assistant.", "Record expected response date."),
-                Stage("Payment follow-up", "Legal Admin Assistant", "Call the client for payment and verify evidence before drafting.", "Notify client of fee.", "Track the 30-day payment window.", "Attach receipt to file."),
-                Stage("Draft response", "Legal Admin Assistant", "Prepare the draft mortgage-in-principle response.", "Capture applicant, property, and lender details.", "Reference payment evidence.", "Send draft to Legal Officer."),
-                Stage("Legal vetting", "Legal Officer", "Vet the preliminary response and confirm no obvious legal objection.", "Review title and lease references.", "Check file completeness.", "Approve final wording."),
-                Stage("Finalize and sign", "Head of Legal", "Print the finalized letter and obtain Head of Legal signature.", "Prepare final letterhead copy.", "Obtain signature.", "Release response and update file.")
-            ],
-            [
-                Doc("Property file", "Minute file for payment", true),
-                Doc("Mortgage in principle request", "Minute file for payment", true),
-                Doc("Payment receipt", "Payment follow-up", true),
-                Doc("Lease or allocation reference", "Minute file for payment", true)
-            ],
-            MortgageFields("Proposed lender"),
-            ["Mortgage in principle letter", "Payment follow-up record", "Updated legal file"],
-            CommonHandoffs(false));
+                Stage("Head of Legal Minuting", "Head of Legal", "File is minuted for transfer-fee payment and processing.", ["Receive Estate file", "Minute payment requirement", "Assign Legal Admin"]),
+                Stage("Client Payment Call", "Legal Admin Assistant", "Client is called to pay transfer fee within the approved period.", ["Notify client", "Track 30-day payment window", "Capture payment evidence"]),
+                Stage("Transfer Drafting", "Legal Admin Assistant", "After payment, the draft transfer form is prepared.", ["Confirm payment", "Prepare transfer draft", "Send to Legal Officer"]),
+                Stage("Legal Vetting", "Legal Officer", "Legal Officer vets and approves the transfer draft.", ["Review parties", "Review property details", "Approve or return draft"]),
+                Stage("Client Execution", "Client Signature", "Client signs the approved transfer form.", ["Invite parties", "Capture signature date", "Attach executed copy"]),
+                Stage("Legal Officer Signature", "Legal Officer", "Legal Officer signs the transfer instrument.", ["Confirm execution", "Sign instrument", "Forward for LAA signature"]),
+                Stage("Legal Admin Signature", "Legal Admin Assistant", "Legal Admin signs or attests as required.", ["Apply LAA signature", "Check execution pack", "Send to Head of Legal"]),
+                Stage("Head of Legal Signature", "Head of Legal", "Head of Legal signs and the file is returned for Estate records amendment.", ["Sign transfer", "Distribute signed forms", "Return file to Estate Records"])
+            ];
+        }
 
-    private static LegalProcedureWorkspace CourtProcess(LegalProcedureCatalogItem procedure, string processType) =>
-        Workspace(
-            procedure,
+        if (string.Equals(entityType, "LegalTerminationRecognition", StringComparison.OrdinalIgnoreCase))
+        {
+            return
             [
-                Stage("Receive court process", "Registry", "Receive the served process and capture service details.", "Accept service from bailiff or server.", "Record service date and time.", "Forward process to Legal Admin Assistant."),
-                Stage("Register and open docket", "Legal Admin Assistant", "Record the process and open or update the court jacket.", "Enter process in the court register.", "Open court jacket or docket.", "Attach served process."),
-                Stage("Forward for assignment", "Secretary / Head of Legal", "Route the docket to the Head of Legal and assign a Legal Officer.", "Forward process through Secretary.", "Assign Legal Officer.", "Capture assignment date and deadline."),
-                Stage("Prepare response", "Legal Officer", "Request the property file and prepare appearance, defence, affidavit, or other response.", "Request property file from Estate.", "Review evidence and deadlines.", "Prepare required court process."),
-                Stage("File at court", "Legal Admin Assistant", "File the prepared process at court and capture proof of filing.", "Submit filing copy to court registry.", "Obtain filed copy or receipt.", "Update the court process register."),
-                Stage("Monitor and close", "Legal Officer", "Track hearings, subsequent processes, and closure actions.", "Update hearing dates.", "Prepare follow-up filings.", "Close docket when the matter concludes.")
-            ],
+                Stage("Termination Draft Instruction", "Head of Legal", "Head of Legal refers file for drafting of termination letter.", ["Receive file", "Confirm termination basis", "Minute Legal Admin"]),
+                Stage("Termination Draft", "Legal Admin Assistant", "Draft termination letter is prepared for approval.", ["Prepare draft", "Attach site report", "Send to Head of Legal"]),
+                Stage("Termination Approval", "Head of Legal", "Termination letter is approved and signed.", ["Approve letter", "Sign letter", "Release for posting"]),
+                Stage("Notice Posting", "Legal Clerk", "Termination notice is pasted for 21 days.", ["Record posting date", "Track 21-day expiry", "Upload posting evidence"]),
+                Stage("Payment Approval", "Head of Legal", "File returns for payment approval before recognition.", ["Review posting outcome", "Approve payment request", "Notify client"]),
+                Stage("Recognition Vetting", "Legal Officer", "Draft recognition is prepared and vetted.", ["Confirm payment", "Vet recognition draft", "Approve recognition"]),
+                Stage("Client and Legal Execution", "Client Signature", "Client signs, then Legal Officer and Legal Admin sign.", ["Capture client signature", "Capture Legal Officer signature", "Capture Legal Admin signature"]),
+                Stage("Head of Legal Closeout", "Head of Legal", "File is sent to Head of Legal for signature and Estate update.", ["Sign recognition", "Update legal record", "Return to Estate Records"])
+            ];
+        }
+
+        if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase))
+        {
+            return
             [
-                Doc("Served court process", "Receive court process", true),
-                Doc("Court jacket or docket", "Register and open docket", true),
-                Doc("Property file", "Prepare response", processType == "Writ of summons"),
-                Doc("Evidence bundle", "Prepare response", false),
-                Doc("Filed court copy or receipt", "File at court", true)
-            ],
-            CourtFields(processType),
-            ["Court docket", "Filed court process", "Hearing update log", "Closure note"],
+                Stage("Head of Legal Minuting", "Head of Legal", "File is minuted for payment and mortgage processing.", ["Receive Estate file", "Confirm mortgage request", "Minute Legal Admin"]),
+                Stage("Client Payment Call", "Legal Admin Assistant", "Client is called to make payment within 30 days.", ["Notify client", "Track 30-day window", "Capture receipt"]),
+                Stage("Draft Mortgage Letter", "Legal Admin Assistant", "After payment, draft mortgage letter is prepared and sent for vetting.", ["Confirm payment", "Prepare draft", "Send to Legal Officer"]),
+                Stage("Legal Vetting", "Legal Officer", "Legal Officer approves or returns the draft.", ["Vet draft", "Confirm property file", "Approve draft"]),
+                Stage("Head of Legal Signature", "Head of Legal", "Letter is finalized and sent to Head of Legal for signature.", ["Finalize letter", "HOL signature", "Prepare MD signature pack"]),
+                Stage("Managing Director Signature", "Managing Director", "Head of Legal sends the letter for Managing Director signature.", ["MD signature", "Seal / date letter", "Release to client and return file"])
+            ];
+        }
+
+        if (string.Equals(entityType, "LegalMortgageInPrinciple", StringComparison.OrdinalIgnoreCase))
+        {
+            return
             [
-                Handoff("Registry", "Legal Admin Assistant", "Court process is served on the company"),
-                Handoff("Legal Admin Assistant", "Secretary / Head of Legal", "Process is recorded and ready for assignment"),
-                Handoff("Head of Legal", "Legal Officer", "Matter is assigned"),
-                Handoff("Legal Officer", "Legal Admin Assistant", "Process is ready for court filing"),
-                Handoff("Legal Admin Assistant", "Court Registry", "Filing copy is complete")
+                Stage("Head of Legal Minuting", "Head of Legal", "File is minuted for payment and in-principle review.", ["Receive request", "Minute payment", "Assign Legal Admin"]),
+                Stage("Client Payment Call", "Legal Admin Assistant", "Client is called for payment within 30 days.", ["Notify client", "Track payment deadline", "Capture receipt"]),
+                Stage("Draft In-Principle Letter", "Legal Admin Assistant", "After payment, draft mortgage-in-principle letter is prepared.", ["Confirm payment", "Prepare draft", "Send for vetting"]),
+                Stage("Legal Vetting", "Legal Officer", "Legal Officer approves the draft.", ["Vet draft", "Confirm conditions", "Approve or return"]),
+                Stage("Head of Legal Signature", "Head of Legal", "Letter is finalized and sent to Head of Legal for signature.", ["Finalize letter", "Sign letter", "Release to client / Estate"])
+            ];
+        }
+
+        if (string.Equals(entityType, "LegalAssignmentSubleaseVesting", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                Stage("Head of Legal Minuting", "Head of Legal", "File is minuted to Legal Admin Assistant for drafting.", ["Receive Estate file", "Confirm instrument type", "Assign Legal Admin"]),
+                Stage("Draft Letter / Instrument", "Legal Admin Assistant", "Legal Admin drafts the letter or instrument and sends it to Legal Officer.", ["Prepare draft", "Attach property file references", "Send to Legal Officer"]),
+                Stage("Legal Officer Approval", "Legal Officer", "Legal Officer reviews and approves the draft.", ["Vet parties", "Confirm consent / vesting details", "Approve or return"]),
+                Stage("Head of Legal Signature Pack", "Legal Admin Assistant", "Approved file is sent to Head of Legal for signature routing.", ["Print / finalize", "Prepare signature pack", "Send to Head of Legal"]),
+                Stage("Executive Signature Routing", "Head of Legal", "Head of Legal signs or sends file to Managing Director where required.", ["HOL signature", "MD signature if required", "Seal / date instrument"]),
+                Stage("File Return and Closeout", "Legal Admin Assistant", "Completed instrument is dispatched and file is returned.", ["Release document", "Update legal register", "Return file to Estate"])
+            ];
+        }
+
+        if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                Stage("Head of Legal Minuting", "Head of Legal", "File is minuted to Secretary for lease or variation drafting.", ["Receive Estate file", "Confirm request type", "Minute Secretary"]),
+                Stage("Secretary Drafting", "Secretary", "Secretary drafts lease, deed of variation, renewal, or sublease.", ["Prepare draft", "Attach schedule details", "Send to Legal Officer"]),
+                Stage("Legal Officer Approval", "Legal Officer", "Legal Officer approves or returns the draft.", ["Review draft", "Confirm schedule insertion", "Approve draft"]),
+                Stage("Legal Admin Assignment", "Secretary", "Secretary assigns approved file to Legal Admin Assistant.", ["Prepare execution pack", "Assign Legal Admin", "Call client"]),
+                Stage("Client Execution", "Client Signature", "Client and witnesses are called to sign the lease or instrument.", ["Invite client", "Capture client signature", "Capture witness signature"]),
+                Stage("Head of Legal Signature", "Head of Legal", "Lease is sealed and sent to Head of Legal for signature.", ["Seal instrument", "HOL signature", "Prepare MD routing"]),
+                Stage("Managing Director Signature", "Managing Director", "Lease is sent to Managing Director for signature and completion.", ["MD signature", "Record pickup / registration handoff", "Return file to Estate"])
+            ];
+        }
+
+        if (string.Equals(entityType, "LegalOpinionAdvisory", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                Stage("Advisory Intake", "Head of Legal", "Legal opinion request is received, logged, and assigned.", ["Capture request", "Attach source documents", "Assign Legal Officer"]),
+                Stage("Issue Review", "Legal Officer", "Legal Officer reviews facts, laws, and risk position.", ["Confirm issue statement", "Review documents", "Record legal risk"]),
+                Stage("Advice Drafting", "Legal Officer", "Draft legal opinion or advice memo is prepared.", ["Prepare draft", "Add recommendations", "Mark confidentiality"]),
+                Stage("Approval", "Head of Legal", "Head of Legal reviews and approves the advice.", ["Review draft", "Approve or return", "Set dispatch recipient"]),
+                Stage("Dispatch and Closure", "Legal Admin Assistant", "Approved advice is dispatched and closed in the legal register.", ["Dispatch advice", "Upload final memo", "Close matter"])
+            ];
+        }
+
+        if (string.Equals(entityType, "LegalExternalCounsel", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                Stage("Counsel Instruction", "Head of Legal", "External counsel instruction or retainer request is captured.", ["Confirm scope", "Select counsel", "Approve instruction"]),
+                Stage("Matter Assignment", "Legal Officer", "Matter is assigned and deliverables are agreed.", ["Record deliverables", "Set due dates", "Share source documents"]),
+                Stage("Deliverable Review", "Legal Officer", "External counsel deliverables are reviewed.", ["Receive deliverable", "Review advice / filing", "Record action points"]),
+                Stage("Fee and Invoice Control", "Legal Admin Assistant", "Fees, invoices, and AP references are tracked.", ["Capture fee note", "Link invoice / AP reference", "Confirm approval"]),
+                Stage("Performance Closeout", "Head of Legal", "Matter performance and closeout notes are recorded.", ["Rate performance", "Close matter", "Archive counsel records"])
+            ];
+        }
+
+        return
+        [
+            Stage("Legal Intake", "Head of Legal", "Legal file, request, or property record is received and minuted.", ["Capture source department", "Attach source file", "Assign responsible role"]),
+            Stage("Due Diligence", "Legal Officer", "Legal Officer checks property file, payments, cadastral plan, schedule, and legal risk.", ["Confirm payment status", "Confirm cadastral plan", "Record due diligence outcome"]),
+            Stage("Draft Preparation", "Secretary / Legal Admin Assistant", "Draft letter, instrument, consent, or response is prepared.", ["Prepare draft", "Use approved template", "Send for vetting"]),
+            Stage("Legal Review and Approval", "Legal Officer / Head of Legal", "Draft is vetted, approved, or returned for correction.", ["Vet draft", "Record approval decision", "Prepare signature pack"]),
+            Stage("Execution and Signature", "Client / Head of Legal / Managing Director", "Document is signed, sealed, dated, or routed for executive signature.", ["Capture signatures", "Seal / date document", "Record pickup or dispatch"]),
+            Stage("Filing and Return", "Legal Admin Assistant", "Completed document is filed and property file is returned to originating department.", ["Upload final document", "Update legal register", "Return file to Estate"])
+        ];
+    }
+
+    private static IReadOnlyList<LegalWorkspaceDocument> BuildDocuments(string entityType)
+    {
+        var documents = new List<LegalWorkspaceDocument>
+        {
+            Doc("Source request / forwarding minute", "Estate / Originating Department", true),
+            Doc("Property file extract", "Estate Records", true),
+            Doc("Payment / receipt evidence", "Finance / Client", false),
+            Doc("Legal review note", "Legal Officer", true),
+            Doc("Final signed / dispatched document", "Legal Department", true)
+        };
+
+        if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
+        {
+            documents.AddRange([
+                Doc("Served court process", "Registry / Court bailiff", true),
+                Doc("Court jacket / docket", "Legal Officer", true),
+                Doc("Filed response / court filing evidence", "Legal Admin Assistant / Court", true),
+                Doc("Hearing notice or next action note", "Court / Legal Officer", false)
             ]);
+        }
 
-    private static LegalProcedureWorkspace TerminationRecognition(LegalProcedureCatalogItem procedure) =>
-        Workspace(
-            procedure,
-            [
-                Stage("Due diligence and site review", "Legal Officer", "Review the property file and site report before termination or recognition action.", "Confirm tenancy or allocation details.", "Review site report.", "Confirm basis for termination or recognition."),
-                Stage("Draft termination notice", "Legal Admin Assistant", "Prepare the draft termination letter after Head of Legal instruction.", "Draft termination notice.", "Send draft for Head of Legal approval.", "Record notice details."),
-                Stage("Approve and paste notice", "Head of Legal / Legal Clerk", "Approve the notice and paste it on the affected property for 21 days.", "Sign approved notice.", "Paste notice on site.", "Track 21-day notice expiry."),
-                Stage("Payment and recognition draft", "Head of Legal / Legal Admin Assistant", "After notice expiry, approve payment and draft the recognition or tenancy declaration.", "Confirm notice expiry.", "Approve and verify payment.", "Draft recognition document for vetting."),
-                Stage("Execution", "Client / Legal Officer / Legal Admin Assistant", "Collect client, witness, Legal Officer, and Legal Admin Assistant signatures.", "Call client for signature.", "Obtain witness signatures.", "Capture internal signatures."),
-                Stage("Final signature and records", "Head of Legal / Estate", "Obtain final Head of Legal signature and return the file for records amendment.", "Route to Head of Legal.", "Distribute signed copies.", "Return file to Estate.")
-            ],
-            [
-                Doc("Property file", "Due diligence and site review", true),
-                Doc("Site report", "Due diligence and site review", true),
-                Doc("Termination notice", "Draft termination notice", true),
-                Doc("Notice-pasting evidence", "Approve and paste notice", true),
-                Doc("Payment receipt", "Payment and recognition draft", true),
-                Doc("Recognition or tenancy declaration", "Payment and recognition draft", true)
-            ],
-            CommonFields("Recognition / termination request type"),
-            ["Termination notice", "Recognition or tenancy declaration", "Signed client copies", "Estate records amendment request"],
-            [
-                Handoff("Legal Officer", "Legal Admin Assistant", "Termination notice is required"),
-                Handoff("Legal Admin Assistant", "Head of Legal", "Draft notice is ready for approval"),
-                Handoff("Head of Legal", "Legal Clerk", "Notice is signed for posting"),
-                Handoff("Client", "Legal Admin Assistant", "Payment and signature are complete"),
-                Handoff("Head of Legal", "Estate", "Final document is signed")
+        if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
+        {
+            documents.AddRange([
+                Doc("Lease request and Estate forwarding letter", "Estate Department", true),
+                Doc("Cadastral plan and schedule", "Estate / Planning", true),
+                Doc("Draft lease / deed of variation / sublease", "Secretary", true),
+                Doc("Client and witness execution evidence", "Client / Legal", true),
+                Doc("Registration handover evidence", "Legal / Lands Commission", false)
             ]);
+        }
 
-    private static LegalProcedureWorkspace AssignmentSubleaseVesting(LegalProcedureCatalogItem procedure) =>
-        InstrumentWorkspace(
-            procedure,
-            "assignment, sublease, or vesting",
-            "Consent to assign / sublet / recognition of vesting",
-            ["Consent to assign", "Consent to sublet", "Recognition of vesting", "Returned Estate file"]);
-
-    private static LegalProcedureWorkspace LeaseVariationRenewalSublease(LegalProcedureCatalogItem procedure) =>
-        InstrumentWorkspace(
-            procedure,
-            "lease, supplementary lease, deed of variation, renewal, or sublease",
-            "Lease / variation / renewal / sublease instrument",
-            ["Lease", "Supplementary lease", "Deed of variation", "Renewal instrument", "Sublease consent", "Registration release note"]);
-
-    private static LegalProcedureWorkspace Transfer(LegalProcedureCatalogItem procedure) =>
-        Workspace(
-            procedure,
-            [
-                Stage("Due diligence", "Legal Officer", "Review the transfer request, property file, ownership position, and supporting documents.", "Confirm transferor and transferee details.", "Review property file.", "Identify payment and approval requirements."),
-                Stage("Interview parties", "Legal Officer", "Invite applicants and transferees for interview and validation.", "Schedule interview.", "Confirm identity and capacity.", "Record interview outcome."),
-                Stage("Fee calculation and approval", "Estate / Managing Director", "Refer the file to Estate for fee calculation and obtain approval.", "Request fee calculation.", "Obtain approval for calculated fees.", "Return approved file to Legal."),
-                Stage("Payment and draft transfer", "Client / Legal Officer", "Receive payment and prepare transfer declaration forms.", "Confirm transfer fee payment.", "Prepare draft transfer declaration.", "Send draft for vetting."),
-                Stage("Client execution", "Client / Witnesses", "Call the parties to execute transfer declarations with witnesses.", "Notify transferor and transferee.", "Capture witness signatures.", "Confirm execution completeness."),
-                Stage("Legal signatures and records", "Legal Officer / Head of Legal / Estate", "Route for internal signatures, distribute signed copies, and return file to Estate for amendment.", "Obtain Legal Officer and Legal Admin Assistant signatures.", "Obtain Head of Legal signature.", "Forward file to Estate for records amendment.")
-            ],
-            [
-                Doc("Property file", "Due diligence", true),
-                Doc("Transfer request", "Due diligence", true),
-                Doc("Transfer fee approval", "Fee calculation and approval", true),
-                Doc("Payment receipt", "Payment and draft transfer", true),
-                Doc("Transfer declaration forms", "Payment and draft transfer", true),
-                Doc("Identity and witness details", "Client execution", true)
-            ],
-            CommonFields("Transfer request type"),
-            ["Transfer declaration forms", "Signed transfer copies", "Estate amendment instruction", "Legal file copy"],
-            [
-                Handoff("Legal Officer", "Estate", "Fee calculation is required"),
-                Handoff("Estate", "Managing Director", "Calculated fees need approval"),
-                Handoff("Client", "Legal Officer", "Payment and execution are complete"),
-                Handoff("Legal Officer", "Head of Legal", "Transfer is ready for final legal signature"),
-                Handoff("Head of Legal", "Estate", "Records amendment is required")
+        if (string.Equals(entityType, "LegalAssignmentSubleaseVesting", StringComparison.OrdinalIgnoreCase))
+        {
+            documents.AddRange([
+                Doc("Consent to assign / sublease request", "Estate / Applicant", true),
+                Doc("Recognition of vesting evidence", "Applicant / Legal", false),
+                Doc("Draft consent / recognition letter", "Legal Admin Assistant", true),
+                Doc("Signed and sealed instrument", "Legal Department", true)
             ]);
+        }
 
-    private static LegalProcedureWorkspace InstrumentWorkspace(LegalProcedureCatalogItem procedure, string instrumentType, string documentName, IReadOnlyList<string> outputs) =>
-        Workspace(
-            procedure,
-            [
-                Stage("Receive and minute file", "Head of Legal", $"Receive the property file for {instrumentType} action and minute it for drafting.", "Confirm instrument type.", "Check property and party references.", "Minute the file to the drafter."),
-                Stage("Due diligence", "Legal Officer", "Review payment, lease, cadastral, schedule, and party details before drafting.", "Check payments and arrears.", "Confirm parties and property references.", "Confirm cadastral plan and schedule."),
-                Stage("Draft instrument", "Legal Admin Assistant / Secretary", $"Draft the {documentName.ToLowerInvariant()} using the approved template.", "Prepare draft instrument.", "Capture correct parties and property references.", "Send draft to Legal Officer."),
-                Stage("Vetting", "Legal Officer", "Vet the draft and approve it for final printing.", "Review legal sufficiency.", "Confirm schedules and plan references.", "Approve or return corrections."),
-                Stage("Signatures", "Head of Legal / Managing Director", "Print final copy and route for required internal signatures.", "Print final letterhead or instrument copy.", "Obtain Head of Legal signature.", "Route to Managing Director where required."),
-                Stage("Release and records", "Legal Admin Assistant / Estate", "Date, seal, release the document, and return the property file for records update.", "Date and seal final document.", "Notify client for collection or signing.", "Return property file to Estate.")
-            ],
-            [
-                Doc("Property file", "Receive and minute file", true),
-                Doc($"{documentName} request", "Receive and minute file", true),
-                Doc("Payment evidence", "Due diligence", true),
-                Doc("Cadastral plan and schedule", "Due diligence", true),
-                Doc($"Draft {documentName.ToLowerInvariant()}", "Draft instrument", true)
-            ],
-            CommonFields("Instrument type"),
-            outputs,
-            CommonHandoffs(true));
+        if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalMortgageInPrinciple", StringComparison.OrdinalIgnoreCase))
+        {
+            documents.AddRange([
+                Doc("Mortgage consent request", "Estate / Applicant", true),
+                Doc("Financial institution / mortgagee letter", "Applicant / Mortgagee", true),
+                Doc("Draft mortgage consent / in-principle letter", "Legal Admin Assistant", true),
+                Doc("Signed mortgage letter", "Head of Legal / MD", true)
+            ]);
+        }
 
-    private static LegalProcedureWorkspace Workspace(
-        LegalProcedureCatalogItem procedure,
-        IReadOnlyList<LegalWorkspaceStage> stages,
-        IReadOnlyList<LegalWorkspaceDocument> documents,
-        IReadOnlyList<LegalWorkspaceField> fields,
-        IReadOnlyList<string> outputs,
-        IReadOnlyList<LegalWorkspaceHandoff> handoffs) =>
-        new(procedure, stages, documents, fields, outputs, handoffs);
+        if (string.Equals(entityType, "LegalTerminationRecognition", StringComparison.OrdinalIgnoreCase))
+        {
+            documents.AddRange([
+                Doc("Site report", "Estate / Legal Clerk", true),
+                Doc("Termination notice", "Legal Admin Assistant", true),
+                Doc("21-day posting evidence", "Legal Clerk", true),
+                Doc("Recognition draft / declaration", "Legal Officer", true),
+                Doc("Executed recognition document", "Client / Legal", true)
+            ]);
+        }
 
-    private static LegalWorkspaceStage Stage(string name, string owner, string summary, params string[] checklist) =>
+        if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            documents.AddRange([
+                Doc("Transfer file from Estate", "Estate Department", true),
+                Doc("Transfer fee payment receipt", "Finance / Client", true),
+                Doc("Draft transfer form", "Legal Admin Assistant", true),
+                Doc("Executed transfer form", "Client / Legal", true),
+                Doc("Signed transfer distribution / Estate return note", "Legal Admin Assistant", true)
+            ]);
+        }
+
+        return documents
+            .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static IReadOnlyList<LegalWorkspaceField> BuildFields(string entityType)
+    {
+        var fields = new List<LegalWorkspaceField>
+        {
+            Field("referenceNumber", "Legal reference number", "text"),
+            Field("sourceDepartment", "Source department", "select", ["Estate", "Property Management", "Finance", "Managing Director", "External Party", "Court / Registry", "Other"]),
+            Field("propertyFileReference", "Property file reference", "text"),
+            Field("propertyNumber", "Property / plot / house number", "text"),
+            Field("applicantName", "Applicant / lessee / client name", "text"),
+            Field("receivedDate", "Received date", "date"),
+            Field("assignedLegalOfficer", "Assigned Legal Officer", "text"),
+            Field("paymentStatus", "Payment status", "select", ["Not required", "Pending", "Paid", "Waived / exception approved"]),
+            Field("paymentReceiptReference", "Payment / receipt reference", "text"),
+            Field("cadastralPlanStatus", "Cadastral plan status", "select", ["Not required", "Pending", "Available", "Returned for correction"]),
+            Field("scheduleStatus", "Schedule insertion status", "select", ["Not required", "Pending", "Inserted", "Returned for correction"]),
+            Field("dueDiligenceStatus", "Due diligence status", "select", ["Not started", "In progress", "Cleared", "Issue found", "Returned"]),
+            Field("draftDocumentReference", "Draft document reference", "text"),
+            Field("legalVettingStatus", "Legal vetting status", "select", ["Not started", "Under review", "Approved", "Returned for correction"]),
+            Field("signatureStatus", "Signature status", "select", ["Not started", "Client signed", "Legal signed", "Head of Legal signed", "MD signed", "Fully signed"]),
+            Field("sealStatus", "Seal / dating status", "select", ["Not required", "Pending", "Sealed", "Dated", "Sealed and dated"]),
+            Field("dispatchStatus", "Dispatch / pickup status", "select", ["Not started", "Client notified", "Picked up", "Dispatched", "Filed"]),
+            Field("estateReturnStatus", "Estate file return status", "select", ["Not required", "Pending return", "Returned to Estate", "Returned for correction"]),
+            Field("closeoutNotes", "Closeout notes", "textarea")
+        };
+
+        if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("courtProcessType", "Court process type", "select", ["Writ of Summons", "Motion", "Notice", "Order", "Letter", "Other"]),
+                Field("courtName", "Court name", "text"),
+                Field("caseNumber", "Court case number", "text"),
+                Field("serviceDate", "Service date", "date"),
+                Field("responseDeadline", "Response / filing deadline", "date"),
+                Field("courtJacketReference", "Court jacket / docket reference", "text"),
+                Field("filingReference", "Court filing reference", "text"),
+                Field("nextHearingDate", "Next hearing date", "date")
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("instrumentType", "Instrument type", "select", ["Lease", "Supplementary Lease", "Deed of Variation", "Renewal", "Sublease"]),
+                Field("lesseeName", "Lessee name", "text"),
+                Field("leaseTerm", "Lease term", "text"),
+                Field("scheduleReference", "Schedule reference", "text"),
+                Field("clientExecutionDate", "Client execution date", "date"),
+                Field("witnessName", "Witness name", "text"),
+                Field("landsCommissionHandoff", "Lands Commission handoff status", "select", ["Not required", "Pending", "Sent", "Registered", "Returned"])
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalAssignmentSubleaseVesting", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("instrumentType", "Instrument type", "select", ["Assignment", "Sublease", "Recognition of Vesting"]),
+                Field("assignorName", "Assignor / current lessee", "text"),
+                Field("assigneeName", "Assignee / incoming party", "text"),
+                Field("vestingInstrumentReference", "Vesting instrument reference", "text"),
+                Field("consentDecision", "Consent / recognition decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalMortgageInPrinciple", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("mortgageType", "Mortgage type", "select", ["Consent to Mortgage", "Mortgage in Principle"]),
+                Field("mortgageeName", "Mortgagee / financial institution", "text"),
+                Field("paymentDueDate", "Payment due date", "date"),
+                Field("clientPaymentDate", "Client payment date", "date"),
+                Field("mortgageLetterReference", "Mortgage letter reference", "text"),
+                Field("mdSignatureRequired", "MD signature required", "select", ["Yes", "No"])
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalTerminationRecognition", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("terminationReason", "Termination reason", "textarea"),
+                Field("siteReportReference", "Site report reference", "text"),
+                Field("noticePostingStartDate", "Notice posting start date", "date"),
+                Field("noticePostingEndDate", "Notice posting end date", "date"),
+                Field("recognitionApplicantName", "Recognition applicant name", "text"),
+                Field("recognitionPaymentStatus", "Recognition payment status", "select", ["Pending", "Paid", "Waived / exception approved"]),
+                Field("recognitionDocumentReference", "Recognition document reference", "text")
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("transferorName", "Transferor name", "text"),
+                Field("transfereeName", "Transferee name", "text"),
+                Field("interviewDate", "Applicant / transferee interview date", "date"),
+                Field("transferFeePayable", "Transfer fee payable", "currency"),
+                Field("transferFeeReceipt", "Transfer fee receipt", "text"),
+                Field("mdApprovalReference", "Managing Director approval reference", "text"),
+                Field("transferDeclarationReference", "Transfer declaration reference", "text"),
+                Field("distributionStatus", "Signed transfer distribution status", "select", ["Not started", "Distributed", "Returned to Estate Records"])
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalOpinionAdvisory", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("advisorySubject", "Advisory subject", "text"),
+                Field("confidentialityLevel", "Confidentiality level", "select", ["Internal", "Restricted", "Privileged", "Board / Executive"]),
+                Field("legalRiskLevel", "Legal risk level", "select", ["Low", "Medium", "High", "Critical"]),
+                Field("adviceRecipient", "Advice recipient", "text")
+            ]);
+        }
+
+        if (string.Equals(entityType, "LegalExternalCounsel", StringComparison.OrdinalIgnoreCase))
+        {
+            fields.AddRange([
+                Field("counselName", "External counsel / law firm", "text"),
+                Field("instructionReference", "Instruction / retainer reference", "text"),
+                Field("feeEstimate", "Fee estimate", "currency"),
+                Field("invoiceReference", "Invoice / AP reference", "text"),
+                Field("performanceRating", "Performance rating", "select", ["Not rated", "Good", "Satisfactory", "Needs attention"])
+            ]);
+        }
+
+        return fields;
+    }
+
+    private static IReadOnlyList<string> BuildOutputs(string entityType)
+    {
+        if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Recorded court process", "Court jacket / docket", "Filed response or process", "Next-action / hearing tracker", "Legal closeout note"];
+        }
+
+        if (string.Equals(entityType, "LegalTerminationRecognition", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Termination notice", "21-day posting evidence", "Recognition document", "Executed signature pack", "Estate records update handoff"];
+        }
+
+        if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Transfer fee confirmation", "Transfer declaration", "Executed transfer form", "Signed distribution pack", "Estate records amendment handoff"];
+        }
+
+        if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalMortgageInPrinciple", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Payment confirmation", "Draft mortgage letter", "Vetted mortgage consent / in-principle letter", "Signed letter", "Estate file return note"];
+        }
+
+        if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Draft lease / variation / renewal / sublease", "Execution pack", "Signed and sealed instrument", "Registration handoff", "Estate file return note"];
+        }
+
+        if (string.Equals(entityType, "LegalAssignmentSubleaseVesting", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Draft consent / recognition instrument", "Vetted legal letter", "Signed and sealed instrument", "Client release note", "Estate file return note"];
+        }
+
+        if (string.Equals(entityType, "LegalOpinionAdvisory", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Issue summary", "Research / review note", "Legal opinion memo", "Approved advice", "Dispatch evidence"];
+        }
+
+        if (string.Equals(entityType, "LegalExternalCounsel", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Counsel instruction", "Retainer / fee record", "Deliverable review", "Invoice/AP handoff", "Performance closeout"];
+        }
+
+        return ["Legal intake record", "Due diligence note", "Draft document", "Approved / signed document", "Dispatch or Estate return evidence"];
+    }
+
+    private static IReadOnlyList<LegalWorkspaceHandoff> BuildHandoffs(string entityType)
+    {
+        var handoffs = new List<LegalWorkspaceHandoff>
+        {
+            Handoff("Estate / Originating Department", "Head of Legal", "Property file, request, or court process is submitted to Legal."),
+            Handoff("Head of Legal", "Legal Officer / Legal Admin", "Matter is minuted and assigned for due diligence or drafting."),
+            Handoff("Legal Officer", "Head of Legal", "Draft or advice is approved for signature routing."),
+            Handoff("Legal Admin Assistant", "Estate / Originating Department", "Completed file is returned with signed document or legal closeout note.")
+        };
+
+        if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
+        {
+            handoffs.Add(Handoff("Legal Admin Assistant", "Court", "Approved response or process is filed at court."));
+        }
+
+        if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
+        {
+            handoffs.Add(Handoff("Head of Legal", "Managing Director", "Document requires executive signature."));
+        }
+
+        if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
+        {
+            handoffs.Add(Handoff("Legal Department", "Lands Commission", "Executed instrument is handed over for registration where applicable."));
+        }
+
+        if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
+        {
+            handoffs.Add(Handoff("Legal Department", "Estate Records", "Signed transfer forms are returned for records and ledger amendment."));
+        }
+
+        return handoffs;
+    }
+
+    private static LegalWorkspaceStage Stage(
+        string name,
+        string owner,
+        string summary,
+        IReadOnlyList<string> checklist) =>
         new(name, owner, summary, checklist);
 
     private static LegalWorkspaceDocument Doc(string name, string requiredFrom, bool isMandatory) =>
         new(name, requiredFrom, isMandatory);
 
-    private static LegalWorkspaceField Field(string key, string label, string type, params string[] options) =>
-        new(key, label, type, options.Length == 0 ? null : options);
+    private static LegalWorkspaceField Field(
+        string key,
+        string label,
+        string type,
+        IReadOnlyList<string>? options = null) =>
+        new(key, label, type, options);
 
     private static LegalWorkspaceHandoff Handoff(string fromRole, string toRole, string trigger) =>
         new(fromRole, toRole, trigger);
-
-    private static IReadOnlyList<LegalWorkspaceField> CommonFields(string requestTypeLabel) =>
-    [
-        Field("referenceNumber", "Reference number", "text"),
-        Field("requestType", requestTypeLabel, "select", "Lease", "Assignment", "Mortgage", "Transfer", "Court process", "Recognition"),
-        Field("applicantName", "Applicant / party name", "text"),
-        Field("propertyReference", "Property reference", "text"),
-        Field("originatingDepartment", "Originating department", "select", "Estate", "Registry", "Finance", "External party", "Court"),
-        Field("receivedDate", "Received date", "date"),
-        Field("priority", "Priority", "select", "Normal", "Urgent", "Court deadline")
-    ];
-
-    private static IReadOnlyList<LegalWorkspaceField> MortgageFields(string lenderLabel) =>
-    [
-        Field("referenceNumber", "Reference number", "text"),
-        Field("lesseeName", "Lessee name", "text"),
-        Field("propertyReference", "Property reference", "text"),
-        Field("lenderName", lenderLabel, "text"),
-        Field("paymentStatus", "Payment status", "select", "Pending", "Paid", "Waived"),
-        Field("receivedDate", "Received date", "date")
-    ];
-
-    private static IReadOnlyList<LegalWorkspaceField> CourtFields(string processType) =>
-    [
-        Field("suitNumber", "Suit number", "text"),
-        Field("processType", "Process type", "text", processType),
-        Field("courtName", "Court", "text"),
-        Field("parties", "Parties", "textarea"),
-        Field("serviceDate", "Service date", "date"),
-        Field("responseDeadline", "Response deadline", "date"),
-        Field("assignedOfficer", "Assigned Legal Officer", "text")
-    ];
-
-    private static IReadOnlyList<LegalWorkspaceHandoff> CommonHandoffs(bool includeManagingDirector)
-    {
-        var handoffs = new List<LegalWorkspaceHandoff>
-        {
-            Handoff("Estate / Registry", "Head of Legal", "File is received for legal action"),
-            Handoff("Head of Legal", "Legal Admin Assistant / Secretary", "File is minuted for drafting or payment follow-up"),
-            Handoff("Legal Admin Assistant / Secretary", "Legal Officer", "Draft is ready for vetting"),
-            Handoff("Legal Officer", "Head of Legal", "Draft has been approved")
-        };
-
-        if (includeManagingDirector)
-        {
-            handoffs.Add(Handoff("Head of Legal", "Managing Director", "Executive signature is required"));
-        }
-
-        handoffs.Add(Handoff("Legal Admin Assistant", "Estate Records", "Final document is released and records need update"));
-        return handoffs;
-    }
 }

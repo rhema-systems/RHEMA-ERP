@@ -1,0 +1,4 @@
+ExternalLineId,BoqLineKey,BoqItemCode,Description,UnitCode,PreviousQuantity,RevisedQuantity,ChangeType,MeasurementCode,SourceElementIds,ExtractionMethod,ConfidencePercent,Comment
+IFC-WALL-001,65f36dfb-9dbf-4ef8-b9ad-6d940922726c,A-WALL-100,200 mm block wall,m2,120.500000,128.750000,Modified,SMM7.F10,2ADz5YQnX7N9H4rKm1,ModelProperty,100,Wall extent increased at grid C.
+IFC-DOOR-004,073f8278-ab3d-41b5-868e-ac3e92db350a,A-DOOR-040,Internal timber door set,nr,45.000000,0.000000,Removed,SMM7.L20,3FQ4p7Mxj1Dk2L8sZ0,VendorTakeoff,98,Door type replaced by the new schedule.
+IFC-DOOR-008,,,Fire-rated steel door set,nr,0.000000,15.000000,Added,SMM7.L20,1Ks9F2mV8Qx4P0eYb6,VendorTakeoff,96,New item requires independent BoQ mapping.

@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tdc.gov.gh/contracts/quantity-survey/tdc-qs-design-extraction-reconciliation-v1.schema.json",
+  "title": "TDC Quantity Survey Design Extraction Reconciliation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "exchangeId",
+    "reconciledAtUtc",
+    "projectReference",
+    "baseBoqVersionNumber",
+    "manifestSha256",
+    "status",
+    "summary",
+    "lines",
+    "blockingIssues",
+    "reconciliationSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "tdc.qs.design-extraction.reconciliation.v1"
+    },
+    "exchangeId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reconciledAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "projectReference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "baseBoqVersionNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "manifestSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "status": {
+      "enum": ["Rejected", "NeedsResolution", "ReadyForReview", "ApprovedForImpact"]
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2000,
+      "items": {
+        "$ref": "#/$defs/reconciliationLine"
+      }
+    },
+    "blockingIssues": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "reconciliationSha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-F0-9]{64}$"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalLineCount",
+        "matchedLineCount",
+        "blockingLineCount",
+        "previousQuantityTotal",
+        "revisedQuantityTotal",
+        "netQuantityChange"
+      ],
+      "properties": {
+        "externalLineCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "matchedLineCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        },
+        "blockingLineCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        },
+        "previousQuantityTotal": {
+          "type": "number",
+          "minimum": 0
+        },
+        "revisedQuantityTotal": {
+          "type": "number",
+          "minimum": 0
+        },
+        "netQuantityChange": {
+          "type": "number"
+        }
+      }
+    },
+    "reconciliationLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalLineId",
+        "matchedBoqLineKey",
+        "outcome",
+        "previousQuantity",
+        "revisedQuantity",
+        "quantityVariance",
+        "proposedRoute",
+        "resolutionCode",
+        "reasonCode"
+      ],
+      "properties": {
+        "externalLineId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "matchedBoqLineKey": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        },
+        "outcome": {
+          "enum": [
+            "ExactMatch",
+            "ToleranceMatch",
+            "NewExternalLine",
+            "MissingExternalLine",
+            "AmbiguousMapping",
+            "UnitMismatch",
+            "QuantityVariance",
+            "DuplicateExternalLine",
+            "Rejected"
+          ]
+        },
+        "previousQuantity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "revisedQuantity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "quantityVariance": {
+          "type": "number"
+        },
+        "proposedRoute": {
+          "enum": ["Measurement", "Variation", "Ignore", "Unresolved"]
+        },
+        "resolutionCode": {
+          "type": ["string", "null"],
+          "enum": [null, "AcceptedExact", "AcceptedWithinTolerance", "MappedByIndependentReviewer", "ExcludedWithReason", "ReturnedToAdapter"]
+        },
+        "reasonCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message", "externalLineId"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "maxLength": 100
+        },
+        "severity": {
+          "enum": ["Error", "Warning"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "externalLineId": {
+          "type": ["string", "null"],
+          "maxLength": 100
+        }
+      }
+    }
+  }
+}

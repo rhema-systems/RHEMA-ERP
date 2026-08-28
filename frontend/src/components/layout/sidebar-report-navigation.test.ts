@@ -21,18 +21,41 @@ describe('main Reports navigation', () => {
 
     expect(reports?.children?.map(item => [item.title, item.href])).toEqual([
       ['Financial Reports', '/reports/financial'],
+      // These shared destinations were added by other module owners after the
+      // original report-navigation gate. Retain the full ordered contract so a
+      // future sidebar edit cannot silently remove a module's report landing page.
+      ['Report Automation', '/reports/automation'],
       ['Procurement Reports', '/reports/purchasing'],
       ['Inventory Reports', '/reports/inventory'],
+      ['Quantity Survey Reports', '/reports/quantity-survey'],
+      ['Audit & Compliance Reports', '/reports/audit-compliance'],
       ['Sales Reports', '/reports/sales'],
       ['HR Reports', '/reports/human-resources'],
       ['Estate Reports', '/reports/estate'],
       ['Development Reports', '/reports/development'],
       ['Operations Reports', '/reports/operations'],
+      ['Property Management Reports', '/reports?module=property-management'],
+      ['Facilities Reports', '/reports?module=facilities'],
+      ['Legal Reports', '/reports?module=legal'],
+      ['DMS Reports', '/reports?module=dms'],
+      ['Planning Reports', '/reports?module=planning'],
     ]);
   });
 });
 
 describe('navigation surfaces', () => {
+  it('exposes the controlled journal-batch workspace under General Ledger', () => {
+    // This assertion guards against a fully implemented Finance workspace becoming
+    // reachable only by a memorised URL after future sidebar reorganisations.
+    const journalBatches = findByTitle(navigationItems, 'Journal Batches');
+
+    expect(journalBatches).toMatchObject({
+      href: '/finance/journal-batches',
+      permissions: ['Finance.JournalBatches.View'],
+    });
+    expect(containsHref(sidebarNavigationItems, '/finance/journal-batches')).toBe(true);
+  });
+
   it('keeps frequent operational records and reports in the sidebar while moving stable setup to settings', () => {
     expect(sidebarNavigationItems.some(item => item.title === 'Administration')).toBe(false);
     expect(sidebarNavigationItems.some(item => item.title === 'Notifications')).toBe(false);
@@ -74,9 +97,13 @@ describe('navigation surfaces', () => {
       'Purchasing',
       'Tendering',
       'Planning',
+      // Procurement documents are now an operational record group on master,
+      // so the surface contract must distinguish them from stable Settings data.
+      'Procurement Documents',
       'Governance & Controls',
     ]);
     expect(findByTitle(sidebarNavigationItems, 'Supplier Management')?.children?.map(item => item.title)).toEqual([
+      'Supplier Application Portal',
       'Business Partners',
       'Registrations',
       'Pending Partners',

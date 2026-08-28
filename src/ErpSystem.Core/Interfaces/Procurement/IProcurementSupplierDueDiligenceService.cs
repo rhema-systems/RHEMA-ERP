@@ -14,6 +14,7 @@ public interface IProcurementSupplierDueDiligenceService
     Task<ProcurementSupplierDueDiligenceDto> UpdateAsync(Guid id, UpdateProcurementSupplierDueDiligenceRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierDueDiligenceDto> SubmitAsync(Guid id, ProcurementSupplierDueDiligenceLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierDueDiligenceDto> ApproveAsync(Guid id, ProcurementSupplierDueDiligenceLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementSupplierDueDiligenceDto> SupersedeStaleAsync(Guid id, ProcurementSupplierDueDiligenceLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierDueDiligenceDto> RejectAsync(Guid id, ProcurementSupplierDueDiligenceLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<int> ProcessExpiryAsync(Guid? tenantId = null, DateTime? atUtc = null, CancellationToken cancellationToken = default);
 }

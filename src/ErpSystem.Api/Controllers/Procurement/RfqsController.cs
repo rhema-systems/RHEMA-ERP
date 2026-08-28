@@ -150,6 +150,30 @@ public class RfqsController : ControllerBase
         {
             return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
         }
+        catch (ProcurementTenderDocumentControlAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("TENDER_DOCUMENT_ACCESS_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementTenderDocumentControlConflictException ex)
+        {
+            return Conflict(ControlProblem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementTenderDocumentControlValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
+        catch (ProcurementControlEventAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("PROCUREMENT_CONTROL_EVENT_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementControlEventConflictException ex)
+        {
+            return Conflict(ControlProblem("PROCUREMENT_CONTROL_EVENT_CONFLICT", ex.Message, 409));
+        }
+        catch (ProcurementControlEventValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
         catch (ProcurementAwardReadinessNotFoundException ex)
         {
             return NotFound(AwardReadinessProblem(404, ex.Code, ex.Message));
@@ -177,7 +201,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error awarding RFQ {RfqId}", id);
-            return StatusCode(500, "An error occurred while awarding the RFQ");
+            throw;
         }
     }
 
@@ -214,14 +238,40 @@ public class RfqsController : ControllerBase
         {
             return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
         }
+        catch (ProcurementTenderDocumentControlAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("TENDER_DOCUMENT_ACCESS_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementTenderDocumentControlConflictException ex)
+        {
+            return Conflict(ControlProblem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementTenderDocumentControlValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
+        catch (ProcurementControlEventAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("PROCUREMENT_CONTROL_EVENT_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementControlEventConflictException ex)
+        {
+            return Conflict(ControlProblem("PROCUREMENT_CONTROL_EVENT_CONFLICT", ex.Message, 409));
+        }
+        catch (ProcurementControlEventValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogError(ex, "Error sending RFQ {RfqId}", id);
-            return StatusCode(500, "An error occurred while sending the RFQ");
+            // Unexpected failures must flow through the central exception middleware so the
+            // caller receives the standard safe ProblemDetails response and administrators
+            // receive a complete, tenant-scoped SystemExceptionLog entry.
+            throw;
         }
     }
 

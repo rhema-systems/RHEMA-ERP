@@ -11,8 +11,8 @@ public class DataRetentionPolicy : BaseEntity
 
     public bool Enabled { get; set; } = true;
 
-    [Range(1, 3650)]
-    public int AuditLogRetentionDays { get; set; } = 365;
+    [Range(2555, 36500)]
+    public int AuditLogRetentionDays { get; set; } = 2555;
 
     [Range(1, 3650)]
     public int SecurityLogRetentionDays { get; set; } = 365;
@@ -23,7 +23,7 @@ public class DataRetentionPolicy : BaseEntity
     [Range(1, 3650)]
     public int EhcAuditEventRetentionDays { get; set; } = 365;
 
-    [Range(2555, 3650)]
+    [Range(2555, 36500)]
     public int WorkflowAuditRetentionDays { get; set; } = 2555;
 }
 

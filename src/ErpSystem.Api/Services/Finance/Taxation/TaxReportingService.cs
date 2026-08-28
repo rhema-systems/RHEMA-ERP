@@ -591,6 +591,7 @@ public sealed class TaxReportingService : ITaxReportingService
             .AsNoTracking()
             .Include(p => p.WithholdingTax)
             .Include(p => p.WithholdingTaxAccount)
+            .Include(p => p.Allocations)
             .Where(p => p.TenantId == TenantId
                 && !p.IsDeleted
                 && p.PaymentDate.Date >= fromDate
@@ -643,7 +644,11 @@ public sealed class TaxReportingService : ITaxReportingService
                 TaxCode = payment.WithholdingTax?.Code,
                 TaxName = payment.WithholdingTax?.Name,
                 TaxRate = RoundRate(payment.WithholdingTaxRate != 0m ? payment.WithholdingTaxRate : payment.WithholdingTax?.Rate ?? 0m),
-                TaxableBase = RoundMoney(payment.TotalAmount + payment.WithholdingTaxAmount),
+                // WHT headers are functional-currency roll-ups. Prefer the policy snapshot and
+                // never add one to payment-currency cash for a cross-currency settlement.
+                TaxableBase = RoundMoney(payment.WithholdingTaxBaseAmount > 0m
+                    ? payment.WithholdingTaxBaseAmount
+                    : payment.Allocations.Where(a => !a.IsDeleted).Sum(a => a.SettlementFunctionalAmount)),
                 WithholdingAmount = RoundMoney(payment.WithholdingTaxAmount),
                 TaxAccountId = payment.WithholdingTaxAccountId,
                 TaxAccountNumber = payment.WithholdingTaxAccount?.AccountNumber,
@@ -682,6 +687,7 @@ public sealed class TaxReportingService : ITaxReportingService
             .Include(p => p.WithholdingTaxAccount)
             .Include(p => p.VatWithholdingTax)
             .Include(p => p.VatWithholdingAccount)
+            .Include(p => p.Allocations)
             .Where(p => p.TenantId == TenantId
                 && !p.IsDeleted
                 && p.PaymentDate.Date >= fromDate
@@ -743,7 +749,12 @@ public sealed class TaxReportingService : ITaxReportingService
                         TaxCode = payment.WithholdingTax?.Code,
                         TaxName = payment.WithholdingTax?.Name,
                         TaxRate = RoundRate(payment.WithholdingTax?.Rate ?? 0m),
-                        TaxableBase = RoundMoney(payment.TotalAmount + payment.WithholdingTaxAmount + payment.VatWithholdingAmount),
+                        // SettlementFunctionalAmount already combines cash and all deductions at
+                        // their frozen rates, so the statutory base remains meaningful when the
+                        // receipt and invoices use different currencies.
+                        TaxableBase = RoundMoney(payment.Allocations
+                            .Where(a => !a.IsDeleted)
+                            .Sum(a => a.SettlementFunctionalAmount)),
                         WithholdingAmount = RoundMoney(payment.WithholdingTaxAmount),
                         TaxAccountId = payment.WithholdingTaxAccountId,
                         TaxAccountNumber = payment.WithholdingTaxAccount?.AccountNumber,
@@ -775,7 +786,9 @@ public sealed class TaxReportingService : ITaxReportingService
                         TaxCode = payment.VatWithholdingTax?.Code,
                         TaxName = payment.VatWithholdingTax?.Name,
                         TaxRate = RoundRate(payment.VatWithholdingTax?.Rate ?? 0m),
-                        TaxableBase = RoundMoney(payment.TotalAmount + payment.WithholdingTaxAmount + payment.VatWithholdingAmount),
+                        TaxableBase = RoundMoney(payment.Allocations
+                            .Where(a => !a.IsDeleted)
+                            .Sum(a => a.SettlementFunctionalAmount)),
                         WithholdingAmount = RoundMoney(payment.VatWithholdingAmount),
                         TaxAccountId = payment.VatWithholdingAccountId,
                         TaxAccountNumber = payment.VatWithholdingAccount?.AccountNumber,

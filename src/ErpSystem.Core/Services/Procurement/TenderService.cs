@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -107,7 +108,9 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            result.SourcingMethod = await GetSourcingMethodAsync(tender);
+            return result;
         }
         catch (Exception ex)
         {
@@ -133,7 +136,9 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == tender.Id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            result.SourcingMethod = await GetSourcingMethodAsync(tender);
+            return result;
         }
         catch (Exception ex)
         {
@@ -526,11 +531,11 @@ public class TenderService : ITenderService
             if (tender.EstimatedValue != gate.EstimatedValue || !string.Equals(tender.Currency, gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
                 throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value and currency no longer match the locked sourcing case.");
 
-            if (gate.SelectedMethod is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource)
+            if (gate.SelectedMethod is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase)
             {
                 throw new ProcurementExceptionalSourcingConflictException(
                     "EXCEPTIONAL_CONTROL_REQUIRED",
-                    "Restricted Tendering and Single Source tenders must be prepared, approved, and released through the dedicated exceptional-sourcing control.");
+                    "Restricted Tendering, Single Source, and Petty Purchase cases must be prepared, approved, and released through the dedicated noncompetitive-sourcing control.");
             }
 
             var documentCorrelationId = Guid.NewGuid().ToString("N");
@@ -542,10 +547,11 @@ public class TenderService : ITenderService
                 dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
                 dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
                 documentCorrelationId);
-            if (gate.SelectedMethod is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering)
+            if (gate.SelectedMethod is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering or
+                ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection)
             {
                 if (!dto.OpeningDate.HasValue)
-                    throw new ProcurementTenderControlValidationException("TENDER_OPENING_REQUIRED", "NCT/ICT advertisement requires a public opening date.");
+                    throw new ProcurementTenderControlValidationException("TENDER_OPENING_REQUIRED", "Controlled tender publication requires an opening date.");
                 await _tenderControlService.PublishAsync(id, new PublishProcurementTenderRequest
                 {
                     AdvertisementReference = dto.AdvertisementReference ?? string.Empty,
@@ -791,7 +797,9 @@ public class TenderService : ITenderService
     }
 
     // Tender Documents
-    public async Task<TenderDocumentDto> UploadTenderDocumentAsync(Guid tenderId, UploadTenderDocumentDto dto, string filePath, string? fileType, long? fileSize)
+    public async Task<TenderDocumentDto> UploadTenderDocumentAsync(Guid tenderId, UploadTenderDocumentDto dto,
+        string logicalFileReference, string? fileType, long? fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId)
     {
         try
         {
@@ -806,12 +814,15 @@ public class TenderService : ITenderService
                 TenderId = tenderId,
                 DocumentName = dto.DocumentName,
                 DocumentType = dto.DocumentType,
-                FilePath = filePath,
+                FilePath = logicalFileReference,
                 FileType = fileType,
                 FileSize = fileSize,
                 IsPublic = dto.IsPublic,
                 UploadedDate = DateTime.UtcNow,
                 UploadedById = _currentUserProvider.UserId,
+                FileUploadRecordId = fileUploadRecordId,
+                CentralDocumentRecordId = centralDocumentRecordId,
+                CentralDocumentVersionId = centralDocumentVersionId,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -820,7 +831,7 @@ public class TenderService : ITenderService
             // If this is an acceptance declaration, update the tender entity
             if (dto.DocumentType == "AcceptanceDeclaration")
             {
-                tender.AcceptanceDeclarationDocumentPath = filePath;
+                tender.AcceptanceDeclarationDocumentPath = logicalFileReference;
                 tender.AcceptanceDeclarationDocumentName = dto.DocumentName;
                 tender.UpdatedAt = DateTime.UtcNow;
                 await _tenderRepository.UpdateAsync(tender);
@@ -891,7 +902,7 @@ public class TenderService : ITenderService
             if (await _exceptionalSourcingControlService.IsExceptionalAsync(tenderId))
                 throw new ProcurementExceptionalSourcingConflictException(
                     "EXCEPTIONAL_INVITATION_CONTROL_REQUIRED",
-                    "Restricted and single-source suppliers are invited only after the dedicated Board/MD/PPA approval completes.");
+                    "Controlled noncompetitive suppliers are invited only through the dedicated approved sourcing lifecycle.");
 
             foreach (var businessPartnerId in dto.BusinessPartnerIds)
             {
@@ -1493,6 +1504,16 @@ public class TenderService : ITenderService
         };
     }
 
+    private async Task<ProcurementMethodType?> GetSourcingMethodAsync(Tender tender)
+    {
+        if (!tender.SourcingCaseId.HasValue) return null;
+        return await _unitOfWork.Repository<ProcurementSourcingCase>()
+            .GetQueryable(item => item.Id == tender.SourcingCaseId.Value &&
+                                  item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted)
+            .Select(item => (ProcurementMethodType?)item.SelectedMethod)
+            .SingleOrDefaultAsync();
+    }
+
     private static TenderItemDto MapItemToDto(TenderItem item)
     {
         return new TenderItemDto
@@ -1548,7 +1569,10 @@ public class TenderService : ITenderService
             FileSize = document.FileSize,
             IsPublic = document.IsPublic,
             UploadedDate = document.UploadedDate,
-            UploadedByName = string.Empty // Would need to fetch from User entity
+            UploadedByName = string.Empty, // Would need to fetch from User entity
+            FileUploadRecordId = document.FileUploadRecordId,
+            CentralDocumentRecordId = document.CentralDocumentRecordId,
+            CentralDocumentVersionId = document.CentralDocumentVersionId
         };
     }
 
@@ -1858,14 +1882,14 @@ public class TenderService : ITenderService
     {
         if (string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase))
             return;
-        if (await _tenderControlService.IsNctOrIctAsync(tender.Id))
+        if (await _tenderControlService.IsControlledTenderMethodAsync(tender.Id))
             throw new ProcurementTenderControlConflictException(
                 "TENDER_STATUTORY_TERMS_LOCKED",
-                "NCT/ICT tender lots, items, documents, fees, and revisions are locked after document approval. Use the applicable statutory control.");
+                "NCT, ICT, QBS, and QCBS tender terms are locked after document approval. Use the controlled tender lifecycle.");
         if (await _exceptionalSourcingControlService.IsExceptionalAsync(tender.Id))
             throw new ProcurementExceptionalSourcingConflictException(
                 "EXCEPTIONAL_TENDER_TERMS_LOCKED",
-                "Restricted and single-source tender terms are locked after approval. Use the dedicated exceptional-sourcing control.");
+                "Restricted, single-source, and petty-purchase terms are locked after approval. Use the dedicated noncompetitive-sourcing control.");
     }
 
     private static TenderLotDto MapToLotDto(TenderLot lot)

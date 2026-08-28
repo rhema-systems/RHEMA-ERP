@@ -47,6 +47,19 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public DepreciationConvention DepreciationConvention { get; set; } = DepreciationConvention.FullMonth;
 
+        /// <summary>
+        /// Book-specific approved annual diminishing-balance rate. Keeping the assumption on the
+        /// book value prevents one accounting book from silently inheriting another book's policy.
+        /// </summary>
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DiminishingBalanceRatePercent { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal LifetimeProductionCapacity { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal AccumulatedProductionUnits { get; set; }
+
         public DateTime? PlacedInServiceDate { get; set; }
 
         public DateTime? OpeningAsOfDate { get; set; }
@@ -70,6 +83,11 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? CapitalizationJournalEntryId { get; set; }
 
         public Guid? CapitalizationPostingEventId { get; set; }
+
+        // Current-cycle reversal lineage is retained beside the original capitalization evidence.
+        public Guid? CapitalizationReversalJournalEntryId { get; set; }
+        public Guid? CapitalizationReversalPostingEventId { get; set; }
+        public DateTime? CapitalizationReversedAt { get; set; }
 
         [MaxLength(50)]
         public string? SourceDocumentType { get; set; }

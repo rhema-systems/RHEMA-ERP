@@ -12,9 +12,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
+import { FixedAssetCapitalizationReversalPanel } from '@/components/finance/FixedAssetCapitalizationReversalPanel';
 import type {
   DepreciationConvention,
   DepreciationMethod,
+  FixedAsset,
   FixedAssetCategory,
   FixedAssetStatus,
   UpdateFixedAssetDto,
@@ -27,6 +29,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const { toast } = useToast();
   const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
+  const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [formData, setFormData] = useState<UpdateFixedAssetDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -41,6 +44,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
         ]);
 
         setCategories(categoryData);
+        setAsset(asset);
         setFormData({
           assetCode: asset.assetCode,
           name: asset.name,
@@ -57,6 +61,8 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           depreciationConvention: asset.depreciationConvention,
           usefulLifeMonths: asset.usefulLifeMonths,
           residualValue: asset.residualValue,
+          diminishingBalanceRatePercent: asset.diminishingBalanceRatePercent,
+          lifetimeProductionCapacity: asset.lifetimeProductionCapacity,
           status: asset.status,
           disposalDate: toDateInput(asset.disposalDate),
           maintenanceAssetId: asset.maintenanceAssetId,
@@ -115,6 +121,21 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
     };
   };
 
+  const refreshAccountingState = async () => {
+    const refreshed = await fixedAssetsDataService.getAssetById(id);
+    setAsset(refreshed);
+    // A posted reversal changes only accounting-owned fields. Preserve any unsaved descriptive
+    // edits while refreshing the status and cost evidence shown elsewhere on this workspace.
+    setFormData(current => current ? {
+      ...current,
+      status: refreshed.status,
+      purchasePrice: refreshed.purchasePrice,
+      installationCost: refreshed.installationCost,
+      taxAmount: refreshed.taxAmount,
+      acquisitionCost: refreshed.acquisitionCost,
+    } : current);
+  };
+
   const handleActivate = async () => {
     try {
       await fixedAssetsDataService.activateAsset(id, formData?.placedInServiceDate || undefined);
@@ -154,6 +175,8 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       </div>
     );
   }
+
+  const accountingLocked = !!asset?.postingEventId && !asset.capitalizationReversalPostingEventId;
 
   return (
     <div className="space-y-6">
@@ -201,6 +224,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             <Select
               value={formData.fixedAssetCategoryId}
               onValueChange={(value) => setFormData({ ...formData, fixedAssetCategoryId: value })}
+              disabled={accountingLocked}
             >
               <SelectTrigger id="category">
                 <SelectValue placeholder="Select category" />
@@ -220,6 +244,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="purchaseDate"
               type="date"
               value={formData.purchaseDate}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })}
             />
           </div>
@@ -229,6 +254,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="serviceDate"
               type="date"
               value={formData.placedInServiceDate || ''}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, placedInServiceDate: e.target.value })}
             />
           </div>
@@ -253,6 +279,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             <Select
               value={formData.status}
               onValueChange={(value) => setFormData({ ...formData, status: value as FixedAssetStatus })}
+              disabled
             >
               <SelectTrigger id="status">
                 <SelectValue />
@@ -266,8 +293,15 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
                 <SelectItem value="WrittenOff">Written Off</SelectItem>
                 <SelectItem value="UnderConstruction">Under Construction</SelectItem>
                 <SelectItem value="OnHold">On Hold</SelectItem>
+                <SelectItem value="Acquired">Acquired</SelectItem>
+                <SelectItem value="Capitalized">Capitalized</SelectItem>
+                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
+                <SelectItem value="Rejected">Rejected</SelectItem>
               </SelectContent>
             </Select>
+            {/* Status is accounting-owned. Lifecycle commands and approval workflows change it;
+                allowing a normal edit form to do so would disguise the required audit trail. */}
+            <p className="text-xs text-muted-foreground">Status changes through lifecycle and approval actions.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="disposalDate">Disposal Date</Label>
@@ -284,6 +318,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Financial Details</CardTitle>
+          {accountingLocked && <CardDescription>Posted accounting values are locked. Use the controlled capitalization correction below.</CardDescription>}
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -292,6 +327,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="purchasePrice"
               type="number"
               value={formData.purchasePrice}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, purchasePrice: Number(e.target.value) })}
             />
           </div>
@@ -301,6 +337,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="installationCost"
               type="number"
               value={formData.installationCost}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, installationCost: Number(e.target.value) })}
             />
           </div>
@@ -310,6 +347,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="taxAmount"
               type="number"
               value={formData.taxAmount}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, taxAmount: Number(e.target.value) })}
             />
           </div>
@@ -319,6 +357,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="acquisitionCost"
               type="number"
               value={formData.acquisitionCost ?? ''}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, acquisitionCost: e.target.value === '' ? undefined : Number(e.target.value) })}
             />
           </div>
@@ -335,6 +374,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             <Select
               value={formData.depreciationMethod}
               onValueChange={(value) => setFormData({ ...formData, depreciationMethod: value as DepreciationMethod })}
+              disabled={accountingLocked}
             >
               <SelectTrigger id="method">
                 <SelectValue />
@@ -343,17 +383,52 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
                 <SelectItem value="StraightLine">Straight Line</SelectItem>
                 <SelectItem value="DecliningBalance">Declining Balance</SelectItem>
                 <SelectItem value="DoubleDecliningBalance">Double Declining Balance</SelectItem>
-                <SelectItem value="SumOfYearsDigits">Sum of Years Digits</SelectItem>
                 <SelectItem value="UnitsOfProduction">Units of Production</SelectItem>
-                <SelectItem value="None">None</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          {(formData.depreciationMethod === 'DecliningBalance' ||
+            formData.depreciationMethod === 'DoubleDecliningBalance') && (
+            <div className="space-y-2">
+              <Label htmlFor="diminishingRate">Annual Diminishing-Balance Rate (%)</Label>
+              <Input
+                id="diminishingRate"
+                type="number"
+                min={0}
+                max={100}
+                step="0.0001"
+                value={formData.diminishingBalanceRatePercent}
+                disabled={accountingLocked}
+                onChange={(e) => setFormData({ ...formData, diminishingBalanceRatePercent: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Double-declining may use 0 for the useful-life-derived accelerated rate.
+              </p>
+            </div>
+          )}
+          {formData.depreciationMethod === 'UnitsOfProduction' && (
+            <div className="space-y-2">
+              <Label htmlFor="productionCapacity">Approved Lifetime Production Capacity</Label>
+              <Input
+                id="productionCapacity"
+                type="number"
+                min={0}
+                step="0.0001"
+                value={formData.lifetimeProductionCapacity}
+                disabled={accountingLocked}
+                onChange={(e) => setFormData({ ...formData, lifetimeProductionCapacity: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Capitalized assumptions are locked and must not be destructively edited.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="convention">Depreciation Convention</Label>
             <Select
               value={formData.depreciationConvention}
               onValueChange={(value) => setFormData({ ...formData, depreciationConvention: value as DepreciationConvention })}
+              disabled={accountingLocked}
             >
               <SelectTrigger id="convention">
                 <SelectValue />
@@ -372,6 +447,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="usefulLife"
               type="number"
               value={formData.usefulLifeMonths}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, usefulLifeMonths: Number(e.target.value) })}
             />
           </div>
@@ -381,11 +457,19 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               id="residualValue"
               type="number"
               value={formData.residualValue}
+              disabled={accountingLocked}
               onChange={(e) => setFormData({ ...formData, residualValue: Number(e.target.value) })}
             />
           </div>
         </CardContent>
       </Card>
+
+      {asset && (
+        <FixedAssetCapitalizationReversalPanel
+          asset={asset}
+          onChanged={refreshAccountingState}
+        />
+      )}
 
       {/* Lifecycle Actions */}
       <Card>

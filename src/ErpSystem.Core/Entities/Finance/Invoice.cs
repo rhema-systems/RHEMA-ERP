@@ -78,6 +78,14 @@ namespace ErpSystem.Core.Entities.Finance
         public decimal ExchangeRate { get; set; } = 1.0m;
 
         /// <summary>
+        /// Approved tenant exchange-rate record frozen for a governed foreign-currency opening
+        /// invoice. Ordinary legacy invoices may remain null until their FX entry contract is
+        /// migrated independently.
+        /// </summary>
+        public Guid? ExchangeRateId { get; set; }
+        public virtual ExchangeRate? ExchangeRateRecord { get; set; }
+
+        /// <summary>
         /// Total amount converted to the Tenant's Base Currency.
         /// Used for reporting and credit limit checks.
         /// Formula: TotalAmount * ExchangeRate (if using direct quote)

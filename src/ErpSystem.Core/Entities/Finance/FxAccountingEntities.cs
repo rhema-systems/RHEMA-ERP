@@ -37,6 +37,26 @@ public class FxRealizedSettlement : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal SettledForeignAmount { get; set; }
 
+    /// <summary>
+    /// Cash leg of the settlement. TransactionCurrency above remains the invoice exposure
+    /// currency, while these fields explain functional- or third-currency cash used to clear it.
+    /// They are intentionally duplicated from the allocation so an FX event is self-contained
+    /// audit evidence and remains understandable after operational projections are rebuilt.
+    /// </summary>
+    [Required]
+    [MaxLength(3)]
+    public string PaymentCurrencyCode { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentCurrencyAmount { get; set; }
+
+    public Guid? PaymentExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal PaymentExchangeRate { get; set; }
+
+    public bool IsCrossCurrency { get; set; }
+
     [Column(TypeName = "decimal(18,6)")]
     public decimal HistoricalExchangeRate { get; set; }
 

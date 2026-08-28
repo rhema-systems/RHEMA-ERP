@@ -44,6 +44,7 @@ import { format } from 'date-fns';
 import Link from 'next/link';
 import { ReceiptInspectionControl } from '@/components/procurement/ReceiptInspectionControl';
 import { ReceiptDocumentControl } from '@/components/procurement/ReceiptDocumentControl';
+import { ReceiptSourceEvidenceControl } from '@/components/procurement/ReceiptSourceEvidenceControl';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 
 const GRNStatuses = [
@@ -860,6 +861,7 @@ export default function PurchaseReceiptDetailPage() {
           </TabsContent>
         )}
         <TabsContent value="documents" className="space-y-6">
+          <ReceiptSourceEvidenceControl receiptId={id} />
           <ReceiptDocumentControl receiptId={id} />
         </TabsContent>
       </Tabs>

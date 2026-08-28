@@ -50,6 +50,7 @@ import {
   PurchaseRequisitionLinkageOptionsDto,
   SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
+import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
 import {
   EMPTY_REQUISITION_LINKAGE,
@@ -90,6 +91,7 @@ export default function EditPurchaseRequisitionPage() {
   const [requiredDate, setRequiredDate] = useState('');
   const [priority, setPriority] = useState('Normal');
   const [department, setDepartment] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PRItemFormData[]>([]);
@@ -100,6 +102,7 @@ export default function EditPurchaseRequisitionPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
+  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
   // Item dialog
@@ -182,10 +185,11 @@ export default function EditPurchaseRequisitionPage() {
     const loadData = async () => {
       try {
         setLoadingData(true);
-        const [itemsData, suppliersData, linkageData] = await Promise.all([
+        const [itemsData, suppliersData, linkageData, departmentsData] = await Promise.all([
           inventoryManagementService.getInventoryItems({ isActive: true }),
           businessPartnerService.getActivePartners(),
-          purchasingService.getPurchaseRequisitionLinkageOptions()
+          purchasingService.getPurchaseRequisitionLinkageOptions(),
+          commonService.getDepartments(),
         ]);
         
         setInventoryItems(itemsData || []);
@@ -193,6 +197,7 @@ export default function EditPurchaseRequisitionPage() {
           bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
         ));
         setLinkageOptions(linkageData);
+        setDepartments((departmentsData || []).filter((value) => value.isActive));
       } catch (error) {
         console.error('Error loading reference data:', error);
         toast.error('Failed to load reference data');
@@ -203,6 +208,14 @@ export default function EditPurchaseRequisitionPage() {
 
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (departmentId || !department || departments.length === 0) return;
+    const match = departments.find((value) =>
+      value.name.localeCompare(department, undefined, { sensitivity: 'accent' }) === 0 ||
+      `${value.code} - ${value.name}`.localeCompare(department, undefined, { sensitivity: 'accent' }) === 0);
+    if (match) setDepartmentId(match.id);
+  }, [department, departmentId, departments]);
 
   // Calculate totals
   const calculateLineTotal = (quantity: number, unitPrice: number) => {
@@ -244,7 +257,7 @@ export default function EditPurchaseRequisitionPage() {
           itemName: item.name,
           itemDescription: item.description || item.name,
           unitOfMeasure: finalUOM,
-          estimatedUnitPrice: item.lastPurchaseCost || item.standardCost || item.currentCost || 0
+          estimatedUnitPrice: item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0
         }));
         
       } catch (error) {
@@ -259,7 +272,7 @@ export default function EditPurchaseRequisitionPage() {
           itemName: item.name,
           itemDescription: item.description || item.name,
           unitOfMeasure: finalUOM,
-          estimatedUnitPrice: item.lastPurchaseCost || item.standardCost || item.currentCost || 0
+          estimatedUnitPrice: item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0
         }));
       }
     }
@@ -343,6 +356,10 @@ export default function EditPurchaseRequisitionPage() {
       toast.error('Please add at least one item');
       return;
     }
+    if (!departmentId) {
+      toast.error('Select an active HR department before saving');
+      return;
+    }
     const linkageError = validateExceptionLinkage(linkage);
     if (linkageError) {
       toast.error(linkageError);
@@ -366,7 +383,7 @@ export default function EditPurchaseRequisitionPage() {
         rowVersion,
         requiredDate: requiredDate || undefined,
         priority,
-        department: department || undefined,
+        departmentId,
         costCenter: linkage.costCenter || undefined,
         justification: justification || undefined,
         notes: notes || undefined,
@@ -504,13 +521,19 @@ export default function EditPurchaseRequisitionPage() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="department">Department</Label>
-              <Input
-                id="department"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                placeholder="e.g., IT, HR, Operations"
-              />
+              <Label htmlFor="departmentId">Department *</Label>
+              <Select value={departmentId} onValueChange={setDepartmentId} disabled={loadingData}>
+                <SelectTrigger id="departmentId">
+                  <SelectValue placeholder={loadingData ? 'Loading departments...' : 'Select HR department'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {departments.map((value) => (
+                    <SelectItem key={value.id} value={value.id}>
+                      {value.code ? `${value.code} - ${value.name}` : value.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             
           </div>
@@ -742,7 +765,7 @@ export default function EditPurchaseRequisitionPage() {
                               <div className="text-sm text-muted-foreground">{item.description}</div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Stock: {item.currentStock} {item.unitOfMeasure} • 
-                                Last Cost: ${item.lastPurchaseCost?.toFixed(2) || item.standardCost?.toFixed(2) || '0.00'}
+                                Managed cost: ${(item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0).toFixed(2)}
                               </div>
                             </div>
                             {selectedInventoryItem?.id === item.id && (
@@ -831,29 +854,8 @@ export default function EditPurchaseRequisitionPage() {
                 )}
               </div>
               
-              <div className="space-y-2">
-                <Label htmlFor="estimatedUnitPrice" className="flex items-center gap-2">
-                  <DollarSign className="h-4 w-4" />
-                  Estimated Unit Price *
-                </Label>
-                <Input
-                  id="estimatedUnitPrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={itemFormData.estimatedUnitPrice}
-                  onChange={(e) => setItemFormData(prev => ({ ...prev, estimatedUnitPrice: parseFloat(e.target.value) || 0 }))}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Line Total</Label>
-                <Input
-                  type="text"
-                  value={`$${calculateLineTotal(itemFormData.quantity, itemFormData.estimatedUnitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  disabled
-                  className="bg-muted font-medium"
-                />
+              <div className="md:col-span-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                The requester does not enter pricing. For an inventory item, the system uses its managed cost; Procurement completes commercial pricing during sourcing.
               </div>
               
               <div className="space-y-2">

@@ -30,7 +30,7 @@ public sealed class ProcurementSupplierApplicantJwtService :
             throw new InvalidOperationException("JWT SecretKey not found"));
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, session.SystemActorUserId.ToString()),
+            new(ClaimTypes.NameIdentifier, session.ApplicantActorId.ToString()),
             new(ClaimTypes.Name, $"supplier-applicant:{session.RegistrationId:N}"),
             new("tenant_id", session.TenantId.ToString()),
             new("auth_provider", "ApplicantToken"),

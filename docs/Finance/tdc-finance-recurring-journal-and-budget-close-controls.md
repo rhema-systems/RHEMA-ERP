@@ -17,6 +17,56 @@ Both providers append their result and supporting record references to the immut
 snapshot on every evaluation. A cycle already created from an older approved template retains its
 older provider set; new checks start only through a newly approved baseline or custom version.
 
+## FR-GL-006 production recurring-journal workflow (2026-08-08)
+
+The original schema and close check are now complemented by a complete Finance-owned operating
+workflow. The browser demonstration and local-storage records have been removed. Finance users can
+create balanced functional-currency standing instructions, submit them for independent approval,
+pause/resume approved schedules, generate due occurrences, independently approve each accounting
+event, and post approved occurrences through `IFinancePostingEngine`.
+
+The design deliberately separates three authorities:
+
+1. **Template maker** defines the accounting intent, fixed balanced lines, effective dates,
+   business-day convention, optional reversal rule, and reference pattern.
+2. **Template checker** independently activates the standing instruction. The maker cannot approve
+   it, and all reasons form part of the Finance audit trail.
+3. **Occurrence checker and poster** review the immutable generated snapshot before it reaches the
+   GL. The scheduler only creates `PendingApproval` work; it cannot post money. The occurrence
+   approver cannot also post that occurrence.
+
+Every occurrence stores the versioned template snapshot, scheduled/effective dates, business-day
+adjustment explanation, review evidence, posting evidence, failure diagnostics, and any reversal
+due date. Posting uses an occurrence-specific idempotency key, preventing an API retry or two
+application nodes from duplicating the journal.
+
+The first production release intentionally permits only the tenant functional currency. A foreign-
+currency standing instruction requires rate-source and snapshot policy that is not safe to infer;
+it is rejected explicitly instead of generating an untraceable FX journal. Auto-reversal currently
+records a controlled reversal due date for follow-up and never silently posts a reversal.
+
+Operational routes are under `/api/finance/recurring-journals` and reuse existing Finance journal
+permissions for viewing, creation, editing, submission, approval, and posting. The recurring-
+journal background service runs every 15 minutes and can also be invoked through the workspace's
+controlled “Process due schedules” action for UAT/catch-up.
+
+Schema support for the maker-checker and posting evidence is introduced by
+`20260808131857_AddRecurringJournalProductionLifecycle`. The migration is deliberately limited to
+the recurring template and occurrence audit fields; it does not alter unrelated Finance precision
+or seed monetary standing instructions. TDC Finance should create its own approved recurring
+templates so that account choices, amounts, ownership, and effective dates are conscious business
+decisions rather than development defaults.
+
+### Recurring-journal verification (2026-08-08)
+
+- Five focused recurrence/generation tests pass, including idempotent repeated processing and the
+  guarantee that generation creates one `PendingApproval` occurrence without a journal entry.
+- Both Finance frontend/backend route-contract tests pass, and targeted ESLint is clean for the
+  recurring-journal workspace and data service.
+- Core/Data/API compile with zero errors; reported warnings are existing cross-module warnings.
+- Local RHEMAERP has migration `20260808131857_AddRecurringJournalProductionLifecycle` recorded,
+  with all five template evidence columns and seven occurrence evidence columns present.
+
 ## Recurring-journal generation control
 
 `RECURRING_JOURNAL_EXCEPTIONS` is mandatory and cannot be downgraded in an approved template.
@@ -58,7 +108,7 @@ The data migration upgrades only active system baselines. It supersedes the prio
 and creates a new immutable approved version for month-, quarter-, and year-end. A custom active
 template is never displaced because it represents an explicit tenant governance decision.
 
-## Verification
+## Close-control verification (2026-08-03)
 
 - Fifteen focused period-close and baseline-seeder tests pass. They cover a failed recurring-journal submission, approved inactive
   budget warning, baseline task/provider presence, immutable evidence counts, and existing close

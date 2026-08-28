@@ -36,7 +36,7 @@ Rejected or deferred:
 
 - `ALL_ACTIVE_BOOKS`.
 - Unbalanced or single-sided imports.
-- Foreign-currency GL opening lines. The current model stores functional debit/credit amounts only and therefore rejects a non-functional transaction currency before approval or posting rather than inventing an original foreign amount or FX snapshot.
+- Free-form foreign-currency GL opening lines. A later governed bank-opening path supports foreign bank accounts only when it can freeze an approved, effective exchange-rate record and preserve both native and functional amounts; generic lines still cannot invent foreign amounts or FX evidence.
 - Silent suspense/equity plug creation.
 - Direct mutation of `Account.Balance`.
 - Direct mutation of `BankAccount.CurrentBalance`.
@@ -139,7 +139,7 @@ Focused tests are in `tests/ErpSystem.Api.Tests/Services/Finance/ControlledOpeni
 - `FIN-LIM-0007` is resolved for tenant-safe back-reference diagnostic and repair tooling.
 - `FIN-LIM-0008` is resolved for bank snapshot diagnostic and rebuild tooling.
 - `FIN-LIM-0017` is narrowed by the opening-balance and migration tooling foundation but final production migration execution and accountant sign-off evidence remain open.
-- `FIN-LIM-0048` tracks AP/AR/fixed-asset subledger opening-document migration where production cutover needs subledger opening balances rather than GL-only opening TB lines.
+- `FIN-LIM-0048` implementation is resolved by canonical AP/AR opening invoices, controlled fixed-asset register-to-GL posting, and specialised supplier/customer advance and WHT/certificate opening workflows documented in `docs/subledger-opening-balance-cutover-foundation.md`. TDC representative-data rehearsal and accountant sign-off remain governed by `FIN-LIM-0017`.
 
 ## PR Definition Of Done
 

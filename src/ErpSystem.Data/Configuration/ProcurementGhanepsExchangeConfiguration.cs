@@ -37,8 +37,9 @@ public sealed class ProcurementGhanepsExchangeEventConfiguration :
             item.EventFamily,
             item.Direction,
             item.MappingKey,
-            item.EventReference
-        }).IsUnique();
+            item.EventReference,
+            item.MappingIntegrityHash
+        }).IsUnique().HasDatabaseName("UX_ProcGhanepsEvent_Source_MappingHash");
         builder.HasIndex(item => new
         {
             item.TenantId,

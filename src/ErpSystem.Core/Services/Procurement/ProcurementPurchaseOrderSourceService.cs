@@ -178,6 +178,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         purchaseOrder.SourcingReleaseId = source.SourcingReleaseId;
         purchaseOrder.SourcingCaseId = source.SourcingCaseId;
         purchaseOrder.AwardReadinessDecisionId = source.AwardReadinessDecisionId;
+        purchaseOrder.ProcurementCategory = source.ProcurementCategory;
         purchaseOrder.SourceSnapshotJson = source.SourceSnapshotJson;
         purchaseOrder.SourceIntegrityHash = source.SourceIntegrityHash;
         purchaseOrder.SourceValidatedAtUtc = source.ValidatedAtUtc;
@@ -382,6 +383,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
             throw Invalid("PO_SOURCE_LINEAGE_CHANGED",
                 "The persisted purchase-order source snapshot no longer matches the authoritative approved source.");
         }
+        if (current.ProcurementCategory != purchaseOrder.ProcurementCategory)
+        {
+            throw Invalid("PO_SOURCE_CATEGORY_CHANGED",
+                "The persisted purchase-order category no longer matches the approved requisition.");
+        }
 
         if (current.SourceType !=
             ProcurementPurchaseOrderSourceType.FrameworkCallOff)
@@ -548,6 +554,12 @@ public sealed class ProcurementPurchaseOrderSourceService :
             }
 
             EnsureOrderMatchesSource(current, lines, totalAmount, currencyCode);
+            await EnsureBudgetCommitmentAsync(
+                current,
+                totalAmount,
+                currencyCode,
+                purchaseOrderId,
+                cancellationToken);
             if (current.SourceType ==
                 ProcurementPurchaseOrderSourceType.Contract)
             {
@@ -1490,6 +1502,76 @@ public sealed class ProcurementPurchaseOrderSourceService :
         return (requisition, sourcingCase);
     }
 
+    private async Task EnsureBudgetCommitmentAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        decimal totalAmount,
+        string? currencyCode,
+        Guid purchaseOrderId,
+        CancellationToken cancellationToken)
+    {
+        var release = await SourcingReleases.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == source.SourcingReleaseId &&
+                item.PurchaseRequisitionId == source.PurchaseRequisitionId &&
+                !item.IsDeleted)
+            .Include(item => item.BudgetCommitment)
+                .ThenInclude(item => item.ProcurementBudget)
+            .Include(item => item.PurchaseRequisition)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_BUDGET_SOURCING_RELEASE_NOT_FOUND",
+                "The approved sourcing release and budget commitment were not found in the current tenant.");
+        var commitment = release.BudgetCommitment;
+        var budget = commitment?.ProcurementBudget;
+        if (commitment is null || budget is null)
+            throw Invalid("PO_BUDGET_COMMITMENT_NOT_FOUND",
+                "The approved sourcing release has no authoritative budget commitment.");
+
+        var priorExposure = await PurchaseOrders.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceRequisitionId == source.PurchaseRequisitionId &&
+                item.Id != purchaseOrderId &&
+                !item.IsDeleted &&
+                item.Status != "Cancelled" &&
+                item.Status != "Rejected")
+            .Select(item => (decimal?)item.TotalAmount)
+            .SumAsync(cancellationToken) ?? 0m;
+        var requiredExposure = decimal.Round(
+            priorExposure + totalAmount, 2, MidpointRounding.AwayFromZero);
+        var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
+            new ProcurementCommitmentLifecycleSnapshot(
+                _currentUser.TenantId,
+                release.PurchaseRequisition.Id,
+                release.PurchaseRequisition.TenantId,
+                release.PurchaseRequisition.Currency,
+                release.PurchaseRequisition.BudgetId,
+                release.TenantId,
+                release.PurchaseRequisitionId,
+                release.BudgetCommitmentId,
+                release.BudgetCommitmentReference,
+                commitment.Id,
+                commitment.TenantId,
+                commitment.PurchaseRequisitionId,
+                commitment.ProcurementBudgetId,
+                commitment.ReservationReference,
+                commitment.Status,
+                commitment.ReservedAmount,
+                commitment.Currency,
+                budget.Id,
+                budget.TenantId,
+                budget.Status,
+                budget.Currency,
+                budget.CommittedAmount,
+                budget.ApprovedById,
+                budget.ApprovedDate,
+                budget.EffectiveDate,
+                budget.ExpiryDate,
+                requiredExposure,
+                currencyCode ?? source.CurrencyCode,
+                DateTime.UtcNow));
+        if (!result.IsValid)
+            throw Invalid(result.Code, result.Message);
+    }
+
     private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
         ResolveSourceLinkAsync(
             ProcurementAwardReadinessSourceType sourceType,
@@ -1642,6 +1724,9 @@ public sealed class ProcurementPurchaseOrderSourceService :
             SourcingReleaseId = sourcingCase.SourcingReleaseId,
             AwardReadinessDecisionId = readiness.Id,
             BusinessPartnerId = businessPartnerId,
+            ProcurementCategory = requisition.ProcurementCategory ??
+                throw Invalid("PO_SOURCE_CATEGORY_REQUIRED",
+                    "The approved requisition has no governed procurement category."),
             CurrencyCode = string.IsNullOrWhiteSpace(currencyCode)
                 ? "USD"
                 : currencyCode.Trim().ToUpperInvariant(),

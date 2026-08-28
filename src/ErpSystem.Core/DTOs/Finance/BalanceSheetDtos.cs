@@ -78,6 +78,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IncludeAccountDetails { get; set; } = false;
         public List<Guid> AccountIds { get; set; } = new();
         public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+        public List<FinanceDimensionFilterDto> DimensionFilters { get; set; } = new();
         public Guid? LayoutId { get; set; }
 
         /// <summary>

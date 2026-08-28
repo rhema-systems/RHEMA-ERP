@@ -269,6 +269,26 @@ public class ContractService : IContractService
                 throw new InvalidOperationException($"Cannot edit contract in {contract.Status} status. Use amendments for changes.");
             }
 
+            if (!string.IsNullOrWhiteSpace(dto.ContractType) &&
+                !string.Equals(dto.ContractType, contract.ContractType, StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(contract.ContractType, "Works", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(dto.ContractType, "Works", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    "A Works contract cannot be reclassified. Create or amend it through the governed Works-contract process.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(contract.CommercialTermsPolicyHash) &&
+                ((dto.ContractValue.HasValue && dto.ContractValue.Value != contract.ContractValue) ||
+                 (!string.IsNullOrWhiteSpace(dto.PaymentTerms) &&
+                  !string.Equals(dto.PaymentTerms, contract.PaymentTerms, StringComparison.Ordinal)) ||
+                 (dto.RetentionPercentage.HasValue && dto.RetentionPercentage.Value != contract.RetentionPercentage) ||
+                 (dto.WarrantyPeriodDays.HasValue && dto.WarrantyPeriodDays.Value != contract.WarrantyPeriodDays)))
+            {
+                throw new InvalidOperationException(
+                    "Use the Quantity Survey commercial-terms workspace to change governed Works-contract values.");
+            }
+
             if (dto.ContractValue.HasValue)
             {
                 var award = await _awardRepository.GetByIdAsync(contract.TenderAwardId)

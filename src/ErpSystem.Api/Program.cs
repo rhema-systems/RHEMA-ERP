@@ -2,6 +2,7 @@ using System.Text;
 using ErpSystem.Api.Configuration;
 using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
+using ErpSystem.Api.HealthChecks;
 using ErpSystem.Api.Middleware;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
@@ -205,6 +206,31 @@ if (args.Length > 0 && args[0] == "seed-workflows")
     return;
 }
 
+// Seed only the prerequisites needed to exercise supplier onboarding end to end.
+// This never creates an applicant, token, payment, registration, or supplier record.
+if (args.Length > 0 && args[0] == "seed-supplier-onboarding-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seeder = scope.ServiceProvider.GetRequiredService<ProcurementSupplierOnboardingTestSeeder>();
+        await seeder.SeedAsync();
+    }
+
+    Console.WriteLine("Supplier-onboarding E2E prerequisites seeded successfully.");
+    return;
+}
+
 // Check for development database rebuild command.
 // This bypasses the current migration chain and recreates the schema directly from the EF model.
 if (args.Length > 0 && args[0] == "rebuild-db")
@@ -266,7 +292,7 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -367,6 +393,11 @@ builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
 builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptDocumentService>(provider =>
     provider.GetRequiredService<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>());
+builder.Services.AddScoped<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceEvidenceService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceEvidenceReadinessService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();
@@ -397,11 +428,7 @@ if (app.Configuration.GetValue("HttpRequestResponseLogging:Enabled", false))
 // Add security headers
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage();
-}
-else
+if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
@@ -518,6 +545,7 @@ app.UseMiddleware<ProcurementGhanepsProblemDetailsMiddleware>();
 
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
+app.UseMiddleware<HrIdentityAccessMiddleware>();
 
 // Rate limiting depends on authenticated user claims for ERP/external users.
 // Auth endpoints remain anonymous here, so login/password-reset throttling still applies by IP.
@@ -528,13 +556,27 @@ app.UseMiddleware<TemporaryPasswordChangeMiddleware>();
 app.UseMiddleware<ExternalUserAccessMiddleware>();
 app.UseAuthorization();
 
-// Health check endpoints
-app.MapHealthChecks("/health");
-app.MapHealthChecks("/health/ready");
-app.MapHealthChecks("/health/live");
+// Keep aggregate diagnostics available to operators, but separate readiness from liveness.
+// A SQL/Redis outage should remove this instance from traffic via readiness without causing an
+// orchestrator to restart a healthy API process repeatedly via liveness.
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
 app.MapHealthChecks("/health/shutdown", new HealthCheckOptions
 {
-    Predicate = check => check.Tags.Contains("shutdown")
+    Predicate = check => check.Tags.Contains("shutdown"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
 });
 
 // API Controllers

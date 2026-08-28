@@ -51,6 +51,7 @@ describe('AllSettingsPage', () => {
       'Units of Measure',
       'UoM Schedules',
       'Warehouses & Locations',
+      'Issue Accounting & Asset Custody',
     ]);
     expect(modules?.cards.find(card => card.title === 'Inventory')?.links.map(link => link.title))
       .not.toContain('Inventory Items');
@@ -121,6 +122,7 @@ describe('AllSettingsPage', () => {
       'Units of Measure',
       'UoM Schedules',
       'Warehouses & Locations',
+      'Issue Accounting & Asset Custody',
     ]);
     expect(sections.flatMap(section => section.cards).flatMap(card => card.links).map(link => link.title))
       .not.toContain('Policy Profiles');
@@ -131,7 +133,7 @@ describe('AllSettingsPage', () => {
     mocks.permissions = ['procurement.access.manage'];
     render(<AllSettingsPage />);
 
-    expect(screen.getByRole('link', { name: 'Access & Committees' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Scopes & Committees' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Policy Profiles' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Inventory Items' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Notification Center' })).not.toBeInTheDocument();
@@ -147,7 +149,7 @@ describe('AllSettingsPage', () => {
       target: { value: 'committees' },
     });
 
-    expect(screen.getByRole('link', { name: 'Access & Committees' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Scopes & Committees' })).toHaveAttribute(
       'href',
       '/administration/procurement/access-controls',
     );

@@ -7,6 +7,8 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ErpSystem.Api.Services.Finance.GL;
 
@@ -17,17 +19,23 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<FinancePostingEngine> _logger;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IFinanceBudgetControlService? _budgetControl;
+    private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
 
     public FinancePostingEngine(
         ApplicationDbContext context,
         ICurrentUserService currentUserService,
         ILogger<FinancePostingEngine> logger,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IFinanceBudgetControlService? budgetControl = null,
+        IFinanceBudgetCommitmentService? budgetCommitments = null)
     {
         _context = context;
         _currentUserService = currentUserService;
         _logger = logger;
         _financeAuditService = financeAuditService;
+        _budgetControl = budgetControl;
+        _budgetCommitments = budgetCommitments;
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
@@ -105,12 +113,42 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
 
         var now = DateTime.UtcNow;
         var postedByUserId = GetCurrentUserGuid();
+        await EnsureDimensionSetsAsync(tenantId, validation.Lines, now, postedByUserId, cancellationToken);
         var journalEntry = validation.ExistingJournalEntryId.HasValue
             ? await ApplyExistingJournalPostingAsync(tenantId, validation, now, postedByUserId, cancellationToken)
             : await CreatePostedJournalEntryAsync(tenantId, validation, now, postedByUserId, cancellationToken);
 
         var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
         await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
+
+        if (request.BudgetReservationIds.Count > 0)
+        {
+            if (string.IsNullOrWhiteSpace(request.BudgetReservationSourceDocumentType))
+            {
+                if (_budgetControl == null)
+                    throw new InvalidOperationException("Finance budget control is not configured for this budget-controlled posting.");
+                await _budgetControl.ConsumeReservationsAsync(
+                    tenantId,
+                    validation.SourceDocumentId,
+                    request.BudgetReservationIds,
+                    journalEntry.Id,
+                    postingEvent.Id,
+                    cancellationToken);
+            }
+            else
+            {
+                if (_budgetCommitments == null)
+                    throw new InvalidOperationException("Finance budget commitments are not configured for this producer posting.");
+                await _budgetCommitments.ConsumeForPostingAsync(
+                    tenantId,
+                    request.BudgetReservationSourceDocumentType,
+                    validation.SourceDocumentId,
+                    request.BudgetReservationIds,
+                    journalEntry.Id,
+                    postingEvent.Id,
+                    cancellationToken);
+            }
+        }
 
         if (!validation.ExistingJournalEntryId.HasValue)
         {
@@ -186,6 +224,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             .Select(t => new FinancePostingLineDto
             {
                 AccountId = t.AccountId,
+                SourceDocumentLineId = t.SourceDocumentLineId,
                 Description = $"Reversal: {t.Description}",
                 DebitAmount = t.CreditAmount,
                 CreditAmount = t.DebitAmount,
@@ -199,6 +238,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 TransactionCreditAmount = t.TransactionDebitAmount,
                 SourceReferenceNumber = t.SourceReferenceNumber,
                 LineNumber = t.LineNumber,
+                FinanceDimensionSetId = t.FinanceDimensionSetId,
                 SegmentString = t.SegmentString,
                 Notes = reason,
                 TransactionTag = "Reversal"
@@ -324,6 +364,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             transaction.TransactionDate = validation.PostingDate;
             transaction.SourceModule = validation.SourceModule;
             transaction.SourceDocumentId = validation.SourceDocumentId;
+            transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
             transaction.SourceDocumentType = validation.SourceDocumentType;
             transaction.BookClassification = validation.BookClassification;
             transaction.FunctionalCurrencyCode = validation.FunctionalCurrencyCode;
@@ -335,6 +376,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             transaction.ExchangeRate = requestLine.ExchangeRate;
             transaction.ExchangeRateSource = requestLine.ExchangeRateSource;
             transaction.ExchangeRateDate = requestLine.ExchangeRateDate;
+            transaction.FinanceDimensionSetId = requestLine.DimensionSet?.Id;
             transaction.FiscalPeriodId = validation.FiscalPeriod.Id;
             transaction.PostingStatus = PostedStatus;
             transaction.PostedDate = now;
@@ -397,6 +439,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 AccountId = line.AccountId,
+                SourceDocumentLineId = line.SourceDocumentLineId,
                 JournalEntryId = journalEntry.Id,
                 TransactionDate = validation.PostingDate,
                 Description = line.Description ?? validation.Description,
@@ -411,6 +454,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 ExchangeRate = line.ExchangeRate,
                 ExchangeRateSource = line.ExchangeRateSource,
                 ExchangeRateDate = line.ExchangeRateDate,
+                FinanceDimensionSetId = line.DimensionSet?.Id,
                 SourceModule = validation.SourceModule,
                 SourceDocumentId = validation.SourceDocumentId,
                 SourceDocumentType = validation.SourceDocumentType,
@@ -658,7 +702,18 @@ WHERE [Id] = {delta.AccountId}
 
     private void SyncTrackedAccountBalanceSnapshot(Guid tenantId, AccountBalanceDelta delta)
     {
-        foreach (var entry in _context.ChangeTracker.Entries<Account>())
+        // Materialize the tracker query before changing property state below. EF Core's
+        // Entries<T>() iterator may run DetectChanges while it is being enumerated, and assigning
+        // OriginalValue/IsModified can in turn mutate tracker state. Procurement and other module
+        // integrations commonly enter Finance with the posting accounts already tracked, so walking
+        // the live iterator here caused "Collection was modified" after SQL Server had applied the
+        // atomic balance update. A stable snapshot keeps the raw-SQL balance and the tracked read-side
+        // entity synchronized without invalidating EF's enumerator.
+        var trackedAccounts = _context.ChangeTracker
+            .Entries<Account>()
+            .ToArray();
+
+        foreach (var entry in trackedAccounts)
         {
             if (entry.Entity.TenantId != tenantId ||
                 entry.Entity.Id != delta.AccountId ||
@@ -1061,8 +1116,18 @@ WHERE [Id] = {delta.AccountId}
                 exchangeRateDate = null;
             }
 
+            var dimensionSet = await ResolveDimensionSetAsync(
+                tenantId,
+                postingDate,
+                request,
+                line,
+                debit,
+                credit,
+                cancellationToken);
+
             normalizedLines.Add(new ValidatedPostingLine(
                 line.AccountId,
+                line.SourceDocumentLineId,
                 NormalizeOptional(line.Description, 500, "Line description"),
                 debit,
                 credit,
@@ -1076,6 +1141,7 @@ WHERE [Id] = {delta.AccountId}
                 exchangeRateDate,
                 NormalizeOptional(line.SourceReferenceNumber, 100, "Line source reference"),
                 line.LineNumber.GetValueOrDefault(lineNumber++),
+                dimensionSet,
                 NormalizeOptional(line.SegmentString, 200, "Segment string"),
                 NormalizeOptional(line.Notes, 1000, "Line notes"),
                 NormalizeOptional(line.TransactionTag, 50, "Transaction tag")));
@@ -1414,6 +1480,22 @@ WHERE [Id] = {delta.AccountId}
     {
         ExchangeRate? rate;
         var policyOverrideUsed = policy.IsOverride;
+        var preservesHistoricalSourceMeasurement =
+            request.PreserveHistoricalExchangeRateSnapshot &&
+            string.Equals(request.SourceModule, "AP", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(request.SourceDocumentType, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase) &&
+            exchangeRateId.HasValue &&
+            suppliedRate.HasValue;
+        if (request.PreserveHistoricalExchangeRateSnapshot && !preservesHistoricalSourceMeasurement)
+            throw new InvalidOperationException(
+                "Historical exchange-rate preservation is restricted to an AP supplier debit note with explicit source-rate evidence.");
+        if (preservesHistoricalSourceMeasurement)
+        {
+            // A supplier debit note corrects the approved source invoice at its immutable rate;
+            // this is not a user-entered current-period FX override.
+            EnsureExchangeRateOverrideApproval(request, requireApproval: true);
+            policyOverrideUsed = true;
+        }
         if (exchangeRateId.HasValue)
         {
             rate = await _context.ExchangeRates
@@ -1473,7 +1555,8 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Exchange rate currency pair does not match the posting currency pair.");
         }
 
-        if (rate.EffectiveDate.Date > postingDate.Date || (rate.EndDate.HasValue && rate.EndDate.Value.Date < postingDate.Date))
+        if (!preservesHistoricalSourceMeasurement &&
+            (rate.EffectiveDate.Date > postingDate.Date || (rate.EndDate.HasValue && rate.EndDate.Value.Date < postingDate.Date)))
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
                 tenantId,
@@ -1484,7 +1567,8 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Exchange rate is not effective for the posting date.");
         }
 
-        if (!rate.IsActive || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved))
+        if (!preservesHistoricalSourceMeasurement &&
+            (!rate.IsActive || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved)))
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
                 tenantId,
@@ -1499,7 +1583,7 @@ WHERE [Id] = {delta.AccountId}
         {
             // A reversal must reproduce the original immutable rate snapshot even
             // when the tenant's current policy has since changed.
-            if (!request.ReversalOfJournalEntryId.HasValue)
+            if (!request.ReversalOfJournalEntryId.HasValue && !preservesHistoricalSourceMeasurement)
             {
                 EnsureExchangeRateOverrideApproval(request, requireOverrideApproval);
                 policyOverrideUsed = true;
@@ -2042,6 +2126,209 @@ WHERE [Id] = {delta.AccountId}
         return normalized;
     }
 
+    private async Task<ValidatedDimensionSet?> ResolveDimensionSetAsync(
+        Guid tenantId,
+        DateTime postingDate,
+        FinancePostingRequestDto request,
+        FinancePostingLineDto line,
+        decimal normalizedDebit,
+        decimal normalizedCredit,
+        CancellationToken cancellationToken)
+    {
+        var dimensions = line.Dimensions?.ToList() ?? new List<FinancePostingDimensionValueDto>();
+        if (line.FinanceDimensionSetId.HasValue)
+        {
+            if (dimensions.Count > 0)
+                throw new InvalidOperationException("A posting line cannot supply both dimension values and a historical dimension-set ID.");
+            if (!request.ReversalOfJournalEntryId.HasValue && !request.ExistingJournalEntryId.HasValue)
+                throw new InvalidOperationException("Stored Finance dimension-set IDs may only be reused from an exact Finance journal line.");
+
+            var belongsToOriginalLine = await _context.AccountTransactions.AsNoTracking().AnyAsync(x =>
+                x.TenantId == tenantId
+                && !x.IsDeleted
+                && x.JournalEntryId == (request.ReversalOfJournalEntryId ?? request.ExistingJournalEntryId)!.Value
+                && x.AccountId == line.AccountId
+                && x.FinanceDimensionSetId == line.FinanceDimensionSetId.Value
+                && (request.ReversalOfJournalEntryId.HasValue
+                    ? x.DebitAmount == normalizedCredit && x.CreditAmount == normalizedDebit
+                    : x.DebitAmount == normalizedDebit && x.CreditAmount == normalizedCredit)
+                && (!line.LineNumber.HasValue || x.LineNumber == line.LineNumber), cancellationToken);
+            if (!belongsToOriginalLine)
+                throw new InvalidOperationException("The historical Finance dimension set does not belong to the exact original journal line being reversed.");
+
+            var historical = await _context.FinanceDimensionSets.AsNoTracking()
+                .Include(x => x.Items)
+                .SingleOrDefaultAsync(x => x.TenantId == tenantId
+                    && x.Id == line.FinanceDimensionSetId.Value && !x.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("The historical Finance dimension set was not found for this tenant.");
+            return ToValidatedDimensionSet(historical, requiresInsert: false);
+        }
+
+        if (dimensions.Count == 0)
+            return null;
+        if (dimensions.Count > 20)
+            throw new InvalidOperationException("A posting line cannot contain more than 20 Finance dimensions.");
+
+        var normalized = dimensions.Select(input =>
+        {
+            var dimensionCode = NormalizeRequired(input.DimensionCode, "Dimension code", 30).ToUpperInvariant();
+            var valueCode = NormalizeOptional(input.ValueCode, 50, "Dimension value code")?.ToUpperInvariant();
+            var sourceEntityType = NormalizeOptional(input.SourceEntityType, 100, "Dimension source entity type");
+            var hasLookup = valueCode is not null;
+            var hasEntity = sourceEntityType is not null || input.SourceEntityId.HasValue;
+            if (hasLookup == hasEntity || (hasEntity && (sourceEntityType is null || !input.SourceEntityId.HasValue)))
+                throw new InvalidOperationException($"Dimension {dimensionCode} must identify exactly one lookup value or one source entity.");
+            return new NormalizedDimensionInput(dimensionCode, valueCode, sourceEntityType, input.SourceEntityId);
+        }).ToList();
+
+        var repeatedCodes = normalized.GroupBy(x => x.DimensionCode, StringComparer.Ordinal)
+            .Where(x => x.Count() > 1).Select(x => x.Key).OrderBy(x => x).ToArray();
+        if (repeatedCodes.Length > 0)
+            throw new InvalidOperationException($"A posting line contains duplicate Finance dimension(s): {string.Join(", ", repeatedCodes)}.");
+
+        var requestedCodes = normalized.Select(x => x.DimensionCode).ToArray();
+        var definitions = await _context.FinanceDimensionDefinitions.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted && x.IsActive && requestedCodes.Contains(x.Code))
+            .ToListAsync(cancellationToken);
+        if (definitions.Count != normalized.Count)
+            throw new InvalidOperationException("One or more Finance dimensions were not found or are inactive for this tenant.");
+
+        var resolvedItems = new List<ValidatedDimensionSetItem>();
+        foreach (var input in normalized)
+        {
+            var definition = definitions.Single(x => x.Code == input.DimensionCode);
+            if (definition.ValueSourceType == "Lookup" && input.ValueCode is null)
+                throw new InvalidOperationException($"Dimension {definition.Code} requires a Finance lookup value.");
+            if (definition.ValueSourceType == "EntityBacked" && !input.SourceEntityId.HasValue)
+                throw new InvalidOperationException($"Dimension {definition.Code} requires canonical source-entity lineage.");
+
+            var value = await _context.FinanceDimensionValues.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.TenantId == tenantId && !x.IsDeleted && x.IsActive
+                && x.FinanceDimensionDefinitionId == definition.Id
+                && x.EffectiveDate.Date <= postingDate.Date
+                && (!x.ExpiryDate.HasValue || x.ExpiryDate.Value.Date >= postingDate.Date)
+                && (input.ValueCode != null
+                    ? x.Code == input.ValueCode
+                    : x.SourceEntityType == input.SourceEntityType && x.SourceEntityId == input.SourceEntityId), cancellationToken)
+                ?? throw new InvalidOperationException($"Dimension value for {definition.Code} was not found, active, and effective for the posting date.");
+
+            resolvedItems.Add(new ValidatedDimensionSetItem(
+                definition.Id,
+                value.Id,
+                definition.Code,
+                value.Code,
+                value.Name,
+                definition.DisplayOrder));
+        }
+
+        resolvedItems = resolvedItems.OrderBy(x => x.DisplayOrder).ThenBy(x => x.DimensionCode, StringComparer.Ordinal).ToList();
+        var canonical = string.Join("|", resolvedItems.Select(x => $"{x.DefinitionId:N}:{x.ValueId:N}"));
+        var combinationHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        var deterministicBytes = SHA256.HashData(Encoding.UTF8.GetBytes($"FIN-DIMSET|{tenantId:N}|{combinationHash}"));
+        var dimensionSetId = new Guid(deterministicBytes.AsSpan(0, 16));
+        var displayValue = string.Join(" · ", resolvedItems.Select(x => $"{x.DimensionCode}={x.ValueCode}"));
+
+        var existing = await _context.FinanceDimensionSets.AsNoTracking().Include(x => x.Items)
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && !x.IsDeleted
+                && (x.Id == dimensionSetId || x.CombinationHash == combinationHash), cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.Id != dimensionSetId || existing.CombinationHash != combinationHash)
+                throw new InvalidOperationException("Finance dimension-set identity collision detected.");
+            EnsureSetItemsMatch(existing, resolvedItems);
+            return ToValidatedDimensionSet(existing, requiresInsert: false);
+        }
+
+        return new ValidatedDimensionSet(dimensionSetId, combinationHash, displayValue, resolvedItems, true);
+    }
+
+    private async Task EnsureDimensionSetsAsync(
+        Guid tenantId,
+        IReadOnlyList<ValidatedPostingLine> lines,
+        DateTime now,
+        Guid? actorId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var plan in lines.Select(x => x.DimensionSet).Where(x => x is { RequiresInsert: true })
+                     .Cast<ValidatedDimensionSet>().DistinctBy(x => x.Id))
+        {
+            if (_context.Database.IsSqlServer())
+            {
+                if (_context.Database.CurrentTransaction is null)
+                    throw new InvalidOperationException("Finance dimension-set creation requires an active database transaction.");
+                var resource = $"FIN:DIMSET:{tenantId:N}:{plan.CombinationHash}";
+                await _context.Database.ExecuteSqlInterpolatedAsync($@"
+DECLARE @result int;
+EXEC @result = sys.sp_getapplock
+    @Resource = {resource},
+    @LockMode = 'Exclusive',
+    @LockOwner = 'Transaction',
+    @LockTimeout = 15000;
+IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;", cancellationToken);
+            }
+
+            var existing = _context.FinanceDimensionSets.Local.FirstOrDefault(x => x.Id == plan.Id)
+                ?? await _context.FinanceDimensionSets.Include(x => x.Items).SingleOrDefaultAsync(x =>
+                    x.TenantId == tenantId && !x.IsDeleted
+                    && (x.Id == plan.Id || x.CombinationHash == plan.CombinationHash), cancellationToken);
+            if (existing is not null)
+            {
+                if (existing.Id != plan.Id || existing.CombinationHash != plan.CombinationHash)
+                    throw new InvalidOperationException("Finance dimension-set identity collision detected.");
+                EnsureSetItemsMatch(existing, plan.Items);
+                continue;
+            }
+
+            var set = new FinanceDimensionSet
+            {
+                Id = plan.Id,
+                TenantId = tenantId,
+                CombinationHash = plan.CombinationHash,
+                DisplayValue = plan.DisplayValue,
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName,
+                CreatedById = actorId
+            };
+            foreach (var item in plan.Items)
+            {
+                var itemIdBytes = SHA256.HashData(Encoding.UTF8.GetBytes(
+                    $"FIN-DIMSET-ITEM|{tenantId:N}|{plan.Id:N}|{item.DefinitionId:N}"));
+                set.Items.Add(new FinanceDimensionSetItem
+                {
+                    Id = new Guid(itemIdBytes.AsSpan(0, 16)),
+                    TenantId = tenantId,
+                    FinanceDimensionSetId = set.Id,
+                    FinanceDimensionDefinitionId = item.DefinitionId,
+                    FinanceDimensionValueId = item.ValueId,
+                    DimensionCodeSnapshot = item.DimensionCode,
+                    DimensionValueCodeSnapshot = item.ValueCode,
+                    DimensionValueNameSnapshot = item.ValueName,
+                    CreatedAt = now,
+                    CreatedBy = _currentUserService.UserName,
+                    CreatedById = actorId
+                });
+            }
+            _context.FinanceDimensionSets.Add(set);
+        }
+    }
+
+    private static ValidatedDimensionSet ToValidatedDimensionSet(FinanceDimensionSet source, bool requiresInsert) =>
+        new(source.Id, source.CombinationHash, source.DisplayValue,
+            source.Items.OrderBy(x => x.DimensionCodeSnapshot, StringComparer.Ordinal).Select(x =>
+                new ValidatedDimensionSetItem(x.FinanceDimensionDefinitionId, x.FinanceDimensionValueId,
+                    x.DimensionCodeSnapshot, x.DimensionValueCodeSnapshot, x.DimensionValueNameSnapshot, 0)).ToList(),
+            requiresInsert);
+
+    private static void EnsureSetItemsMatch(FinanceDimensionSet existing, IReadOnlyList<ValidatedDimensionSetItem> requested)
+    {
+        var stored = existing.Items.Select(x => $"{x.FinanceDimensionDefinitionId:N}:{x.FinanceDimensionValueId:N}")
+            .OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        var expected = requested.Select(x => $"{x.DefinitionId:N}:{x.ValueId:N}")
+            .OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        if (!stored.SequenceEqual(expected, StringComparer.Ordinal))
+            throw new InvalidOperationException("Stored Finance dimension-set items do not match their canonical combination hash.");
+    }
+
     private static bool IsCurrencyLinkEffectiveForPosting(AccountCurrencyLink link, DateTime postingDate)
     {
         var postingDay = postingDate.Date;
@@ -2083,6 +2370,7 @@ WHERE [Id] = {delta.AccountId}
 
     private sealed record ValidatedPostingLine(
         Guid AccountId,
+        Guid? SourceDocumentLineId,
         string? Description,
         decimal DebitAmount,
         decimal CreditAmount,
@@ -2096,9 +2384,31 @@ WHERE [Id] = {delta.AccountId}
         DateTime? ExchangeRateDate,
         string? SourceReferenceNumber,
         int LineNumber,
+        ValidatedDimensionSet? DimensionSet,
         string? SegmentString,
         string? Notes,
         string? TransactionTag);
+
+    private sealed record NormalizedDimensionInput(
+        string DimensionCode,
+        string? ValueCode,
+        string? SourceEntityType,
+        Guid? SourceEntityId);
+
+    private sealed record ValidatedDimensionSet(
+        Guid Id,
+        string CombinationHash,
+        string DisplayValue,
+        IReadOnlyList<ValidatedDimensionSetItem> Items,
+        bool RequiresInsert);
+
+    private sealed record ValidatedDimensionSetItem(
+        Guid DefinitionId,
+        Guid ValueId,
+        string DimensionCode,
+        string ValueCode,
+        string ValueName,
+        int DisplayOrder);
 
     private sealed record FunctionalCurrencyConfig(string CurrencyCode, bool IsConfigured);
 

@@ -37,6 +37,18 @@ public class CustomerPayment : BusinessEntity
     /// </summary>
     public bool IsCustomerAdvance { get; set; }
 
+    /// <summary>
+    /// Classifies a receipt-shaped cutover fact whose cash movement occurred before go-live.
+    /// Canonical CustomerPayment identity is retained for advance application and WHT inquiry,
+    /// while the opening journal offsets migration clearing instead of a live bank account.
+    /// </summary>
+    [MaxLength(40)]
+    public string? OpeningBalanceType { get; set; }
+    public Guid? OpeningBalanceBatchId { get; set; }
+
+    [MaxLength(100)]
+    public string? OpeningSourceReference { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 
@@ -51,6 +63,13 @@ public class CustomerPayment : BusinessEntity
 
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
+
+    /// <summary>
+    /// Approved receipt-currency rate snapshot source. The value remains duplicated in
+    /// ExchangeRate intentionally: the id supplies audit lineage while the value guarantees
+    /// deterministic posting if rate-master data is later corrected.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
 
     // Bank/Payment Details
     public Guid? BankAccountId { get; set; }
@@ -81,6 +100,10 @@ public class CustomerPayment : BusinessEntity
     public Guid? WithholdingTaxAccountId { get; set; }
     public virtual Account? WithholdingTaxAccount { get; set; }
 
+    /// <summary>
+    /// Functional/statutory WHT roll-up derived from the active invoice allocations. The native
+    /// invoice-currency evidence is retained on PaymentAllocation for posting and audit trace.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
@@ -90,6 +113,9 @@ public class CustomerPayment : BusinessEntity
     public Guid? VatWithholdingAccountId { get; set; }
     public virtual Account? VatWithholdingAccount { get; set; }
 
+    /// <summary>
+    /// Functional/statutory VAT-WHT roll-up derived from the active invoice allocations.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal VatWithholdingAmount { get; set; }
 

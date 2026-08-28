@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Check, ChevronsUpDown, Download, FileSpreadsheet, FileText, Loader2, Play, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Check, ChevronsUpDown, Download, FileSpreadsheet, FileText, Loader2, Play, Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -35,6 +35,7 @@ interface PartnerStatementReportProps {
     loadReport: (params: StatementReportParams) => Promise<DetailedLedgerReport>;
     downloadCsv: (params: StatementReportParams) => Promise<Blob>;
     downloadPdf?: (params: StatementReportParams) => Promise<void>;
+    printPdf?: (params: StatementReportParams) => Promise<void>;
     downloadXlsx?: (params: StatementReportParams) => Promise<void>;
     canExport?: boolean;
 }
@@ -59,17 +60,6 @@ const saveBlob = (blob: Blob, fileName: string) => {
     }
 };
 
-const formatReportAmount = (amount: number, currencyCode: string) => {
-    if (currencyCode === 'Supplier Currency' || currencyCode === 'Customer Currency') {
-        return amount.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        });
-    }
-
-    return formatCurrency(amount, currencyCode);
-};
-
 export function PartnerStatementReport({
     title,
     description,
@@ -82,6 +72,7 @@ export function PartnerStatementReport({
     loadReport,
     downloadCsv,
     downloadPdf,
+    printPdf,
     downloadXlsx,
     canExport = true,
 }: PartnerStatementReportProps) {
@@ -91,7 +82,7 @@ export function PartnerStatementReport({
     const [showPartnerCurrency, setShowPartnerCurrency] = useState(false);
     const [report, setReport] = useState<DetailedLedgerReport | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [exportingFormat, setExportingFormat] = useState<'csv' | 'pdf' | 'xlsx' | null>(null);
+    const [exportingFormat, setExportingFormat] = useState<'csv' | 'pdf' | 'print' | 'xlsx' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [partnerPickerOpen, setPartnerPickerOpen] = useState(false);
 
@@ -150,9 +141,12 @@ export function PartnerStatementReport({
 
     const exportControlledDocument = async (
         formatName: 'PDF' | 'XLSX',
-        download: (params: StatementReportParams) => Promise<void>
+        download: (params: StatementReportParams) => Promise<void>,
+        action: 'download' | 'print' = 'download'
     ) => {
-        const format = formatName.toLowerCase() as 'pdf' | 'xlsx';
+        const format = action === 'print'
+            ? 'print'
+            : formatName.toLowerCase() as 'pdf' | 'xlsx';
         setExportingFormat(format);
         setError(null);
         try {
@@ -192,6 +186,17 @@ export function PartnerStatementReport({
                                     >
                                         {exportingFormat === 'pdf' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
                                         PDF
+                                    </Button>
+                                )}
+                                {printPdf && (
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => exportControlledDocument('PDF', printPdf, 'print')}
+                                        disabled={exportingFormat !== null || partnersLoading}
+                                        aria-label={`Print ${title}`}
+                                    >
+                                        {exportingFormat === 'print' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                                        Print
                                     </Button>
                                 )}
                                 {downloadXlsx && (
@@ -307,24 +312,37 @@ export function PartnerStatementReport({
                         </div>
                     )}
 
-                    <div className="grid gap-4 md:grid-cols-4">
-                        <div className="rounded-md border bg-background p-4">
-                            <div className="text-sm text-muted-foreground">Opening Balance</div>
-                            <div className="mt-2 text-2xl font-bold">{formatReportAmount(report.totalOpeningBalance, report.currencyCode)}</div>
+                    {(report.currencyTotals && report.currencyTotals.length > 1 ? report.currencyTotals : [{
+                        currencyCode: report.currencyCode,
+                        openingBalance: report.totalOpeningBalance,
+                        totalDebits: report.totalDebits,
+                        totalCredits: report.totalCredits,
+                        closingBalance: report.totalClosingBalance,
+                    }]).map((total) => (
+                        <div key={total.currencyCode} className="space-y-2">
+                            {report.currencyTotals && report.currencyTotals.length > 1 && (
+                                <div className="text-sm font-semibold text-muted-foreground">{total.currencyCode} totals</div>
+                            )}
+                            <div className="grid gap-4 md:grid-cols-4">
+                                <div className="rounded-md border bg-background p-4">
+                                    <div className="text-sm text-muted-foreground">Opening Balance</div>
+                                    <div className="mt-2 text-2xl font-bold">{formatCurrency(total.openingBalance, total.currencyCode)}</div>
+                                </div>
+                                <div className="rounded-md border bg-background p-4">
+                                    <div className="text-sm text-muted-foreground">Debits</div>
+                                    <div className="mt-2 text-2xl font-bold">{formatCurrency(total.totalDebits, total.currencyCode)}</div>
+                                </div>
+                                <div className="rounded-md border bg-background p-4">
+                                    <div className="text-sm text-muted-foreground">Credits</div>
+                                    <div className="mt-2 text-2xl font-bold">{formatCurrency(total.totalCredits, total.currencyCode)}</div>
+                                </div>
+                                <div className="rounded-md border bg-primary/5 p-4">
+                                    <div className="text-sm text-primary">Closing Balance</div>
+                                    <div className="mt-2 text-2xl font-bold text-primary">{formatCurrency(total.closingBalance, total.currencyCode)}</div>
+                                </div>
+                            </div>
                         </div>
-                        <div className="rounded-md border bg-background p-4">
-                            <div className="text-sm text-muted-foreground">Debits</div>
-                            <div className="mt-2 text-2xl font-bold">{formatReportAmount(report.totalDebits, report.currencyCode)}</div>
-                        </div>
-                        <div className="rounded-md border bg-background p-4">
-                            <div className="text-sm text-muted-foreground">Credits</div>
-                            <div className="mt-2 text-2xl font-bold">{formatReportAmount(report.totalCredits, report.currencyCode)}</div>
-                        </div>
-                        <div className="rounded-md border bg-primary/5 p-4">
-                            <div className="text-sm text-primary">Closing Balance</div>
-                            <div className="mt-2 text-2xl font-bold text-primary">{formatReportAmount(report.totalClosingBalance, report.currencyCode)}</div>
-                        </div>
-                    </div>
+                    ))}
 
                     {report.accounts.length === 0 ? (
                         <div className="rounded-md border bg-background py-16 text-center text-muted-foreground">

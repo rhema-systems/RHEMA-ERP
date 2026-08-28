@@ -406,6 +406,7 @@ public class LandedCostService : ILandedCostService
 
         var createdGrn = new GoodsReceiptNote
         {
+            Id = receipt.Id,
             TenantId = receipt.TenantId,
             GRNNumber = grnNumberCandidate,
             PurchaseOrderReceiptId = receipt.Id,
@@ -934,10 +935,11 @@ public class LandedCostService : ILandedCostService
         // Guard: landed costs should be posted only after the receipt has posted inventory valuation (layers/balances).
         // If the receipt didn't create valuation movements (e.g., pending inspection, missing warehouse during receipt),
         // we would otherwise push everything into "variance stub" which is confusing for users.
+        var valuationReceiptId = grn.PurchaseOrderReceiptId ?? grn.Id;
         var receiptPostedToValuation = await _unitOfWork.Repository<InventoryMovement>()
             .GetQueryable()
             .AnyAsync(m =>
-                m.ReferenceId == grn.Id &&
+                m.ReferenceId == valuationReceiptId &&
                 m.ReferenceType == ReferenceType.PO &&
                 m.MovementType == InventoryMovementType.PurchaseReceipt &&
                 m.IsPosted);

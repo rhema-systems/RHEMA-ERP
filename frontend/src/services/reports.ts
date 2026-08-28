@@ -145,10 +145,18 @@ export interface ReportSchedule {
 }
 
 export interface CreateReportTemplateDto {
+  reportId: string;
+  templateKey: string;
   name: string;
   description: string;
   category: string;
   type: string;
+  audience: 'PPA/GHANEPS' | 'Finance' | 'Audit' | 'Board';
+  cadence: 'Monthly' | 'Quarterly' | 'AdHoc';
+  defaultOutputFormat: 'Online' | 'XLSX' | 'PDF';
+  outputFormats: Array<'Online' | 'XLSX' | 'PDF'>;
+  savedFilters?: Record<string, unknown>;
+  generationMetadata?: Record<string, unknown>;
   chartType?: string;
   isCustom?: boolean;
   tags?: string[];
@@ -158,10 +166,21 @@ export interface CreateReportTemplateDto {
 
 export interface ReportTemplate {
   id: string;
+  reportId?: string;
+  reportName?: string;
+  templateKey: string;
+  version: number;
   name: string;
   description: string;
   category: string;
   type: string;
+  audience: 'PPA/GHANEPS' | 'Finance' | 'Audit' | 'Board';
+  cadence: 'Monthly' | 'Quarterly' | 'AdHoc';
+  status: 'Draft' | 'Published' | 'Archived';
+  defaultOutputFormat: 'Online' | 'XLSX' | 'PDF';
+  outputFormats: Array<'Online' | 'XLSX' | 'PDF'>;
+  savedFilters?: Record<string, unknown>;
+  generationMetadata?: Record<string, unknown>;
   chartType?: string;
   isCustom: boolean;
   isFavorite?: boolean;
@@ -172,6 +191,23 @@ export interface ReportTemplate {
   tags?: string[];
   previewImage?: string;
   configuration?: Record<string, any>;
+  lastGeneratedAt?: string;
+  lastGeneratedBy?: string;
+  lastGenerationFormat?: string;
+  rowVersion: string;
+}
+
+export interface UpdateReportTemplateDto extends CreateReportTemplateDto {
+  rowVersion: string;
+}
+
+export interface GenerateReportTemplateDto {
+  format: 'Online' | 'XLSX' | 'PDF';
+  filterOverrides?: Record<string, unknown>;
+  page?: number;
+  pageSize?: number;
+  includeCharts?: boolean;
+  includeHeaders?: boolean;
 }
 
 export interface ReportAnalytics {
@@ -453,10 +489,16 @@ class ReportsService {
   }
 
   // Templates
-  async getReportTemplates(category?: string): Promise<ReportTemplate[]> {
+  async getReportTemplates(filters?: {
+    audience?: string;
+    cadence?: string;
+    status?: string;
+  }): Promise<ReportTemplate[]> {
     try {
       const params = new URLSearchParams();
-      if (category) params.append('category', category);
+      if (filters?.audience) params.append('audience', filters.audience);
+      if (filters?.cadence) params.append('cadence', filters.cadence);
+      if (filters?.status) params.append('status', filters.status);
 
       return await apiService.request<ReportTemplate[]>(`/reports/templates?${params.toString()}`);
     } catch (error) {
@@ -475,6 +517,78 @@ class ReportsService {
       console.error('Error creating report template:', error);
       throw error;
     }
+  }
+
+  async updateReportTemplate(templateId: string, request: UpdateReportTemplateDto): Promise<ReportTemplate> {
+    return apiService.request<ReportTemplate>(`/reports/templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async publishReportTemplate(template: ReportTemplate): Promise<ReportTemplate> {
+    return this.mutateReportTemplate(template, 'publish');
+  }
+
+  async archiveReportTemplate(template: ReportTemplate): Promise<ReportTemplate> {
+    return this.mutateReportTemplate(template, 'archive');
+  }
+
+  async cloneReportTemplate(template: ReportTemplate): Promise<ReportTemplate> {
+    return apiService.request<ReportTemplate>(`/reports/templates/${template.id}/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ rowVersion: template.rowVersion }),
+    });
+  }
+
+  async deleteReportTemplate(template: ReportTemplate): Promise<void> {
+    await apiService.request<void>(`/reports/templates/${template.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ rowVersion: template.rowVersion }),
+    });
+  }
+
+  async executeReportTemplate(templateId: string, request: GenerateReportTemplateDto): Promise<ReportResult> {
+    return apiService.request<ReportResult>(`/reports/templates/${templateId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async exportReportTemplate(
+    templateId: string,
+    request: GenerateReportTemplateDto
+  ): Promise<{ fileName: string; blob: Blob }> {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+    const token = typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
+    const response = await fetch(`${baseUrl}/reports/templates/${templateId}/export`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error(`Template export failed with status ${response.status}`);
+    return {
+      fileName: normalizeReportExportFileName(
+        response.headers.get('Content-Disposition'),
+        request.format.toLowerCase()
+      ),
+      blob: await response.blob(),
+    };
+  }
+
+  private async mutateReportTemplate(
+    template: ReportTemplate,
+    action: 'publish' | 'archive'
+  ): Promise<ReportTemplate> {
+    return apiService.request<ReportTemplate>(`/reports/templates/${template.id}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ rowVersion: template.rowVersion }),
+    });
   }
 
   // Analytics

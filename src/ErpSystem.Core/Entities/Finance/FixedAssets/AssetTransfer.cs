@@ -57,6 +57,45 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? ToSegmentLookupValueId { get; set; }
         public virtual SegmentLookupValue? ToSegmentLookupValue { get; set; }
 
+        // GL reclassification transfers snapshot both categories. The asset's live category is
+        // changed only after the compensating reclassification journal posts successfully, while
+        // these references preserve what the maker requested even if category setup later changes.
+        public Guid? FromFixedAssetCategoryId { get; set; }
+        public virtual FixedAssetCategory? FromFixedAssetCategory { get; set; }
+
+        public Guid? ToFixedAssetCategoryId { get; set; }
+        public virtual FixedAssetCategory? ToFixedAssetCategory { get; set; }
+
+        public Guid? AccountingBookId { get; set; }
+        public virtual AccountingBook? AccountingBook { get; set; }
+
+        [MaxLength(20)]
+        public string BookClassification { get; set; } = "IFRS";
+
+        // Account IDs and balances are immutable posting evidence. Rebuilding a pending request
+        // from mutable category configuration could otherwise move a different balance than the
+        // independent checker approved.
+        public Guid? FromAssetAccountId { get; set; }
+        public Guid? ToAssetAccountId { get; set; }
+        public Guid? FromAccumulatedDepreciationAccountId { get; set; }
+        public Guid? ToAccumulatedDepreciationAccountId { get; set; }
+        public Guid? FromAccumulatedImpairmentAccountId { get; set; }
+        public Guid? ToAccumulatedImpairmentAccountId { get; set; }
+        public Guid? FromRevaluationSurplusAccountId { get; set; }
+        public Guid? ToRevaluationSurplusAccountId { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ReclassificationAssetCarryingAmount { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ReclassificationAccumulatedDepreciation { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ReclassificationAccumulatedImpairment { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ReclassificationRevaluationSurplus { get; set; }
+
         [MaxLength(1000)]
         public string? Reason { get; set; }
 

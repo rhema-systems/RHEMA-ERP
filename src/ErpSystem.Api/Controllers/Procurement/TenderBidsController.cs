@@ -1,7 +1,9 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,6 +20,8 @@ public class TenderBidsController : ControllerBase
     private readonly ITenderAssignmentRepository _assignmentRepository;
     private readonly ITenderPaymentRepository _paymentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IControlledFileUploadService _controlledFiles;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly ILogger<TenderBidsController> _logger;
 
     public TenderBidsController(
@@ -27,6 +31,8 @@ public class TenderBidsController : ControllerBase
         ITenderAssignmentRepository assignmentRepository,
         ITenderPaymentRepository paymentRepository,
         ICurrentUserProvider currentUserProvider,
+        IControlledFileUploadService controlledFiles,
+        ICentralDocumentRepositoryFileService centralDocuments,
         ILogger<TenderBidsController> logger)
     {
         _bidService = bidService;
@@ -35,6 +41,8 @@ public class TenderBidsController : ControllerBase
         _assignmentRepository = assignmentRepository;
         _paymentRepository = paymentRepository;
         _currentUserProvider = currentUserProvider;
+        _controlledFiles = controlledFiles;
+        _centralDocuments = centralDocuments;
         _logger = logger;
     }
 
@@ -99,20 +107,11 @@ public class TenderBidsController : ControllerBase
                     return NotFound($"Bid with ID {id} not found");
                 }
 
-                // Verify the bid belongs to this business partner OR the user is assigned to the tender
+                // A tender assignment grants access to the opportunity, never to another
+                // supplier's sealed bid. External users may read only their own bid.
                 if (bid.BusinessPartnerId != businessPartner.Id)
                 {
-                    // Check if user is assigned to this tender via TenderAssignment
-                    var assignments = await _assignmentRepository.GetByBusinessPartnerIdAsync(businessPartner.Id);
-                    var isAssigned = assignments.Any(a =>
-                        a.TenderId == bid.TenderId &&
-                        (a.AssignmentType == "AllUsers" || a.AssignedToUserId == _currentUserProvider.UserId)
-                    );
-
-                    if (!isAssigned)
-                    {
-                        return NotFound($"Bid with ID {id} not found");
-                    }
+                    return NotFound($"Bid with ID {id} not found");
                 }
             }
 
@@ -513,29 +512,99 @@ public class TenderBidsController : ControllerBase
                 return BadRequest("No file provided");
             }
 
-            // Create uploads folder for bid documents
-            var uploadsFolder = Path.Combine("uploads", "tender-bids", id.ToString());
-            Directory.CreateDirectory(uploadsFolder);
-
-            // Generate unique filename
-            var fileName = $"{Guid.NewGuid()}_{file.FileName}";
-            var filePath = Path.Combine(uploadsFolder, fileName);
-
-            // Save file to disk
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            var bid = await _bidService.GetBidByIdAsync(id);
+            if (bid is null || !await CanAccessBidAsync(bid))
             {
-                await file.CopyToAsync(stream);
+                return NotFound("Bid not found");
+            }
+
+            var normalizedType = documentType?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedType) || normalizedType.Length > 50)
+                return BadRequest("A valid document type is required.");
+            var safeName = Path.GetFileName(file.FileName);
+            var normalizedName = string.IsNullOrWhiteSpace(documentName) ? safeName : documentName.Trim();
+            if (normalizedName.Length > 200)
+                return BadRequest("Document name cannot exceed 200 characters.");
+            var actorName = string.IsNullOrWhiteSpace(_currentUserProvider.FullName)
+                ? _currentUserProvider.Username
+                : _currentUserProvider.FullName;
+
+            var upload = await _controlledFiles.UploadAsync(new ControlledFileUploadRequest
+            {
+                TenantId = _currentUserProvider.TenantId,
+                ActorUserId = _currentUserProvider.UserId,
+                ActorName = actorName,
+                Category = ControlledFileUploadCategories.DocumentManagement,
+                FileName = safeName,
+                ContentType = string.IsNullOrWhiteSpace(file.ContentType)
+                    ? "application/octet-stream"
+                    : file.ContentType,
+                FileSize = file.Length,
+                OpenReadStream = file.OpenReadStream
+            }, HttpContext.RequestAborted);
+
+            CentralDocumentRepositoryLink centralDocument;
+            try
+            {
+                centralDocument = await _centralDocuments.RegisterAsync(
+                    new CentralDocumentRepositoryRegistration
+                    {
+                        TenantId = _currentUserProvider.TenantId,
+                        ActorUserId = _currentUserProvider.UserId,
+                        ActorName = actorName,
+                        FileUploadRecordId = upload.Record.Id,
+                        SourceModule = "Procurement",
+                        SourceLabel = "Procurement / Tender bid documents",
+                        SourceEntityType = "TenderBid",
+                        SourceRecordId = id,
+                        SourceRecordReference = bid.BidNumber,
+                        Title = normalizedName,
+                        DocumentType = "TenderDocument",
+                        MetadataTemplateCode = "TDC-PROC-TENDER",
+                        AccessProfile = "Procurement tender restricted",
+                        VersionStatus = "Submitted",
+                        ChangeSummary = $"{normalizedType} uploaded from the tender bid.",
+                        RequirePublishedGovernance = true,
+                        MetadataValues =
+                        [
+                            new("sourceReference", "Source reference", bid.BidNumber),
+                            new("documentFamily", "Document family", "Tender bid"),
+                            new("classification", "Classification", normalizedType),
+                            new("sourceStatus", "Source status", bid.Status),
+                            new("uploadedBy", "Uploaded by", actorName),
+                            new("checksumSha256", "Checksum SHA-256", upload.ChecksumSha256)
+                        ]
+                    }, HttpContext.RequestAborted);
+            }
+            catch
+            {
+                await _controlledFiles.DeleteAsync(_currentUserProvider.TenantId,
+                    upload.Record.Id, _currentUserProvider.UserId, HttpContext.RequestAborted);
+                throw;
             }
 
             // Create DTO
             var dto = new UploadBidDocumentDto
             {
-                DocumentName = documentName ?? file.FileName,
-                DocumentType = documentType
+                DocumentName = normalizedName,
+                DocumentType = normalizedType
             };
 
-            // Upload document (service will update with file info)
-            var document = await _bidService.UploadBidDocumentAsync(id, dto, filePath, file.ContentType, file.Length);
+            TenderBidDocumentDto document;
+            try
+            {
+                document = await _bidService.UploadBidDocumentAsync(id, dto,
+                    $"dms:{centralDocument.DocumentRecordId:N}:version:{centralDocument.DocumentVersionId:N}",
+                    upload.Record.ContentType, upload.Record.FileSize, upload.Record.Id,
+                    centralDocument.DocumentRecordId, centralDocument.DocumentVersionId);
+            }
+            catch
+            {
+                await _centralDocuments.DeleteAsync(_currentUserProvider.TenantId,
+                    centralDocument.DocumentRecordId, _currentUserProvider.UserId,
+                    HttpContext.RequestAborted);
+                throw;
+            }
             return Created($"/api/procurement/TenderBids/{id}/documents/{document.Id}", document);
         }
         catch (InvalidOperationException ex)
@@ -557,6 +626,8 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var bid = await _bidService.GetBidByIdAsync(id);
+            if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
             var documents = await _bidService.GetBidDocumentsAsync(id);
             return Ok(documents);
         }
@@ -575,6 +646,8 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var bid = await _bidService.GetBidByIdAsync(bidId);
+            if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
             var documents = await _bidService.GetBidDocumentsAsync(bidId);
             var document = documents.FirstOrDefault(d => d.Id == documentId);
 
@@ -583,12 +656,23 @@ public class TenderBidsController : ControllerBase
                 return NotFound("Document not found");
             }
 
-            if (string.IsNullOrEmpty(document.FilePath) || !System.IO.File.Exists(document.FilePath))
+            if (document.CentralDocumentRecordId.HasValue && document.CentralDocumentVersionId.HasValue)
             {
-                _logger.LogError("Document file not found at path: {FilePath}", document.FilePath);
-                return NotFound("Document file not found on server");
+                var content = await _centralDocuments.OpenAsync(_currentUserProvider.TenantId,
+                    document.CentralDocumentRecordId.Value,
+                    document.CentralDocumentVersionId.Value,
+                    HttpContext.RequestAborted);
+                if (content is null || content.UploadRecord.VirusScanStatus != FileVirusScanStatus.Clean)
+                {
+                    if (content is not null) await content.DisposeAsync();
+                    return NotFound("Document is unavailable in the central repository.");
+                }
+                return File(content.Content, content.ContentType, content.FileName,
+                    enableRangeProcessing: true);
             }
 
+            if (string.IsNullOrEmpty(document.FilePath) || !System.IO.File.Exists(document.FilePath))
+                return NotFound("Legacy document file not found on server");
             var fileBytes = await System.IO.File.ReadAllBytesAsync(document.FilePath);
             var contentType = document.FileType ?? "application/octet-stream";
 
@@ -609,6 +693,8 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var bid = await _bidService.GetBidByIdAsync(bidId);
+            if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
             await _bidService.DeleteBidDocumentAsync(documentId);
             return NoContent();
         }
@@ -621,6 +707,39 @@ public class TenderBidsController : ControllerBase
             _logger.LogError(ex, "Error deleting bid document {DocumentId}", documentId);
             return StatusCode(500, "An error occurred while deleting the document");
         }
+    }
+
+    private async Task<bool> CanAccessBidAsync(TenderBidDetailDto bid)
+    {
+        if (!_currentUserProvider.IsExternalUser)
+        {
+            return true;
+        }
+
+        var businessPartner = await _businessPartnerRepository.GetByUserIdAsync(
+            _currentUserProvider.UserId);
+        if (businessPartner is null)
+        {
+            var link = await _businessPartnerUserRepository.GetByUserIdAsync(
+                _currentUserProvider.UserId);
+            if (link is { IsActive: true }) businessPartner = link.BusinessPartner;
+        }
+
+        if (businessPartner is null)
+        {
+            return false;
+        }
+
+        if (bid.BusinessPartnerId == businessPartner.Id)
+        {
+            return true;
+        }
+
+        var assignments = await _assignmentRepository.GetByBusinessPartnerIdAsync(
+            businessPartner.Id);
+        return assignments.Any(item => item.TenderId == bid.TenderId &&
+            (item.AssignmentType == "AllUsers" ||
+             item.AssignedToUserId == _currentUserProvider.UserId));
     }
 
     /// <summary>
@@ -918,4 +1037,3 @@ public class TenderBidsController : ControllerBase
 
     #endregion
 }
-

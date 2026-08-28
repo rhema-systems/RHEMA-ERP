@@ -69,6 +69,9 @@ export interface FinanceSettings {
   suspenseAccountId?: string;
   discountAllowedAccountId?: string;
   discountReceivedAccountId?: string;
+  directionalExchangeRatePolicyEnabled?: boolean;
+  arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+  apInvoiceQuoteSide?: ExchangeRateQuoteSide;
 }
 
 // --- Currency ---
@@ -511,8 +514,22 @@ class FinanceService {
   /**
    * Get current exchange rate for a currency
    */
-  async getCurrentExchangeRate(currencyCode: string): Promise<ExchangeRate> {
-    return apiService.get<ExchangeRate>(`${this.baseUrl}/exchange-rates/current/${currencyCode}`);
+  async getCurrentExchangeRate(
+    currencyCode: string,
+    options?: {
+      baseCurrencyCode?: string;
+      effectiveDate?: string;
+      rateType?: ExchangeRateType;
+      quoteSide?: ExchangeRateQuoteSide;
+    },
+  ): Promise<ExchangeRate> {
+    const params = new URLSearchParams();
+    if (options?.baseCurrencyCode) params.set('baseCurrencyCode', options.baseCurrencyCode);
+    if (options?.effectiveDate) params.set('effectiveDate', options.effectiveDate);
+    if (options?.rateType) params.set('rateType', options.rateType);
+    if (options?.quoteSide) params.set('quoteSide', options.quoteSide);
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    return apiService.get<ExchangeRate>(`${this.baseUrl}/exchange-rates/current/${currencyCode}${query}`);
   }
 
   /**
@@ -609,6 +626,13 @@ class FinanceService {
   }
 
   /**
+   * Open a previously unopened Future period.
+   */
+  async openPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+    return apiService.post<FiscalPeriod>(`${this.baseUrl}/periods/${id}/open`, { reason });
+  }
+
+  /**
    * Validate period can be closed
    */
   async validatePeriodClose(id: string): Promise<PeriodCloseValidationDto> {
@@ -640,7 +664,7 @@ class FinanceService {
    * Unlock period
    */
   async unlockPeriod(id: string, reason: string): Promise<void> {
-    return apiService.post(`${this.baseUrl}/periods/${id}/unlock`, reason);
+    return apiService.post(`${this.baseUrl}/periods/${id}/unlock`, { reason });
   }
 
   // ==========================================

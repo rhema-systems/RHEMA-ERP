@@ -91,7 +91,7 @@ Reports derive accounting balances from posted GL movement and reconcile that mo
 
 ## GL Reconciliation Behavior
 
-The reconciliation report compares posted GL against fixed asset subledger snapshots for asset cost/carrying accounts, accumulated depreciation, depreciation expense, accumulated impairment, impairment loss, revaluation surplus/loss, disposal proceeds clearing, and disposal gain/loss.
+The reconciliation report compares posted GL against fixed asset subledger snapshots for asset cost/carrying accounts, accumulated depreciation, depreciation expense, accumulated impairment, impairment loss, revaluation surplus/loss, disposal proceeds clearing, and disposal gain/loss. The later `FIN-LIM-0041` policy slice also deducts completed disposal transfers from the asset-specific revaluation-surplus subledger before comparing it with GL.
 
 Diagnostic counters flag missing posting-event references, GL movement without fixed asset source references, and subledger records without posted GL.
 

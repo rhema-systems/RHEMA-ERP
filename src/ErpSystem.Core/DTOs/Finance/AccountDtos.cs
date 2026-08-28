@@ -120,6 +120,13 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public string? AccountSubCategory { get; set; }
 
+        /// <summary>
+        /// Cash-flow statement section assigned to this account.
+        /// Valid values are Operating, Investing, Financing, or null when the
+        /// account has not yet been classified.
+        /// </summary>
+        public string? CashFlowClassification { get; set; }
+
         #endregion
 
         #region Multi-Currency
@@ -410,6 +417,9 @@ namespace ErpSystem.Core.DTOs.Finance
         [MaxLength(100)]
         public string? AccountSubCategory { get; set; }
 
+        [MaxLength(50)]
+        public string? CashFlowClassification { get; set; }
+
         /// <summary>
         /// Primary currency code (ISO 4217).
         /// </summary>
@@ -573,6 +583,9 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         [MaxLength(100)]
         public string? AccountSubCategory { get; set; }
+
+        [MaxLength(50)]
+        public string? CashFlowClassification { get; set; }
 
         /// <summary>
         /// Primary currency code.

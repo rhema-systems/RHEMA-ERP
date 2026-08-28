@@ -1342,7 +1342,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         var state = BuildEffectiveState(register);
         var missingPartners = businessPartnerIds.Distinct().Where(id =>
             !HasEffectiveDocumentAccess(register, id, null)).ToList();
-        var normalizedEmails = externalEmails.Select(NormalizeEmail).Where(item => item is not null)
+        var normalizedEmails = (externalEmails ?? Array.Empty<string>()).Select(NormalizeEmail).Where(item => item is not null)
             .Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var missingEmails = normalizedEmails.Where(email =>
             !HasEffectiveDocumentAccess(register, null, email)).ToList();

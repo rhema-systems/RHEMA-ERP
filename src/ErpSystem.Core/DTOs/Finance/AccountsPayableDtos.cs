@@ -37,6 +37,7 @@ public class VendorInvoiceDto
 
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public decimal BaseCurrencyAmount { get; set; }
 
     public int PaymentTermsDays { get; set; }
@@ -65,6 +66,11 @@ public class VendorInvoiceDto
     public decimal MatchingPriceTolerancePercent { get; set; }
     public decimal MatchingQuantityTolerancePercent { get; set; }
     public Guid? MatchExceptionControlEventId { get; set; }
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
+    public string? AcceptedSupplySourceReference { get; set; }
+    public string? AcceptedSupplySnapshotHash { get; set; }
+    public DateTime? AcceptedSupplyValidatedAtUtc { get; set; }
 
     // Status
     public VendorInvoiceStatus Status { get; set; }
@@ -105,6 +111,7 @@ public class VendorInvoiceCreateDto
 
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public int PaymentTermsDays { get; set; } = 30;
     public Guid? PaymentTermId { get; set; }
@@ -122,6 +129,16 @@ public class VendorInvoiceCreateDto
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
+
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
+
+    /// <summary>
+    /// Server-only flag used by the QS owner when handing an approved Works
+    /// certificate to AP. It cannot be supplied by an API client.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsTrustedAcceptedSupplyHandoff { get; set; }
 
     // GL accounts
     public Guid? ExpenseAccountId { get; set; }
@@ -142,6 +159,8 @@ public class VendorInvoiceUpdateDto
 
     public string? SupplierInvoiceNumber { get; set; }
     public Guid? PurchaseOrderId { get; set; }
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
 
     public DateTime InvoiceDate { get; set; }
     public DateTime? ReceivedDate { get; set; }
@@ -149,6 +168,7 @@ public class VendorInvoiceUpdateDto
 
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public int PaymentTermsDays { get; set; } = 30;
     public Guid? PaymentTermId { get; set; }
@@ -200,6 +220,7 @@ public class VendorInvoiceLineItemDto
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
     public string? GLAccountName { get; set; }
+    public Guid? BudgetEntryId { get; set; }
     public Guid? FixedAssetId { get; set; }
     public Guid? CapitalizationJournalEntryId { get; set; }
     public Guid? CapitalizationPostingEventId { get; set; }
@@ -226,6 +247,7 @@ public class VendorInvoiceLineItemCreateDto
 {
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
+    public Guid? BudgetEntryId { get; set; }
     public Guid? FixedAssetId { get; set; }
     /// <summary>
     /// Legacy procurement PO line id only; do not send FinancePurchaseOrderItem ids in this field.
@@ -523,6 +545,7 @@ public class VendorPaymentDto
     public string? PaymentMethodName { get; set; }
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
     public Guid? BankAccountId { get; set; }
     public string? BankAccountName { get; set; }
     public string? ChequeNumber { get; set; }
@@ -572,6 +595,27 @@ public class VendorPaymentDto
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
+    public List<SupplierDebitNoteApplicationDto> SupplierDebitNoteApplications { get; set; } = new();
+}
+
+/// <summary>
+/// Restricted Finance-owned read model used by downstream contract controls. It deliberately
+/// excludes bank, cheque and authorization details while proving that the supplier advance is
+/// posted, active and still has an unapplied balance.
+/// </summary>
+public sealed class PostedSupplierAdvanceDto
+{
+    public Guid Id { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public Guid SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public DateTime PaymentDate { get; set; }
+    public decimal TotalAmount { get; set; }
+    public decimal AllocatedAmount { get; set; }
+    public decimal AvailableAmount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public VendorPaymentStatus Status { get; set; }
+    public Guid JournalEntryId { get; set; }
 }
 
 public class VendorPaymentCreateDto
@@ -591,6 +635,7 @@ public class VendorPaymentCreateDto
 
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public Guid? BankAccountId { get; set; }
     public string? ChequeNumber { get; set; }
@@ -736,8 +781,20 @@ public class VendorPaymentAllocationDto
     public Guid VendorInvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public decimal AllocatedAmount { get; set; }
+    public decimal PaymentCurrencyAmount { get; set; }
+    public string InvoiceCurrencyCode { get; set; } = string.Empty;
+    public string PaymentCurrencyCode { get; set; } = string.Empty;
+    public bool IsCrossCurrency { get; set; }
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
+    public decimal InvoiceSettlementExchangeRate { get; set; }
+    public Guid? PaymentExchangeRateId { get; set; }
+    public decimal PaymentExchangeRate { get; set; }
+    public decimal PaymentFunctionalAmount { get; set; }
+    public decimal SettlementFunctionalAmount { get; set; }
     public decimal DiscountAmount { get; set; }
+    public decimal DiscountFunctionalAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
+    public decimal WithholdingTaxFunctionalAmount { get; set; }
     public DateTime AllocationDate { get; set; }
     public string? Notes { get; set; }
     public bool IsReversal { get; set; }
@@ -754,6 +811,20 @@ public class VendorPaymentAllocationCreateDto
     [Required]
     [Range(0.01, double.MaxValue)]
     public decimal AllocatedAmount { get; set; }
+
+    /// <summary>
+    /// Payment/advance-lot amount to consume in payment currency. AllocatedAmount always remains
+    /// the invoice-currency reduction. Same-currency callers may omit this value; cross-currency
+    /// callers must state both native amounts so Finance never invents a commercial conversion.
+    /// </summary>
+    public decimal? PaymentCurrencyAmount { get; set; }
+
+    /// <summary>
+    /// Optional approved invoice-currency rate for the settlement/application date. If omitted,
+    /// Finance resolves the active approved daily mid-rate. A posted advance retains its separate
+    /// origin rate, allowing application-time realized FX to remain reproducible and auditable.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
 
     public decimal DiscountAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
@@ -779,6 +850,11 @@ public class OutstandingVendorInvoiceDto
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    /// <summary>
+    /// Currency in which the payable balance is denominated. Payment-entry clients must use
+    /// this value instead of assuming that every outstanding invoice shares the bank currency.
+    /// </summary>
+    public string CurrencyCode { get; set; } = "GHS";
     public int DaysOverdue { get; set; }
     public decimal? EarlyPaymentDiscountPercentage { get; set; }
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
@@ -974,6 +1050,13 @@ public class ApAgingInvoiceDto
     public decimal CreditedAmount { get; set; }
     public decimal WithheldAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public string DocumentCurrencyCode { get; set; } = "GHS";
+    public decimal DocumentTotalAmount { get; set; }
+    public decimal DocumentSettledAmount { get; set; }
+    public decimal DocumentCreditedAmount { get; set; }
+    public decimal DocumentWithheldAmount { get; set; }
+    public decimal DocumentBalanceAmount { get; set; }
     public Guid? SourcePostingEventId { get; set; }
     public Guid? SourceJournalEntryId { get; set; }
     public string? SettlementStatus { get; set; }
@@ -1045,6 +1128,7 @@ public class SupplierDetailedLedgerReportDto
     public decimal TotalDebits { get; set; }
     public decimal TotalCredits { get; set; }
     public decimal TotalClosingBalance { get; set; }
+    public List<DetailedLedgerCurrencyTotalDto> CurrencyTotals { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
     public List<SupplierDetailedLedgerAccountDto> Suppliers { get; set; } = new();
 }

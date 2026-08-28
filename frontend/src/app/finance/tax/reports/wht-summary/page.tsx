@@ -7,21 +7,29 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 import type { WHTSummaryEntry } from '@/types/tax';
-import { Download, Filter, Search, FileText } from 'lucide-react';
+import { Filter, Search, FileText } from 'lucide-react';
 import Link from 'next/link';
+import { format, startOfMonth } from 'date-fns';
 
 export default function WHTSummaryPage() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [summary, setSummary] = useState<WHTSummaryEntry[]>([]);
     const [filteredSummary, setFilteredSummary] = useState<WHTSummaryEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [startDate, setStartDate] = useState('2024-12-01');
-    const [endDate, setEndDate] = useState('2024-12-31');
+    const [startDate, setStartDate] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+    const [endDate, setEndDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+    const [currencyCode, setCurrencyCode] = useState('GHS');
 
     useEffect(() => {
         loadSummary();
-    }, []);
+    }, [startDate, endDate]);
 
     useEffect(() => {
         filterSummary();
@@ -29,8 +37,12 @@ export default function WHTSummaryPage() {
 
     const loadSummary = async () => {
         try {
-            const data = await taxDataService.getWHTSummary(startDate, endDate);
+            const [data, settings] = await Promise.all([
+                taxDataService.getWHTSummary(startDate, endDate),
+                financeDataService.getFinanceSettings(),
+            ]);
             setSummary(data);
+            setCurrencyCode(settings.baseCurrency);
         } catch (error) {
             console.error('Failed to load WHT summary:', error);
         } finally {
@@ -53,7 +65,10 @@ export default function WHTSummaryPage() {
     };
 
     const formatCurrency = (amount: number) => {
-        return `GHS ${amount.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return new Intl.NumberFormat('en-GH', {
+            style: 'currency',
+            currency: currencyCode,
+        }).format(amount);
     };
 
     const totals = {
@@ -78,7 +93,7 @@ export default function WHTSummaryPage() {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold">Withholding Tax Summary</h1>
-                    <p className="text-muted-foreground">WHT deducted by supplier - December 2024</p>
+                    <p className="text-muted-foreground">WHT deducted by supplier for the selected reporting period</p>
                 </div>
                 <div className="flex gap-2">
                     <Link href="/finance/tax/reports">
@@ -86,10 +101,18 @@ export default function WHTSummaryPage() {
                             All Reports
                         </Button>
                     </Link>
-                    <Button variant="outline">
-                        <Download className="mr-2 h-4 w-4" />
-                        Export
-                    </Button>
+                    {canExport && (
+                        <ReportPdfActions
+                            reportName="withholding tax payable report"
+                            onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                DOCUMENT_TYPES.financeTaxWhtPayable,
+                                { fromDate: startDate, toDate: endDate })}
+                            onPrint={() => documentOutputService.printReportDocument(
+                                DOCUMENT_TYPES.financeTaxWhtPayable,
+                                { fromDate: startDate, toDate: endDate })}
+                            disabled={loading || !startDate || !endDate}
+                        />
+                    )}
                 </div>
             </div>
 
@@ -122,10 +145,7 @@ export default function WHTSummaryPage() {
                                 id="startDate"
                                 type="date"
                                 value={startDate}
-                                onChange={(e) => {
-                                    setStartDate(e.target.value);
-                                    loadSummary();
-                                }}
+                                onChange={(e) => setStartDate(e.target.value)}
                                 className="mt-1"
                             />
                         </div>
@@ -135,10 +155,7 @@ export default function WHTSummaryPage() {
                                 id="endDate"
                                 type="date"
                                 value={endDate}
-                                onChange={(e) => {
-                                    setEndDate(e.target.value);
-                                    loadSummary();
-                                }}
+                                onChange={(e) => setEndDate(e.target.value)}
                                 className="mt-1"
                             />
                         </div>
@@ -147,9 +164,8 @@ export default function WHTSummaryPage() {
                                 variant="outline"
                                 onClick={() => {
                                     setSearchTerm('');
-                                    setStartDate('2024-12-01');
-                                    setEndDate('2024-12-31');
-                                    loadSummary();
+                                    setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+                                    setEndDate(format(new Date(), 'yyyy-MM-dd'));
                                 }}
                                 className="w-full"
                             >

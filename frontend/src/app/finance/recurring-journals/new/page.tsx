@@ -1,17 +1,142 @@
 'use client';
-import { useMemo, useState } from 'react';
+
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Save } from 'lucide-react';
-import { Badge } from '@/components/ui/badge'; import { Button } from '@/components/ui/button'; import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card'; import { Input } from '@/components/ui/input'; import { Label } from '@/components/ui/label'; import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select'; import { Switch } from '@/components/ui/switch'; import { Textarea } from '@/components/ui/textarea';
-import { saveDemoTemplate } from '@/lib/finance/recurring-journal-demo';
-export default function NewRecurringJournalPage(){
- const router=useRouter(); const [step,setStep]=useState(1); const [name,setName]=useState('Monthly Management Fee Accrual'); const [description,setDescription]=useState('Accrue monthly management fees and allocate across operating departments.'); const [frequency,setFrequency]=useState('Monthly'); const [amount,setAmount]=useState('30000'); const [day,setDay]=useState('Last business day'); const [autoReverse,setAutoReverse]=useState(true); const [reference,setReference]=useState('MGMT-{Period}-{Sequence}');
- const dates=useMemo(()=>['31 Jul 2026','31 Aug 2026','30 Sep 2026','30 Oct 2026','30 Nov 2026'],[frequency,day]);
- const submit=()=>{const id='demo-'+Date.now();saveDemoTemplate({id,templateNumber:`RJ-2026-${String(Date.now()).slice(-4)}`,name,description,frequency,schedule:day,nextDue:'2026-07-31',amount:Number(amount),status:'Pending Approval',owner:'Akwasi Adu-Kyeremeh',autoReverse,referencePattern:reference,submittedAt:new Date().toISOString()});router.push(`/finance/recurring-journals/${id}`)};
- return <div className="mx-auto max-w-6xl space-y-6"><div><Badge variant="outline" className="mb-2 border-blue-300 text-blue-700">Demo Preview</Badge><h1 className="text-3xl font-bold">New Recurring Journal</h1><p className="text-muted-foreground">Create a controlled, approval-backed recurring journal template.</p></div><div className="grid grid-cols-4 gap-2">{['Basics','Journal lines','Schedule','Review'].map((x,i)=><div key={x} className={`rounded-lg border p-3 text-sm ${step===i+1?'border-blue-600 bg-blue-50 text-blue-800':step>i+1?'bg-emerald-50 text-emerald-800':''}`}><span className="mr-2 font-bold">{step>i+1?<Check className="inline h-4 w-4"/>:i+1}</span>{x}</div>)}</div>
- {step===1&&<Card><CardHeader><CardTitle>Template basics</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2"><div><Label>Name</Label><Input value={name} onChange={e=>setName(e.target.value)}/></div><div><Label>Reference pattern</Label><Input value={reference} onChange={e=>setReference(e.target.value)}/><p className="mt-1 text-xs text-muted-foreground">Tokens: {'{TemplateNumber} {Period} {ScheduledDate} {Sequence}'}</p></div><div className="md:col-span-2"><Label>Description</Label><Textarea value={description} onChange={e=>setDescription(e.target.value)}/></div></CardContent></Card>}
- {step===2&&<Card><CardHeader><CardTitle>Balanced journal & allocation</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><div><Label>Fixed template total (GHS)</Label><Input type="number" value={amount} onChange={e=>setAmount(e.target.value)}/></div><div><Label>Book</Label><Input value="IFRS" readOnly/></div><div><Label>Allocation method</Label><Input value="Percentage allocation" readOnly/></div></div><div className="overflow-hidden rounded-lg border"><table className="w-full text-sm"><thead className="bg-muted"><tr><th className="p-3 text-left">Account / dimension</th><th>Debit</th><th>Credit</th><th>Allocation</th></tr></thead><tbody><tr className="border-t"><td className="p-3">610100 · Management Fees<br/><span className="text-xs text-muted-foreground">Departments: Operations 60% · Administration 40%</span></td><td className="text-center">GHS {Number(amount).toLocaleString()}</td><td></td><td className="text-center">100%</td></tr><tr className="border-t"><td className="p-3">220200 · Accrued Expenses</td><td></td><td className="text-center">GHS {Number(amount).toLocaleString()}</td><td></td></tr></tbody></table></div><div className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">Balanced · Debits and credits both equal GHS {Number(amount).toLocaleString()}</div></CardContent></Card>}
- {step===3&&<Card><CardHeader><CardTitle>Schedule & reversal</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2"><div><Label>Frequency</Label><Select value={frequency} onValueChange={setFrequency}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{['Weekly','Semi-monthly','Monthly','Quarterly','Annually','Custom rule'].map(x=><SelectItem value={x} key={x}>{x}</SelectItem>)}</SelectContent></Select></div><div><Label>Run rule</Label><Select value={day} onValueChange={setDay}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{['Last business day','1st and 15th','15th and month-end','First Monday','Selected weekdays'].map(x=><SelectItem value={x} key={x}>{x}</SelectItem>)}</SelectContent></Select></div><div><Label>Starts</Label><Input type="date" defaultValue="2026-07-31"/></div><div><Label>End condition</Label><Select defaultValue="none"><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="none">No end date</SelectItem><SelectItem value="date">Specific date</SelectItem><SelectItem value="count">Maximum occurrences</SelectItem></SelectContent></Select></div><div className="flex items-center justify-between rounded-lg border p-4 md:col-span-2"><div><p className="font-medium">Automatic reversal</p><p className="text-sm text-muted-foreground">Create reversal draft on first day of next fiscal period; approval still required.</p></div><Switch checked={autoReverse} onCheckedChange={setAutoReverse}/></div><div className="rounded-lg border bg-blue-50/60 p-4 md:col-span-2"><p className="mb-3 flex items-center gap-2 font-medium"><CalendarDays className="h-4 w-4"/>Next five scheduled dates</p><div className="flex flex-wrap gap-2">{dates.map(x=><Badge key={x} variant="outline" className="bg-white">{x}</Badge>)}</div><p className="mt-3 text-xs text-muted-foreground">Business-day policy: Next business day; previous business day when month-end would cross a fiscal period.</p></div></CardContent></Card>}
- {step===4&&<Card><CardHeader><CardTitle>Review and submit for activation</CardTitle></CardHeader><CardContent className="space-y-5"><div className="grid gap-4 md:grid-cols-3">{[['Template',name],['Amount',`GHS ${Number(amount).toLocaleString()}`],['Schedule',`${frequency} · ${day}`],['Reference',reference],['Reversal',autoReverse?'First day next period':'None'],['Workflow','Accounts Officer → Finance Manager → Financial Controller']].map(([a,b])=><div className="rounded-lg border p-4" key={a}><p className="text-xs text-muted-foreground">{a}</p><p className="mt-1 font-medium">{b}</p></div>)}</div><div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Demo action: submission stores this template only in this browser and displays the planned Pending Approval state. No workflow or GL posting occurs.</div></CardContent></Card>}
- <div className="flex justify-between"><Button variant="outline" onClick={()=>step===1?router.push('/finance/recurring-journals'):setStep(step-1)}><ArrowLeft className="mr-2 h-4 w-4"/>{step===1?'Cancel':'Back'}</Button>{step<4?<Button onClick={()=>setStep(step+1)}>Continue<ArrowRight className="ml-2 h-4 w-4"/></Button>:<Button onClick={submit}><Save className="mr-2 h-4 w-4"/>Submit for activation</Button>}</div></div>
+import Link from 'next/link';
+import { ArrowLeft, Loader2, Save, ShieldCheck } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/hooks/use-toast';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import {
+  recurringJournalDataService,
+  type BusinessDayConvention,
+  type CreateRecurringJournalTemplate,
+  type RecurrenceFrequency,
+} from '@/services/finance/recurring-journal-data.service';
+import type { Account } from '@/types/finance';
+
+type ScheduleChoice = 'month-end' | 'day-one' | 'semi-monthly';
+
+export default function NewRecurringJournalPage() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [referencePattern, setReferencePattern] = useState('{TemplateNumber}-{Period}-{Sequence}');
+  const [amount, setAmount] = useState('');
+  const [debitAccountId, setDebitAccountId] = useState('');
+  const [creditAccountId, setCreditAccountId] = useState('');
+  const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  const [schedule, setSchedule] = useState<ScheduleChoice>('month-end');
+  const [autoReverse, setAutoReverse] = useState(false);
+  const [submissionReason, setSubmissionReason] = useState('Configured for independent Finance review and controlled activation.');
+
+  useEffect(() => {
+    void financeDataService.getAccounts({ status: 'Active', take: 2000 })
+      .then(items => setAccounts(items.filter(item => item.allowDirectPosting && !item.isControlAccount)))
+      .catch(error => toast({ title: 'Chart of accounts could not be loaded', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' }));
+  }, [toast]);
+
+  const scheduleDefinition = useMemo((): {
+    frequency: RecurrenceFrequency;
+    recurrenceRuleJson: string;
+    convention: BusinessDayConvention;
+    label: string;
+  } => {
+    if (schedule === 'day-one') return {
+      frequency: 'Monthly', recurrenceRuleJson: JSON.stringify({ daysOfMonth: [1] }),
+      convention: 'NextBusinessDay', label: 'First business day of each month',
+    };
+    if (schedule === 'semi-monthly') return {
+      frequency: 'SemiMonthly', recurrenceRuleJson: JSON.stringify({ daysOfMonth: [15, 31] }),
+      convention: 'PreviousBusinessDay', label: '15th and month-end, adjusted backward',
+    };
+    // Month-end schedules move backward so a weekend/holiday never pushes an
+    // accrual into the next fiscal period.
+    return {
+      frequency: 'Monthly', recurrenceRuleJson: JSON.stringify({ lastCalendarDay: true }),
+      convention: 'PreviousBusinessDay', label: 'Last business day of each month',
+    };
+  }, [schedule]);
+
+  const submit = async () => {
+    const fixedAmount = Number(amount);
+    if (!name.trim() || !debitAccountId || !creditAccountId || !effectiveFrom || !Number.isFinite(fixedAmount) || fixedAmount <= 0) {
+      toast({ title: 'Complete the required fields', description: 'Name, effective date, debit account, credit account and a positive amount are required.', variant: 'destructive' });
+      return;
+    }
+    if (debitAccountId === creditAccountId) {
+      toast({ title: 'Select different accounts', description: 'A recurring journal cannot debit and credit the same account.', variant: 'destructive' });
+      return;
+    }
+    if (submissionReason.trim().length < 10) {
+      toast({ title: 'Add a meaningful submission reason', description: 'The reason must contain at least 10 characters for the audit trail.', variant: 'destructive' });
+      return;
+    }
+
+    const request: CreateRecurringJournalTemplate = {
+      name: name.trim(), description: description.trim() || undefined,
+      journalType: 'Recurring', bookClassification: 'IFRS', currencyCode: 'GHS',
+      referencePattern: referencePattern.trim() || undefined,
+      effectiveFrom, timeZoneId: 'Africa/Accra', frequency: scheduleDefinition.frequency,
+      interval: 1, recurrenceRuleJson: scheduleDefinition.recurrenceRuleJson,
+      businessDayConvention: scheduleDefinition.convention,
+      autoReverse, reversalRule: autoReverse ? 'FirstDayOfNextFiscalPeriod' : 'None',
+      lines: [
+        { accountId: debitAccountId, isDebit: true, fixedAmount, description: description.trim() || name.trim(), dimensionValuesJson: '{}' },
+        { accountId: creditAccountId, isDebit: false, fixedAmount, description: description.trim() || name.trim(), dimensionValuesJson: '{}' },
+      ],
+    };
+
+    setSaving(true);
+    try {
+      const created = await recurringJournalDataService.create(request);
+      await recurringJournalDataService.submit(created.id, submissionReason.trim());
+      toast({ title: 'Recurring journal submitted', description: `${created.templateNumber} now awaits an independent approver.` });
+      router.push(`/finance/recurring-journals/${created.id}`);
+    } catch (error) {
+      toast({ title: 'Recurring journal was not submitted', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="mx-auto max-w-6xl space-y-6">
+    <div>
+      <Button variant="ghost" asChild className="mb-3"><Link href="/finance/recurring-journals"><ArrowLeft className="mr-2 h-4 w-4" />Recurring journals</Link></Button>
+      <h1 className="text-3xl font-bold">New Recurring Journal</h1>
+      <p className="text-muted-foreground">Create a balanced standing instruction and send it through maker-checker activation.</p>
+    </div>
+
+    <Card><CardHeader><CardTitle>Template intent</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2">
+      <div><Label htmlFor="name">Name</Label><Input id="name" value={name} onChange={event => setName(event.target.value)} placeholder="Monthly rent accrual" /></div>
+      <div><Label htmlFor="reference">Reference pattern</Label><Input id="reference" value={referencePattern} onChange={event => setReferencePattern(event.target.value)} /><p className="mt-1 text-xs text-muted-foreground">Tokens: {'{TemplateNumber} {Period} {ScheduledDate} {Sequence}'}</p></div>
+      <div className="md:col-span-2"><Label htmlFor="description">Purpose and accounting background</Label><Textarea id="description" value={description} onChange={event => setDescription(event.target.value)} placeholder="Explain why this entry recurs and what it recognises." /></div>
+    </CardContent></Card>
+
+    <Card><CardHeader><CardTitle>Balanced IFRS journal</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-3">
+      <div><Label htmlFor="amount">Fixed amount (GHS)</Label><Input id="amount" type="number" min="0.01" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></div>
+      <div><Label>Debit account</Label><Select value={debitAccountId} onValueChange={setDebitAccountId}><SelectTrigger><SelectValue placeholder="Select posting account" /></SelectTrigger><SelectContent>{accounts.map(item => <SelectItem key={item.id} value={item.id}>{item.accountCode} · {item.accountName}</SelectItem>)}</SelectContent></Select></div>
+      <div><Label>Credit account</Label><Select value={creditAccountId} onValueChange={setCreditAccountId}><SelectTrigger><SelectValue placeholder="Select posting account" /></SelectTrigger><SelectContent>{accounts.map(item => <SelectItem key={item.id} value={item.id}>{item.accountCode} · {item.accountName}</SelectItem>)}</SelectContent></Select></div>
+      <div className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800 md:col-span-3">Debits and credits will use the same fixed amount. The server validates balance and posting-account eligibility again before saving.</div>
+    </CardContent></Card>
+
+    <Card><CardHeader><CardTitle>Schedule, reversal and submission</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2">
+      <div><Label>Schedule</Label><Select value={schedule} onValueChange={value => setSchedule(value as ScheduleChoice)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="month-end">Last business day monthly</SelectItem><SelectItem value="day-one">First business day monthly</SelectItem><SelectItem value="semi-monthly">15th and month-end</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{scheduleDefinition.label}</p></div>
+      <div><Label htmlFor="effective">Effective from</Label><Input id="effective" type="date" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} /></div>
+      <div className="flex items-center justify-between rounded-lg border p-4 md:col-span-2"><div><p className="font-medium">Prepare reversal on the next fiscal period</p><p className="text-sm text-muted-foreground">The reversal due date is recorded for control; it does not silently post a journal.</p></div><Switch checked={autoReverse} onCheckedChange={setAutoReverse} /></div>
+      <div className="md:col-span-2"><Label htmlFor="reason">Submission reason</Label><Textarea id="reason" value={submissionReason} onChange={event => setSubmissionReason(event.target.value)} /></div>
+      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 md:col-span-2"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Submitting does not activate or post the template. A different user must approve the standing instruction; every generated occurrence then receives a separate approval before posting.</p></div>
+    </CardContent></Card>
+
+    <div className="flex justify-between"><Button variant="outline" asChild><Link href="/finance/recurring-journals">Cancel</Link></Button><Button onClick={submit} disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Create and submit</Button></div>
+  </div>;
 }

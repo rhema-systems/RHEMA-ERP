@@ -25,6 +25,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
     private readonly IWorkflowStepRepository _workflowStepRepository;
     private readonly IWorkflowTransitionRepository _workflowTransitionRepository;
     private readonly IWorkflowEntityTypeRepository _workflowEntityTypeRepository;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<WorkflowDefinitionServiceAdapter> _logger;
 
     public WorkflowDefinitionServiceAdapter(
@@ -34,6 +35,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         IWorkflowStepRepository workflowStepRepository,
         IWorkflowTransitionRepository workflowTransitionRepository,
         IWorkflowEntityTypeRepository workflowEntityTypeRepository,
+        IUnitOfWork unitOfWork,
         ILogger<WorkflowDefinitionServiceAdapter> logger)
     {
         _coreService = coreService;
@@ -42,6 +44,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         _workflowStepRepository = workflowStepRepository;
         _workflowTransitionRepository = workflowTransitionRepository;
         _workflowEntityTypeRepository = workflowEntityTypeRepository;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
@@ -89,7 +92,8 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             await CreateStepsAndTransitionsAsync(definition, createDto, tenantId);
         }
 
-        return await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id) ?? definition;
+        // Re-read without tracking so the returned graph reflects database filters.
+        return await GetDefinitionForLifecycleValidationAsync(definition.Id, definition.TenantId);
     }
 
     public async Task<WorkflowDefinition> UpdateWorkflowDefinitionAsync(Guid id, UpdateWorkflowDefinitionDto updateDto)
@@ -135,29 +139,31 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             ? modifiedById
             : null;
 
-        await _workflowDefinitionRepository.UpdateAsync(definition);
-        await _workflowDefinitionRepository.SaveChangesAsync();
-
-        if (updateDto.Steps != null && updateDto.Steps.Any())
+        await _unitOfWork.ExecuteInTransactionAsync(async cancellationToken =>
         {
-            await _workflowTransitionRepository.DeleteRangeAsync(t => t.WorkflowDefinitionId == definition.Id);
-            await _workflowTransitionRepository.SaveChangesAsync();
-            await _workflowStepRepository.DeleteRangeAsync(s => s.WorkflowDefinitionId == definition.Id);
-            await _workflowStepRepository.SaveChangesAsync();
+            await _workflowDefinitionRepository.UpdateAsync(definition);
 
-            await CreateStepsAndTransitionsAsync(definition, new CreateWorkflowDefinitionDto
+            if (updateDto.Steps != null && updateDto.Steps.Any())
             {
-                Name = definition.Name,
-                Description = definition.Description,
-                EntityType = definition.EntityType?.Name ?? updateDto.EntityType ?? string.Empty,
-                Configuration = definition.Configuration,
-                CreatedById = modifiedById,
-                Steps = updateDto.Steps ?? new List<CreateWorkflowStepDto>(),
-                Transitions = updateDto.Transitions ?? new List<CreateWorkflowTransitionDto>()
-            }, definition.TenantId);
-        }
+                await _workflowTransitionRepository.DeleteRangeAsync(t => t.WorkflowDefinitionId == definition.Id);
+                await _workflowStepRepository.DeleteRangeAsync(s => s.WorkflowDefinitionId == definition.Id);
 
-        return await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id) ?? definition;
+                await CreateStepsAndTransitionsAsync(definition, new CreateWorkflowDefinitionDto
+                {
+                    Name = definition.Name,
+                    Description = definition.Description,
+                    EntityType = definition.EntityType?.Name ?? updateDto.EntityType ?? string.Empty,
+                    Configuration = definition.Configuration,
+                    CreatedById = modifiedById,
+                    Steps = updateDto.Steps,
+                    Transitions = updateDto.Transitions ?? new List<CreateWorkflowTransitionDto>()
+                }, definition.TenantId, saveChanges: false);
+            }
+        });
+
+        // Re-read without tracking so soft-deleted graph rows already present in the
+        // change tracker cannot leak back into the update response/navigation graph.
+        return await GetDefinitionForLifecycleValidationAsync(definition.Id, definition.TenantId);
     }
 
     public async Task<WorkflowDefinition> CloneWorkflowDefinitionDraftAsync(
@@ -605,7 +611,8 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
     private async Task CreateStepsAndTransitionsAsync(
         WorkflowDefinition definition,
         CreateWorkflowDefinitionDto template,
-        Guid tenantId)
+        Guid tenantId,
+        bool saveChanges = true)
     {
         var orderedSteps = template.Steps.OrderBy(s => s.Order).ToList();
         if (!orderedSteps.Any())
@@ -614,12 +621,17 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         }
 
         var stepEntities = new List<WorkflowStep>();
+        var requestedStepIdMap = new Dictionary<Guid, Guid>();
         for (var i = 0; i < orderedSteps.Count; i++)
         {
             var stepDto = orderedSteps[i];
-            var stepId = stepDto.Id.HasValue && stepDto.Id.Value != Guid.Empty
-                ? stepDto.Id.Value
-                : Guid.NewGuid();
+            // Client step IDs identify transition endpoints only. Persist fresh IDs so a
+            // replacement graph cannot collide with the soft-deleted audit history.
+            var stepId = Guid.NewGuid();
+            if (stepDto.Id is { } requestedStepId && requestedStepId != Guid.Empty)
+            {
+                requestedStepIdMap[requestedStepId] = stepId;
+            }
 
             var stepEntity = new WorkflowStep
             {
@@ -644,7 +656,6 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         }
 
         await _workflowStepRepository.AddRangeAsync(stepEntities);
-        await _workflowStepRepository.SaveChangesAsync();
 
         var transitions = new List<WorkflowTransition>();
         if (template.Transitions.Any())
@@ -652,7 +663,13 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
             var stepIds = stepEntities.Select(s => s.Id).ToHashSet();
             foreach (var transitionDto in template.Transitions)
             {
-                if (!stepIds.Contains(transitionDto.FromStepId) || !stepIds.Contains(transitionDto.ToStepId))
+                var fromStepId = requestedStepIdMap.GetValueOrDefault(
+                    transitionDto.FromStepId,
+                    transitionDto.FromStepId);
+                var toStepId = requestedStepIdMap.GetValueOrDefault(
+                    transitionDto.ToStepId,
+                    transitionDto.ToStepId);
+                if (!stepIds.Contains(fromStepId) || !stepIds.Contains(toStepId))
                 {
                     continue;
                 }
@@ -661,8 +678,8 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
                 {
                     Id = Guid.NewGuid(),
                     WorkflowDefinitionId = definition.Id,
-                    FromStepId = transitionDto.FromStepId,
-                    ToStepId = transitionDto.ToStepId,
+                    FromStepId = fromStepId,
+                    ToStepId = toStepId,
                     Name = transitionDto.Name,
                     Description = transitionDto.Description,
                     Condition = transitionDto.Condition != null
@@ -699,6 +716,10 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         if (transitions.Any())
         {
             await _workflowTransitionRepository.AddRangeAsync(transitions);
+        }
+
+        if (saveChanges)
+        {
             await _workflowTransitionRepository.SaveChangesAsync();
         }
     }

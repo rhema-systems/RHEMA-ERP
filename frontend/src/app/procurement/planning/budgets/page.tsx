@@ -25,6 +25,7 @@ import { procurementBudgetService, type ProcurementBudgetDto } from '@/services/
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 export default function ProcurementBudgetsPage() {
   const router = useRouter();
@@ -34,6 +35,8 @@ export default function ProcurementBudgetsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [budgetToDelete, setBudgetToDelete] = useState<ProcurementBudgetDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadBudgets();
@@ -75,15 +78,19 @@ export default function ProcurementBudgetsPage() {
     router.push('/procurement/planning/budgets/new');
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this budget?')) return;
+  const handleDelete = async () => {
+    if (!budgetToDelete) return false;
     try {
-      await procurementBudgetService.deleteBudget(id);
+      setDeleting(true);
+      await procurementBudgetService.deleteBudget(budgetToDelete.id);
       toast.success('Budget deleted successfully');
-      loadBudgets();
+      await loadBudgets();
     } catch (error) {
       console.error('Error deleting budget:', error);
-      toast.error('Failed to delete budget');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete budget');
+      return false;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -227,7 +234,7 @@ export default function ProcurementBudgetsPage() {
                           {budget.status === 'Draft' && (
                             <>
                               <Button variant="ghost" size="sm" onClick={() => handleEdit(budget.id)} title="Edit"><Edit className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="sm" onClick={() => handleDelete(budget.id)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => setBudgetToDelete(budget)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
                             </>
                           )}
                         </div>
@@ -249,6 +256,19 @@ export default function ProcurementBudgetsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={budgetToDelete !== null}
+        onOpenChange={(open) => { if (!open) setBudgetToDelete(null); }}
+        title="Delete procurement budget?"
+        description={budgetToDelete
+          ? `Delete ${budgetToDelete.budgetCode}? This action is available only while the budget is still a draft.`
+          : undefined}
+        confirmText="Delete budget"
+        variant="destructive"
+        onConfirm={handleDelete}
+        isLoading={deleting}
+      />
     </div>
   );
 }

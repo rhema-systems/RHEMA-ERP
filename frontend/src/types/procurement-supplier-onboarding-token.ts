@@ -1,19 +1,10 @@
 export type SupplierOnboardingFeeMode = 'Free' | 'Paid';
 export type SupplierOnboardingTokenStatus =
-  | 'AwaitingPayment'
-  | 'Active'
-  | 'Expired';
+  'AwaitingPayment' | 'Active' | 'Expired';
 export type SupplierOnboardingPaymentStatus =
-  | 'NotRequired'
-  | 'Pending'
-  | 'Posted'
-  | 'Reconciled'
-  | 'Exempt'
-  | 'Failed';
+  'NotRequired' | 'Pending' | 'Posted' | 'Reconciled' | 'Exempt' | 'Failed';
 export type SupplierOnboardingExemptionStatus =
-  | 'PendingApproval'
-  | 'Approved'
-  | 'Rejected';
+  'PendingApproval' | 'Approved' | 'Rejected';
 
 export interface SupplierOnboardingTokenSearch {
   search?: string;
@@ -30,6 +21,14 @@ export interface SupplierOnboardingTokenSummary {
   expiredCount: number;
   pendingReconciliationCount: number;
   postedAmount: number;
+}
+
+export interface SupplierOnboardingRegistrationOption {
+  registrationId: string;
+  registrationNumber: string;
+  applicantName: string;
+  registrationCategory?: 'Goods' | 'Works' | 'Services';
+  status: string;
 }
 
 export interface SupplierOnboardingTokenListItem {

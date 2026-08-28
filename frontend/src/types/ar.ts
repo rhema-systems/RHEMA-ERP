@@ -60,6 +60,7 @@ export interface InvoiceLineItem {
     quantity: number;
     unitPrice: number;
     taxRate: number;
+    taxAmount?: number;
     taxCode?: string;
     unit?: string;
     discountPercentage: number;
@@ -72,18 +73,27 @@ export interface Invoice {
     invoiceNumber: string;
     customerId: string;
     customerName: string;
+    customerAddress?: string;
     invoiceDate: string;
-    dueDate: string;
+    dueDate: string | null;
+    subTotal?: number;
+    taxAmount?: number;
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
-    status: 'Draft' | 'Sent' | 'Posted' | 'Paid' | 'Void' | 'Overdue';
+    status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
     currencyCode: string;
     exchangeRate: number;
+    exchangeRateId?: string;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
+    reference?: string;
     isOpeningBalance: boolean;
+    earlyPaymentDiscountPercentage?: number;
+    earlyPaymentDiscountDueDate?: string;
+    earlyPaymentDiscountAmount?: number;
+    journalEntryId?: string;
     notes?: string;
     lineItems: InvoiceLineItem[];
     tenantId: string;
@@ -97,6 +107,7 @@ export interface InvoiceCreateRequest {
     dueDate?: string;
     currencyCode: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;
@@ -145,6 +156,8 @@ export interface CustomerPayment {
     status: 'Draft' | 'Approved' | 'Pending' | 'Posted' | 'Cleared' | 'Reversed' | 'Void' | 'Bounced';
     currencyCode: string;
     exchangeRate: number;
+    /** Approved rate-master row frozen when this receipt was recorded. */
+    exchangeRateId?: string;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string;
     withholdingTaxAmount: number;
@@ -186,6 +199,8 @@ export interface PaymentCreateRequest {
     transactionReference?: string;
     currencyCode: string;
     exchangeRate?: number;
+    /** Optional approved rate selected by the UI; the API resolves the daily rate when omitted. */
+    exchangeRateId?: string;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string;
     withholdingTaxAmount?: number;
@@ -205,7 +220,23 @@ export interface PaymentAllocation {
     invoiceId: string;
     invoiceNumber: string;
     allocatedAmount: number;
+    /** Amount consumed from the receipt currency; differs from allocatedAmount for FX settlement. */
+    paymentCurrencyAmount: number;
+    invoiceCurrencyCode: string;
+    paymentCurrencyCode: string;
+    isCrossCurrency: boolean;
+    invoiceSettlementExchangeRateId?: string;
+    invoiceSettlementExchangeRate: number;
+    paymentExchangeRateId?: string;
+    paymentExchangeRate: number;
+    paymentFunctionalAmount: number;
+    settlementFunctionalAmount: number;
     discountAmount?: number;
+    discountFunctionalAmount: number;
+    withholdingTaxAmount: number;
+    withholdingTaxFunctionalAmount: number;
+    vatWithholdingAmount: number;
+    vatWithholdingFunctionalAmount: number;
     allocationDate: string;
     notes?: string;
     isReversal: boolean;
@@ -287,7 +318,14 @@ export interface PaymentAllocationRequest {
 export interface InvoiceAllocationRequest {
     invoiceId: string;
     allocatedAmount: number;
+    /** Required when the receipt currency and invoice currency differ. */
+    paymentCurrencyAmount?: number;
+    invoiceSettlementExchangeRateId?: string;
     discountAmount?: number;
+    /** Invoice-currency statutory deduction allocated to this invoice. */
+    withholdingTaxAmount?: number;
+    /** Invoice-currency VAT withholding allocated to this invoice. */
+    vatWithholdingAmount?: number;
     notes?: string;
 }
 
@@ -309,9 +347,38 @@ export interface AgingBucket {
 
 export interface AgingReport {
     asOfDate: string;
+    currencyCode: string;
+    usesSettlementReadModel: boolean;
     buckets: AgingBucket[];
-    totalOutstanding: number;
-    customerDetails?: any[]; // Simplified for summary view
+    summary: {
+        totalCurrent: number;
+        totalDays1To30: number;
+        totalDays31To60: number;
+        totalDays61To90: number;
+        totalDays90Plus: number;
+        grandTotal: number;
+        totalCustomers: number;
+        overdueCustomers: number;
+    };
+    customers: Array<{
+        customerId: string;
+        customerCode: string;
+        customerName: string;
+        current: number;
+        days1To30: number;
+        days31To60: number;
+        days61To90: number;
+        days90Plus: number;
+        totalOutstanding: number;
+    }>;
+}
+
+export interface DetailedLedgerCurrencyTotal {
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
 }
 
 export interface CustomerDetailedLedgerReport {
@@ -323,6 +390,7 @@ export interface CustomerDetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals: DetailedLedgerCurrencyTotal[];
     warnings: string[];
     customers: CustomerDetailedLedgerAccount[];
 }

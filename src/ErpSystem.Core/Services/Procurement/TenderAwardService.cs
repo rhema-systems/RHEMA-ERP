@@ -760,14 +760,14 @@ public class TenderAwardService : ITenderAwardService
 
     private async Task EnsureLegacyAwardAllowedAsync(Guid tenderId)
     {
-        if (await _tenderControlService.IsNctOrIctAsync(tenderId))
+        if (await _tenderControlService.IsControlledTenderMethodAsync(tenderId))
             throw new ProcurementTenderControlConflictException(
                 "TENDER_STATUTORY_AWARD_REQUIRED",
-                "NCT/ICT awards and downstream PO handoff require the statutory approval, contract, and bidder-acceptance control.");
+                "NCT, ICT, QBS, and QCBS awards and downstream PO handoff require the controlled approval, contract, and bidder-acceptance lifecycle.");
         if (await _exceptionalSourcingControlService.IsExceptionalAsync(tenderId))
             throw new ProcurementExceptionalSourcingConflictException(
                 "EXCEPTIONAL_AWARD_CONTROL_REQUIRED",
-                "Restricted and single-source awards require completed justification, authority approval, negotiation, filing, and statutory control.");
+                "Restricted, single-source, and petty-purchase awards must use the dedicated controlled sourcing lifecycle.");
     }
 }
 

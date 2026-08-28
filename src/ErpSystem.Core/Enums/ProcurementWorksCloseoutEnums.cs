@@ -30,3 +30,11 @@ public enum ProcurementWorksCloseoutCheckStatus
     NotRequired = 2,
     Pending = 3
 }
+
+public enum ProcurementRetentionReleaseStage
+{
+    PracticalCompletion = 0,
+    SectionalTakeover = 1,
+    DefectsLiability = 2,
+    FinalRelease = 3
+}

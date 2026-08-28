@@ -1951,7 +1951,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var detail = GetOrCreateDetail(
                     balance.CounterpartyId,
                     invoiceNames.GetValueOrDefault(balance.SourceDocumentId) ?? "Supplier");
-                AddToSupplierAgingBucket(detail, balance.OutstandingAmount, balance.DueDate, balance.TransactionDate, date);
+                AddToSupplierAgingBucket(
+                    detail,
+                    ToFunctionalAmount(balance, balance.OutstandingAmount),
+                    balance.DueDate,
+                    balance.TransactionDate,
+                    date);
                 detail.InvoiceCount++;
 
                 if (detail.OldestInvoiceDate == null || balance.TransactionDate < detail.OldestInvoiceDate)
@@ -1968,7 +1973,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (!adjustment.SupplierId.HasValue)
                     continue;
 
-                var amount = GetSignedApSubledgerAmount(adjustment);
+                var amount = GetSignedApSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
@@ -1981,7 +1986,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 if (includeInvoiceDetails && detail.Invoices != null)
                 {
-                    detail.Invoices.Add(MapApAdjustmentToAgingInvoice(adjustment, date));
+                    detail.Invoices.Add(MapApAdjustmentToAgingInvoice(adjustment, date, baseCurrencyCode));
                 }
             }
 
@@ -2234,6 +2239,18 @@ namespace ErpSystem.Api.Services.Finance.AP
             report.TotalDebits = RoundMoney(report.Suppliers.Sum(s => s.TotalDebits));
             report.TotalCredits = RoundMoney(report.Suppliers.Sum(s => s.TotalCredits));
             report.TotalClosingBalance = RoundMoney(report.Suppliers.Sum(s => s.ClosingBalance));
+            report.CurrencyTotals = report.Suppliers
+                .GroupBy(s => s.CurrencyCode, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new DetailedLedgerCurrencyTotalDto
+                {
+                    CurrencyCode = group.Key,
+                    OpeningBalance = RoundMoney(group.Sum(s => s.OpeningBalance)),
+                    TotalDebits = RoundMoney(group.Sum(s => s.TotalDebits)),
+                    TotalCredits = RoundMoney(group.Sum(s => s.TotalCredits)),
+                    ClosingBalance = RoundMoney(group.Sum(s => s.ClosingBalance))
+                })
+                .ToList();
             report.Warnings = report.Warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             return report;
@@ -2254,6 +2271,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     p.Status != VendorPaymentStatus.Voided &&
                     p.WithholdingTaxAmount > 0)
                 .Include(p => p.Supplier)
+                .Include(p => p.Allocations)
                 .ToListAsync(cancellationToken);
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
@@ -2274,9 +2292,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                     SupplierId = g.Key.SupplierId,
                     SupplierName = g.Key.Name,
                     TaxId = g.Key.TaxId,
-                    TotalInvoiceAmount = g.Sum(p => p.TotalAmount),
+                    // All summary money is labelled in functional currency. Allocation snapshots
+                    // prevent payment-currency cash from being combined with functional WHT.
+                    TotalInvoiceAmount = g.Sum(p => p.Allocations
+                        .Where(a => !a.IsDeleted)
+                        .Sum(a => a.SettlementFunctionalAmount)),
                     TotalWithholdingTax = g.Sum(p => p.WithholdingTaxAmount),
-                    TotalNetPayment = g.Sum(p => p.TotalAmount - p.WithholdingTaxAmount),
+                    TotalNetPayment = g.Sum(p => p.Allocations
+                        .Where(a => !a.IsDeleted)
+                        .Sum(a => a.PaymentFunctionalAmount)),
                     TransactionCount = g.Count()
                 })
                 .OrderByDescending(s => s.TotalWithholdingTax)
@@ -2607,11 +2631,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                 InvoiceNumber = balance.SourceDocumentNumber,
                 InvoiceDate = balance.TransactionDate,
                 DueDate = balance.DueDate,
-                TotalAmount = balance.OriginalDocumentAmount,
-                SettledAmount = balance.SettledAmount,
-                CreditedAmount = balance.CreditedAmount,
-                WithheldAmount = balance.WithheldAmount,
-                BalanceAmount = balance.OutstandingAmount,
+                TotalAmount = RoundMoney(balance.OriginalFunctionalAmount),
+                SettledAmount = ToFunctionalAmount(balance, balance.SettledAmount),
+                CreditedAmount = ToFunctionalAmount(balance, balance.CreditedAmount),
+                WithheldAmount = ToFunctionalAmount(balance, balance.WithheldAmount),
+                BalanceAmount = ToFunctionalAmount(balance, balance.OutstandingAmount),
+                CurrencyCode = NormalizeCurrency(balance.FunctionalCurrencyCode, "GHS"),
+                DocumentCurrencyCode = NormalizeCurrency(balance.DocumentCurrencyCode, "GHS"),
+                DocumentTotalAmount = RoundMoney(balance.OriginalDocumentAmount),
+                DocumentSettledAmount = RoundMoney(balance.SettledAmount),
+                DocumentCreditedAmount = RoundMoney(balance.CreditedAmount),
+                DocumentWithheldAmount = RoundMoney(balance.WithheldAmount),
+                DocumentBalanceAmount = RoundMoney(balance.OutstandingAmount),
                 SourcePostingEventId = balance.SourcePostingEventId,
                 SourceJournalEntryId = balance.SourceJournalEntryId,
                 SettlementStatus = balance.SettlementStatus,
@@ -2626,9 +2657,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static ApAgingInvoiceDto MapApAdjustmentToAgingInvoice(
             SubledgerAdjustmentJournal adjustment,
-            DateTime asOfDate)
+            DateTime asOfDate,
+            string functionalCurrencyCode)
         {
-            var amount = GetSignedApSubledgerAmount(adjustment);
+            var amount = GetSignedApSubledgerFunctionalAmount(adjustment);
+            var documentAmount = GetSignedApSubledgerAmount(adjustment);
             var agingDate = adjustment.DueDate ?? adjustment.AdjustmentDate;
             var daysOutstanding = (int)(asOfDate - agingDate).TotalDays;
             return new ApAgingInvoiceDto
@@ -2639,6 +2672,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DueDate = adjustment.DueDate,
                 TotalAmount = amount,
                 BalanceAmount = amount,
+                CurrencyCode = functionalCurrencyCode,
+                DocumentCurrencyCode = NormalizeCurrency(adjustment.CurrencyCode, functionalCurrencyCode),
+                DocumentTotalAmount = documentAmount,
+                DocumentBalanceAmount = documentAmount,
                 DaysOutstanding = Math.Max(0, daysOutstanding),
                 AgingBucket = daysOutstanding <= 30 ? "Current"
                     : daysOutstanding <= 60 ? "31-60"
@@ -2646,6 +2683,30 @@ namespace ErpSystem.Api.Services.Finance.AP
                     : "90+",
                 SettlementStatus = "PostedAdjustment"
             };
+        }
+
+        private static decimal ToFunctionalAmount(SubledgerSettlementBalance balance, decimal documentAmount)
+        {
+            if (documentAmount == 0m)
+                return 0m;
+
+            if (balance.OriginalDocumentAmount == 0m)
+                return RoundMoney(documentAmount);
+
+            return RoundMoney(documentAmount * balance.OriginalFunctionalAmount / balance.OriginalDocumentAmount);
+        }
+
+        private static decimal GetSignedApSubledgerFunctionalAmount(SubledgerAdjustmentJournal adjustment)
+        {
+            var documentAmount = GetSignedApSubledgerAmount(adjustment);
+            if (documentAmount == 0m)
+                return 0m;
+
+            var functionalAmount = adjustment.BaseCurrencyAmount != 0m
+                ? Math.Abs(adjustment.BaseCurrencyAmount)
+                : Math.Abs(adjustment.Amount) * NormalizeExchangeRate(adjustment.ExchangeRate);
+
+            return RoundMoney(documentAmount > 0m ? functionalAmount : -functionalAmount);
         }
 
         private async Task<List<SupplierLedgerSelection>> GetSupplierLedgerSelectionsAsync(

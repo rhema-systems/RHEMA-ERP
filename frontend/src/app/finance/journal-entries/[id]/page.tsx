@@ -7,9 +7,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { ArrowLeft, Printer, Download, CheckCircle, XCircle, FileText, SendHorizontal, ShieldCheck, ShieldX, Loader2, RotateCcw, Paperclip, Upload as UploadIcon, Trash2, History, Users } from 'lucide-react';
+import { ArrowLeft, Printer, Download, CheckCircle, XCircle, FileText, SendHorizontal, ShieldCheck, ShieldX, Loader2, RotateCcw, Paperclip, Upload as UploadIcon, Trash2, History, Users, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
-import type { FinanceJournalAuditLog, JournalEntry, JournalEntryAttachment, PostingStatus } from '@/types/finance';
+import type { FinanceBudgetControlEvaluation, FinanceJournalAuditLog, JournalEntry, JournalEntryAttachment, PostingStatus } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
@@ -42,6 +42,10 @@ export default function JournalEntryDetailPage() {
     const [workflowSummary, setWorkflowSummary] = useState<WorkflowEntitySummaryDto | null>(null);
     const [auditTrail, setAuditTrail] = useState<FinanceJournalAuditLog[]>([]);
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
+    const [budgetControl, setBudgetControl] = useState<FinanceBudgetControlEvaluation | null>(null);
+    const [budgetControlError, setBudgetControlError] = useState<string | null>(null);
+    const [overrideReason, setOverrideReason] = useState('');
+    const [showOverrideForm, setShowOverrideForm] = useState(false);
     
     // Reversal State
     const [showReverseForm, setShowReverseForm] = useState(false);
@@ -77,6 +81,14 @@ export default function JournalEntryDetailPage() {
                 setAuditTrail(auditEvents || []);
             } catch {
                 setAuditTrail([]);
+            }
+
+            try {
+                setBudgetControl(await financeDataService.getJournalEntryBudgetControl(id));
+                setBudgetControlError(null);
+            } catch (error: any) {
+                setBudgetControl(null);
+                setBudgetControlError(error?.message || 'Budget control could not be evaluated.');
             }
         } catch (err) {
             toast({ title: 'Error', description: 'Failed to load journal entry', variant: 'destructive' });
@@ -157,10 +169,10 @@ export default function JournalEntryDetailPage() {
         return String(stepType).replace(/([a-z])([A-Z])/g, '$1 $2');
     };
 
-    const formatCurrency = (amount: number) => {
+    const formatCurrency = (amount: number, currencyCode?: string) => {
         return new Intl.NumberFormat('en-GH', {
             style: 'currency',
-            currency: entry?.primaryCurrency || 'GHS',
+            currency: currencyCode || entry?.primaryCurrency || 'GHS',
         }).format(amount);
     };
 
@@ -236,6 +248,25 @@ export default function JournalEntryDetailPage() {
             await fetchEntry();
         } catch (err: any) {
             toast({ title: 'Error', description: err?.message || 'Failed to submit for approval', variant: 'destructive' });
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const handleRequestBudgetOverride = async () => {
+        if (!entry || overrideReason.trim().length < 10) {
+            toast({ title: 'Reason required', description: 'Enter at least 10 characters explaining the budget exception.', variant: 'destructive' });
+            return;
+        }
+        try {
+            setActionLoading('budget-override');
+            await financeDataService.requestJournalEntryBudgetOverride(entry.id, overrideReason.trim());
+            toast({ title: 'Override requested', description: 'The Finance Budget Override workflow has started.' });
+            setOverrideReason('');
+            setShowOverrideForm(false);
+            await fetchEntry();
+        } catch (err: any) {
+            toast({ title: 'Error', description: err?.message || 'Failed to request budget override', variant: 'destructive' });
         } finally {
             setActionLoading(null);
         }
@@ -496,6 +527,7 @@ export default function JournalEntryDetailPage() {
                                         <tr className="border-b bg-muted/50">
                                             <th className="p-3 text-left font-medium">Account</th>
                                             <th className="p-3 text-left font-medium">Description</th>
+                                            <th className="p-3 text-left font-medium">Coding dimensions</th>
                                             <th className="p-3 text-right font-medium">Debit</th>
                                             <th className="p-3 text-right font-medium">Credit</th>
                                         </tr>
@@ -522,6 +554,17 @@ export default function JournalEntryDetailPage() {
                                                     {line.description}
                                                     {isSystemClearing && <div className="text-xs text-amber-600 mt-1">Auto-generated balancing line</div>}
                                                 </td>
+                                                <td className="p-3">
+                                                    {line.dimensions?.length ? (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {line.dimensions.map(item => (
+                                                                <Badge key={`${item.definitionId}-${item.valueId}`} variant="secondary">
+                                                                    {item.dimensionCode}: {item.valueCode}
+                                                                </Badge>
+                                                            ))}
+                                                        </div>
+                                                    ) : <span className="text-sm text-muted-foreground">—</span>}
+                                                </td>
                                                 <td className="p-3 text-right font-mono">
                                                     {debitAmount > 0 ? formatCurrency(debitAmount) : '-'}
                                                 </td>
@@ -533,7 +576,7 @@ export default function JournalEntryDetailPage() {
                                     </tbody>
                                     <tfoot>
                                         <tr className="bg-muted/50 font-bold">
-                                            <td colSpan={2} className="p-3 text-right">Totals:</td>
+                                            <td colSpan={3} className="p-3 text-right">Totals:</td>
                                             <td className="p-3 text-right">{formatCurrency(entry.totalDebitAmount)}</td>
                                             <td className="p-3 text-right">{formatCurrency(entry.totalCreditAmount)}</td>
                                         </tr>
@@ -707,6 +750,105 @@ export default function JournalEntryDetailPage() {
                         </Card>
                     )}
 
+                    {(budgetControl?.hasTrackedExpenseLines || budgetControlError) && (
+                        <Card className={budgetControl?.isAllowed ? 'border-emerald-500/40' : 'border-amber-500/60'}>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <CircleDollarSign className="h-5 w-5" />
+                                    Finance Budget Control
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {budgetControlError ? (
+                                    <Alert variant="destructive">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        <AlertTitle>Budget evaluation unavailable</AlertTitle>
+                                        <AlertDescription>{budgetControlError}</AlertDescription>
+                                    </Alert>
+                                ) : budgetControl && (
+                                    <>
+                                        <Alert variant={budgetControl.isAllowed ? 'default' : 'destructive'}>
+                                            <AlertTriangle className="h-4 w-4" />
+                                            <AlertTitle>
+                                                {budgetControl.hasApprovedOverride
+                                                    ? 'Approved budget override applies'
+                                                    : budgetControl.overrideStatus === 'PendingApproval'
+                                                        ? 'Budget override pending approval'
+                                                    : budgetControl.isAllowed
+                                                        ? 'Budget available'
+                                                        : budgetControl.requiresOverride
+                                                            ? 'Budget override required'
+                                                            : 'Budget setup blocks submission'}
+                                            </AlertTitle>
+                                            <AlertDescription>
+                                                Controlled expense request: {formatCurrency(budgetControl.totalRequestedAmount, budgetControl.currencyCode)}
+                                                {budgetControl.totalShortfallAmount > 0 && `; shortfall: ${formatCurrency(budgetControl.totalShortfallAmount, budgetControl.currencyCode)}`}.
+                                            </AlertDescription>
+                                        </Alert>
+
+                                        <div className="space-y-3">
+                                            {budgetControl.lines.map((line) => (
+                                                <div key={`${line.accountId}-${line.fiscalPeriodId}`} className="rounded-md border p-3 text-sm">
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div>
+                                                            <p className="font-medium">{line.accountNumber} · {line.accountName}</p>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {line.budgetScenarioName || 'No adopted scenario'} · {line.fiscalPeriodCode}
+                                                                {line.segmentValue ? ` · ${line.segmentValue}` : ''}
+                                                            </p>
+                                                        </div>
+                                                        <Badge variant={line.decisionCode === 'AVAILABLE' ? 'default' : 'destructive'}>
+                                                            {line.decisionCode.replaceAll('_', ' ')}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                                                        <span>Budget: {formatCurrency(line.budgetAmount, budgetControl.currencyCode)}</span>
+                                                        <span>Posted: {formatCurrency(line.postedActualAmount, budgetControl.currencyCode)}</span>
+                                                        <span>Reserved: {formatCurrency(line.reservedAmount, budgetControl.currencyCode)}</span>
+                                                        <span>Available: {formatCurrency(line.availableAmount, budgetControl.currencyCode)}</span>
+                                                        <span>Requested: {formatCurrency(line.requestedAmount, budgetControl.currencyCode)}</span>
+                                                        <span>Shortfall: {formatCurrency(line.shortfallAmount, budgetControl.currencyCode)}</span>
+                                                    </div>
+                                                    <p className="mt-2 text-xs">{line.message}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {entry.postingStatus === 'Draft' && budgetControl.requiresOverride && !budgetControl.hasApprovedOverride && budgetControl.overrideStatus !== 'PendingApproval' && (
+                                            <div className="space-y-2 border-t pt-3">
+                                                {!showOverrideForm ? (
+                                                    <Button variant="outline" className="w-full" onClick={() => setShowOverrideForm(true)}>
+                                                        Request Budget Override
+                                                    </Button>
+                                                ) : (
+                                                    <>
+                                                        <textarea
+                                                            className="min-h-[90px] w-full rounded-md border bg-background p-2 text-sm"
+                                                            placeholder="Explain the operational need and why the adopted budget is insufficient..."
+                                                            value={overrideReason}
+                                                            onChange={(event) => setOverrideReason(event.target.value)}
+                                                        />
+                                                        <div className="flex gap-2">
+                                                            <Button
+                                                                className="flex-1"
+                                                                onClick={handleRequestBudgetOverride}
+                                                                disabled={actionLoading === 'budget-override' || overrideReason.trim().length < 10}
+                                                            >
+                                                                {actionLoading === 'budget-override' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                                Submit Override
+                                                            </Button>
+                                                            <Button variant="outline" onClick={() => setShowOverrideForm(false)}>Cancel</Button>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
+
                     {workflowSummary?.hasActiveInstance && (
                         <Card>
                             <CardHeader>
@@ -805,7 +947,12 @@ export default function JournalEntryDetailPage() {
                                     </Button>
                                 )}
                                 {canSubmitForApproval && (
-                                    <Button className="w-full" variant="outline" onClick={handleRequestApproval} disabled={actionLoading === 'request-approval'}>
+                                    <Button
+                                        className="w-full"
+                                        variant="outline"
+                                        onClick={handleRequestApproval}
+                                        disabled={actionLoading === 'request-approval' || Boolean(budgetControlError) || budgetControl?.isAllowed === false}
+                                    >
                                         {actionLoading === 'request-approval' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SendHorizontal className="mr-2 h-4 w-4" />}
                                         Submit for Approval
                                     </Button>

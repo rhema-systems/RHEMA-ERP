@@ -1,4 +1,5 @@
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.DTOs.Procurement;
 
@@ -79,6 +80,7 @@ public sealed class ProcurementControlEventDto
     public int SchemaVersion { get; set; }
     public string EventType { get; set; } = string.Empty;
     public string Action { get; set; } = string.Empty;
+    public AuditOperationKind Operation { get; set; }
     public ProcurementControlEventResult Result { get; set; }
     public string? RuleCode { get; set; }
     public Guid? RuleId { get; set; }

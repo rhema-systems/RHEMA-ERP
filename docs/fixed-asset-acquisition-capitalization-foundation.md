@@ -66,7 +66,7 @@ Rules:
 - The AP line stores `CapitalizationJournalEntryId`, `CapitalizationPostingEventId`, and `CapitalizedAt`.
 - The asset stores source document, source line, journal entry, posting event, functional currency, transaction currency, exchange-rate snapshot, and capitalization date.
 
-Fixed asset capitalization through GRV/procurement accrual clearing is guarded and deferred. Unsafe GRV-linked fixed asset capitalization fails clearly instead of silently posting.
+Procurement-origin capitalization is now handled by the dedicated FIN-INT-007 adapter documented in `docs/fixed-asset-procurement-capitalization-foundation.md`. It reclassifies posted Inventory Control carrying value to the fixed-asset cost account; the later supplier invoice clears GRV and does not post a second asset debit.
 
 ## Direct Capitalization
 
@@ -334,11 +334,11 @@ Rollback is safe only before fixed asset capitalization postings are used. After
 - `FIN-LIM-0025`: asset transfers remain open.
 - `FIN-LIM-0026`: disposals remain open.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open.
-- `FIN-LIM-0028`: procurement/GRV-origin capitalization remains open and is guarded.
+- `FIN-LIM-0028`: resolved by the FIN-INT-007 Procurement accepted-supply capitalization adapter.
 - `FIN-LIM-0029`: direct capitalization workflow routing remains open.
-- `FIN-LIM-0030`: capitalization reversal/adjustment remains open.
+- `FIN-LIM-0030`: resolved by the controlled capitalization reversal/correction follow-up in `docs/fixed-asset-capitalization-reversal-foundation.md`.
 
-None of these open fixed asset limitations blocks starting the depreciation batch because the acquisition/capitalization accounting base is now available. They remain go-live blockers unless explicitly accepted by accounting/product leadership.
+The limitations still marked open do not block starting the depreciation batch because the acquisition/capitalization accounting base is available. They remain go-live blockers unless explicitly accepted by accounting/product leadership.
 
 ## Definition Of Done
 

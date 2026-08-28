@@ -24,6 +24,13 @@ public class ProcurementPlanDto
     public int PlanDurationYears { get; set; }
     public string Status { get; set; } = "Draft";
     public decimal TotalEstimatedBudget { get; set; }
+
+    /// <summary>
+    /// Approved procurement budget selected by the planner.  The selection is
+    /// validated against the plan department and fiscal year before it is
+    /// linked; the system never guesses a budget at approval time.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
     public decimal ApprovedBudget { get; set; }
     public string Currency { get; set; } = "USD";
     public string? PreparedByName { get; set; }
@@ -92,6 +99,12 @@ public class CreateProcurementPlanDto
     public int PlanDurationYears { get; set; } = 1;
 
     public decimal TotalEstimatedBudget { get; set; }
+
+    /// <summary>
+    /// Optional while a plan remains Draft. Submission and final approval require
+    /// a tenant-safe, approved budget that matches the plan department and fiscal year.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
 
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
@@ -173,14 +186,27 @@ public class ApproveProcurementPlanDto
     public bool AutoGenerateSchedules { get; set; } = true;
 
     /// <summary>
-    /// Optional: Specific budget ID to link. If null, system auto-matches by department + fiscal year
+    /// The budget selection is made while the plan is being prepared. This
+    /// member is retained only for backwards-compatible API deserialization.
     /// </summary>
     public Guid? BudgetId { get; set; }
 
     /// <summary>
-    /// If true, automatically links to matching budget on approval
+    /// Retained for backwards-compatible API deserialization. Plans must not
+    /// auto-select an arbitrary matching budget at approval time.
     /// </summary>
-    public bool AutoLinkBudget { get; set; } = true;
+    public bool AutoLinkBudget { get; set; }
+}
+
+/// <summary>
+/// Shared-workflow decision for a procurement budget.
+/// </summary>
+public sealed class ApproveProcurementBudgetDto
+{
+    public bool IsApproved { get; set; } = true;
+
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 /// <summary>
@@ -1263,6 +1289,21 @@ public class EmergencyProcurementPlanDto
     public int CriticalItemCount { get; set; }
     public int EmergencySupplierCount { get; set; }
     public DateTime CreatedAt { get; set; }
+    public Guid? PurchaseRequisitionId { get; set; }
+    public string? PurchaseRequisitionNumber { get; set; }
+    public Guid? ExceptionRuleId { get; set; }
+    public string? ExceptionRuleCode { get; set; }
+    public string? ExceptionRuleName { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
+    public string? EvidenceReference { get; set; }
+    public string? ApprovalAuthority { get; set; }
+    public string? ApprovalReference { get; set; }
+    public DateTime? InternalAuditVouchedAtUtc { get; set; }
+    public DateTime? SubmittedForApprovalAtUtc { get; set; }
+    public Guid? ExceptionalSourcingTenderId { get; set; }
+    public DateTime? FiledAtUtc { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -1274,8 +1315,88 @@ public class EmergencyProcurementPlanDetailDto : EmergencyProcurementPlanDto
     public string? RapidProcurementProcess { get; set; }
     public string? EscalationContacts { get; set; }
     public string? Notes { get; set; }
+    public string? ExceptionJustification { get; set; }
+    public string? InternalAuditVouchNote { get; set; }
+    public string? PostAwardJustification { get; set; }
+    public Guid? PostAwardCentralDocumentVersionId { get; set; }
+    public string? PostAwardEvidenceReference { get; set; }
     public List<EmergencyProcurementItemDto> CriticalItems { get; set; } = new();
     public List<EmergencySupplierDto> EmergencySuppliers { get; set; } = new();
+}
+
+public sealed class EmergencyPurchaseGovernanceOptionsDto
+{
+    public List<EmergencyPurchaseRequisitionOptionDto> Requisitions { get; set; } = new();
+    public List<EmergencyPurchaseExceptionRuleOptionDto> ExceptionRules { get; set; } = new();
+    public List<EmergencyPurchaseDocumentOptionDto> EvidenceDocuments { get; set; } = new();
+    public List<EmergencyPurchaseExceptionalSourcingOptionDto> FiledExceptionalSourcing { get; set; } = new();
+}
+
+public sealed class EmergencyPurchaseRequisitionOptionDto
+{
+    public Guid Id { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Category { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+}
+
+public sealed class EmergencyPurchaseExceptionRuleOptionDto
+{
+    public Guid Id { get; set; }
+    public string RuleCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string ApproverRole { get; set; } = string.Empty;
+    public Guid WorkflowDefinitionId { get; set; }
+}
+
+public sealed class EmergencyPurchaseDocumentOptionDto
+{
+    public Guid VersionId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string VersionNumber { get; set; } = string.Empty;
+}
+
+public sealed class EmergencyPurchaseExceptionalSourcingOptionDto
+{
+    public Guid TenderId { get; set; }
+    public string TenderNumber { get; set; } = string.Empty;
+    public string FilingReference { get; set; } = string.Empty;
+}
+
+public sealed class PrepareEmergencyPurchaseRequest
+{
+    public Guid PurchaseRequisitionId { get; set; }
+    public Guid ExceptionRuleId { get; set; }
+    public Guid CentralDocumentVersionId { get; set; }
+    [Required, StringLength(2000), MinLength(20)] public string Justification { get; set; } = string.Empty;
+    [Required] public string RowVersion { get; set; } = string.Empty;
+}
+
+public class EmergencyPurchaseLifecycleRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [StringLength(1000)] public string? Comments { get; set; }
+}
+
+public sealed class VouchEmergencyPurchaseRequest : EmergencyPurchaseLifecycleRequest
+{
+    [Required, StringLength(1000), MinLength(10)] public string VouchNote { get; set; } = string.Empty;
+}
+
+public sealed class DecideEmergencyPurchaseRequest : EmergencyPurchaseLifecycleRequest
+{
+    [Required, RegularExpression("^(?i:Approve|Reject)$")] public string Action { get; set; } = string.Empty;
+    [StringLength(200)] public string? ApprovalReference { get; set; }
+}
+
+public sealed class FileEmergencyPurchasePostAwardRequest : EmergencyPurchaseLifecycleRequest
+{
+    public Guid ExceptionalSourcingTenderId { get; set; }
+    public Guid CentralDocumentVersionId { get; set; }
+    [Required, StringLength(2000), MinLength(20)] public string Justification { get; set; } = string.Empty;
 }
 
 /// <summary>

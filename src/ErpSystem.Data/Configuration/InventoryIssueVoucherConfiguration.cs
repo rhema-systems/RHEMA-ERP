@@ -10,10 +10,13 @@ public sealed class InventoryIssueVoucherConfiguration : IEntityTypeConfiguratio
     {
         builder.ToTable("InventoryIssueVouchers", table =>
         {
+            table.HasTrigger("TR_InventoryIssueVouchers_ControlledLifecycle");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Status", "[Status] IN (1,2)");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Hashes", "LEN([PayloadHash]) = 64 AND LEN([IntegrityHash]) = 64");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Sod", "[RequestedById] <> [ApprovedById] AND [RequestedById] <> [IssuedById] AND [ApprovedById] <> [IssuedById] AND [IssuedById] <> [ReceiverUserId]");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Acknowledgement", "([Status] = 1 AND [AcknowledgedById] IS NULL AND [AcknowledgedAtUtc] IS NULL) OR ([Status] = 2 AND [AcknowledgedById] = [ReceiverUserId] AND [AcknowledgedAtUtc] IS NOT NULL)");
+            table.HasCheckConstraint("CK_InventoryIssueVouchers_MovementReason", "[MovementReasonCode] IN ('DEPARTMENT_CONSUMPTION','PROJECT_CONSUMPTION','MAINTENANCE_CONSUMPTION','ASSET_CUSTODY')");
+            table.HasCheckConstraint("CK_InventoryIssueVouchers_FinanceLineage", "([FinancePostingEventId] IS NULL AND [FinanceJournalEntryId] IS NULL) OR ([FinancePostingEventId] IS NOT NULL AND [FinanceJournalEntryId] IS NOT NULL)");
         });
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.HasIndex(item => new { item.TenantId, item.VoucherNumber }).IsUnique();
@@ -37,6 +40,7 @@ public sealed class InventoryIssueVoucherLineConfiguration : IEntityTypeConfigur
     {
         builder.ToTable("InventoryIssueVoucherLines", table =>
         {
+            table.HasTrigger("TR_InventoryIssueVoucherLines_AppendOnly");
             table.HasCheckConstraint("CK_InventoryIssueVoucherLines_Quantity", "[Quantity] > 0");
             table.HasCheckConstraint("CK_InventoryIssueVoucherLines_Value", "[UnitCost] >= 0 AND [TotalValue] >= 0");
             table.HasCheckConstraint("CK_InventoryIssueVoucherLines_IntegrityHash", "LEN([IntegrityHash]) = 64");
@@ -71,6 +75,7 @@ public sealed class InventoryIssueVoucherActionConfiguration : IEntityTypeConfig
     {
         builder.ToTable("InventoryIssueVoucherActions", table =>
         {
+            table.HasTrigger("TR_InventoryIssueVoucherActions_AppendOnly");
             table.HasCheckConstraint("CK_InventoryIssueVoucherActions_Sequence", "[Sequence] > 0");
             table.HasCheckConstraint("CK_InventoryIssueVoucherActions_ActionType", "[ActionType] IN (1,2)");
             table.HasCheckConstraint("CK_InventoryIssueVoucherActions_StatusAfter", "[StatusAfter] IN (1,2)");

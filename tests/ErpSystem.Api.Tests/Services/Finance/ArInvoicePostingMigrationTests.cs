@@ -4,6 +4,7 @@ using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -110,6 +111,114 @@ public sealed class ArInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task ForeignOpeningBalanceArInvoice_ShouldRetainApprovedRateAndKeepClearingFunctional()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.IsOpeningBalance = true;
+            invoice.CurrencyCode = "USD";
+            invoice.ExchangeRate = 12.5m;
+            invoice.BaseCurrencyAmount = 1250m;
+        });
+        var rate = SeedApprovedDailyRate(db, tenantId, "USD", 12.5m, ExchangeRateQuoteSide.Buying);
+        fixture.Invoice.ExchangeRateId = rate.Id;
+        EnableCurrencyForAccounts(db, tenantId, "USD", fixture.ArAccount);
+        var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
+        var settings = await db.FinanceSettings.SingleAsync(s => s.TenantId == tenantId);
+        settings.MigrationClearingAccountId = clearingAccount.Id;
+        settings.DirectionalExchangeRatePolicyEnabled = true;
+        settings.ArInvoiceQuoteSide = ExchangeRateQuoteSide.Buying;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        var control = journal.Transactions.Single(item => item.AccountId == fixture.ArAccount.Id);
+        control.DebitAmount.Should().Be(1250m);
+        control.TransactionCurrency.Should().Be("USD");
+        control.TransactionDebitAmount.Should().Be(100m);
+        control.ExchangeRate.Should().Be(12.5m);
+        control.ExchangeRateId.Should().Be(rate.Id);
+        control.ExchangeRateSource.Should().Be("Regression approved rate");
+
+        var clearing = journal.Transactions.Single(item => item.AccountId == clearingAccount.Id);
+        clearing.CreditAmount.Should().Be(1250m);
+        clearing.TransactionCurrency.Should().Be("GHS");
+        clearing.TransactionCreditAmount.Should().Be(1250m);
+        clearing.ExchangeRateId.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ForeignOpeningBalanceArInvoice_ShouldRejectRateDriftBeforePosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.IsOpeningBalance = true;
+            invoice.CurrencyCode = "USD";
+            invoice.ExchangeRate = 14m;
+        });
+        var rate = SeedApprovedDailyRate(db, tenantId, "USD", 15m);
+        fixture.Invoice.ExchangeRateId = rate.Id;
+        var settings = await db.FinanceSettings.SingleAsync(s => s.TenantId == tenantId);
+        settings.MigrationClearingAccountId = SeedAccount(db, tenantId, "3999", AccountType.Equity).Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var action = () => service.PostAsync(fixture.Invoice.Id);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not match the approved rate record*");
+        (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ForeignOpeningBalanceArInvoice_ShouldRejectCreateWithoutRateEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+
+        var action = () => service.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 5),
+            DueDate = new DateTime(2026, 8, 4),
+            CurrencyCode = "USD",
+            ExchangeRate = 15m,
+            IsOpeningBalance = true,
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Opening customer balance",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*require an approved exchange-rate record*");
+        (await db.Invoices.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task DraftOpeningBalanceArInvoice_ShouldSendAndPostControlAgainstMigrationClearing()
     {
         var tenantId = Guid.NewGuid();
@@ -138,6 +247,82 @@ public sealed class ArInvoicePostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(100m);
         journal.Transactions.Single(t => t.AccountId == clearingAccount.Id).CreditAmount.Should().Be(100m);
         journal.Transactions.Should().NotContain(t => t.AccountId == fixture.RevenueAccount.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task FixedAssetDisposalDeduction_ShouldDebitClearingOnlyForMatchingCompletedDisposal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        const string disposalReference = "DSP-2026-0001";
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Reference = $"FA-DISPOSAL:{disposalReference}";
+            invoice.SubTotal = 80m;
+            invoice.TotalAmount = 80m;
+            invoice.BaseCurrencyAmount = 80m;
+            invoice.LineItems.Add(new InvoiceLineItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InvoiceId = invoice.Id,
+                LineItemType = LineItemType.FixedAssetDisposalAdjustment,
+                GLAccountId = invoice.LineItems.Single().GLAccountId,
+                Description = "Auctioneer deduction", Quantity = 1m, UnitPrice = -20m,
+                TaxTreatment = TaxTreatment.OutOfScope, DiscountPercentage = 0m, DiscountAmount = 0m,
+                TaxAmount = 0m, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+            });
+        });
+        db.AssetDisposals.Add(new AssetDisposal
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FixedAssetId = Guid.NewGuid(),
+            DisposalDate = fixture.Invoice.InvoiceDate, DisposalType = DisposalType.Sale,
+            Status = AssetDisposalStatus.Completed, SaleProceeds = 100m, DisposalCost = 20m,
+            BuyerBusinessPartnerId = fixture.Customer.Id, ReferenceNumber = disposalReference,
+            Reason = "Approved sale", CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Single(line => line.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(80m);
+        journal.Transactions.Where(line => line.AccountId == fixture.RevenueAccount.Id)
+            .Sum(line => line.CreditAmount - line.DebitAmount).Should().Be(80m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task FixedAssetDisposalDeduction_ShouldRejectSpoofedPublicInvoiceReference()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Reference = "FA-DISPOSAL:NOT-APPROVED";
+            invoice.SubTotal = 80m;
+            invoice.TotalAmount = 80m;
+            invoice.BaseCurrencyAmount = 80m;
+            invoice.LineItems.Add(new InvoiceLineItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InvoiceId = invoice.Id,
+                LineItemType = LineItemType.FixedAssetDisposalAdjustment,
+                GLAccountId = invoice.LineItems.Single().GLAccountId,
+                Description = "Spoofed deduction", Quantity = 1m, UnitPrice = -20m,
+                TaxTreatment = TaxTreatment.OutOfScope, DiscountPercentage = 0m, DiscountAmount = 0m,
+                TaxAmount = 0m, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+            });
+        });
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*restricted to non-taxable fixed-asset disposal adjustments*");
+        (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
     [Fact]
@@ -522,6 +707,58 @@ public sealed class ArInvoicePostingMigrationTests
 
         db.Accounts.Add(account);
         return account;
+    }
+
+    private static ExchangeRate SeedApprovedDailyRate(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string targetCurrency,
+        decimal rate,
+        ExchangeRateQuoteSide quoteSide = ExchangeRateQuoteSide.Mid)
+    {
+        var exchangeRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = targetCurrency,
+            Rate = rate,
+            InverseRate = decimal.Round(1m / rate, 6),
+            EffectiveDate = new DateTime(2026, 7, 5),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = quoteSide,
+            RateSource = "Regression approved rate",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.Add(exchangeRate);
+        return exchangeRate;
+    }
+
+    private static void EnableCurrencyForAccounts(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string currencyCode,
+        params Account[] accounts)
+    {
+        foreach (var account in accounts)
+        {
+            account.IsMultiCurrency = true;
+            db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountId = account.Id,
+                LinkedCurrencyCode = currencyCode,
+                TransactionRateType = "Daily",
+                IsActive = true,
+                EffectiveDate = new DateTime(2026, 1, 1),
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "seed"
+            });
+        }
     }
 
     private static BusinessPartner SeedCustomer(ApplicationDbContext db, Guid tenantId, Guid arAccountId)

@@ -9,14 +9,15 @@ namespace ErpSystem.Core.Entities;
 public class SystemExceptionLog : TenantEntity
 {
     /// <summary>
-    /// Deduplication fingerprint (stable key used to group repeated exceptions).
+    /// Stable classification fingerprint used for searching related incidents.
+    /// Every occurrence is stored as its own row; this value is not a deduplication key.
     /// </summary>
     [Required]
     [MaxLength(64)]
     public string Fingerprint { get; set; } = string.Empty;
 
     /// <summary>
-    /// Number of times this exception fingerprint has occurred.
+    /// Legacy compatibility field. New rows always represent one occurrence.
     /// </summary>
     public int OccurrenceCount { get; set; } = 1;
 

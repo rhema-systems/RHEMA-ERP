@@ -8,7 +8,13 @@ export interface SupplierApplicantIssueResult {
   registrationNumber: string;
   tokenId: string;
   tokenReference: string;
-  applicationToken: string;
+  applicationToken?: string | null;
+  applicantSessionToken?: string | null;
+  applicantSessionExpiresAtUtc?: string | null;
+  paymentSessionToken?: string | null;
+  paymentSessionExpiresAtUtc?: string | null;
+  paymentOnly: boolean;
+  resumedExistingApplication?: boolean;
   feeMode: 'Free' | 'Paid' | number;
   tokenStatus: 'AwaitingPayment' | 'Active' | 'Expired' | number;
   paymentStatus: string | number;
@@ -107,4 +113,14 @@ export interface SupplierApplicantAccessHistory {
   credentialActivatedAtUtc?: string;
   notificationAttemptCount: number;
   lastNotificationStatus?: string;
+}
+
+export interface SupplierApplicantContactCorrectionResult {
+  registrationId: string;
+  maskedContact: string;
+  status: string | number;
+  contactCorrected: boolean;
+  provisioningRetried: boolean;
+  credentialDelivered: boolean;
+  message: string;
 }

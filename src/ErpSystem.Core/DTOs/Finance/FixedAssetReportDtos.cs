@@ -63,15 +63,27 @@ public class AssetDisposalReportDto
     public string Name { get; set; } = string.Empty;
     public DateTime DisposalDate { get; set; }
     public DisposalType DisposalType { get; set; }
+    public AssetDisposalScope DisposalScope { get; set; }
+    public decimal DisposedPortionPercent { get; set; }
+    public string? ComponentReference { get; set; }
+    public string? AllocationEvidenceReference { get; set; }
     public decimal SaleProceeds { get; set; }
     public decimal DisposalCost { get; set; }
     public decimal NetProceeds { get; set; }
+    public string ProceedsCurrencyCode { get; set; } = "GHS";
+    public decimal ProceedsFunctionalAmount { get; set; }
+    public Guid? ProceedsExchangeRateId { get; set; }
+    public decimal ProceedsExchangeRateValue { get; set; }
+    public string ProceedsExchangeRateSource { get; set; } = "Functional currency";
+    public DateTime ProceedsExchangeRateDate { get; set; }
     public decimal CostAtDisposal { get; set; }
     public decimal AccumulatedDepreciationAtDisposal { get; set; }
     public decimal AccumulatedImpairmentAtDisposal { get; set; }
     public decimal RevaluationSurplusAtDisposal { get; set; }
+    public decimal RevaluationSurplusTransferAmount { get; set; }
     public decimal NetBookValue { get; set; }
     public decimal GainLoss { get; set; }
+    public decimal RemainingNetBookValue { get; set; }
     public string? BuyerName { get; set; }
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }

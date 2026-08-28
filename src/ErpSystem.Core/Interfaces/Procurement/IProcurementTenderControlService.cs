@@ -8,6 +8,8 @@ public interface IProcurementTenderControlService
 {
     Task<ProcurementTenderControlDto> GetAsync(Guid tenderId, CancellationToken cancellationToken = default);
     Task<bool> IsNctOrIctAsync(Guid tenderId, CancellationToken cancellationToken = default);
+    Task<bool> IsControlledTenderMethodAsync(Guid tenderId, CancellationToken cancellationToken = default);
+    Task<bool> ShouldConcealFinancialProposalAsync(Guid tenderId, Guid bidId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderControlDto> PublishAsync(Guid tenderId, PublishProcurementTenderRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderDocumentIssueDto> IssueDocumentAsync(Guid tenderId, IssueProcurementTenderDocumentRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementTenderSubmissionDisposition?> RecordSubmissionAsync(TenderBid bid, DateTime receivedAtUtc, string correlationId, CancellationToken cancellationToken = default);

@@ -10,6 +10,7 @@ export interface DataRetentionPolicy {
   securityLogRetentionDays: number;
   notificationRetentionDays: number;
   ehcAuditEventRetentionDays: number;
+  workflowAuditRetentionDays: number;
 }
 
 export interface UpdateDataRetentionPolicyRequest {
@@ -18,6 +19,7 @@ export interface UpdateDataRetentionPolicyRequest {
   securityLogRetentionDays: number;
   notificationRetentionDays: number;
   ehcAuditEventRetentionDays: number;
+  workflowAuditRetentionDays: number;
 }
 
 export interface DataRetentionJobRun {
@@ -33,7 +35,9 @@ export interface DataRetentionJobRun {
 
 export const dataRetentionService = {
   async getPolicy(): Promise<DataRetentionPolicy | null> {
-    const res = await apiService.request<ApiEnvelope<DataRetentionPolicy | null>>('/admin/retention/policy', { method: 'GET' });
+    const res = await apiService.request<
+      ApiEnvelope<DataRetentionPolicy | null>
+    >('/admin/retention/policy', { method: 'GET' });
     return res.data ?? null;
   },
 
@@ -46,10 +50,12 @@ export const dataRetentionService = {
 
   async listRuns(take = 50): Promise<DataRetentionJobRun[]> {
     const qs = new URLSearchParams({ take: String(take) });
-    const res = await apiService.request<ApiEnvelope<DataRetentionJobRun[]>>(`/admin/retention/runs?${qs.toString()}`, { method: 'GET' });
+    const res = await apiService.request<ApiEnvelope<DataRetentionJobRun[]>>(
+      `/admin/retention/runs?${qs.toString()}`,
+      { method: 'GET' }
+    );
     return res.data ?? [];
   },
 };
 
 export default dataRetentionService;
-

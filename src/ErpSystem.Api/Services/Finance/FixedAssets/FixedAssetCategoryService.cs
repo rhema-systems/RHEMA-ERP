@@ -51,6 +51,11 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
 
     public async Task<FixedAssetCategoryDto> CreateAsync(CreateFixedAssetCategoryDto dto)
     {
+        ValidateDepreciationPolicy(
+            dto.DefaultMethod,
+            dto.DefaultUsefulLifeMonths,
+            dto.DefaultDiminishingBalanceRatePercent,
+            dto.DefaultLifetimeProductionCapacity);
         await ValidateCategoryDtoAsync(dto);
 
         var category = new FixedAssetCategory
@@ -62,6 +67,10 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             DefaultMethod = dto.DefaultMethod,
             DefaultUsefulLifeMonths = dto.DefaultUsefulLifeMonths,
             DefaultResidualValuePercent = dto.DefaultResidualValuePercent,
+            // Persist at the schema's four-decimal policy precision so the approved rate shown to
+            // users is exactly the rate later snapshotted by depreciation schedules.
+            DefaultDiminishingBalanceRatePercent = RoundRate(dto.DefaultDiminishingBalanceRatePercent),
+            DefaultLifetimeProductionCapacity = dto.DefaultLifetimeProductionCapacity,
             AssetAccountId = dto.AssetAccountId,
             AccumulatedDepreciationAccountId = dto.AccumulatedDepreciationAccountId,
             DepreciationExpenseAccountId = dto.DepreciationExpenseAccountId,
@@ -100,6 +109,11 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == id)
             ?? throw new KeyNotFoundException("Fixed asset category not found.");
 
+        ValidateDepreciationPolicy(
+            dto.DefaultMethod,
+            dto.DefaultUsefulLifeMonths,
+            dto.DefaultDiminishingBalanceRatePercent,
+            dto.DefaultLifetimeProductionCapacity);
         await ValidateCategoryDtoAsync(dto, id);
         var beforeMapping = BuildAccountMappingSnapshot(category);
 
@@ -109,6 +123,8 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
         category.DefaultMethod = dto.DefaultMethod;
         category.DefaultUsefulLifeMonths = dto.DefaultUsefulLifeMonths;
         category.DefaultResidualValuePercent = dto.DefaultResidualValuePercent;
+        category.DefaultDiminishingBalanceRatePercent = RoundRate(dto.DefaultDiminishingBalanceRatePercent);
+        category.DefaultLifetimeProductionCapacity = dto.DefaultLifetimeProductionCapacity;
         category.AssetAccountId = dto.AssetAccountId;
         category.AccumulatedDepreciationAccountId = dto.AccumulatedDepreciationAccountId;
         category.DepreciationExpenseAccountId = dto.DepreciationExpenseAccountId;
@@ -174,6 +190,8 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             DefaultMethod = category.DefaultMethod,
             DefaultUsefulLifeMonths = category.DefaultUsefulLifeMonths,
             DefaultResidualValuePercent = category.DefaultResidualValuePercent,
+            DefaultDiminishingBalanceRatePercent = category.DefaultDiminishingBalanceRatePercent,
+            DefaultLifetimeProductionCapacity = category.DefaultLifetimeProductionCapacity,
             AssetAccountId = category.AssetAccountId,
             AccumulatedDepreciationAccountId = category.AccumulatedDepreciationAccountId,
             DepreciationExpenseAccountId = category.DepreciationExpenseAccountId,
@@ -345,6 +363,46 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
 
         return account;
     }
+
+    private static void ValidateDepreciationPolicy(
+        DepreciationMethod method,
+        int usefulLifeMonths,
+        decimal diminishingBalanceRatePercent,
+        decimal lifetimeProductionCapacity)
+    {
+        if (usefulLifeMonths <= 0)
+        {
+            throw new InvalidOperationException("Fixed asset category useful life must be greater than zero.");
+        }
+
+        // FIN-LIM-0031 deliberately implements only methods whose consumption patterns TDC can
+        // evidence under IAS 16. Keeping unsupported enum values rejected prevents an operator from
+        // selecting a label for which the posting engine has no approved calculation policy.
+        if (method is DepreciationMethod.SumOfYearsDigits or DepreciationMethod.None)
+        {
+            throw new InvalidOperationException("TDC supports straight-line, diminishing-balance, double-declining, and units-of-production depreciation only.");
+        }
+
+        if (method == DepreciationMethod.DecliningBalance &&
+            (diminishingBalanceRatePercent <= 0m || diminishingBalanceRatePercent > 100m))
+        {
+            throw new InvalidOperationException("Diminishing-balance categories require an annual rate greater than 0% and no more than 100%.");
+        }
+
+        if (method == DepreciationMethod.DoubleDecliningBalance &&
+            (diminishingBalanceRatePercent < 0m || diminishingBalanceRatePercent > 100m))
+        {
+            throw new InvalidOperationException("A double-declining override rate must be between 0% and 100%; zero uses 200% divided by useful life in years.");
+        }
+
+        if (method == DepreciationMethod.UnitsOfProduction && lifetimeProductionCapacity <= 0m)
+        {
+            throw new InvalidOperationException("Units-of-production categories require a positive lifetime production capacity.");
+        }
+    }
+
+    private static decimal RoundRate(decimal value)
+        => Math.Round(value, 4, MidpointRounding.AwayFromZero);
 
     private static object BuildAccountMappingSnapshot(FixedAssetCategory category)
         => new

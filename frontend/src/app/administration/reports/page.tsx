@@ -68,7 +68,8 @@ import {
   XCircle,
   AlertCircle,
   AlertTriangle,
-  Package
+  Package,
+  Map
 } from 'lucide-react';
 import { Input } from '../../../components/ui/input';
 import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog';
@@ -122,6 +123,22 @@ const getModuleIconName = (moduleName: string): string => {
       return 'Package';
     case 'operations':
       return 'Activity';
+    case 'planning':
+    case 'town planning':
+      return 'Map';
+    case 'estate':
+      return 'Building';
+    case 'property management':
+    case 'property-management':
+      return 'Building';
+    case 'facilities':
+    case 'facilities management':
+      return 'Activity';
+    case 'legal':
+      return 'Shield';
+    case 'document management':
+    case 'dms':
+      return 'FileText';
     case 'procurement':
       return 'ShoppingCart';
     case 'marketing':
@@ -178,6 +195,12 @@ export default function AdministrationReportsPage() {
     { id: 'hr', name: 'Human Resources', description: 'HR and employee reports', icon: 'Users' },
     { id: 'inventory', name: 'Inventory', description: 'Stock and inventory reports', icon: 'Package' },
     { id: 'operations', name: 'Operations', description: 'Operational efficiency reports', icon: 'Activity' },
+    { id: 'planning', name: 'Planning', description: 'Planning vetting, layouts, site reports, searches, compliance, and committee reports', icon: 'Map' },
+    { id: 'estate', name: 'Estate', description: 'Estate acquisition, casework, registers, and inspections reports', icon: 'Building' },
+    { id: 'property-management', name: 'Property Management', description: 'Property units, leases, occupancy, billing, and ground rent reports', icon: 'Building' },
+    { id: 'facilities', name: 'Facilities', description: 'Facilities maintenance, complaints, assets, and service charge reports', icon: 'Activity' },
+    { id: 'legal', name: 'Legal', description: 'Legal matters, approvals, leases, transfers, and closeout reports', icon: 'Shield' },
+    { id: 'dms', name: 'DMS', description: 'Document register, metadata, versioning, and module queue reports', icon: 'FileText' },
   ];
 
   // Fetch roles
@@ -388,6 +411,14 @@ export default function AdministrationReportsPage() {
         return <Package className="h-3 w-3" />;
       case 'Activity':
         return <Activity className="h-3 w-3" />;
+      case 'Map':
+        return <Map className="h-3 w-3" />;
+      case 'Building':
+        return <Building className="h-3 w-3" />;
+      case 'Shield':
+        return <Shield className="h-3 w-3" />;
+      case 'FileText':
+        return <FileText className="h-3 w-3" />;
       default:
         return <FileText className="h-3 w-3" />;
     }

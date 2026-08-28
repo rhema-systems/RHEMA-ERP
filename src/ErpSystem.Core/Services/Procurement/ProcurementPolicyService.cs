@@ -523,12 +523,67 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         }
 
         ValidateThresholdRelationships(rules, errors);
+        ValidateOperationalMethodRules(rules, errors);
+        await ValidateRfqWorkflowReferencesAsync(rules, errors, cancellationToken);
         ValidateAuthorityBounds(rules, errors);
         ValidateSodRules(rules, errors);
         if (rules.Count > 0 && rules.All(item => !GetRuleEnabled(item.Entity)))
             warnings.Add(new ProcurementPolicyValidationIssueDto { Code = "ALL_RULES_DISABLED", Message = "Every policy rule is disabled.", Severity = "Warning" });
 
         return new ProcurementPolicyValidationResultDto { Errors = errors, Warnings = warnings };
+    }
+
+    private static void ValidateOperationalMethodRules(
+        IEnumerable<(ProcurementPolicyRuleKind Kind, object Entity)> rules,
+        ICollection<ProcurementPolicyValidationIssueDto> errors)
+    {
+        foreach (var method in rules.Where(item => item.Kind == ProcurementPolicyRuleKind.Method && GetRuleEnabled(item.Entity))
+                     .Select(item => (ProcurementPolicyMethodRule)item.Entity))
+        {
+            if (method.Method == ProcurementMethodType.RequestForQuotation &&
+                (!method.RequiresCompetition || method.MinimumQuotationCount <= 0))
+                AddError(errors, "RFQ_COMPETITION_REQUIRED",
+                    "An enabled Request for Quotation rule must require competition and a positive minimum quotation count.",
+                    ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
+            if (method.Method == ProcurementMethodType.RequestForQuotation && !method.WorkflowDefinitionId.HasValue)
+                AddError(errors, "RFQ_WORKFLOW_REQUIRED",
+                    "An enabled Request for Quotation rule must select the shared evaluation approval workflow used at dispatch and award.",
+                    ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
+        }
+    }
+
+    private async Task ValidateRfqWorkflowReferencesAsync(
+        IEnumerable<(ProcurementPolicyRuleKind Kind, object Entity)> rules,
+        ICollection<ProcurementPolicyValidationIssueDto> errors,
+        CancellationToken cancellationToken)
+    {
+        var rfqMethods = rules
+            .Where(item => item.Kind == ProcurementPolicyRuleKind.Method && GetRuleEnabled(item.Entity))
+            .Select(item => (ProcurementPolicyMethodRule)item.Entity)
+            .Where(item => item.Method == ProcurementMethodType.RequestForQuotation && item.WorkflowDefinitionId.HasValue)
+            .ToList();
+        if (rfqMethods.Count == 0) return;
+
+        var definitionIds = rfqMethods.Select(item => item.WorkflowDefinitionId!.Value).Distinct().ToList();
+        var definitions = await WorkflowDefinitions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && definitionIds.Contains(item.Id))
+            .Include(item => item.EntityType)
+            .AsNoTracking()
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+        foreach (var method in rfqMethods)
+        {
+            if (!definitions.TryGetValue(method.WorkflowDefinitionId!.Value, out var definition) ||
+                definition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published ||
+                !definition.IsActive ||
+                !definition.EntityType.IsActive ||
+                !string.Equals(definition.EntityType.Code, "TENDER_EVALUATION", StringComparison.OrdinalIgnoreCase))
+            {
+                AddError(errors, "RFQ_WORKFLOW_ENTITY_INVALID",
+                    "The RFQ evaluation workflow must be an active Published workflow for the TENDER_EVALUATION entity type.",
+                    ProcurementPolicyRuleKind.Method, method.Id, method.RuleCode);
+            }
+        }
     }
 
     private static void ValidateThresholdRelationships(
@@ -693,11 +748,12 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
 
     private async Task<int> MaterializeEvidenceRulesAsync(ProcurementPolicySet policySet, IReadOnlyCollection<ProcurementConfigurationDecision> decisions, DateTime now)
     {
-        var requirements = new List<(string DecisionKey, ProcurementEvidenceStage Stage, IEnumerable<string> Names, DateTime From, DateTime? To)>
+        var requirements = new List<(string DecisionKey, ProcurementEvidenceStage Stage, ProcurementMethodType? Method, IEnumerable<string> Names, DateTime From, DateTime? To)>
         {
             EvidenceTuple("DEC-004", ProcurementEvidenceStage.Evaluation, DeserializeDecision<ProcurementAuthorityStageDecisionValueDto>(decisions, "DEC-004"), item => item.EvidenceRequirements),
-            EvidenceTuple("DEC-005", ProcurementEvidenceStage.Requisition, DeserializeDecision<ProcurementPettyPurchaseDecisionValueDto>(decisions, "DEC-005"), item => item.EvidenceRequirements),
-            EvidenceTuple("DEC-006", ProcurementEvidenceStage.Sourcing, DeserializeDecision<ProcurementExceptionPrerequisiteDecisionValueDto>(decisions, "DEC-006"), item => item.MandatoryEvidenceChecklist),
+            EvidenceTuple("DEC-005", ProcurementEvidenceStage.Requisition, DeserializeDecision<ProcurementPettyPurchaseDecisionValueDto>(decisions, "DEC-005"), item => item.EvidenceRequirements, ProcurementMethodType.PettyPurchase),
+            EvidenceTuple("DEC-006", ProcurementEvidenceStage.Sourcing, DeserializeDecision<ProcurementExceptionPrerequisiteDecisionValueDto>(decisions, "DEC-006"), item => item.MandatoryEvidenceChecklist,
+                DeserializeDecision<ProcurementExceptionPrerequisiteDecisionValueDto>(decisions, "DEC-006").Method),
             EvidenceTuple("DEC-008", ProcurementEvidenceStage.PurchaseOrder, DeserializeDecision<ProcurementSignatureDecisionValueDto>(decisions, "DEC-008"), item => item.EvidenceRequirements)
         };
         var count = 0;
@@ -709,6 +765,7 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             {
                 TenantId = policySet.TenantId, PolicySetId = policySet.Id,
                 RuleCode = $"EVID-{requirement.DecisionKey}-{count:000}", EvidenceName = name, Stage = requirement.Stage,
+                Method = requirement.Method,
                 SharedRequirementKey = $"PROC-{requirement.DecisionKey}-{count:000}", IsMandatory = true, RequiresVerification = true,
                 SourceDecisionKey = requirement.DecisionKey, EffectiveFrom = EnsureUtc(requirement.From), EffectiveTo = EnsureUtc(requirement.To),
                 CreatedAt = now, CreatedBy = _currentUser.FullName, CreatedById = _currentUser.UserId
@@ -717,12 +774,13 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         return count;
     }
 
-    private static (string DecisionKey, ProcurementEvidenceStage Stage, IEnumerable<string> Names, DateTime From, DateTime? To) EvidenceTuple<T>(
+    private static (string DecisionKey, ProcurementEvidenceStage Stage, ProcurementMethodType? Method, IEnumerable<string> Names, DateTime From, DateTime? To) EvidenceTuple<T>(
         string key,
         ProcurementEvidenceStage stage,
         T value,
-        Func<T, IEnumerable<string>> names) where T : EffectiveDatedDecisionValueDto =>
-        (key, stage, names(value), value.EffectiveFrom, value.EffectiveTo);
+        Func<T, IEnumerable<string>> names,
+        ProcurementMethodType? method = null) where T : EffectiveDatedDecisionValueDto =>
+        (key, stage, method, names(value), value.EffectiveFrom, value.EffectiveTo);
 
     private static T DeserializeDecision<T>(IEnumerable<ProcurementConfigurationDecision> decisions, string key)
     {
@@ -901,7 +959,20 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
         if (value.OverrideAction is ProcurementPolicyOverrideAction.Add)
         {
             if (value.SourceRuleId.HasValue && policySet.ScopeType == ProcurementPolicyScopeType.TenantBaseline)
-                throw ValidationException("OVERRIDE_SOURCE", "A baseline Add rule cannot reference an overridden source rule.");
+            {
+                if (!policySet.SupersedesPolicySetId.HasValue)
+                    throw ValidationException("OVERRIDE_SOURCE", "A baseline Add rule can reference a source rule only when it is a cloned policy revision.");
+
+                // Baseline policy clones retain the prior rule id as immutable version lineage.
+                // It is not tenant-override lineage, but it must still resolve to the directly
+                // superseded policy and the same rule family before an inherited rule is edited.
+                await FindRuleEntityAsync(
+                    policySet.SupersedesPolicySetId.Value,
+                    kind,
+                    value.SourceRuleId.Value,
+                    tracked: false,
+                    cancellationToken);
+            }
             return;
         }
         if (policySet.ScopeType != ProcurementPolicyScopeType.TenantOverride || !policySet.BasePolicySetId.HasValue || !value.SourceRuleId.HasValue)
@@ -919,14 +990,20 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
             _ => null
         };
         if (!workflowDefinitionId.HasValue) return;
-        var exists = await WorkflowDefinitions.GetQueryable(item =>
+        var definition = await WorkflowDefinitions.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.Id == workflowDefinitionId.Value &&
                 item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
                 item.IsActive)
-            .AsNoTracking().AnyAsync(cancellationToken);
-        if (!exists)
+            .Include(item => item.EntityType)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (definition is null)
             throw ValidationException("WORKFLOW_REFERENCE", "Workflow references must identify an active Published workflow definition in this tenant.");
+        if (value is SaveProcurementPolicyMethodRuleValue { Method: ProcurementMethodType.RequestForQuotation } &&
+            (!definition.EntityType.IsActive ||
+             !string.Equals(definition.EntityType.Code, "TENDER_EVALUATION", StringComparison.OrdinalIgnoreCase)))
+            throw ValidationException("RFQ_WORKFLOW_ENTITY_INVALID",
+                "The RFQ evaluation workflow must use the TENDER_EVALUATION entity type.");
     }
 
     private static SaveProcurementPolicyRuleValueBase GetAndValidateRuleValue(SaveProcurementPolicyRuleRequest request)

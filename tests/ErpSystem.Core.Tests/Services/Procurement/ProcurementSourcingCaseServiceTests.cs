@@ -251,7 +251,12 @@ public sealed class ProcurementSourcingCaseServiceTests
         gate.SourcingCaseId.Should().Be(created.Id);
 
         await fixture.Service.RegisterSourceRequestAsync(created.Id, "RequestForQuotation",
-            Guid.NewGuid(), "RFQ-CASE-001", "trace-register");
+            fixture.SourceEntityId, "RFQ-CASE-001", "trace-register");
+        var revalidated = await fixture.Service.RevalidateSourceEntryAsync(
+            fixture.Requisition.Id, fixture.ReleaseDto.Id, created.Id,
+            ProcurementMethodType.RequestForQuotation, "RequestForQuotation",
+            fixture.SourceEntityId, "RFQ-CASE-001", "trace-revalidate");
+        revalidated.SourcingCaseId.Should().Be(created.Id);
         var started = await fixture.Service.GetAsync(created.Id);
         started.Status.Should().Be(ProcurementSourcingCaseStatus.InProgress);
         started.SourceRequests.Should().ContainSingle(item =>
@@ -460,6 +465,9 @@ public sealed class ProcurementSourcingCaseServiceTests
                 _isAdministrator && string.Equals(role, "TenantAdmin", StringComparison.Ordinal));
             _releases.Setup(item => item.GetReadinessAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => Readiness);
+            _releases.Setup(item => item.GetLinkedControlReadinessAsync(
+                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => Readiness);
             _releases.Setup(item => item.EnforceSourcingAsync(Requisition.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => ReleaseDto);
             _compliance.Setup(item => item.EvaluateAsync(
@@ -493,6 +501,7 @@ public sealed class ProcurementSourcingCaseServiceTests
         public Guid OverrideRuleId { get; private set; }
         public Guid OverrideWorkflowId { get; private set; }
         public Guid OverrideApproverId => _overrideApproverId;
+        public Guid SourceEntityId { get; } = Guid.NewGuid();
         public ProcurementMethodType RecommendedMethod { get; set; } = ProcurementMethodType.RequestForQuotation;
         public bool AllowMethod { get; set; } = true;
         public ApplicationDbContext Context { get; }
@@ -503,7 +512,8 @@ public sealed class ProcurementSourcingCaseServiceTests
         public ProcurementSourcingCaseService Service { get; }
 
         public void MakeSourceUnavailable() =>
-            _releases.Setup(item => item.GetReadinessAsync(Requisition.Id, It.IsAny<CancellationToken>()))
+            _releases.Setup(item => item.GetLinkedControlReadinessAsync(
+                    Requisition.Id, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ProcurementRequisitionSourcingNotFoundException(
                     "PR_NOT_FOUND", "The purchase requisition is no longer operationally available."));
 

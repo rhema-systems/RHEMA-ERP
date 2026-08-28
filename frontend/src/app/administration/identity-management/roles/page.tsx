@@ -54,10 +54,7 @@ const isProtectedSystemRole = (role?: Pick<Role, 'name' | 'isSystemRole'> | null
 const roleSchema = z.object({
   name: z.string()
     .trim()
-    .min(2, 'Role name must be at least 2 characters')
-    .refine((name) => !isProtectedRoleName(name), {
-      message: 'This name is reserved for a protected system role',
-    }),
+    .min(2, 'Role name must be at least 2 characters'),
   description: z.string().optional(),
   permissions: z.array(z.string()).min(1, 'At least one permission is required'),
 });
@@ -188,6 +185,45 @@ export default function RolesPage() {
     queryFn: () => adminApiService.getRoles(),
   });
 
+  const {
+    data: availablePermissions = [],
+    isLoading: permissionsLoading,
+    isError: permissionsFailed,
+  } = useQuery({
+    queryKey: ['admin-permissions'],
+    queryFn: () => adminApiService.getPermissions(),
+  });
+
+  const permissionCategories = React.useMemo(() => {
+    const grouped: Record<string, {
+      icon: React.ElementType;
+      permissions: Array<{ id: string; name: string; description: string }>;
+    }> = {};
+
+    for (const permission of availablePermissions) {
+      const category = permission.category?.trim() || 'Other';
+      const configuredCategory = Object.values(PERMISSION_CATEGORIES).find(config =>
+        config.permissions.some(item => item.id === permission.name));
+      grouped[category] ??= {
+        icon: configuredCategory?.icon ?? Shield,
+        permissions: [],
+      };
+      grouped[category].permissions.push({
+        id: permission.name,
+        name: permission.displayName || permission.name,
+        description: permission.description || permission.name,
+      });
+    }
+
+    for (const category of Object.values(grouped)) {
+      category.permissions.sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    return Object.fromEntries(
+      Object.entries(grouped).sort(([left], [right]) => left.localeCompare(right))
+    );
+  }, [availablePermissions]);
+
   // Create/Update role mutation
   const createRoleMutation = useMutation({
     mutationFn: (roleData: RoleFormData) => {
@@ -243,14 +279,6 @@ export default function RolesPage() {
   };
 
   const handleEdit = (role: Role) => {
-    if (isProtectedSystemRole(role)) {
-      toast({
-        title: 'Error',
-        description: 'Protected system roles cannot be edited',
-        variant: 'destructive',
-      });
-      return;
-    }
     setEditingRole(role);
     form.reset({
       name: role.name,
@@ -273,7 +301,20 @@ export default function RolesPage() {
   };
 
   const onSubmit = (data: RoleFormData) => {
-    createRoleMutation.mutate(data);
+    if (!isProtectedSystemRole(editingRole) && isProtectedRoleName(data.name)) {
+      form.setError('name', {
+        message: 'This name is reserved for a protected system role',
+      });
+      return;
+    }
+
+    createRoleMutation.mutate(isProtectedSystemRole(editingRole)
+      ? {
+          ...data,
+          name: editingRole!.name,
+          description: editingRole!.description || '',
+        }
+      : data);
   };
 
   const columns: Column<Role>[] = [
@@ -287,7 +328,7 @@ export default function RolesPage() {
           <span className="font-medium">{name}</span>
           {isProtectedSystemRole(role) && (
             <Badge variant="outline" className="text-xs">
-              Locked
+              System role
             </Badge>
           )}
         </div>
@@ -355,29 +396,29 @@ export default function RolesPage() {
           searchPlaceholder="Search roles..."
           onAdd={handleAdd}
           customActions={(role) => (
-            isProtectedSystemRole(role) ? (
+            <div className="flex items-center gap-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="h-8 w-8 p-0"
-                disabled
-                title="Protected system role"
+                title={isProtectedSystemRole(role) ? 'Edit role permissions' : 'Edit role'}
+                onClick={() => handleEdit(role)}
               >
-                <LockKeyhole className="h-4 w-4" />
+                <Pencil className="h-4 w-4" />
               </Button>
-            ) : (
-              <div className="flex items-center gap-1">
+              {isProtectedSystemRole(role) ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 p-0"
-                  title="Edit role"
-                  onClick={() => handleEdit(role)}
+                  disabled
+                  title="System roles cannot be deleted"
                 >
-                  <Pencil className="h-4 w-4" />
+                  <LockKeyhole className="h-4 w-4" />
                 </Button>
+              ) : (
                 <Button
                   type="button"
                   variant="ghost"
@@ -388,8 +429,8 @@ export default function RolesPage() {
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
-              </div>
-            )
+              )}
+            </div>
           )}
         />
 
@@ -401,8 +442,10 @@ export default function RolesPage() {
                 {editingRole ? 'Edit Role' : 'Add New Role'}
               </DialogTitle>
               <DialogDescription>
-                {editingRole 
-                  ? 'Update role information and permissions' 
+                {isProtectedSystemRole(editingRole)
+                  ? 'Update permission assignments. The system role name and description remain protected.'
+                  : editingRole
+                  ? 'Update role information and permissions'
                   : 'Create a new role with specific permissions'}
               </DialogDescription>
             </DialogHeader>
@@ -417,7 +460,11 @@ export default function RolesPage() {
                       <FormItem>
                         <FormLabel>Role Name *</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter role name" {...field} />
+                          <Input
+                            placeholder="Enter role name"
+                            disabled={isProtectedSystemRole(editingRole)}
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -435,6 +482,7 @@ export default function RolesPage() {
                         <Textarea 
                           placeholder="Enter role description" 
                           rows={3}
+                          disabled={isProtectedSystemRole(editingRole)}
                           {...field} 
                         />
                       </FormControl>
@@ -454,7 +502,15 @@ export default function RolesPage() {
                       <FormLabel>Permissions *</FormLabel>
                       <FormControl>
                         <div className="space-y-6">
-                          {Object.entries(PERMISSION_CATEGORIES).map(([category, config]) => {
+                          {permissionsLoading && (
+                            <p className="text-sm text-muted-foreground">Loading permissions...</p>
+                          )}
+                          {permissionsFailed && (
+                            <p className="text-sm text-destructive">
+                              Permissions could not be loaded. Close the dialog and retry.
+                            </p>
+                          )}
+                          {Object.entries(permissionCategories).map(([category, config]) => {
                             const Icon = config.icon;
                             return (
                               <div key={category} className="space-y-3">
@@ -518,12 +574,14 @@ export default function RolesPage() {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={createRoleMutation.isPending}
+                    disabled={createRoleMutation.isPending || permissionsLoading || permissionsFailed}
                   >
                     {createRoleMutation.isPending
                       ? 'Saving...'
                       : editingRole
-                      ? 'Update Role'
+                      ? isProtectedSystemRole(editingRole)
+                        ? 'Update Permissions'
+                        : 'Update Role'
                       : 'Create Role'}
                   </Button>
                 </DialogFooter>

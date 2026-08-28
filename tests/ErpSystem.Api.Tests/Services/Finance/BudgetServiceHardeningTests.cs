@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.Finance.Budget;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -15,6 +16,98 @@ public class BudgetServiceHardeningTests
 {
     private static readonly Guid TenantId = Guid.NewGuid();
     private static readonly Guid CurrentUserId = Guid.NewGuid();
+
+    [Fact]
+    public async Task UpdateScenarioAsync_OmittedDimensionPolicyPreservesExistingControls()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var definition = CreateDimensionDefinition();
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.FiscalYears.Add(new FiscalYear
+        {
+            Id = scenario.FiscalYearId, TenantId = TenantId, FiscalYearName = "FY Test"
+        });
+        db.FinanceDimensionDefinitions.Add(definition);
+        db.BudgetScenarios.Add(scenario);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).UpdateScenarioAsync(new UpdateBudgetScenarioDto
+        {
+            Id = scenario.Id,
+            Name = "FY Budget renamed",
+            RowVersion = Convert.ToBase64String(scenario.RowVersion)
+        });
+
+        result.ControlDimensions.Should().ContainSingle(item => item.DimensionCode == "DEPT");
+        (await db.BudgetScenarioControlDimensions.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task BulkSaveEntriesAsync_PersistsCanonicalDimensionCell()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var scenario = CreateScenario();
+        scenario.FiscalYearId = fiscalYear.Id;
+        var budgetReturn = CreateReturn(scenario.Id, CurrentUserId);
+        var account = CreateAccount(AccountType.Expense);
+        account.Status = AccountStatus.Active;
+        account.AllowDirectPosting = true;
+        var definition = CreateDimensionDefinition();
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "FIN", Name = "Finance",
+            EffectiveDate = fiscalYear.StartDate, IsActive = true
+        };
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.AddRange(fiscalYear, period, scenario, budgetReturn, account, definition, value);
+        await db.SaveChangesAsync();
+
+        await CreateService(db).BulkSaveEntriesAsync(new BulkSaveBudgetEntriesDto
+        {
+            BudgetReturnId = budgetReturn.Id,
+            ReturnRowVersion = Convert.ToBase64String(budgetReturn.RowVersion),
+            Entries =
+            {
+                new BudgetEntrySaveDto
+                {
+                    BudgetReturnId = budgetReturn.Id,
+                    AccountId = account.Id,
+                    FiscalPeriodId = period.Id,
+                    CurrencyCode = "GHS",
+                    Amount = 125_000m,
+                    DimensionAssignments =
+                    {
+                        new BudgetDimensionAssignmentInputDto
+                        {
+                            FinanceDimensionDefinitionId = definition.Id,
+                            FinanceDimensionValueId = value.Id
+                        }
+                    }
+                }
+            }
+        });
+
+        var entry = await db.BudgetEntries.Include(item => item.FinanceDimensionSet)
+            .ThenInclude(set => set!.Items).SingleAsync();
+        entry.AmountBase.Should().Be(125_000m);
+        entry.FinanceDimensionSet.Should().NotBeNull();
+        entry.FinanceDimensionSet!.Items.Should().ContainSingle(item =>
+            item.FinanceDimensionDefinitionId == definition.Id
+            && item.FinanceDimensionValueId == value.Id);
+    }
 
     [Fact]
     public async Task GetMyReturnsAsync_ReturnsOnlyAssignmentsForCurrentUser()
@@ -105,6 +198,71 @@ public class BudgetServiceHardeningTests
         await act.Should()
             .ThrowAsync<InvalidOperationException>()
             .WithMessage("*approved*");
+    }
+
+    [Fact]
+    public async Task SubmitReturnAsync_StartsWorkflowAndPersistsSubmittedState()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var budgetReturn = CreateReturn(scenario.Id, CurrentUserId);
+        db.BudgetScenarios.Add(scenario);
+        db.BudgetReturns.Add(budgetReturn);
+        db.BudgetEntries.Add(new BudgetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            BudgetReturnId = budgetReturn.Id,
+            AccountId = Guid.NewGuid(),
+            FiscalPeriodId = Guid.NewGuid(),
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            Amount = 14_000m,
+            AmountBase = 14_000m
+        });
+        await db.SaveChangesAsync();
+
+        var workflowInstanceId = Guid.NewGuid();
+        var workflow = new Mock<IWorkflowService>(MockBehavior.Strict);
+        workflow.Setup(service => service.StartApprovalWorkflowAsync("BudgetReturn", budgetReturn.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = workflowInstanceId
+            });
+
+        var result = await CreateService(db, workflow.Object).SubmitReturnAsync(
+            budgetReturn.Id,
+            Convert.ToBase64String(budgetReturn.RowVersion));
+
+        result.Status.Should().Be("Submitted");
+        result.SubmittedDate.Should().NotBeNull();
+        (await db.BudgetReturns.AsNoTracking().SingleAsync(item => item.Id == budgetReturn.Id))
+            .Status.Should().Be("Submitted");
+        workflow.Verify(service => service.StartApprovalWorkflowAsync("BudgetReturn", budgetReturn.Id), Times.Once);
+    }
+
+    [Fact]
+    public void BudgetWorkflowMutations_KeepTransactionsInsideTheExecutionStrategy()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
+            directory = directory.Parent;
+
+        directory.Should().NotBeNull("the repository root must be discoverable from the test output");
+        var source = File.ReadAllText(Path.Combine(
+            directory!.FullName,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Budget",
+            "BudgetService.cs"));
+
+        AssertRetryableWorkflowMethod(source, "SubmitScenarioAsync", "ArchiveScenarioAsync");
+        AssertRetryableWorkflowMethod(source, "SubmitReturnAsync", "RecallReturnAsync");
+        AssertRetryableWorkflowMethod(source, "RecallReturnAsync", "ENTRIES");
     }
 
     [Fact]
@@ -241,6 +399,96 @@ public class BudgetServiceHardeningTests
         result.IsOfficial.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task CreateRevisionAsync_RejectsAVirementThatDoesNotNetToZero()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var expense = CreateAccount(AccountType.Expense);
+        var revenue = CreateAccount(AccountType.Revenue);
+        var official = CreateScenario("Approved");
+        official.FiscalYearId = fiscalYear.Id;
+        official.IsActive = true;
+        var budgetReturn = CreateReturn(official.Id, CurrentUserId);
+        budgetReturn.Status = "Approved";
+        db.AddRange(fiscalYear, period, expense, revenue, official, budgetReturn);
+        db.BudgetEntries.Add(CreateEntry(budgetReturn.Id, expense.Id, period.Id, 100m));
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var request = CreateRevisionRequest(official.Id, period.Id, expense.Id, revenue.Id, -25m, 20m);
+
+        var act = () => service.CreateRevisionAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*exactly zero*");
+    }
+
+    [Fact]
+    public async Task ApplyRevisionAsync_CreatesAnImmutableOfficialSuccessorAndSupersedesSource()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var expense = CreateAccount(AccountType.Expense);
+        var revenue = CreateAccount(AccountType.Revenue);
+        var official = CreateScenario("Approved");
+        official.FiscalYearId = fiscalYear.Id;
+        official.Name = "FY2026 Original";
+        official.IsActive = true;
+        official.VersionNumber = 1;
+        var budgetReturn = CreateReturn(official.Id, CurrentUserId);
+        budgetReturn.Status = "Approved";
+        db.AddRange(fiscalYear, period, expense, revenue, official, budgetReturn);
+        db.BudgetEntries.AddRange(
+            CreateEntry(budgetReturn.Id, expense.Id, period.Id, 100m),
+            CreateEntry(budgetReturn.Id, revenue.Id, period.Id, 50m));
+
+        var revision = new BudgetRevision
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            RevisionNumber = "BR-2026-00001",
+            RevisionType = "Virement",
+            SourceScenarioId = official.Id,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            BoardResolutionReference = "TDC/BOARD/2026/047",
+            BoardResolutionDate = new DateTime(2026, 6, 25),
+            Justification = "Move approved funds to the higher-priority revenue activity.",
+            Status = "Approved",
+            SubmittedByUserId = Guid.NewGuid(),
+            ApprovedAt = DateTime.UtcNow,
+            RowVersion = new byte[8],
+            Lines = new List<BudgetRevisionLine>
+            {
+                CreateRevisionLine(expense.Id, period.Id, -25m),
+                CreateRevisionLine(revenue.Id, period.Id, 25m)
+            }
+        };
+        db.BudgetRevisions.Add(revision);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.ApplyRevisionAsync(
+            revision.Id,
+            Convert.ToBase64String(revision.RowVersion));
+
+        result.Status.Should().Be("Applied");
+        result.ResultScenarioId.Should().NotBeNull();
+        official.IsActive.Should().BeFalse();
+        official.Status.Should().Be("Superseded");
+        var successor = await db.BudgetScenarios
+            .Include(item => item.BudgetReturns).ThenInclude(item => item.BudgetEntries)
+            .SingleAsync(item => item.Id == result.ResultScenarioId);
+        successor.IsActive.Should().BeTrue();
+        successor.ParentScenarioId.Should().Be(official.Id);
+        successor.VersionType.Should().Be("Virement");
+        successor.VersionNumber.Should().Be(2);
+        successor.BudgetReturns.Single().BudgetEntries.Sum(item => item.AmountBase).Should().Be(150m);
+        successor.BudgetReturns.Single().BudgetEntries.Single(item => item.AccountId == expense.Id).AmountBase.Should().Be(75m);
+        successor.BudgetReturns.Single().BudgetEntries.Single(item => item.AccountId == revenue.Id).AmountBase.Should().Be(75m);
+    }
+
     private ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -249,13 +497,26 @@ public class BudgetServiceHardeningTests
         return new ApplicationDbContext(options, TenantId);
     }
 
-    private BudgetService CreateService(ApplicationDbContext db)
+    private BudgetService CreateService(ApplicationDbContext db, IWorkflowService? workflow = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(service => service.TenantId).Returns(TenantId);
         currentUser.SetupGet(service => service.UserId).Returns(CurrentUserId.ToString());
 
-        return new BudgetService(db, currentUser.Object, Mock.Of<IWorkflowService>());
+        return new BudgetService(db, currentUser.Object, workflow ?? Mock.Of<IWorkflowService>());
+    }
+
+    private static void AssertRetryableWorkflowMethod(string source, string methodName, string nextMarker)
+    {
+        var start = source.IndexOf($" {methodName}(", StringComparison.Ordinal);
+        var end = source.IndexOf(nextMarker, start + methodName.Length, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0);
+        end.Should().BeGreaterThan(start);
+
+        var method = source[start..end];
+        method.Should().Contain("CreateExecutionStrategy()");
+        method.Should().Contain("ExecuteInTransactionAsync(");
+        method.Should().NotContain("BeginTransactionAsync(");
     }
 
     private BudgetScenario CreateScenario(string status = "Collecting") =>
@@ -316,6 +577,14 @@ public class BudgetServiceHardeningTests
             AccountType = accountType
         };
 
+    private FinanceDimensionDefinition CreateDimensionDefinition() =>
+        new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "DEPT", Name = "Department",
+            Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true
+        };
+
     private BudgetEntry CreateEntry(
         Guid returnId,
         Guid accountId,
@@ -333,5 +602,37 @@ public class BudgetServiceHardeningTests
             Amount = amount,
             AmountBase = amount,
             RowVersion = new byte[8]
+        };
+
+    private CreateBudgetRevisionDto CreateRevisionRequest(
+        Guid scenarioId,
+        Guid periodId,
+        Guid releaseAccountId,
+        Guid increaseAccountId,
+        decimal release,
+        decimal increase) =>
+        new()
+        {
+            SourceScenarioId = scenarioId,
+            RevisionType = "Virement",
+            EffectiveDate = new DateTime(2026, 7, 1),
+            BoardResolutionReference = "TDC/BOARD/2026/047",
+            BoardResolutionDate = new DateTime(2026, 6, 25),
+            Justification = "Move approved funds to the higher-priority operational activity.",
+            Lines = new List<BudgetRevisionLineInputDto>
+            {
+                new() { AccountId = releaseAccountId, FiscalPeriodId = periodId, AdjustmentAmountBase = release },
+                new() { AccountId = increaseAccountId, FiscalPeriodId = periodId, AdjustmentAmountBase = increase }
+            }
+        };
+
+    private BudgetRevisionLine CreateRevisionLine(Guid accountId, Guid periodId, decimal adjustment) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            AccountId = accountId,
+            FiscalPeriodId = periodId,
+            AdjustmentAmountBase = adjustment
         };
 }

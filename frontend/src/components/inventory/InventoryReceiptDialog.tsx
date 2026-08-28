@@ -25,6 +25,7 @@ import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto, Wa
 import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import { formatInventoryMoney } from '@/lib/inventory-currency';
 
 interface InventoryReceiptDialogProps {
   open: boolean;
@@ -32,6 +33,7 @@ interface InventoryReceiptDialogProps {
   mode: 'create' | 'edit' | 'view';
   receiptId?: string;
   onSuccess: () => void;
+  currencyCode: string;
 }
 
 interface FormData {
@@ -55,7 +57,7 @@ interface ItemFormData {
   reason: string;
 }
 
-export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, onSuccess }: InventoryReceiptDialogProps) {
+export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, onSuccess, currencyCode }: InventoryReceiptDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -534,7 +536,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm text-muted-foreground">Total Value</p>
-                          <p className="text-2xl font-bold">${totalReceiptValue.toFixed(2)}</p>
+                          <p className="text-2xl font-bold">{formatInventoryMoney(totalReceiptValue, currencyCode)}</p>
                         </div>
                         <ArrowUpCircle className="h-8 w-8 text-green-500" />
                       </div>
@@ -697,7 +699,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                         <TableCell>{item.unitOfMeasure}</TableCell>
                         <TableCell className="text-right">{item.unitCost.toFixed(2)}</TableCell>
                         <TableCell className="text-right font-medium">
-                          ${item.totalValue.toFixed(2)}
+                          {formatInventoryMoney(item.totalValue, currencyCode)}
                         </TableCell>
                         {canEdit && (
                           <TableCell>
