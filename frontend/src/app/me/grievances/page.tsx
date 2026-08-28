@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, ShieldQuestion } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -11,11 +11,14 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { grievanceService } from '@/services/hr/grievance.service';
-import { GRIEVANCE_LADDER, type GrievanceSummary } from '@/types/hr/grievance';
+import { employeeRelationsService } from '@/services/hr/employee-relations.service';
+import {
+  GRIEVANCE_LADDER, ER_CASE_TYPE_OPTIONS, type GrievanceSummary,
+} from '@/types/hr/employee-relations';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const levelLabel = (v: string) => GRIEVANCE_LADDER.find((l) => l.value === v)?.label ?? v;
+const typeLabel = (v: string) => ER_CASE_TYPE_OPTIONS.find((t) => t.value === v)?.label ?? v;
 
 function GrievanceTable({ rows, emptyTitle, emptyBody, showWho = false }: {
   rows: GrievanceSummary[];
@@ -30,6 +33,7 @@ function GrievanceTable({ rows, emptyTitle, emptyBody, showWho = false }: {
         <TableRow>
           <TableHead>Reference</TableHead>
           {showWho && <TableHead>Raised by</TableHead>}
+          <TableHead>Kind</TableHead>
           <TableHead>Subject</TableHead>
           <TableHead>Filed</TableHead>
           <TableHead>Currently with</TableHead>
@@ -45,6 +49,9 @@ function GrievanceTable({ rows, emptyTitle, emptyBody, showWho = false }: {
               </Link>
             </TableCell>
             {showWho && <TableCell>{g.employeeName}</TableCell>}
+            {/* A welfare case or a mediation reads very differently from a grievance, and both
+                turn up in these two lists since slice 1. */}
+            <TableCell>{typeLabel(g.caseType)}</TableCell>
             <TableCell className="max-w-md truncate">{g.subject}</TableCell>
             <TableCell>{fmtDate(g.filedDate)}</TableCell>
             <TableCell>{levelLabel(g.currentLevel)}</TableCell>
@@ -69,12 +76,12 @@ function GrievanceTable({ rows, emptyTitle, emptyBody, showWho = false }: {
 export default function MyGrievancesPage() {
   const mine = useQuery({
     queryKey: ['me', 'grievances', 'mine'],
-    queryFn: () => grievanceService.getMine(),
+    queryFn: () => employeeRelationsService.getMine(),
   });
 
   const toAnswer = useQuery({
     queryKey: ['me', 'grievances', 'awaiting-my-response'],
-    queryFn: () => grievanceService.getAwaitingMyResponse(),
+    queryFn: () => employeeRelationsService.getAwaitingMyResponse(),
   });
 
   const spinner = (
@@ -90,12 +97,22 @@ export default function MyGrievancesPage() {
         description="Grievances you have raised, and any you have been asked to answer."
         backHref="/me"
         actions={
-          <Button asChild>
-            <Link href="/me/grievances/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Raise a grievance
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* The anonymous channel is offered beside the named one, not buried: somebody who
+                cannot put their name to a thing needs to find that out here. */}
+            <Button asChild variant="outline">
+              <Link href="/me/concerns">
+                <ShieldQuestion className="mr-2 h-4 w-4" />
+                Report something anonymously
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/me/grievances/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Raise a grievance
+              </Link>
+            </Button>
+          </div>
         }
       />
 

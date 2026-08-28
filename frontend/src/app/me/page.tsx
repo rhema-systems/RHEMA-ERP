@@ -41,6 +41,7 @@ import {
   Plane,
   Rocket,
   ShieldAlert,
+  ShieldQuestion,
   Target,
   TreePalm,
   UserRound,
@@ -85,6 +86,9 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
       { label: 'My Assets', hint: 'What you hold, and requests', href: '/me/assets', icon: Laptop },
       { label: 'My Safety', hint: 'PPE, risk assessments, report a concern', href: '/me/safety', icon: ShieldAlert },
       { label: 'My Grievances', hint: 'Raise and follow a concern of your own', href: '/me/grievances', icon: MessageSquare },
+      // Its own entry rather than a link buried inside grievances: somebody who cannot put their
+      // name to a thing should not have to open the named channel to discover the anonymous one.
+      { label: 'Report Anonymously', hint: 'Raise something without your name attached', href: '/me/concerns', icon: ShieldQuestion },
       { label: 'Internal Job Board', hint: 'Openings you can apply for', href: '/me/jobs', icon: Briefcase },
     ],
   },

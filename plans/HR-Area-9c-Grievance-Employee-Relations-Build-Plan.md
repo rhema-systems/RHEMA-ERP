@@ -47,7 +47,7 @@ refusal assertion must be probed as a *linked non-HR employee fixture*, never as
 | 9 | Cross-links: SHE incidents, PIPs, disciplinary cases | **COMPLETE 2026-08-28** — 114 ×2 + the ladder = **925**; migration `AddEmployeeRelationsCaseCrossLinks`; the link rule (*about somebody already on the case*) is the leak fix and the meaning at once |
 | 10 | Desk screens: the ER case register and case file | **COMPLETE 2026-08-28** — 2 screens, 30-method client, types written from a payload PROBE; §3.4 defects 1 and 2 both fixed; tsc + lint clean, every desk method has a caller |
 | 10b | Desk screens: analytics, the responder matrix, the concern inbox | **COMPLETE 2026-08-28** — 3 screens + a 13-method admin client; tsc + lint clean, every method has a caller. The probe found the matrix EMPTY, so one type had to come from the DTO — flagged in place |
-| 11 | Portal screens: the employee's side | ⏳ |
+| 11 | Portal screens: the employee's side | **COMPLETE 2026-08-28** — the anonymous channel gets a portal at last; the case view gains nine slices of content; the deprecated client and types file **deleted**, so the `api/grievances` alias now has no consumer anywhere |
 | 12 | Closing audit: content audit ×2, the two greps, route resolution, polish | ⏳ |
 
 ---
@@ -1172,3 +1172,76 @@ obvious that they are the only endpoints in the module that take no actor at all
 `CON-2026-00014` ("Slice 10b probe — payload shape only") sits in the live inbox. Harness fixtures
 are left behind by convention in this area, but a whistleblower inbox is the one place that reads
 oddly, so it is named here.
+
+---
+
+### Slice 11 — the portal screens. CLOSED 2026-08-28.
+
+`/me/concerns` is new; `/me/grievances/[id]` was rewritten; the list and filing screens migrated off
+the deprecated client, which is now **deleted**. `tsc` and `lint` clean.
+
+#### The anonymous channel had a backend and no way in
+
+Slice 6 built whistleblower intake — report, receipt, retrieval code, a two-way thread — and until
+now **no employee could reach any of it**. `/me/concerns` is that surface, and its whole shape
+follows from one fact: the retrieval code is hashed on the way in and cannot be recovered or
+reissued, by HR or by anyone.
+
+So the receipt is presented as something to **copy and keep now**, not to find again later. There is
+deliberately **no "email it to me"** — anywhere it could be sent would attach an identity to the
+report, which is the one thing the channel exists to prevent. The reporting form says out loud that
+nothing identifying the reporter is stored, and then warns them not to identify themselves in the
+text, which is the failure mode the system cannot protect them from.
+
+The tracking form surfaces **the server's own refusal verbatim**. It answers the same way whether
+the number or the code is wrong, and the temptation to be more helpful is exactly the bug: a message
+that distinguished them would turn the form into a way of discovering that somebody reported
+something.
+
+#### The case view was nine slices out of date
+
+It showed a statement and a ladder — area 9 slice 7's grievance. It now shows the parties (with the
+employee's own representative called out), the investigation, the conferences they were asked to,
+the decision, the signed agreement, and the documents, with downloads through the token-authenticated
+route rather than `filePath`.
+
+Two things it takes care to state rather than imply:
+
+- **A withheld conference note is labelled withheld**, not left blank. This is the screen where the
+  distinction matters most — a mediation whose notes are restricted to HR and the chair would
+  otherwise read as one nobody bothered to minute.
+- **An investigation still under way says so**, rather than rendering an empty Findings heading.
+  It cannot be completed without findings, so there is genuinely nothing there yet.
+
+**Accepting the signed agreement** is offered on a RESOLVED case, which looks wrong and is not: the
+agreement is written *from* the decision, so it necessarily arrives afterwards. The dialog says only
+the employee can do it — not HR, not a representative — and that declining is simply not accepting,
+with the ladder still open as the remedy.
+
+**The assign dialog was removed.** Naming a responder is HR's act; it sat on the portal only because,
+before slice 10, this page was the module's one working surface. `respond` stays, because the person
+named to answer is a portal user with no HR permission and nowhere else to do it.
+
+#### ⚠ An open question for slice 12, recorded rather than silently decided
+
+The server sends **`hrInterpretation` and the investigation's findings to everyone who may read the
+case** — the griever and the named responder included, not just HR. This slice renders them, because
+hiding in the UI what the API still returns creates a false impression of what is shared while the
+data stays one call away. Whether the *server* should redact either of them for a non-HR reader is a
+real question, and it belongs to slice 12's audit rather than to a UI slice.
+
+#### The deprecated client is gone, and that closes a slice-12 item early
+
+`services/hr/grievance.service.ts` and `types/hr/grievance.ts` are **deleted**. Slice 10 left them as
+a re-export so the portal kept compiling; slice 11 rewrote the last screen that needed them.
+
+A repo-wide grep now finds **`api/grievances` nowhere but the controller's own route attribute** —
+no frontend caller, no harness, nothing. That was slice 12's stated precondition for dropping the
+alias ("*after* the two greps prove nothing still does"), and it is met. The removal itself stays in
+slice 12, where the harness re-run belongs.
+
+#### Coverage
+
+Every method on both clients has a caller except `getCasesForSource` — the reverse panel on the SHE,
+performance and discipline screens, which is a UI change into three closed areas and is slice 12's
+call. That is now the **only** orphan in the module.

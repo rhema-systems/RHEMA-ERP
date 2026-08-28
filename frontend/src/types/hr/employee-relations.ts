@@ -1,7 +1,7 @@
 /**
  * Employee relations — HR area 9c. Backend route: `api/hr/employee-relations`.
  *
- * This supersedes `types/hr/grievance.ts`, which now re-exports from here. The register holds
+ * This replaced `types/hr/grievance.ts`, deleted in slice 11 once nothing imported it. The register holds
  * mediations, welfare matters and union consultations as well as FR-HR-181 grievances, so
  * "grievance" was the wrong name for the module the moment slice 1 landed.
  *

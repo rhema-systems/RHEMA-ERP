@@ -10,9 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { grievanceService } from '@/services/hr/grievance.service';
+import { employeeRelationsService } from '@/services/hr/employee-relations.service';
 import { toast } from 'sonner';
-import { GRIEVANCE_LADDER } from '@/types/hr/grievance';
+import { GRIEVANCE_LADDER } from '@/types/hr/employee-relations';
 
 const MIN_STATEMENT = 20;
 
@@ -36,7 +36,7 @@ export default function NewGrievancePage() {
   const [statement, setStatement] = useState('');
 
   const fileMutation = useMutation({
-    mutationFn: () => grievanceService.file({ subject: subject.trim(), statement: statement.trim() }),
+    mutationFn: () => employeeRelationsService.file({ subject: subject.trim(), statement: statement.trim() }),
     onSuccess: (created) => {
       toast.success(
         `Grievance ${created.grievanceNumber} raised — it has gone to the first level of the escalation route.`,
