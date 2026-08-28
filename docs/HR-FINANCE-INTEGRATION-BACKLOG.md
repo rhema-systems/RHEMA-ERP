@@ -196,6 +196,54 @@ module, whose **final settlement** is unavoidably an accounting event.
 
 ---
 
+## ✅ The posting entry point now EXISTS (recorded 2026-08-28, merge #8)
+
+**This closes the single biggest unknown in the checklist below.** Master `f71d6917` shipped a
+formal Finance integration contract, so the sweep no longer has to negotiate a mechanism first.
+
+| | |
+|---|---|
+| Contract | **FIN-INT-001** — “Approved source transaction → GL”, status **Available**, version 1.1 |
+| Entry point | `IFinancePostingEngine.PostAsync(FinancePostingRequestDto, ct)` |
+| Also on the interface | `GetReversalPlanAsync(postingEventId, reason, reversalDate, ct)` |
+| Registered | `ServiceCollectionExtensions:834` → `FinancePostingEngine`. Callable today, not a plan |
+| Catalogue | `docs/Finance/finance-integration-contract-catalogue.md` |
+| How to build an adapter | `docs/Finance/finance-integration-adapter-checklist.md` |
+| Consumer test template | `docs/Finance/finance-integration-consumer-test-template.md` |
+| CI gate | `.github/workflows/finance-integration-gate.yml` — a focused test must be added and its TRX count updated |
+
+`FinancePostingRequestDto` already carries what an HR money event needs: `OriginModuleCode`,
+`SourceDocumentType`/`SourceDocumentId`/`SourceDocumentTenantId`/`SourceDocumentReference`,
+`PostingDate`, `FiscalPeriodId`, `BookClassification`, `FunctionalCurrencyCode`,
+`ExchangeRateTypeOverride`, and — importantly for a reminder-driven module that may retry —
+`IdempotencyKey` with `ReturnExistingOnDuplicate`. Reversal is a first-class operation rather
+than something HR would have had to model itself.
+
+There is **no module allow-list to be added to**: `OriginModuleCode` is a free string the engine
+derives from `SourceModule` when omitted. So nothing blocks HR from being a consumer.
+
+**What this changes in the checklist below:**
+
+- “Confirm the Finance module's posting entry point and who owns it” — **answered**. It is
+  `IFinancePostingEngine`, Finance-owned, and the adapter belongs on the HR side of the boundary.
+  The rule in §Rules “do not invent an HR-side posting mechanism” is now not merely a caution:
+  there is a sanctioned one, so inventing another would be plainly wrong.
+- “Cost attribution (project / cost centre dimensions)” — the **mechanism** now exists (master
+  shipped Finance coding dimensions and dimension budgets, PRs #103/#112–#115/#120/#121, and
+  FIN-INT-001 notes that structured transaction dimensions are additive). **TDC's policy answer
+  is still outstanding** — what changed is that we no longer have to design the carrier.
+
+**What has NOT changed:** the deferral itself. The sweep still runs once, after the module, over
+the whole register — the argument for that was never the absence of an entry point, it was that
+GL posting is one accounting design rather than twenty-seven. Do not start posting per area now
+that a callable engine exists.
+
+One caveat worth carrying into the sweep: FIN-INT-011 in the catalogue — *“SH Fund, PF, ESB and
+fuel allocation”* — is listed as **owner not defined**, requirements-clarification, version 0.0.
+That is HR/payroll-shaped territory with no owner, and the sweep is the moment it gets one.
+
+---
+
 ## Before the sweep starts
 
 - [ ] Back-fill the five closed areas above.

@@ -11,6 +11,47 @@ running API on the reference database, and where a fix was trialled the result i
 
 ---
 
+---
+
+## Re-verification against master `f71d6917` (2026-08-28, merge #8)
+
+Every entry below was re-checked against the merged tree after pulling 187 master commits
+(PRs #63–#121). Method: for each defect, establish whether master touched the implicated file at
+all (`git diff 0c1c2e5c origin/master`), then read the code where it did. “Untouched” means the
+file carrying the defect received no change in this range.
+
+| # | Defect | Status after merge #8 | Evidence |
+|---|---|---|---|
+| 1 | Procurement `SuppliersController` dead | **Open** | `SupplierRepositories.cs` + controller untouched |
+| 2 | Finance currency conversion inverted | **RESOLVED** | PR #99 `finance-fx-seed-contract` transposed the seed (`Rate=12.5`, `InverseRate=0.08`) and documented the contract; both directions re-derived against `CurrencyService.ConvertAsync` |
+| 3 | Workflow conditional routing never routes | **Open** | `WorkflowDefinitionServiceAdapter:686` still `JsonSerializer.Serialize`s the condition; `WorkflowConditionEvaluator` untouched, still parses it as an expression |
+| 4 | Inventory frontend type errors | **Partly resolved** | duplicate `isStockingUnit` gone (1 declaration); a full re-count is impossible while #20 aborts the compiler |
+| 5 | `GetActiveByBusinessPartnerIdAsync` throws | **Open** | `BusinessPartnerUserRepository.cs` untouched |
+| 6 | `CreatedBy` holds an id, not a name | **Open** | all cited sites untouched |
+| 7 | Email template designer unusable | **Open** | `EmailTemplate*` untouched |
+| 8 | Fixed-asset → Maintenance link unsettable | **Open** | service and DTOs carry `MaintenanceAssetId`, but neither `register/new` nor `register/[id]/edit` renders a control — the value is initialised and submitted, never entered |
+| 9 | Projects maintenance follow-through throws | **Open** | `ProjectService.MaintenanceFollowThrough.cs` untouched; still no system seed for the three lookups |
+| 10 | Maintenance number collisions | **Open** | `AssetAdmission`/`AssetDischarge` untouched |
+| 11 | External-user allowlist exposure | **Open** | `ExternalUserAccessMiddleware` untouched; `/api/procurement` still a wholesale prefix |
+| 12 | Payroll payslip snapshots (FYI) | n/a | informational entry |
+| 13 | Payroll profile create never worked | **Open** | `PayrollService.cs` untouched |
+| 14 | Workflow pending feeds die mid-stream | **Open** | no `ReferenceHandler`/`IgnoreCycles` anywhere; master's only `WorkflowController` change is an unrelated new endpoint |
+| 15 | Generic approval strands the entity | **Partly mitigated, Finance only** | master added a `SupplierDebitNote` guard returning 409 `FINANCE_DOMAIN_APPROVAL_REQUIRED` pointing at the domain route. The generic hole is unchanged and **no HR entity is protected** — but this is now the precedent pattern for protecting one |
+| 16 | Notification feed planting | **Open upstream** | `NotificationsController` untouched (HR gated its own path in slice 11) |
+| 17 | Fixed-asset approval links to a dead route | **Open** | `ActionUrl` still `/finance/fixed-assets/register/{id}`; `register/[id]/` still contains only `edit/` |
+| 18 | Payroll loans readable by anyone | **Open** | `PayrollController.cs` untouched |
+| 19 | Helpdesk tickets readable by any employee | **Open** | `EhcInternalTicketsController` untouched |
+| 20 | Shared reporting crashes `tsc` | **Open (new)** | introduced by this range |
+
+### Not a numbered defect, but fixed by this range
+
+**The workflow engine’s single-step auto-approve trap is gone.** `WorkflowEngine` (`:1293`) used to
+complete an end step before considering approval semantics, so a one-step approval definition
+silently auto-approved — the trap recorded in the HR workflow-integration notes. Master reordered
+it so approval is handled first: *“A valid one-step approval workflow is necessarily both the start
+and end step; it must create and process its approval before the workflow completes.”* Any HR area
+that avoided single-step definitions for this reason can stop working around it, after re-testing.
+
 ## 1. Procurement — `SuppliersController` is entirely non-functional
 
 **Severity: blocking.** Found 2026-08-17 while retiring HR travel's duplicate vendor master onto
@@ -1182,11 +1223,20 @@ exported. The precise minimal trigger has not been isolated — that belongs wit
 
 ### What a fix needs
 
-Isolate the JSX element that trips the assertion in `StatutoryReportCataloguePage.tsx` — the
-`<Icon />` dynamic-tag render is the prime suspect — and give it an explicit type
-(`const Icon: LucideIcon = item.icon`) or narrow `CatalogueItem['icon']` to a concrete
-`ComponentType<SVGProps<SVGSVGElement>>`. A compiler crash is always worth reporting upstream
-too, but the practical fix is local. Until then the type-check gate is dead for everyone.
+Isolate the JSX element that trips the assertion in `StatutoryReportCataloguePage.tsx`.
+
+**Do not repeat this experiment — it has been run and it fails.** The obvious suspect was the
+dynamic-tag render `const Icon = item.icon;` then `<Icon className="h-4 w-4" />` (`:811-815`),
+where `CatalogueItem.icon` is `LucideIcon`. Typing it explicitly
+(`const Icon: LucideIcon = item.icon`) **does not stop the crash** — verified against the merged
+tree with a clean cache. Excluding the file in `tsconfig` does not help either, because it is
+still pulled into the program by its importers (`app/reports/page.tsx`, `ReportModuleNavigator`).
+The untested candidates that remain are the six bare `<SelectValue />` renders
+(`:935, 1007, 1025, 1045, 1063, 1084`).
+
+Scope note: `next.config` sets `typescript.ignoreBuildErrors: true`, so this does **not** break
+production builds. What it breaks is the `tsc --noEmit` gate — for every module at once, because
+the compiler aborts before emitting any diagnostics.
 
 ---
 
