@@ -8,6 +8,7 @@ import {
   Building2,
   Sparkles,
   DoorOpen,
+  Flag,
   Plus,
   FireExtinguisher,
   Siren,
@@ -1222,6 +1223,28 @@ export const navigationItems: NavItem[] = [
           // "approved and unpaid" — which no single travel request can show.
           { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
           { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard },
+        ],
+      },
+      {
+        // The company schedule. Built 2026-08-28 — the backend had 90 endpoints and no screen had
+        // ever called one of them. Events and bookings are day-to-day work and live here; rooms,
+        // closures, milestones and fiscal years are set up once and live under Administration.
+        title: 'Company Schedule',
+        href: '/hr/company-schedule',
+        icon: CalendarDays,
+        children: [
+          {
+            title: 'Events',
+            href: '/hr/company-schedule/events',
+            icon: CalendarDays,
+            permissions: ['HR.Company.Read'],
+          },
+          {
+            title: 'Room Bookings',
+            href: '/hr/company-schedule/bookings',
+            icon: CalendarCheck,
+            permissions: ['HR.Company.Read'],
+          },
         ],
       },
       {
@@ -3198,6 +3221,20 @@ export const navigationItems: NavItem[] = [
               { title: 'Compliance Requirements', href: '/administration/hr/training/compliance', icon: ShieldAlert },
               { title: 'Learning Paths', href: '/administration/hr/training/learning-paths', icon: Route },
               { title: 'Mentoring Programmes', href: '/administration/hr/training/mentoring', icon: Handshake },
+            ],
+          },
+          {
+            // Set up once, then referenced by the operational screens under /hr/company-schedule.
+            // Closures sit here rather than with events because the question they answer — "is this
+            // a working day?" — is the same one holiday calendars answer, and that is setup.
+            title: 'Company Schedule',
+            href: '/administration/hr/company-schedule',
+            icon: CalendarDays,
+            children: [
+              { title: 'Meeting Rooms', href: '/administration/hr/company-schedule/rooms', icon: DoorOpen },
+              { title: 'Business Closures', href: '/administration/hr/company-schedule/closures', icon: CalendarClock },
+              { title: 'Milestones', href: '/administration/hr/company-schedule/milestones', icon: Flag },
+              { title: 'Fiscal Years', href: '/administration/hr/company-schedule/fiscal-years', icon: CalendarRange },
             ],
           },
           {

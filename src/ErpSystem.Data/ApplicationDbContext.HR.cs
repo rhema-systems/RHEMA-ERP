@@ -5062,9 +5062,9 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.BudgetAmount).HasColumnType("decimal(18,2)");
             entity.Property(x => x.ActualCost).HasColumnType("decimal(18,2)");
 
-            entity.HasOne(x => x.Station)
+            entity.HasOne(x => x.SiteLocation)
                 .WithMany()
-                .HasForeignKey(x => x.StationId)
+                .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.Organizer)
@@ -5181,14 +5181,14 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.RoomCode);
             entity.HasIndex(x => x.RoomName);
-            entity.HasIndex(x => x.StationId);
+            entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.IsActive);
 
             entity.Property(x => x.Type).HasConversion<int>();
 
-            entity.HasOne(x => x.Station)
+            entity.HasOne(x => x.SiteLocation)
                 .WithMany()
-                .HasForeignKey(x => x.StationId)
+                .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(x => x.Bookings)
@@ -5243,14 +5243,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.StartDate);
             entity.HasIndex(x => x.EndDate);
             entity.HasIndex(x => x.Type);
-            entity.HasIndex(x => x.StationId);
+            entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.DepartmentId);
 
             entity.Property(x => x.Type).HasConversion<int>();
 
-            entity.HasOne(x => x.Station)
+            entity.HasOne(x => x.SiteLocation)
                 .WithMany()
-                .HasForeignKey(x => x.StationId)
+                .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.Department)

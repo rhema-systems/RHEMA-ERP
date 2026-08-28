@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -68,7 +69,7 @@ public class CompanyEventService : ICompanyEventService
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
-            .Include(e => e.Station)
+            .Include(e => e.SiteLocation)
             .Include(e => e.ApprovedBy)
             .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId, cancellationToken);
 
@@ -89,7 +90,7 @@ public class CompanyEventService : ICompanyEventService
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
-            .Include(e => e.Station)
+            .Include(e => e.SiteLocation)
             .Include(e => e.ApprovedBy)
             .Include(e => e.Participants).ThenInclude(p => p.Employee)
             .Include(e => e.AttendanceRecords).ThenInclude(a => a.Employee)
@@ -109,6 +110,9 @@ public class CompanyEventService : ICompanyEventService
         var entities = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
+            // The register shows the site; without this it reads blank here while the detail
+            // page shows it, which looks like missing data rather than a missing Include.
+            .Include(e => e.SiteLocation)
             .Where(e => e.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
@@ -121,6 +125,7 @@ public class CompanyEventService : ICompanyEventService
         var query = _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
+            .Include(e => e.SiteLocation)
             .Where(e => e.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -202,7 +207,11 @@ public class CompanyEventService : ICompanyEventService
 
         _logger.LogInformation("Company event created: {EventNumber}", entity.EventNumber);
 
-        return entity.ToDto();
+        // ⚠ Re-read before mapping. `entity` is the graph we just inserted: its Organizer,
+        // Department and SiteLocation navigations are still null, so mapping it straight to a DTO
+        // answers organizerName "" and locationName null. The caller cannot tell that from real
+        // missing data, and any screen that renders the create response shows blanks.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default)
@@ -211,7 +220,7 @@ public class CompanyEventService : ICompanyEventService
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
-            .Include(e => e.Station)
+            .Include(e => e.SiteLocation)
             .FirstOrDefaultAsync(e => e.Id == updateDto.Id && e.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
@@ -658,7 +667,7 @@ public class MeetingRoomService : IMeetingRoomService
     {
         var tenantId = GetTenantId();
         var entity = await _roomRepository.GetQueryable()
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
@@ -676,7 +685,7 @@ public class MeetingRoomService : IMeetingRoomService
     {
         var tenantId = GetTenantId();
         var entities = await _roomRepository.GetQueryable()
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .Where(r => r.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
@@ -687,7 +696,7 @@ public class MeetingRoomService : IMeetingRoomService
     {
         var tenantId = GetTenantId();
         var query = _roomRepository.GetQueryable()
-            .Include(r => r.Station)
+            .Include(r => r.SiteLocation)
             .Where(r => r.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -707,10 +716,10 @@ public class MeetingRoomService : IMeetingRoomService
         };
     }
 
-    public async Task<IEnumerable<MeetingRoomSummaryDto>> GetByStationAsync(Guid stationId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<MeetingRoomSummaryDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _roomRepository.GetByStationAsync(stationId))
+        var entities = (await _roomRepository.GetByLocationAsync(locationId))
             .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
@@ -737,6 +746,8 @@ public class MeetingRoomService : IMeetingRoomService
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
 
+        await EnsureLocationExistsAsync(tenantId, entity.LocationId, cancellationToken);
+
         if (string.IsNullOrEmpty(entity.RoomCode))
         {
             entity.RoomCode = await GenerateRoomCodeAsync(tenantId, cancellationToken);
@@ -754,7 +765,8 @@ public class MeetingRoomService : IMeetingRoomService
 
         _logger.LogInformation("Meeting room created: {RoomCode}", entity.RoomCode);
 
-        return entity.ToDto();
+        // Re-read so locationName is resolved — see the note on CompanyEventService.CreateAsync.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<MeetingRoomDto> UpdateAsync(UpdateMeetingRoomDto updateDto, CancellationToken cancellationToken = default)
@@ -781,6 +793,27 @@ public class MeetingRoomService : IMeetingRoomService
         _logger.LogInformation("Meeting room deleted: {Id}", id);
 
         return true;
+    }
+
+    /// <summary>
+    /// Refuses a site that is not a live Location in this tenant.
+    /// </summary>
+    /// <remarks>
+    /// Without this the bad id reaches SaveChanges and comes back as an unhandled FK violation —
+    /// a 500 reading "Something went wrong while processing your request", which tells the user
+    /// nothing and looks like an outage rather than a bad selection. Caught by the harness on the
+    /// first run. The tenant check matters as much as the existence check: another tenant's
+    /// location exists, and must still be refused here.
+    /// </remarks>
+    private async Task EnsureLocationExistsAsync(
+        Guid tenantId, Guid locationId, CancellationToken cancellationToken)
+    {
+        var exists = await _unitOfWork.Repository<Location>().GetQueryable()
+            .AnyAsync(l => l.Id == locationId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken);
+
+        if (!exists)
+            throw new InvalidOperationException(
+                $"Site '{locationId}' is not a location in this organisation, so a room cannot be filed against it.");
     }
 
     private async Task<string> GenerateRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken)
@@ -978,7 +1011,9 @@ public class RoomBookingService : IRoomBookingService
 
         _logger.LogInformation("Room booking created: {BookingNumber}", entity.BookingNumber);
 
-        return entity.ToDto();
+        // Re-read so roomName and bookedByName are resolved — see the note on
+        // CompanyEventService.CreateAsync.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default)
@@ -1258,7 +1293,7 @@ public class BusinessClosureService : IBusinessClosureService
     {
         var tenantId = GetTenantId();
         var entity = await _closureRepository.GetQueryable()
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Include(c => c.AnnouncedBy)
             .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId, cancellationToken);
@@ -1278,7 +1313,7 @@ public class BusinessClosureService : IBusinessClosureService
     {
         var tenantId = GetTenantId();
         var entities = await _closureRepository.GetQueryable()
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Include(c => c.AnnouncedBy)
             .Where(c => c.TenantId == tenantId)
@@ -1291,7 +1326,7 @@ public class BusinessClosureService : IBusinessClosureService
     {
         var tenantId = GetTenantId();
         var query = _closureRepository.GetQueryable()
-            .Include(c => c.Station)
+            .Include(c => c.SiteLocation)
             .Include(c => c.Department)
             .Include(c => c.AnnouncedBy)
             .Where(c => c.TenantId == tenantId);
@@ -1329,10 +1364,10 @@ public class BusinessClosureService : IBusinessClosureService
         return entities.ToDtoList();
     }
 
-    public async Task<IEnumerable<BusinessClosureDto>> GetByStationAsync(Guid stationId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<BusinessClosureDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _closureRepository.GetByStationAsync(stationId))
+        var entities = (await _closureRepository.GetByLocationAsync(locationId))
             .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
@@ -1345,14 +1380,14 @@ public class BusinessClosureService : IBusinessClosureService
         return entities.ToDtoList();
     }
 
-    public async Task<bool> IsClosureDateAsync(DateTime date, Guid? stationId = null, Guid? departmentId = null, CancellationToken cancellationToken = default)
+    public async Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var query = _closureRepository.GetQueryable()
             .Where(c => c.TenantId == tenantId && c.StartDate <= date && c.EndDate >= date);
 
-        if (stationId.HasValue)
-            query = query.Where(c => c.AffectsAllStations || c.StationId == stationId.Value);
+        if (locationId.HasValue)
+            query = query.Where(c => c.AffectsAllStations || c.LocationId == locationId.Value);
 
         if (departmentId.HasValue)
             query = query.Where(c => c.AffectsAllStations || c.DepartmentId == departmentId.Value);
@@ -1373,7 +1408,9 @@ public class BusinessClosureService : IBusinessClosureService
 
         _logger.LogInformation("Business closure created: {Title}", entity.Title);
 
-        return entity.ToDto();
+        // Re-read so locationName and announcedByName are resolved — see the note on
+        // CompanyEventService.CreateAsync.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<BusinessClosureDto> UpdateAsync(UpdateBusinessClosureDto updateDto, CancellationToken cancellationToken = default)

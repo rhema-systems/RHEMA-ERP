@@ -1240,6 +1240,83 @@ the compiler aborts before emitting any diagnostics.
 
 ---
 
+## 21. Procurement / Shared reporting — three migrations drop constraints that a model-built database never had, so `database update` cannot complete
+
+**What is broken.** Three migrations issue a raw `ALTER TABLE ... DROP CONSTRAINT` with no
+existence guard:
+
+| Migration | Constraint it drops unguarded |
+| --- | --- |
+| `20260722074659_AddProcurementRequisitionSourcingReleases` | `FK_RequestForQuotations_PurchaseRequisitions_SourcePurchaseRequisitionId` |
+| `20260805100000_TDC0705ConfigurableReportTemplates` | `CK_ReportTemplates_Audience` |
+| `20260812170000_ExtendControlledSourcingMethods` | `CK_ProcurementTenderControls_State`, `CK_ProcurementExceptionalSourcingControls_Core` |
+
+**What was proven.** Applying the migration chain after a master→hrdev merge fails on:
+
+```
+Applying migration '20260812170000_ExtendControlledSourcingMethods'.
+Msg 3728: 'CK_ProcurementTenderControls_State' is not a constraint.
+Could not drop constraint. See previous errors.
+```
+
+`CK_ProcurementTenderControls_State` is created **only** inside `migrationBuilder.Sql` in
+`20260723071908_AddProcurementTenderStatutoryControls`. It is not declared on the EF model —
+`grep HasCheckConstraint` finds entries for HR and Quantity Survey, none for Procurement.
+
+**The mechanism, confirmed on a live developer database.** `rebuild-db` (`Program.cs`) calls
+`EnsureCreatedAsync()` — which builds tables from the EF model and therefore creates no check
+constraints and no triggers — and then `StampCurrentModelMigrationsAsAppliedAsync`, which inserts
+a `__EFMigrationsHistory` row for **every migration in the assembly without running any of them**.
+The database is left claiming a complete chain while missing every object that only exists in
+migration SQL.
+
+Queried on the affected database:
+
+| Check | Result |
+| --- | --- |
+| `20260723071908` in `__EFMigrationsHistory` | **1** — recorded as applied |
+| `sys.check_constraints` on `ProcurementTenderControls` | **no rows** — never created |
+| `OBJECT_ID('TR_ProcurementTenderControls_Lifecycle')` | **exists** |
+
+The trigger surviving while the constraint does not is the tell, and it is not a contradiction:
+the trigger is re-issued as `CREATE OR ALTER TRIGGER` by a later migration
+(`20260723184003_AddProcurementTenderDocumentControls`), which is idempotent and succeeds against a
+database that never had it. The check constraints use a bare `ADD CONSTRAINT` and get no such
+second chance. **Idempotent DDL survived the stamping; non-idempotent DDL did not.**
+
+**Why patching the one constraint is not enough.** The same migration's second statement rewrites
+trigger `TR_ProcurementTenderControls_Lifecycle`, which is *also* created only in migration SQL and
+is *also* absent from a model-built database. It is guarded — but the guard is a `THROW`:
+
+```
+IF @definition IS NULL ... THROW 51109, 'The controlled-tender lifecycle trigger is missing ...'
+```
+
+So recreating the check constraint by hand simply moves the failure one statement along, to 51109.
+Every migration-SQL object this chain assumes is missing on such a database.
+
+**What it blocks.** Any developer whose database was built with `rebuild-db` cannot bring it forward
+with `dotnet ef database update` — the chain stops at the first unguarded drop. It also means these
+migrations are not re-runnable, so a partially-applied chain cannot be resumed.
+
+**What a fix needs.** Guard each drop the way HR's own migrations do — the shape is in
+`20260828170021_RepointCompanyScheduleStationToLocation`:
+
+```sql
+IF EXISTS (SELECT 1 FROM sys.check_constraints
+           WHERE [name] = N'CK_ProcurementTenderControls_State'
+             AND [parent_object_id] = OBJECT_ID(N'[dbo].[ProcurementTenderControls]'))
+    ALTER TABLE [dbo].[ProcurementTenderControls] DROP CONSTRAINT [CK_ProcurementTenderControls_State];
+```
+
+and make the trigger rewrite create-if-absent rather than `THROW`. The deeper question for the
+owning team is whether Procurement's check constraints and triggers should be declared on the EF
+model (`HasCheckConstraint`, as Quantity Survey does) so a model-built database gets them too. As
+long as they live only in migration SQL, `rebuild-db` and `database update` produce two different
+databases, and only one of them can run the chain.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

@@ -1,6 +1,8 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -14,19 +16,28 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 /// <remarks>
 /// <para><b>W3 slice 14.</b> All 90 actions carried a bare <c>[Authorize]</c> and no screen has
-/// ever called any of them — the surface is dormant since the port. Gated verb-mechanically on
-/// <c>HR.Company.*</c>: reads → Read, writes and decisions → Write, deletes → Admin. Nothing
-/// self-service is drawn here on purpose: every actor id (<c>organizerId</c>, <c>bookedById</c>,
-/// <c>approvedById</c>, <c>markedById</c>, <c>announcedById</c>) is client-supplied rather than
-/// token-derived, so an open "book a room" or "respond to an invitation" surface would be
-/// act-as-anyone. If a calendar or room-booking screen is ever built, those paths must first move
-/// to token actors and only then open with self-or-permission checks — recorded as a slice-14
-/// residual in the W3 plan.</para>
+/// ever called any of them — the surface was dormant since the port. Gated verb-mechanically on
+/// <c>HR.Company.*</c>: reads → Read, writes and decisions → Write, deletes → Admin.</para>
+///
+/// <para><b>Actor resolution, closed 2026-08-28 when the schedule screens were built.</b> The five
+/// actor ids (<c>organizerId</c>, <c>approvedById</c>, <c>markedById</c>, <c>bookedById</c>,
+/// <c>announcedById</c>) used to arrive as query parameters, which made every one of them
+/// act-as-anyone the moment a screen existed. They now come from the caller's token via
+/// <see cref="HrControllerBase.TryGetEmployeeWriteContext"/> and are no longer accepted from the
+/// client. These are domain actor fields holding <c>Employee</c> ids, not audit fields, so the
+/// employee-linked overload is the correct one — an unlinked administrative account genuinely
+/// cannot organise an event or approve a booking.</para>
+///
+/// <para><b>Still not drawn here:</b> a self-service surface. <c>participants/respond</c> takes a
+/// <c>ParticipantId</c> and stays on the HR-desk <c>Write</c> policy, so it is "HR records the
+/// response", not "the invitee answers". A genuine self-service invitation reply needs a
+/// self-or-permission check against the participant's own employee id first.</para>
 /// </remarks>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Policy = "InternalOnly")]
-public class CompanyScheduleController : ControllerBase
+[CompanyScheduleBusinessRules]
+public class CompanyScheduleController : HrControllerBase
 {
     private readonly ICompanyEventService _eventService;
     private readonly IMeetingRoomService _roomService;
@@ -41,7 +52,9 @@ public class CompanyScheduleController : ControllerBase
         IRoomBookingService bookingService,
         ICompanyMilestoneService milestoneService,
         IBusinessClosureService closureService,
-        IFiscalYearService fiscalYearService)
+        IFiscalYearService fiscalYearService,
+        ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _eventService = eventService;
         _roomService = roomService;
@@ -109,9 +122,12 @@ public class CompanyScheduleController : ControllerBase
 
     [HttpPost("events")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<CompanyEventDto>> CreateEvent([FromQuery] Guid organizerId, [FromBody] CreateCompanyEventDto dto)
+    public async Task<ActionResult<CompanyEventDto>> CreateEvent([FromBody] CreateCompanyEventDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var organizerId, "Organising an event");
+        if (ctx != null) return ctx;
+
         var created = await _eventService.CreateAsync(dto, organizerId);
         return CreatedAtAction(nameof(GetEvent), new { id = created.Id }, created);
     }
@@ -128,8 +144,11 @@ public class CompanyScheduleController : ControllerBase
 
     [HttpPost("events/{id:guid}/approve")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> ApproveEvent(Guid id, [FromQuery] Guid approvedById)
+    public async Task<IActionResult> ApproveEvent(Guid id)
     {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var approvedById, "Approving an event");
+        if (ctx != null) return ctx;
+
         await _eventService.ApproveEventAsync(id, approvedById);
         return Ok(new { message = "Event approved" });
     }
@@ -208,9 +227,12 @@ public class CompanyScheduleController : ControllerBase
 
     [HttpPost("events/{eventId:guid}/attendance")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<EventAttendanceDto>> MarkAttendance(Guid eventId, [FromBody] MarkEventAttendanceDto dto, [FromQuery] Guid markedById)
+    public async Task<ActionResult<EventAttendanceDto>> MarkAttendance(Guid eventId, [FromBody] MarkEventAttendanceDto dto)
     {
         dto.EventId = eventId;
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var markedById, "Marking event attendance");
+        if (ctx != null) return ctx;
+
         var attendance = await _eventService.MarkAttendanceAsync(dto, markedById);
         return Ok(attendance);
     }
@@ -322,10 +344,10 @@ public class CompanyScheduleController : ControllerBase
     public async Task<ActionResult<MeetingRoomDto>> GetMeetingRoom(Guid id)
         => Ok(await _roomService.GetByIdAsync(id));
 
-    [HttpGet("rooms/station/{stationId:guid}")]
+    [HttpGet("rooms/location/{locationId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<MeetingRoomSummaryDto>>> GetRoomsByStation(Guid stationId)
-        => Ok(await _roomService.GetByStationAsync(stationId));
+    public async Task<ActionResult<IEnumerable<MeetingRoomSummaryDto>>> GetRoomsByLocation(Guid locationId)
+        => Ok(await _roomService.GetByLocationAsync(locationId));
 
     [HttpGet("rooms/available")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
@@ -417,11 +439,12 @@ public class CompanyScheduleController : ControllerBase
 
     [HttpPost("bookings")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<RoomBookingDto>> CreateBooking(
-        [FromQuery] Guid bookedById,
-        [FromBody] CreateRoomBookingDto dto)
+    public async Task<ActionResult<RoomBookingDto>> CreateBooking([FromBody] CreateRoomBookingDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var bookedById, "Booking a room");
+        if (ctx != null) return ctx;
+
         var created = await _bookingService.CreateAsync(dto, bookedById);
         return CreatedAtAction(nameof(GetBooking), new { id = created.Id }, created);
     }
@@ -438,8 +461,11 @@ public class CompanyScheduleController : ControllerBase
 
     [HttpPost("bookings/{id:guid}/approve")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> ApproveBooking(Guid id, [FromQuery] Guid approvedById)
+    public async Task<IActionResult> ApproveBooking(Guid id)
     {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var approvedById, "Approving a room booking");
+        if (ctx != null) return ctx;
+
         await _bookingService.ApproveBookingAsync(id, approvedById);
         return Ok(new { message = "Booking approved" });
     }
@@ -559,10 +585,10 @@ public class CompanyScheduleController : ControllerBase
     public async Task<ActionResult<IEnumerable<BusinessClosureDto>>> GetClosuresByType(ClosureType type)
         => Ok(await _closureService.GetByTypeAsync(type));
 
-    [HttpGet("closures/station/{stationId:guid}")]
+    [HttpGet("closures/location/{locationId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<BusinessClosureDto>>> GetClosuresByStation(Guid stationId)
-        => Ok(await _closureService.GetByStationAsync(stationId));
+    public async Task<ActionResult<IEnumerable<BusinessClosureDto>>> GetClosuresByLocation(Guid locationId)
+        => Ok(await _closureService.GetByLocationAsync(locationId));
 
     [HttpGet("closures/upcoming")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
@@ -573,17 +599,18 @@ public class CompanyScheduleController : ControllerBase
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public async Task<ActionResult<bool>> IsClosureDate(
         [FromQuery] DateTime date,
-        [FromQuery] Guid? stationId = null,
+        [FromQuery] Guid? locationId = null,
         [FromQuery] Guid? departmentId = null)
-        => Ok(await _closureService.IsClosureDateAsync(date, stationId, departmentId));
+        => Ok(await _closureService.IsClosureDateAsync(date, locationId, departmentId));
 
     [HttpPost("closures")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<BusinessClosureDto>> CreateClosure(
-        [FromQuery] Guid announcedById,
-        [FromBody] CreateBusinessClosureDto dto)
+    public async Task<ActionResult<BusinessClosureDto>> CreateClosure([FromBody] CreateBusinessClosureDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var announcedById, "Announcing a business closure");
+        if (ctx != null) return ctx;
+
         var created = await _closureService.CreateAsync(dto, announcedById);
         return CreatedAtAction(nameof(GetClosure), new { id = created.Id }, created);
     }
