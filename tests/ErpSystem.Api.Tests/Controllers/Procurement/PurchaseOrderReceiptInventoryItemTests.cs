@@ -148,7 +148,6 @@ public sealed class PurchaseOrderReceiptInventoryItemTests
             Mock.Of<IBusinessPartnerRepository>(),
             Mock.Of<IInventoryItemRepository>(),
             Mock.Of<IWarehouseRepository>(),
-            Mock.Of<IProcurementBudgetService>(),
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<IProjectService>(),
             unitOfWork,
@@ -164,6 +163,7 @@ public sealed class PurchaseOrderReceiptInventoryItemTests
             Mock.Of<IProcurementReceiptInspectionService>(),
             Mock.Of<IProcurementReceiptDocumentService>(),
             Mock.Of<IProcurementControlEventService>(),
+            Mock.Of<IProcurementBudgetCommitmentLifecycleService>(),
             Mock.Of<ILogger<PurchaseOrdersController>>());
 
         return new Fixture(

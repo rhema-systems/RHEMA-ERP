@@ -231,15 +231,30 @@ public sealed class ProcurementRequisitionSubmissionControlServiceTests
         public Mock<IProcurementAccessControlService> Access { get; }
         public ProcurementRequisitionSubmissionControlService Service { get; }
 
-        public PurchaseRequisition NewRequisition(ProcurementPlan? plan = null, ProcurementPlanItem? item = null) => new()
+        public PurchaseRequisition NewRequisition(ProcurementPlan? plan = null, ProcurementPlanItem? item = null)
         {
-            Id = Guid.NewGuid(), TenantId = TenantId,
-            RequisitionNumber = $"PR-2026-{Random.Shared.Next(1000, 9999)}",
-            RequestedById = UserId, Status = "Draft", ProcurementCategory = ProcurementCategoryClass.Goods,
-            SourcePlanId = plan?.Id, SourcePlanItemId = item?.Id,
-            SourcePlanNumber = plan?.PlanNumber, SourcePlanItemDescription = item?.ItemDescription,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
-        };
+            var requisition = new PurchaseRequisition
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId,
+                RequisitionNumber = $"PR-2026-{Random.Shared.Next(1000, 9999)}",
+                RequestedById = UserId, Status = "Draft", ProcurementCategory = ProcurementCategoryClass.Goods,
+                Department = "Information Technology", RequiredDate = DateTime.UtcNow.Date.AddDays(30),
+                Justification = "Approved operational requirement", BudgetId = Guid.NewGuid(),
+                Currency = "GHS", TotalAmount = 500m,
+                SourcePlanId = plan?.Id, SourcePlanItemId = item?.Id,
+                SourcePlanNumber = plan?.PlanNumber, SourcePlanItemDescription = item?.ItemDescription,
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+            };
+            requisition.Items.Add(new PurchaseRequisitionItem
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, RequisitionId = requisition.Id,
+                ItemDescription = item?.ItemDescription ?? "Operational equipment",
+                Quantity = 1m, UnitOfMeasure = "EA", EstimatedUnitPrice = 500m,
+                LineTotal = 500m, Specifications = "Business-approved minimum specification",
+                Status = "Pending", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+            });
+            return requisition;
+        }
 
         public AppReferences SeedAppPath()
         {

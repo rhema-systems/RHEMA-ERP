@@ -63,7 +63,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
             "trace-po-issue");
 
         readiness.CommitmentStatus.Should().Be("Reserved");
-        budget.CommittedAmount.Should().Be(400m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(400m);
         (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
     }
 
@@ -86,11 +87,12 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
 
         readiness.CommitmentStatus.Should().Be("Reserved");
         readiness.RequestedAmount.Should().Be(3_990m);
-        budget.CommittedAmount.Should().Be(3_990m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(3_990m);
         requisition.BudgetValidated.Should().BeFalse(
             "an approved requisition retains its immutable approval-time budget snapshot");
-        requisition.BudgetRemaining.Should().Be(0m,
-            "downstream commitment changes belong to the Finance budget ledger, not the approved requisition");
+        requisition.BudgetRemaining.Should().BeNull(
+            "downstream commitment changes belong to the Finance budget ledger, not the approved requisition snapshot");
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
         commitment.ReservedAmount.Should().Be(3_990m);
     }
@@ -160,7 +162,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
             "trace-adjust-award");
 
         readiness.RequestedAmount.Should().Be(3_990m);
-        budget.CommittedAmount.Should().Be(3_990m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(3_990m);
         budget.RemainingAmount.Should().Be(6_010m);
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
         commitment.ReservedAmount.Should().Be(3_990m);

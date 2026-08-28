@@ -87,7 +87,7 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
     }
 
     [Fact]
-    public async Task AuthorityHardStopOccursBeforeBudgetReservationTransactionOrWorkflowStart()
+    public async Task OptionalAuthorityGuidanceDoesNotBlockConfiguredWorkflowSubmission()
     {
         var fixture = new ControllerFixture();
         var readiness = fixture.AuthorityReadiness(
@@ -95,32 +95,33 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
         fixture.Authority.Setup(service => service.EnforceSubmissionAsync(
                 fixture.Requisition, "trace-pr-authority", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ProcurementRequisitionAuthorityBlockedException(readiness));
+        fixture.Workflow.Setup(service => service.SubmitAsync(
+                "PurchaseRequisition", fixture.Requisition.Id))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.InProgress,
+                    WorkflowInstanceId = Guid.NewGuid()
+                },
+                WorkflowOutcome.Pending));
 
         var result = (ObjectResult)await fixture.Controller.SubmitPurchaseRequisition(fixture.Requisition.Id);
 
-        result.StatusCode.Should().Be(422);
-        var problem = result.Value.Should().BeAssignableTo<ProblemDetails>().Subject;
-        problem.Extensions["code"].Should().Be("PR_AUTHORITY_ROUTE_AMBIGUOUS");
-        problem.Extensions["authorityReadiness"].Should().BeSameAs(readiness);
-        fixture.Budget.Verify(service => service.ReserveAsync(
+        result.StatusCode.Should().Be(200);
+        fixture.Authority.Verify(service => service.EnforceSubmissionAsync(
             It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        fixture.UnitOfWork.Verify(service => service.BeginTransactionAsync(
-            It.IsAny<CancellationToken>()), Times.Never);
         fixture.Workflow.Verify(service => service.SubmitAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            "PurchaseRequisition", fixture.Requisition.Id), Times.Once);
     }
 
     [Fact]
-    public async Task ReadySubmissionCapturesRouteThenStartsExactSelectedWorkflowVersionAtomically()
+    public async Task ReadySubmissionStartsConfiguredWorkflowWithoutAuthorityBandPrerequisite()
     {
         var fixture = new ControllerFixture();
         var calls = new List<string>();
-        fixture.Authority.Setup(service => service.CaptureAsync(
-                fixture.Requisition, fixture.Decision, "trace-pr-authority", It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("capture"))
-            .ReturnsAsync(fixture.Route);
         fixture.Workflow.Setup(service => service.SubmitAsync(
-                "PurchaseRequisition", fixture.Requisition.Id, fixture.Route.WorkflowDefinitionId))
+                "PurchaseRequisition", fixture.Requisition.Id))
             .Callback(() => calls.Add("workflow"))
             .ReturnsAsync(new WorkflowIntegrationResult(
                 new WorkflowExecutionResult
@@ -137,11 +138,12 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
         var result = (OkObjectResult)await fixture.Controller.SubmitPurchaseRequisition(fixture.Requisition.Id);
 
         result.Value.Should().NotBeNull();
-        calls.Should().Equal("capture", "workflow");
+        calls.Should().Equal("workflow");
         fixture.Workflow.Verify(service => service.SubmitAsync(
-            "PurchaseRequisition", fixture.Requisition.Id, fixture.Route.WorkflowDefinitionId), Times.Once);
-        fixture.Workflow.Verify(service => service.SubmitAsync(
-            It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+            "PurchaseRequisition", fixture.Requisition.Id), Times.Once);
+        fixture.Authority.Verify(service => service.CaptureAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<ProcurementAuthorityRouteDecisionDto>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.Repository.Verify(service => service.UpdateRequisitionAsync(fixture.Requisition), Times.Once);
         fixture.UnitOfWork.Verify(service => service.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.UnitOfWork.Verify(service => service.RollbackAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -149,21 +151,17 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
     }
 
     [Fact]
-    public async Task ApprovalSodHardStopPreventsWorkflowAuthorizationAndApprovalMutation()
+    public async Task RequesterSelfApprovalIsRejectedBeforeWorkflowMutation()
     {
         var fixture = new ControllerFixture(status: "Pending Approval");
-        var readiness = fixture.AuthorityReadiness(
-            isCompliant: false, code: "SOD_INITIATOR_APPROVER_CONFLICT");
-        fixture.Authority.Setup(service => service.EnforceApprovalAsync(
-                fixture.Requisition, "trace-pr-authority", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ProcurementRequisitionAuthorityBlockedException(readiness));
+        fixture.Requisition.RequestedById = fixture.UserId;
 
         var result = (ObjectResult)await fixture.Controller.ApprovePurchaseRequisition(
             fixture.Requisition.Id, new ApprovalDto { Approved = true });
 
         result.StatusCode.Should().Be(403);
         result.Value.Should().BeAssignableTo<ProblemDetails>()
-            .Which.Extensions["code"].Should().Be("SOD_INITIATOR_APPROVER_CONFLICT");
+            .Which.Extensions["code"].Should().Be("PR_SELF_APPROVAL_FORBIDDEN");
         fixture.Workflow.Verify(service => service.CanUserApproveAsync(
             It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
         fixture.Workflow.Verify(service => service.ProcessApprovalAsync(
@@ -254,8 +252,8 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
             Authority.Setup(service => service.EnforceSubmissionAsync(
                     Requisition, "trace-pr-authority", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Decision);
-            Budget.Setup(service => service.ReserveAsync(
-                    Requisition, "trace-pr-authority", It.IsAny<CancellationToken>()))
+            Budget.Setup(service => service.GetReadinessAsync(
+                    Requisition.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PurchaseRequisitionBudgetReadinessDto
                 {
                     RequisitionId = Requisition.Id,
@@ -270,6 +268,8 @@ public sealed class PurchaseRequisitionAuthorityControlsControllerTests
                     RequestedAmount = Requisition.TotalAmount,
                     AvailableAmount = 10000m
                 });
+            Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("PurchaseRequisition"))
+                .ReturnsAsync(true);
             UnitOfWork.Setup(service => service.ExecuteInStrategyAsync(
                     It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()))
                 .Returns((Func<Task> operation, CancellationToken _) => operation());

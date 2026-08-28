@@ -165,6 +165,49 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         }
 
         var isCompliant = requiredActions.Count == 0;
+        if (isCompliant && exception.Attempted && !exception.Allowed)
+        {
+            requiredActions.Add(exception.Action);
+            return new Evaluation(BuildReadiness(
+                requisition,
+                false,
+                false,
+                exception.Code,
+                exception.Message,
+                null,
+                app,
+                exception,
+                requiredActions.Distinct(StringComparer.Ordinal).ToList()), app, exception);
+        }
+
+        if (isCompliant && app.Allowed)
+        {
+            return new Evaluation(BuildReadiness(
+                requisition,
+                true,
+                statusAllowsSubmission,
+                "PR_APP_ACKNOWLEDGED",
+                $"The purchase requisition has the required business details. APP attempt {app.Submission!.SubmissionNumber}/A{app.Submission.AttemptNumber} is acknowledged and retained for GHANEPS traceability.",
+                "AcknowledgedAPP",
+                app,
+                exception,
+                []), app, exception);
+        }
+
+        if (isCompliant && exception.Allowed)
+        {
+            return new Evaluation(BuildReadiness(
+                requisition,
+                true,
+                statusAllowsSubmission,
+                "PR_APPROVED_EXCEPTION",
+                $"The purchase requisition has the required business details and approved exception {exception.Rule!.RuleCode} is backed by its completed workflow.",
+                "ApprovedException",
+                app,
+                exception,
+                []), app, exception);
+        }
+
         var appNote = app.Allowed
             ? $" APP attempt {app.Submission!.SubmissionNumber}/A{app.Submission.AttemptNumber} is acknowledged and retained for GHANEPS traceability."
             : requisition.SourcePlanId.HasValue
@@ -177,9 +220,9 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
             requisition,
             isCompliant,
             isCompliant && statusAllowsSubmission,
-            isCompliant ? "PR_READY_FOR_WORKFLOW" : "PR_REQUIRED_DETAILS_INCOMPLETE",
+            isCompliant ? "PR_SUBMISSION_READY" : "PR_REQUIRED_DETAILS_INCOMPLETE",
             message,
-            "BusinessRequirements",
+            isCompliant ? "ConfiguredApprovalWorkflow" : "BusinessRequirements",
             app,
             exception,
             requiredActions.Distinct(StringComparer.Ordinal).ToList()), app, exception);

@@ -78,7 +78,7 @@ async function getFriendlyErrorMessage(
       return procurementPermissionGuidance;
     }
 
-    return 'You cannot create this purchase requisition yet. Ask a Security administrator to assign the active TDC Requisitioner, TDC User Department Head, TDC Procurement Officer, or TDC Senior Procurement Officer role. A warehouse responsibility assignment is not required for requisition creation.';
+    return includeCode('Your assigned Security roles do not authorize this procurement action. Ask a Security administrator to assign the permission required for the action and try again.');
   }
 
   if (
