@@ -149,7 +149,59 @@ public sealed class FinanceBudgetControlServiceTests
 
         result.IsAllowed.Should().BeFalse();
         result.Lines.Single().DecisionCode.Should().Be("NO_MATCHING_BUDGET_LINE");
-        result.Lines.Single().Message.Should().Contain("department/cost-centre");
+        result.Lines.Single().Message.Should().Contain("Department budget combination");
+        result.Lines.Single().Message.Should().NotContain("cost-centre");
+    }
+
+    [Fact]
+    public async Task Missing_budget_cell_names_the_adopted_scenario_control_dimensions()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedJournal(db, budgetTrackingEnabled: true);
+        var budget = SeedAdoptedBudget(db, fixture, 1_000m);
+        // Keep the adopted scenario but remove its only cell from consideration so the
+        // diagnostic must describe the scenario grain rather than a successful match.
+        budget.Entry.IsDeleted = true;
+        var department = new FinanceDimensionDefinition
+        {
+            TenantId = TenantId,
+            Code = "DEPT",
+            Name = "Department",
+            DisplayOrder = 1,
+            IsActive = true
+        };
+        var project = new FinanceDimensionDefinition
+        {
+            TenantId = TenantId,
+            Code = "PROJECT",
+            Name = "Project",
+            DisplayOrder = 2,
+            IsActive = true
+        };
+        db.AddRange(department, project);
+        db.AddRange(
+            new BudgetScenarioControlDimension
+            {
+                TenantId = TenantId,
+                BudgetScenarioId = budget.Scenario.Id,
+                FinanceDimensionDefinitionId = department.Id,
+                DisplayOrder = 1
+            },
+            new BudgetScenarioControlDimension
+            {
+                TenantId = TenantId,
+                BudgetScenarioId = budget.Scenario.Id,
+                FinanceDimensionDefinitionId = project.Id,
+                DisplayOrder = 2
+            });
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).EvaluateManualJournalAsync(fixture.Journal.Id);
+
+        result.IsAllowed.Should().BeFalse();
+        result.Lines.Single().DecisionCode.Should().Be("NO_MATCHING_BUDGET_LINE");
+        result.Lines.Single().Message.Should().Be(
+            "No approved budget line matches this account's Department + Project budget combination for this fiscal period.");
     }
 
     [Fact]

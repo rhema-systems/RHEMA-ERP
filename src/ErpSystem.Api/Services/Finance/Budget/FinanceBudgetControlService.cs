@@ -401,6 +401,8 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             throw new InvalidOperationException("Finance functional-currency settings contain an invalid ISO currency code.");
 
         var scenario = await _db.BudgetScenarios.AsNoTracking()
+            .Include(x => x.ControlDimensions)
+                .ThenInclude(x => x.FinanceDimensionDefinition)
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
                 && x.FiscalYearId == journal.FiscalPeriod.FiscalYearId
                 && x.AdoptedAt != null && x.AdoptionEffectiveDate != null
@@ -461,9 +463,7 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
             else if (matches.Count == 0)
             {
                 line.DecisionCode = "NO_MATCHING_BUDGET_LINE";
-                line.Message = controlSegments.Count > 0
-                    ? "No approved budget line matches this account's department/cost-centre segment."
-                    : "No approved budget line exists for this account and fiscal period.";
+                line.Message = NoMatchingBudgetLineMessage(scenario, controlSegments);
             }
             else if (matches.Count > 1)
             {
@@ -606,6 +606,41 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
                 ValueCode = item.DimensionValueCodeSnapshot,
                 ValueName = item.DimensionValueNameSnapshot
             }).ToList() ?? new List<BudgetDimensionAssignmentDto>();
+
+    /// <summary>
+    /// Names the adopted scenario's actual controlled grain in operator-facing diagnostics.
+    /// Legacy segmented-account budgets fall back to their configured segment names; this
+    /// avoids implying that every tenant controls only Department and Cost Centre.
+    /// </summary>
+    private static string NoMatchingBudgetLineMessage(
+        BudgetScenario scenario,
+        IReadOnlyCollection<AccountSegmentValue> controlSegments)
+    {
+        var dimensionNames = scenario.ControlDimensions
+            .Where(item => !item.IsDeleted
+                && item.FinanceDimensionDefinition is { IsDeleted: false })
+            .OrderBy(item => item.DisplayOrder)
+            .ThenBy(item => item.FinanceDimensionDefinition.Code)
+            .Select(item => item.FinanceDimensionDefinition.Name.Trim())
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (dimensionNames.Count == 0)
+        {
+            dimensionNames = controlSegments
+                .Where(segment => segment.SegmentStructure is not null)
+                .OrderBy(segment => segment.SegmentStructure.SegmentPosition)
+                .Select(segment => segment.SegmentStructure.SegmentName.Trim())
+                .Where(name => name.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return dimensionNames.Count > 0
+            ? $"No approved budget line matches this account's {string.Join(" + ", dimensionNames)} budget combination for this fiscal period."
+            : "No approved budget line exists for this account and fiscal period.";
+    }
 
     private static string EvaluationHash(
         Guid tenantId,
