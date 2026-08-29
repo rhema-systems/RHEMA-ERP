@@ -34,6 +34,9 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { InsuranceClaimsPanel } from '@/components/hr/medical/InsuranceClaimsPanel';
+import { useAuth } from '@/hooks/use-auth';
 import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
 import { useToast } from '@/hooks/use-toast';
 import { medicalClaimService } from '@/services/hr/medical-claims.service';
@@ -77,6 +80,10 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
   const [noteContent, setNoteContent] = useState('');
   const [noteType, setNoteType] = useState<MedicalExpenseClaimNoteType>('General');
   const [noteInternal, setNoteInternal] = useState(true);
+
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const canWriteMedical =
+    hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']) || hasAnyRole(HR_ROLES);
 
   const claimKey = ['hr', 'medical-claims', id];
   const { data: claim } = useQuery({ queryKey: claimKey, queryFn: () => medicalClaimService.getClaim(id) });
@@ -286,6 +293,8 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
           <TabsTrigger value="items">Lines ({items.length})</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
+          {/* What was claimed back from an insurer against this expense. */}
+          <TabsTrigger value="insurance">Insurance</TabsTrigger>
         </TabsList>
 
         <TabsContent value="items" className="mt-4">
@@ -428,6 +437,18 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="insurance" className="mt-4">
+          {/*
+            The policy picker is scoped to this claim's employee — filing against a colleague's
+            policy is not a mistake a dropdown should make possible.
+          */}
+          <InsuranceClaimsPanel
+            expenseClaimId={id}
+            employeeId={claim?.employeeId ?? null}
+            canWrite={canWriteMedical}
+          />
         </TabsContent>
       </Tabs>
 

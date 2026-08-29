@@ -12,11 +12,11 @@ yet classified.
 
 | Measure | Count |
 | --- | ---: |
-| HR write endpoints | 2148 |
-| Wired to a screen | 1738 |
-| No caller found (instrument 01) | 410 |
-| Confirmed unreachable (01 ∩ 02) | 34 |
-| Write-DTO fields no form can set | 101 across 45 DTOs |
+| HR write endpoints | 2149 |
+| Wired to a screen | 1747 |
+| No caller found (instrument 01) | 402 |
+| Confirmed unreachable (01 ∩ 02) | 27 |
+| Write-DTO fields no form can set | 97 across 42 DTOs |
 
 ## A. Decisions taken
 
@@ -34,6 +34,10 @@ yet classified.
 | 2026-08-29 | **A per-case read returns the record; a cross-case read returns a summary.** Four per-case reads were returning projections that dropped the very fields their panels had to edit — the note one truncated at 100 characters. Eight reads converted (D-09). |
 | 2026-08-29 | Notices are issue-and-chase only, and carry **no acknowledge control on the HR screen**: the API refuses anyone but the employee the notice was issued to. |
 | 2026-08-29 | Two Discipline boxes stay unticked **by explanation, not omission**. `POST cases/{}/documents` is deliberately unwired — it rejects every file-location field, so through the API it can only mint a row naming a file that does not exist; it survives for the legacy migration utility. `POST cases/{}/documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — instrument 01 cannot resolve a path passed to a helper, the same artefact that makes EmployeesController read 73/81. |
+| 2026-08-29 | Medical insurance: network facilities, provider documents and premium records are administered from the provider screen; insurance claims are filed from the medical expense claim they belong to. |
+| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |
+| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
+| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
 
 ## B. Blockers — must clear before the dependent build starts
 
@@ -67,6 +71,30 @@ yet classified.
 
   _Was making the panel's "By" column permanently empty — cleared_
 
+- [x] **D-10 — Provider documents took a caller-supplied file path with no gate and no download** · `DONE 2026-08-29`
+
+  `POST provider-documents` REQUIRED a `FilePath` and stored it verbatim, so any HR user could point a document row at arbitrary bytes on disk. There was no upload endpoint and no download route either, so the row was unreadable even when the path was honest. This was the **third** instance of that defect in the medical module — `MedicalExpenseDocument` and `EmployeeMedicalExamDocument` were each fixed for it, and provider documents were missed. There was no safe way to build a UI over it, which is why the collection stayed unreachable. Now: three nullable DMS columns (migration `AddMedicalInsuranceProviderDocumentDmsColumns`, hand-guarded on COL_LENGTH because rebuild-db builds from the EF model), a multipart upload through the scanning + DMS gate, a token-bearing download, and the metadata route refusing every file-location field. **Needs a backend rebuild.**
+
+  _Was blocking the provider-documents build — cleared_
+
+- [x] **D-11 — A declared upload category is not a registered one** · `DONE 2026-08-29`
+
+  Adding `HrMedicalInsuranceProviderDocuments` to `ControlledFileUploadCategories` was only half the job. Membership of `SystemCleanScanRequired` is the ONLY thing that turns scanning on — a category absent from it is silently SKIPPED, and `CentralDocumentRepositoryFileService.RegisterAsync` then rejects `Skipped` as firmly as `Infected`. The upload passed the gate and failed one layer later with an `InvalidOperationException` naming neither the category nor the scan. The property's own remarks predict this exactly; it was still missed. Registered, with a comment at the point of use. **Any future upload category must be added in both places.**
+
+  _Was making every provider-document upload fail — cleared_
+
+- [x] **D-12 — The per-provider premium read returned a summary its panel could not render** · `DONE 2026-08-29`
+
+  `providers/{id}/premium-records` returned `MedicalInsurancePremiumRecordSummaryDto` — total and status only, nothing about contributions, covered lives, due date or payment. Nine probe assertions failed and the panel would have shown blank columns. **Third occurrence of the D-09 shape**, and again the pattern already existed beside it: network facilities and provider documents on the SAME controller returned full DTOs. Converted; `premium-records/overdue` stays a summary. The rule, now stated three times: a per-parent read feeds a panel that must show detail; a cross-record read feeds a list.
+
+  _Was making the premium panel render blank columns — cleared_
+
+- [ ] **D-13 — HR cannot administer employee insurance policies** · `OPEN`
+
+  `policies` (create, update, cancel, delete) and `dependents` (add, update, remove) — seven write endpoints — have no HR screen at all; only the employee's own self-service surface reads policies. Deferred by decision on 2026-08-29 rather than overlooked: whether HR administers enrolment, or it arrives from payroll or the insurer, is a product call and not a coverage gap. Recorded because slice 4 made the consequence concrete — its insurance-claims section cannot execute at all, since no policy exists to claim against.
+
+  _Blocks nothing built so far, and blocks any test of insurance claims_
+
 - [x] **D-06 — Four discipline case-file collections were displayed but unrecordable** · `DONE 2026-08-29`
 
   `StaffDisciplineCaseDetailDto` carries six collections; only two were built out in the first pass. Witnesses, documents, notes and notifications are now authorable too, so the case file is complete. Documents go through the controlled upload gate only — the metadata-only route is left unwired because it rejects every file-location field and can therefore only mint a row naming a file that does not exist.
@@ -94,18 +122,6 @@ yet classified.
 ## C. Confirmed unreachable endpoints (01 ∩ 02)
 
 Both instruments agree, and each was hand-verified in source. This is the trustworthy list.
-
-### MedicalInsurance — `BUILD`
-
-Network facilities, premium records, provider documents, insurance claims.
-
-- [ ] `POST   api/medical-insurance/insurance-claims`
-- [ ] `POST   api/medical-insurance/network-facilities`
-- [ ] `PUT    api/medical-insurance/network-facilities/{}`
-- [ ] `DELETE api/medical-insurance/network-facilities/{}`
-- [ ] `POST   api/medical-insurance/premium-records`
-- [ ] `POST   api/medical-insurance/provider-documents`
-- [ ] `DELETE api/medical-insurance/provider-documents/{}`
 
 ### EmployeeBanks — `BUILD`
 
@@ -545,6 +561,62 @@ measures; reads are listed for completeness and are checked the same way.
 - [ ] `GET    api/discipline/warnings/expiring`
 - [ ] `GET    api/discipline/warnings/type/{}`
 
+### Medical insurance — 15 of 24 writes wired
+
+**Writes**
+
+- [ ] `DELETE api/medical-insurance/dependents/{}`
+- [ ] `PUT    api/medical-insurance/dependents/{}`
+- [x] `POST   api/medical-insurance/insurance-claims`
+- [x] `POST   api/medical-insurance/insurance-claims/{}/payment`
+- [x] `PUT    api/medical-insurance/insurance-claims/{}/status`
+- [x] `POST   api/medical-insurance/network-facilities`
+- [x] `DELETE api/medical-insurance/network-facilities/{}`
+- [x] `PUT    api/medical-insurance/network-facilities/{}`
+- [x] `POST   api/medical-insurance/plans`
+- [x] `DELETE api/medical-insurance/plans/{}`
+- [x] `PUT    api/medical-insurance/plans/{}`
+- [ ] `POST   api/medical-insurance/policies`
+- [ ] `DELETE api/medical-insurance/policies/{}`
+- [ ] `PUT    api/medical-insurance/policies/{}`
+- [ ] `POST   api/medical-insurance/policies/{}/cancel`
+- [ ] `POST   api/medical-insurance/policies/{}/dependents`
+- [x] `POST   api/medical-insurance/premium-records`
+- [x] `POST   api/medical-insurance/premium-records/{}/payment`
+- [ ] `POST   api/medical-insurance/provider-documents`
+- [ ] `POST   api/medical-insurance/provider-documents/upload`
+- [x] `DELETE api/medical-insurance/provider-documents/{}`
+- [x] `POST   api/medical-insurance/providers`
+- [x] `DELETE api/medical-insurance/providers/{}`
+- [x] `PUT    api/medical-insurance/providers/{}`
+
+**Reads**
+
+- [ ] `GET    api/medical-insurance/employees/{}/policies`
+- [ ] `GET    api/medical-insurance/employees/{}/policies/active`
+- [ ] `GET    api/medical-insurance/expense-claims/{}/insurance-claims`
+- [ ] `GET    api/medical-insurance/insurance-claims/{}`
+- [ ] `GET    api/medical-insurance/plans/{}`
+- [ ] `GET    api/medical-insurance/policies`
+- [ ] `GET    api/medical-insurance/policies/expiring`
+- [ ] `GET    api/medical-insurance/policies/{}`
+- [ ] `GET    api/medical-insurance/policies/{}/details`
+- [ ] `GET    api/medical-insurance/policies/{}/dependents`
+- [ ] `GET    api/medical-insurance/policies/{}/insurance-claims`
+- [ ] `GET    api/medical-insurance/premium-records/overdue`
+- [ ] `GET    api/medical-insurance/premium-records/{}`
+- [ ] `GET    api/medical-insurance/provider-documents/{}/download`
+- [ ] `GET    api/medical-insurance/providers`
+- [ ] `GET    api/medical-insurance/providers/code/{}`
+- [ ] `GET    api/medical-insurance/providers/search`
+- [ ] `GET    api/medical-insurance/providers/{}`
+- [ ] `GET    api/medical-insurance/providers/{}/details`
+- [ ] `GET    api/medical-insurance/providers/{}/documents`
+- [ ] `GET    api/medical-insurance/providers/{}/facilities/{}/in-network`
+- [ ] `GET    api/medical-insurance/providers/{}/network-facilities`
+- [ ] `GET    api/medical-insurance/providers/{}/plans`
+- [ ] `GET    api/medical-insurance/providers/{}/premium-records`
+
 ### Employee career paths — 0 of 3 writes wired
 
 **Writes**
@@ -581,7 +653,7 @@ move the real ones into section C's disposition map.
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
 | Assets | 12 | 63 | `REVIEW` |  |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
-| MedicalInsurance | 10 | 23 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
+| MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
 | SuccessionPlan | 8 | 14 | `REVIEW` |  |
 | MedicalClinical | 7 | 17 | `REVIEW` |  |
@@ -676,7 +748,6 @@ missing — the class an endpoint audit cannot see.
 | `CreateEmployeeDependentDto` | 2 of 16 | IsStudentDependent, IsEmergencyContact |
 | `CreateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
 | `UpdateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
-| `CreateMedicalInsurancePremiumRecordDto` | 2 of 11 | TotalPremiumAmount, CoveredLivesCount |
 | `CreateEmployeeMedicalExamDto` | 2 of 17 | BMIRecorded, LinkedClaimId |
 | `UpdateEmployeeMedicalExamDto` | 2 of 16 | BMIRecorded, LinkedClaimId |
 | `CreateMedicalExpenseClaimDto` | 2 of 24 | AdmissionStart, AdmissionEnd |
@@ -694,8 +765,6 @@ missing — the class an endpoint audit cannot see.
 | `CreateSectionDto` | 1 of 5 | SectionHeadId |
 | `CreateEmployeeMedicalInsurancePolicyDto` | 1 of 11 | BenefitTierId |
 | `UpdateEmployeeMedicalInsurancePolicyDto` | 1 of 10 | BenefitTierId |
-| `CreateMedicalInsuranceClaimDto` | 1 of 6 | InsuranceClaimNumber |
-| `UpdateMedicalInsuranceProviderFacilityDto` | 1 of 4 | IsPreferredProvider |
 | `CreateNHISClaimDto` | 1 of 16 | LinkedMedicalClaimId |
 | `UpdateNHISClaimDto` | 1 of 13 | LinkedMedicalClaimId |
 | `CreateNHISClaimDocumentDto` | 1 of 4 | NHISClaimId |

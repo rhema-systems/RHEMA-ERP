@@ -145,6 +145,7 @@ BUILD_CHECKLISTS = {
     "JobAnalysisController.cs": "Job Analysis",
     "StaffDisciplineSupportController.cs": "Discipline — case file support",
     "StaffDisciplineSubEntityController.cs": "Discipline — case sub-entities",
+    "MedicalInsuranceController.cs": "Medical insurance",
     "EmployeeCareerPathController.cs": "Employee career paths",
 }
 
@@ -195,6 +196,45 @@ BLOCKERS = [
      "than removed, unlike the legal-review referrer, because correcting a mis-attributed step is "
      "a legitimate HR act and no screen exposes it — but it is an act-as-anyone vector on paper.",
      "Was making the panel's \"By\" column permanently empty — cleared"),
+    ("D-10", "Provider documents took a caller-supplied file path with no gate and no download", "DONE 2026-08-29",
+     "`POST provider-documents` REQUIRED a `FilePath` and stored it verbatim, so any HR user could "
+     "point a document row at arbitrary bytes on disk. There was no upload endpoint and no download "
+     "route either, so the row was unreadable even when the path was honest. This was the **third** "
+     "instance of that defect in the medical module — `MedicalExpenseDocument` and "
+     "`EmployeeMedicalExamDocument` were each fixed for it, and provider documents were missed. "
+     "There was no safe way to build a UI over it, which is why the collection stayed unreachable. "
+     "Now: three nullable DMS columns (migration `AddMedicalInsuranceProviderDocumentDmsColumns`, "
+     "hand-guarded on COL_LENGTH because rebuild-db builds from the EF model), a multipart upload "
+     "through the scanning + DMS gate, a token-bearing download, and the metadata route refusing "
+     "every file-location field. **Needs a backend rebuild.**",
+     "Was blocking the provider-documents build — cleared"),
+    ("D-11", "A declared upload category is not a registered one", "DONE 2026-08-29",
+     "Adding `HrMedicalInsuranceProviderDocuments` to `ControlledFileUploadCategories` was only "
+     "half the job. Membership of `SystemCleanScanRequired` is the ONLY thing that turns scanning "
+     "on — a category absent from it is silently SKIPPED, and "
+     "`CentralDocumentRepositoryFileService.RegisterAsync` then rejects `Skipped` as firmly as "
+     "`Infected`. The upload passed the gate and failed one layer later with an "
+     "`InvalidOperationException` naming neither the category nor the scan. The property's own "
+     "remarks predict this exactly; it was still missed. Registered, with a comment at the point "
+     "of use. **Any future upload category must be added in both places.**",
+     "Was making every provider-document upload fail — cleared"),
+    ("D-12", "The per-provider premium read returned a summary its panel could not render", "DONE 2026-08-29",
+     "`providers/{id}/premium-records` returned `MedicalInsurancePremiumRecordSummaryDto` — total "
+     "and status only, nothing about contributions, covered lives, due date or payment. Nine probe "
+     "assertions failed and the panel would have shown blank columns. **Third occurrence of the "
+     "D-09 shape**, and again the pattern already existed beside it: network facilities and "
+     "provider documents on the SAME controller returned full DTOs. Converted; "
+     "`premium-records/overdue` stays a summary. The rule, now stated three times: a per-parent "
+     "read feeds a panel that must show detail; a cross-record read feeds a list.",
+     "Was making the premium panel render blank columns — cleared"),
+    ("D-13", "HR cannot administer employee insurance policies", "OPEN",
+     "`policies` (create, update, cancel, delete) and `dependents` (add, update, remove) — seven "
+     "write endpoints — have no HR screen at all; only the employee's own self-service surface "
+     "reads policies. Deferred by decision on 2026-08-29 rather than overlooked: whether HR "
+     "administers enrolment, or it arrives from payroll or the insurer, is a product call and not "
+     "a coverage gap. Recorded because slice 4 made the consequence concrete — its insurance-claims "
+     "section cannot execute at all, since no policy exists to claim against.",
+     "Blocks nothing built so far, and blocks any test of insurance claims"),
     ("D-06", "Four discipline case-file collections were displayed but unrecordable", "DONE 2026-08-29",
      "`StaffDisciplineCaseDetailDto` carries six collections; only two were built out in the first "
      "pass. Witnesses, documents, notes and notifications are now authorable too, so the case file "
@@ -287,6 +327,10 @@ w("| 2026-08-29 | The discipline case file is complete: witnesses, documents, no
 w("| 2026-08-29 | **A per-case read returns the record; a cross-case read returns a summary.** Four per-case reads were returning projections that dropped the very fields their panels had to edit — the note one truncated at 100 characters. Eight reads converted (D-09). |")
 w("| 2026-08-29 | Notices are issue-and-chase only, and carry **no acknowledge control on the HR screen**: the API refuses anyone but the employee the notice was issued to. |")
 w("| 2026-08-29 | Two Discipline boxes stay unticked **by explanation, not omission**. `POST cases/{}/documents` is deliberately unwired — it rejects every file-location field, so through the API it can only mint a row naming a file that does not exist; it survives for the legacy migration utility. `POST cases/{}/documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — instrument 01 cannot resolve a path passed to a helper, the same artefact that makes EmployeesController read 73/81. |")
+w("| 2026-08-29 | Medical insurance: network facilities, provider documents and premium records are administered from the provider screen; insurance claims are filed from the medical expense claim they belong to. |")
+w("| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |")
+w("| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |")
+w("| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |")
 w("")
 
 w("## B. Blockers — must clear before the dependent build starts")

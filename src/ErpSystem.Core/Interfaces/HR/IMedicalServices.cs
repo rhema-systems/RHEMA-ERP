@@ -113,7 +113,7 @@ public interface IMedicalInsuranceService
 
     // Premium record
     Task<MedicalInsurancePremiumRecordDto> GetPremiumRecordByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<MedicalInsurancePremiumRecordDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default);
     Task<MedicalInsurancePremiumRecordDto> CreatePremiumRecordAsync(CreateMedicalInsurancePremiumRecordDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetOverduePremiumsAsync(CancellationToken cancellationToken = default);

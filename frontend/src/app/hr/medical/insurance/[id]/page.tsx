@@ -17,6 +17,11 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { medicalInsuranceService } from '@/services/hr/medical-reference.service';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { NetworkFacilitiesPanel } from '@/components/hr/medical/NetworkFacilitiesPanel';
+import { ProviderDocumentsPanel } from '@/components/hr/medical/ProviderDocumentsPanel';
+import { PremiumRecordsPanel } from '@/components/hr/medical/PremiumRecordsPanel';
+import { useAuth } from '@/hooks/use-auth';
 import { MEDICAL_PLAN_TYPE_OPTIONS, MEDICAL_PROVIDER_TYPE_OPTIONS } from '@/types/hr/medical';
 import type { MedicalInsurancePlan } from '@/types/hr/medical';
 
@@ -95,6 +100,19 @@ export default function MedicalInsuranceProviderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  /**
+   * Medical records are special-category personal data, and the controller's ladder reflects it:
+   * create and update are `HR.Medical.Write`, **every delete is `HR.Medical.Admin`**, and the HR
+   * role holds Write but not Admin. The role check beside each permission mirrors
+   * `HrPermissions.RoleGrants`, which is what keeps a tenant working when its permission rows have
+   * not been seeded.
+   */
+  const canWrite =
+    hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']) || hasAnyRole(HR_ROLES);
+  const canDelete =
+    hasAnyPermission(['HR.Medical.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const { data: provider } = useQuery({
     queryKey: ['hr', 'medical-providers', id],
@@ -265,6 +283,17 @@ export default function MedicalInsuranceProviderDetailPage({
           </>
         )}
       />
+
+      {/*
+        Three collections that had no screen at all. Ordered as an administrator uses them: who an
+        employee may be treated by, what the provider is contractually and legally good for, and
+        what we were billed.
+      */}
+      <NetworkFacilitiesPanel providerId={id} canWrite={canWrite} canDelete={canDelete} />
+
+      <ProviderDocumentsPanel providerId={id} canWrite={canWrite} canDelete={canDelete} />
+
+      <PremiumRecordsPanel providerId={id} canWrite={canWrite} />
     </div>
   );
 }

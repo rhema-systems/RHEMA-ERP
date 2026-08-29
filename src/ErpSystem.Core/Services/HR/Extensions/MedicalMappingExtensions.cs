@@ -1055,6 +1055,9 @@ public static class MedicalMappingExtensions
         dto.ProviderName = entity.MedicalInsuranceProvider?.Name ?? string.Empty;
         dto.FileName = entity.FileName;
         dto.FilePath = entity.FilePath;
+        dto.FileUploadRecordId = entity.FileUploadRecordId;
+        dto.DocumentRecordId = entity.DocumentRecordId;
+        dto.DocumentVersionId = entity.DocumentVersionId;
         dto.DocumentType = entity.DocumentType;
         dto.Description = entity.Description;
         dto.UploadDate = entity.UploadDate;
@@ -1071,6 +1074,9 @@ public static class MedicalMappingExtensions
             ProviderId = dto.ProviderId,
             FileName = dto.FileName,
             FilePath = dto.FilePath,
+            FileUploadRecordId = dto.FileUploadRecordId,
+            DocumentRecordId = dto.DocumentRecordId,
+            DocumentVersionId = dto.DocumentVersionId,
             DocumentType = dto.DocumentType,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,

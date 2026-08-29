@@ -994,11 +994,16 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
+    // Returns the FULL record, not a summary. A per-provider read feeds a panel that has to SHOW
+    // the contributions, the covered lives, the due date and how it was paid — the summary carries
+    // only the total and the status, so a table built on it renders blank columns. The overdue read
+    // below stays on summaries: that feeds a list, not a form. Same rule as the discipline case
+    // file (ledger D-09); network facilities and provider documents already returned full DTOs.
+    public async Task<IEnumerable<MedicalInsurancePremiumRecordDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _premiumRecordRepository.GetByProviderIdAsync(providerId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<MedicalInsurancePremiumRecordDto> CreatePremiumRecordAsync(CreateMedicalInsurancePremiumRecordDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)

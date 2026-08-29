@@ -1,10 +1,15 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -17,11 +22,25 @@ namespace ErpSystem.Api.Controllers.HR;
 public class MedicalInsuranceController : MedicalControllerBase
 {
     private readonly IMedicalInsuranceService _service;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
 
-    public MedicalInsuranceController(IMedicalInsuranceService service, ICurrentUserService currentUser)
+    public MedicalInsuranceController(
+        IMedicalInsuranceService service,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
     }
 
     // =========================================================================
@@ -379,6 +398,14 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetProviderDocumentsAsync(providerId, ct));
 
+    /// <summary>Records a provider document. Metadata only — files arrive through the upload route.</summary>
+    /// <remarks>
+    /// A caller-supplied path would let anyone point a document row at arbitrary bytes on disk,
+    /// including another tenant's. This was the third instance of that defect in the medical
+    /// module: <see cref="MedicalExpenseDocument"/> and <c>EmployeeMedicalExamDocument</c> were
+    /// both fixed for it, and provider documents were missed. Files now arrive through the upload
+    /// endpoint below, which routes them past the malware scanner into private storage.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("provider-documents")]
     public async Task<ActionResult<MedicalInsuranceProviderDocumentDto>> AddProviderDocument(
@@ -387,8 +414,120 @@ public class MedicalInsuranceController : MedicalControllerBase
     {
         if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
+        if (!string.IsNullOrWhiteSpace(dto.FilePath) ||
+            dto.FileUploadRecordId.HasValue ||
+            dto.DocumentRecordId.HasValue ||
+            dto.DocumentVersionId.HasValue)
+        {
+            return BadRequest(new
+            {
+                message = "File locations cannot be supplied directly. " +
+                          "Use POST provider-documents/upload to attach a file."
+            });
+        }
+
         var created = await _service.AddProviderDocumentAsync(dto, tenantId, userId, ct);
         return Ok(created);
+    }
+
+    /// <summary>Attaches a file to a provider through the controlled boundary.</summary>
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
+    [HttpPost("provider-documents/upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<ActionResult<MedicalInsuranceProviderDocumentDto>> UploadProviderDocument(
+        [FromForm] Guid providerId,
+        [FromForm] IFormFile file,
+        [FromForm] MedicalInsuranceProviderDocumentType documentType,
+        [FromForm] string? description = null,
+        [FromForm] DateTime? expiryDate = null,
+        CancellationToken ct = default)
+    {
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
+
+        if (file is null || file.Length == 0)
+            return BadRequest("No file was provided.");
+
+        // Refuse a provider from another tenant before any bytes are stored.
+        var provider = await _db.Set<MedicalInsuranceProvider>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == providerId && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (provider is null) return NotFound("That insurance provider could not be found.");
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = userId,
+                ActorName = CurrentUser.UserName,
+                Category = ControlledFileUploadCategories.HrMedicalInsuranceProviderDocuments,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = "Medical insurance provider document",
+                    SourceEntityType = nameof(MedicalInsuranceProvider),
+                    SourceRecordId = providerId,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = documentType.ToString(),
+                    ChangeSummary = description
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            // The gate's own {code, message} contract — a refused file is not a server fault.
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+
+        try
+        {
+            var created = await _service.AddProviderDocumentAsync(
+                new CreateMedicalInsuranceProviderDocumentDto
+                {
+                    ProviderId = providerId,
+                    FileName = document.OriginalFileName,
+                    FilePath = string.Empty,
+                    FileUploadRecordId = document.FileUploadRecordId,
+                    DocumentRecordId = document.DocumentRecordId,
+                    DocumentVersionId = document.DocumentVersionId,
+                    DocumentType = documentType,
+                    Description = description,
+                    ExpiryDate = expiryDate
+                },
+                tenantId, userId, ct);
+
+            return Ok(created);
+        }
+        catch
+        {
+            // Leave no scanned-and-registered document behind pointing at a row never written.
+            await _hrDocuments.RollbackAsync(document, tenantId, userId, ct);
+            throw;
+        }
+    }
+
+    /// <summary>Streams a provider document to a caller entitled to see it.</summary>
+    [Authorize(Policy = HrPermissions.MedicalReadPolicy)]
+    [HttpGet("provider-documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadProviderDocument(Guid id, CancellationToken ct)
+    {
+        if (TryGetWriteContext(out var tenantId, out _) is { } error) return error;
+
+        var document = await _db.Set<MedicalInsuranceProviderDocument>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (document is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
     }
 
     [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
@@ -408,7 +547,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         => Ok(await _service.GetPremiumRecordByIdAsync(id, ct));
 
     [HttpGet("providers/{providerId:guid}/premium-records")]
-    public async Task<ActionResult<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>>> GetPremiumRecordsByProvider(
+    public async Task<ActionResult<IEnumerable<MedicalInsurancePremiumRecordDto>>> GetPremiumRecordsByProvider(
         Guid providerId,
         CancellationToken ct)
         => Ok(await _service.GetPremiumRecordsByProviderAsync(providerId, ct));

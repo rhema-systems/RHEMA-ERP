@@ -68,6 +68,7 @@ public static class ControlledFileUploadCategories
     public const string HrOfferLetters = "hr-offer-letters";
     public const string HrMedicalExamDocuments = "hr-medical-exam-documents";
     public const string HrMedicalClaimDocuments = "hr-medical-claim-documents";
+    public const string HrMedicalInsuranceProviderDocuments = "hr-medical-insurance-provider-documents";
     public const string HrAppraisalAttachments = "hr-appraisal-attachments";
     public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
 
@@ -215,6 +216,11 @@ public static class ControlledFileUploadCategories
                 HrOfferLetters,
                 HrMedicalExamDocuments,
                 HrMedicalClaimDocuments,
+                // Registered here, not only declared above: a category absent from this set is
+                // SKIPPED by the scanner, and the DMS then refuses to register a non-clean upload
+                // — so the upload fails with an InvalidOperationException that names neither the
+                // category nor the scan. Declaring the constant is half the job.
+                HrMedicalInsuranceProviderDocuments,
                 HrAppraisalAttachments,
                 // A travel attachment is a passport scan, a visa letter or an invitation carrying
                 // a name, a number and an address. A tenant policy should not be able to permit

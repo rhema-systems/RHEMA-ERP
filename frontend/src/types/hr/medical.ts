@@ -778,6 +778,345 @@ export const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] =
   { value: 'SalaryDeduction', label: 'Salary deduction' },
 ];
 
+export type MedicalInsurancePolicyStatus =
+  | 'Active'
+  | 'PendingRenewal'
+  | 'Suspended'
+  | 'Cancelled'
+  | 'Expired'
+  | 'Lapsed'
+  | 'UnderReview';
+
+/**
+ * An employee's cover, as `policies` and `employees/{id}/policies` return it.
+ *
+ * ⚠ Read-only from the HR side for now: the API has create, update, cancel and delete plus a whole
+ * dependent collection, and **no HR screen calls any of them** — only the employee's own
+ * self-service surface reads policies. Listed in the closure ledger as an open gap; this type
+ * exists so an insurance claim can name the policy it is claimed against.
+ */
+export interface MedicalInsurancePolicySummary {
+  id: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  providerName: string;
+  planName: string;
+  policyNumber: string;
+  startDate: string;
+  endDate?: string | null;
+  remainingLimit: number;
+  status: MedicalInsurancePolicyStatus;
+  statusName: string;
+  isActive: boolean;
+}
+
+// ── insurance provider administration ────────────────────────────────────────
+
+/**
+ * The four collections that hang off an insurance provider or a policy, and were unreachable
+ * until the case for them was built. Every union below was read from `HREnums.cs`, not guessed —
+ * `JsonStringEnumConverter` matches the C# member name and 400s on anything else.
+ */
+
+export type MedicalInsuranceProviderDocumentType =
+  | 'OperatingLicense'
+  | 'BusinessRegistration'
+  | 'InsuranceAuthorityCertificate'
+  | 'TaxClearance'
+  | 'FinancialStatements'
+  | 'SolvencyCertificate'
+  | 'ContractAgreement'
+  | 'ServiceLevelAgreement'
+  | 'RateCard'
+  | 'NetworkList'
+  | 'PolicyDocument'
+  | 'Accreditation'
+  | 'RegulatoryFiling'
+  | 'ClaimForm'
+  /** ⚠ 99, not 15 — the enum leaves a gap before its catch-all. */
+  | 'Other';
+
+export const PROVIDER_DOCUMENT_TYPE_OPTIONS: {
+  value: MedicalInsuranceProviderDocumentType;
+  label: string;
+}[] = [
+  { value: 'OperatingLicense', label: 'Operating licence' },
+  { value: 'BusinessRegistration', label: 'Business registration' },
+  { value: 'InsuranceAuthorityCertificate', label: 'Insurance authority certificate' },
+  { value: 'TaxClearance', label: 'Tax clearance' },
+  { value: 'FinancialStatements', label: 'Financial statements' },
+  { value: 'SolvencyCertificate', label: 'Solvency certificate' },
+  { value: 'ContractAgreement', label: 'Contract / agreement' },
+  { value: 'ServiceLevelAgreement', label: 'Service level agreement' },
+  { value: 'RateCard', label: 'Rate card' },
+  { value: 'NetworkList', label: 'Network list' },
+  { value: 'PolicyDocument', label: 'Policy document' },
+  { value: 'Accreditation', label: 'Accreditation' },
+  { value: 'RegulatoryFiling', label: 'Regulatory filing' },
+  { value: 'ClaimForm', label: 'Claim form' },
+  { value: 'Other', label: 'Other' },
+];
+
+export type MedicalInsurancePremiumPaymentStatus =
+  | 'Pending'
+  | 'Paid'
+  | 'Overdue'
+  | 'Waived'
+  | 'Refunded';
+
+export const PREMIUM_STATUS_OPTIONS: {
+  value: MedicalInsurancePremiumPaymentStatus;
+  label: string;
+}[] = [
+  { value: 'Pending', label: 'Pending' },
+  { value: 'Paid', label: 'Paid' },
+  { value: 'Overdue', label: 'Overdue' },
+  { value: 'Waived', label: 'Waived' },
+  { value: 'Refunded', label: 'Refunded' },
+];
+
+export type MedicalInsuranceClaimStatus =
+  | 'Draft'
+  | 'Submitted'
+  | 'UnderReview'
+  | 'AdditionalInfoRequired'
+  | 'Approved'
+  | 'PartiallyApproved'
+  | 'Rejected'
+  | 'PendingPayment'
+  | 'Paid'
+  | 'PartiallyPaid'
+  | 'Appealed'
+  | 'Cancelled';
+
+/** Ordered as the claim actually moves, so the status select reads as a progression. */
+export const INSURANCE_CLAIM_STATUS_OPTIONS: {
+  value: MedicalInsuranceClaimStatus;
+  label: string;
+}[] = [
+  { value: 'Draft', label: 'Draft' },
+  { value: 'Submitted', label: 'Submitted' },
+  { value: 'UnderReview', label: 'Under review' },
+  { value: 'AdditionalInfoRequired', label: 'More information required' },
+  { value: 'Approved', label: 'Approved' },
+  { value: 'PartiallyApproved', label: 'Partially approved' },
+  { value: 'Rejected', label: 'Rejected' },
+  { value: 'PendingPayment', label: 'Pending payment' },
+  { value: 'Paid', label: 'Paid' },
+  { value: 'PartiallyPaid', label: 'Partially paid' },
+  { value: 'Appealed', label: 'Appealed' },
+  { value: 'Cancelled', label: 'Cancelled' },
+];
+
+/**
+ * A facility that is in this provider's network.
+ *
+ * ⚠ **The row joins a provider to a healthcare FACILITY**, so `facilityId` points at the medical
+ * facility register, not at anything insurance-side. The create DTO is named `Add…`, not
+ * `Create…`, alone among this family.
+ */
+export interface MedicalInsuranceProviderFacility {
+  id: string;
+  tenantId: string;
+  providerId: string;
+  providerName: string;
+  facilityId: string;
+  facilityName: string;
+  facilityCity?: string | null;
+  effectiveDate: string;
+  expiryDate?: string | null;
+  isPreferredProvider: boolean;
+  isActive: boolean;
+  notes?: string | null;
+}
+
+/** ⚠ `effectiveDate` is required and `facilityId` is fixed at creation — no update carries it. */
+export interface AddMedicalInsuranceProviderFacility {
+  facilityId: string;
+  effectiveDate: string;
+  expiryDate?: string | null;
+  isPreferredProvider: boolean;
+  notes?: string | null;
+}
+
+/**
+ * ⚠ Neither the facility nor the effective date can be changed — the update DTO carries only the
+ * expiry, the preferred flag, the active flag and notes. Repointing a network row at a different
+ * facility means removing it and adding another.
+ */
+export interface UpdateMedicalInsuranceProviderFacility {
+  id: string;
+  expiryDate?: string | null;
+  isPreferredProvider: boolean;
+  isActive: boolean;
+  notes?: string | null;
+}
+
+/**
+ * A document held against an insurance provider — its licence, its rate card, the contract.
+ *
+ * ⚠ **`filePath` is a legacy server-side location, never a URL.** It stays empty on anything
+ * uploaded through the gate, and downloading is a token-bearing fetch of
+ * `provider-documents/{id}/download`. Rendering it as a link both fails and leaks.
+ */
+export interface MedicalInsuranceProviderDocument {
+  id: string;
+  tenantId: string;
+  providerId: string;
+  providerName: string;
+  fileName: string;
+  filePath: string;
+  fileUploadRecordId?: string | null;
+  documentRecordId?: string | null;
+  documentVersionId?: string | null;
+  documentType: MedicalInsuranceProviderDocumentType;
+  documentTypeName: string;
+  description?: string | null;
+  uploadDate: string;
+  expiryDate?: string | null;
+  isActive: boolean;
+}
+
+/** The multipart form fields the upload endpoint takes beside the file. */
+export interface UploadProviderDocumentFields {
+  providerId: string;
+  documentType: MedicalInsuranceProviderDocumentType;
+  description?: string | null;
+  expiryDate?: string | null;
+}
+
+/**
+ * What the employer was billed for cover over a period.
+ *
+ * ⚠ **`billingPeriodStart` and `billingPeriodEnd` are `DateOnly` on the wire**, not DateTime —
+ * send `YYYY-MM-DD` and nothing else. `dueDate` and `paymentDate` beside them are full DateTimes,
+ * so the two shapes sit in one payload and are easy to mix up.
+ */
+export interface MedicalInsurancePremiumRecord {
+  id: string;
+  tenantId: string;
+  providerId: string;
+  providerName: string;
+  planId: string;
+  planName: string;
+  policyId?: string | null;
+  policyNumber?: string | null;
+  billingPeriodStart: string;
+  billingPeriodEnd: string;
+  totalPremiumAmount: number;
+  employerContribution: number;
+  employeeContribution: number;
+  coveredLivesCount: number;
+  status: MedicalInsurancePremiumPaymentStatus;
+  statusName: string;
+  dueDate?: string | null;
+  paymentDate?: string | null;
+  paymentReference?: string | null;
+  paymentMethod?: PaymentMethod | null;
+  paymentMethodName?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * ⚠ What `premium-records/overdue` returns — a narrow projection, NOT the record. It carries the
+ * total and the status and nothing about contributions, covered lives or how it was paid. The
+ * per-provider read returns the full row because a panel has to show those; this one feeds a list.
+ */
+export interface MedicalInsurancePremiumRecordSummary {
+  id: string;
+  providerName: string;
+  planName: string;
+  billingPeriodStart: string;
+  billingPeriodEnd: string;
+  totalPremiumAmount: number;
+  status: MedicalInsurancePremiumPaymentStatus;
+  statusName: string;
+}
+
+/**
+ * ⚠ `totalPremiumAmount` and `coveredLivesCount` were both in the ledger's "no form can set"
+ * table. Nothing derives the total from the two contributions — it is billed, not computed — so a
+ * form that omitted it recorded a premium of zero.
+ */
+export interface CreateMedicalInsurancePremiumRecord {
+  planId: string;
+  policyId?: string | null;
+  billingPeriodStart: string;
+  billingPeriodEnd: string;
+  totalPremiumAmount: number;
+  employerContribution: number;
+  employeeContribution: number;
+  coveredLivesCount: number;
+  dueDate?: string | null;
+  notes?: string | null;
+}
+
+/** ⚠ Paying is a transition, not a status edit — it stamps the reference, method and date. */
+export interface RecordPremiumPayment {
+  paymentMethod: PaymentMethod;
+  paymentReference: string;
+  paymentDate?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * What was claimed from an insurer against one medical expense claim.
+ *
+ * ⚠ **It joins a POLICY to an EXPENSE CLAIM**, which is why it is authored from the expense
+ * claim's own screen rather than from the provider's: the expense claim is the thing that exists
+ * first and the thing a user is looking at when they decide to claim it.
+ */
+export interface MedicalInsuranceClaim {
+  id: string;
+  tenantId: string;
+  policyId: string;
+  policyNumber: string;
+  medicalExpenseClaimId: string;
+  medicalClaimNumber: string;
+  insuranceClaimNumber: string;
+  submissionDate: string;
+  claimedAmount: number;
+  approvedAmount?: number | null;
+  paidAmount?: number | null;
+  coPayAmount?: number | null;
+  status: MedicalInsuranceClaimStatus;
+  statusName: string;
+  approvalDate?: string | null;
+  rejectionDate?: string | null;
+  rejectionReason?: string | null;
+  paymentDate?: string | null;
+  paymentReference?: string | null;
+  notes?: string | null;
+}
+
+/** ⚠ `insuranceClaimNumber` was in the ledger's "no form can set" table — it is the insurer's own reference. */
+export interface CreateMedicalInsuranceClaim {
+  policyId: string;
+  medicalExpenseClaimId: string;
+  insuranceClaimNumber: string;
+  claimedAmount: number;
+  coPayAmount?: number | null;
+  notes?: string | null;
+}
+
+/** ⚠ The route is `insurance-claims/{id}/status` and the body repeats the id as `claimId`. */
+export interface UpdateMedicalInsuranceClaimStatus {
+  claimId: string;
+  status: MedicalInsuranceClaimStatus;
+  approvedAmount?: number | null;
+  rejectionReason?: string | null;
+  notes?: string | null;
+}
+
+/** ⚠ Recording payment is its own act; it does not go through the status route. */
+export interface RecordMedicalInsuranceClaimPayment {
+  claimId: string;
+  paidAmount: number;
+  paymentReference: string;
+  paymentDate?: string | null;
+  notes?: string | null;
+}
+
 export interface MedicalExpenseClaimSummary {
   id: string;
   claimNumber: string;

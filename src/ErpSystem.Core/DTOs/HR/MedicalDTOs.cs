@@ -991,7 +991,11 @@ public class MedicalInsuranceProviderDocumentDto : BaseDto
     public Guid ProviderId { get; set; }
     public string ProviderName { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
+    /// <summary>⚠ Legacy path, empty on anything uploaded through the gate. Never a URL.</summary>
     public string FilePath { get; set; } = string.Empty;
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
     public MedicalInsuranceProviderDocumentType DocumentType { get; set; }
     public string DocumentTypeName => DocumentType.ToString();
     public string? Description { get; set; }
@@ -1006,8 +1010,24 @@ public class CreateMedicalInsuranceProviderDocumentDto : CreateDtoBase
     public Guid ProviderId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+
+    /// <summary>
+    /// Legacy storage path, no longer required and refused when an API caller supplies it — see
+    /// the controller. Files arrive through <c>POST provider-documents/upload</c>, which puts them
+    /// past the malware scanner into private storage and fills the three ids below instead.
+    /// </summary>
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [Required]
     public MedicalInsuranceProviderDocumentType DocumentType { get; set; }
     [MaxLength(500)]

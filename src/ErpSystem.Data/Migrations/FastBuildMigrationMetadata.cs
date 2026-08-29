@@ -257,3 +257,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827231835_AddEmployeeRelationsReminderSettings")] partial class AddEmployeeRelationsReminderSettings { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260828004916_AddEmployeeRelationsCaseCrossLinks")] partial class AddEmployeeRelationsCaseCrossLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260828170021_RepointCompanyScheduleStationToLocation")] partial class RepointCompanyScheduleStationToLocation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260829072853_AddMedicalInsuranceProviderDocumentDmsColumns")] partial class AddMedicalInsuranceProviderDocumentDmsColumns { }
