@@ -436,7 +436,6 @@ export default function JournalEntryDetailPage() {
     const canApproveWorkflow = !hasActiveWorkflowAssignment || workflowSummary?.canCurrentUserApprove === true;
     const canApproveNow = canApprovePermission && !isCreator && canApproveWorkflow;
     const canWithdrawApproval = !isBatchOwned && entry.postingStatus === 'Pending Approval' && (isCreator || canSubmitForApproval || canEdit || canDelete);
-    const requiresApprovalBeforePost = entry.requiresApproval || entry.postingStatus === 'Pending Approval';
     const pendingApproverText = workflowSummary ? formatPendingApprovers(workflowSummary.pendingApprovers || []) : '';
     const isAllActiveBooks = isAllActiveBooksCode(entry.bookClassification);
     const selectedBookName = getAccountingBookName(accountingBooks, entry.bookClassification);
@@ -933,8 +932,8 @@ export default function JournalEntryDetailPage() {
                     {/* ACTIONS CARD - Context-sensitive by posting status */}
                     {/* ================================================================== */}
 
-                    {/* Draft Actions: Edit, Submit for Approval, Post, Delete */}
-                    {entry.postingStatus === 'Draft' && (canEdit || canSubmitForApproval || canPost || canDelete) && (
+                    {/* Draft Actions: Edit, Submit for Approval, Delete */}
+                    {entry.postingStatus === 'Draft' && (canEdit || canSubmitForApproval || canDelete) && (
                         <Card>
                             <CardHeader>
                                 <CardTitle>Actions</CardTitle>
@@ -955,12 +954,6 @@ export default function JournalEntryDetailPage() {
                                     >
                                         {actionLoading === 'request-approval' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SendHorizontal className="mr-2 h-4 w-4" />}
                                         Submit for Approval
-                                    </Button>
-                                )}
-                                {canPost && (
-                                    <Button className="w-full" onClick={handlePost} disabled={actionLoading === 'post' || requiresApprovalBeforePost}>
-                                        {actionLoading === 'post' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
-                                        Post Entry
                                     </Button>
                                 )}
                                 {canDelete && (
