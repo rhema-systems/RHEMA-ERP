@@ -628,6 +628,7 @@ public class PurchaseOrdersController : ControllerBase
 
             var items = await _purchaseOrderItemRepository.GetItemsByPurchaseOrderIdAsync(id);
             var receipts = await _purchaseOrderReceiptRepository.GetReceiptsByPurchaseOrderIdAsync(id);
+            var budgetCommitment = await GetPurchaseOrderBudgetCommitmentAsync(purchaseOrder);
 
             var purchaseOrderDto = new PurchaseOrderDetailDto
             {
@@ -696,6 +697,7 @@ public class PurchaseOrdersController : ControllerBase
                 ContractUtilizationPercent = purchaseOrder.ContractValue.HasValue && purchaseOrder.ContractValue.Value > 0
                     ? (purchaseOrder.ContractUsedValue ?? 0) / purchaseOrder.ContractValue.Value * 100
                     : null,
+                BudgetCommitment = budgetCommitment,
                 Items = items.Select(item => new PurchaseOrderItemDto
                 {
                     Id = item.Id,
@@ -1340,6 +1342,48 @@ public class PurchaseOrdersController : ControllerBase
                 return NotFound($"Purchase order with ID {id} not found");
             }
 
+            if (purchaseOrder.ProcurementSourceType ==
+                ProcurementPurchaseOrderSourceType.HistoricalMigration)
+            {
+                return Conflict(new
+                {
+                    code = "PO_HISTORICAL_STATUS_MIGRATION_ROUTE_REQUIRED",
+                    message = "Historical purchase-order status changes require a dedicated authorized migration or administrative route. The generic status route is disabled."
+                });
+            }
+
+            var isGovernedPurchaseOrder = purchaseOrder.ProcurementSourceType !=
+                                          ProcurementPurchaseOrderSourceType.HistoricalMigration;
+            if (isGovernedPurchaseOrder &&
+                IsFinalExposureStatus(purchaseOrder.Status) &&
+                !IsFinalExposureStatus(statusDto.Status))
+            {
+                return Conflict(new
+                {
+                    code = "PO_COMMITMENT_REVERSAL_REQUIRED",
+                    message = "A final purchase order cannot leave an exposure status through the generic status route. Cancellation or rejection requires a dedicated atomic commitment-reversal operation."
+                });
+            }
+            if (isGovernedPurchaseOrder &&
+                !(string.Equals(purchaseOrder.Status, "Draft",
+                      StringComparison.OrdinalIgnoreCase) &&
+                  string.Equals(statusDto.Status, "Cancelled",
+                      StringComparison.OrdinalIgnoreCase)))
+            {
+                return Conflict(new
+                {
+                    code = "PO_STATUS_DEDICATED_ROUTE_REQUIRED",
+                    message = "This governed purchase-order transition must use its dedicated submission, approval, rejection, receipt, or amendment lifecycle route. The generic status route permits only Draft to Cancelled."
+                });
+            }
+            if (isGovernedPurchaseOrder)
+            {
+                await _purchaseOrderSources.AuthorizeDraftCancellationAsync(
+                    purchaseOrder,
+                    CorrelationId(),
+                    HttpContext.RequestAborted);
+            }
+
             if (await IsFrameworkCallOffAsync(id))
             {
                 return Conflict(new
@@ -1386,6 +1430,15 @@ public class PurchaseOrdersController : ControllerBase
             await _unitOfWork.SaveChangesAsync();
 
             return NoContent();
+        }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_STATUS_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
         }
         catch (ProcurementPurchaseOrderSourceValidationException ex)
         {
@@ -1538,18 +1591,27 @@ public class PurchaseOrdersController : ControllerBase
                 action,
                 comments);
 
+            if (approvalDto.Approved && workflowResult.Outcome == WorkflowOutcome.Approved)
+            {
+                await _purchaseOrderSources.EnsureBudgetCommitmentForIssueAsync(
+                    purchaseOrder,
+                    correlationId,
+                    HttpContext.RequestAborted);
+                await _budgetCommitments.CommitPurchaseOrderAsync(
+                    purchaseOrder,
+                    correlationId,
+                    HttpContext.RequestAborted);
+                // Persist the immutable formal exposure before the PO enters a
+                // final/exposure status. Both saves remain inside the same
+                // serializable transaction and roll back together on failure.
+                await _unitOfWork.SaveChangesAsync();
+            }
+
             var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseOrder");
             statusAdapter.ApplyApprovalOutcome(purchaseOrder, workflowResult.Outcome, userId);
 
             purchaseOrder.UpdatedAt = DateTime.UtcNow;
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
-            if (approvalDto.Approved && workflowResult.Outcome == WorkflowOutcome.Approved)
-            {
-                await _budgetCommitments.CommitPurchaseOrderAsync(
-                    purchaseOrder,
-                    correlationId,
-                    HttpContext.RequestAborted);
-            }
             await _unitOfWork.SaveChangesAsync();
             if (ownsApprovalTransaction)
             {
@@ -2722,6 +2784,7 @@ public class PurchaseOrdersController : ControllerBase
 
         var items = await _purchaseOrderItemRepository.GetItemsByPurchaseOrderIdAsync(purchaseOrderId);
         var receipts = await _purchaseOrderReceiptRepository.GetReceiptsByPurchaseOrderIdAsync(purchaseOrderId);
+        var budgetCommitment = await GetPurchaseOrderBudgetCommitmentAsync(purchaseOrder);
 
         return new PurchaseOrderDetailDto
         {
@@ -2790,6 +2853,7 @@ public class PurchaseOrdersController : ControllerBase
             ContractUtilizationPercent = purchaseOrder.ContractValue.HasValue && purchaseOrder.ContractValue.Value > 0
                 ? (purchaseOrder.ContractUsedValue ?? 0) / purchaseOrder.ContractValue.Value * 100
                 : null,
+            BudgetCommitment = budgetCommitment,
             Items = items.Select(item => new PurchaseOrderItemDto
             {
                 Id = item.Id,
@@ -2841,6 +2905,200 @@ public class PurchaseOrdersController : ControllerBase
                 RowVersion = Convert.ToBase64String(receipt.RowVersion)
             }).ToList()
         };
+    }
+
+    private async Task<PurchaseOrderBudgetCommitmentDto?>
+        GetPurchaseOrderBudgetCommitmentAsync(PurchaseOrder purchaseOrder)
+    {
+        if (!purchaseOrder.SourceRequisitionId.HasValue)
+            return null;
+
+        var exposureEntries = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.SourceType == "PurchaseOrder" &&
+                item.SourceId == purchaseOrder.Id &&
+                (item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment ||
+                 item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .OrderBy(item => item.EntryType ==
+                ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation ? 0 : 1)
+            .ThenBy(item => item.OccurredAtUtc)
+            .ToListAsync(HttpContext.RequestAborted);
+        var exposure = exposureEntries.FirstOrDefault();
+        if (exposure is null)
+            return null;
+
+        var commitment = await _unitOfWork
+            .Repository<ProcurementBudgetCommitment>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.Id == exposure.ProcurementBudgetCommitmentId &&
+                item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(HttpContext.RequestAborted);
+        if (commitment is null)
+            return null;
+
+        var reservationEvent = await _unitOfWork
+            .Repository<ProcurementControlEvent>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.EventType == "PurchaseRequisitionBudgetControl" &&
+                item.SourceId == commitment.PurchaseRequisitionId &&
+                item.CorrelationId == exposure.CorrelationId &&
+                (item.Action == "BudgetCommitmentReserved" ||
+                 item.Action == "BudgetCommitmentAdjustedForAward" ||
+                 item.Action == "BudgetReservationReused") &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .OrderBy(item => item.OccurredAtUtc)
+            .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+        // The envelope sequence is mutable only through controlled reservation
+        // adjustments. Historical events retain their own sequence in History,
+        // while the PO summary must display the current aggregate sequence.
+        var currentReservationSequence = Math.Max(1, commitment.ReservationSequence);
+        var historyReservationSequence = ResolveHistoryReservationSequence(
+            reservationEvent?.AfterJson,
+            currentReservationSequence);
+        var reservationAmount = ReadSnapshotDecimal(
+            reservationEvent?.AfterJson,
+            "reservedAmount") ?? commitment.ReservedAmount;
+        var reservedAt = reservationEvent?.OccurredAtUtc ?? commitment.ReservedAtUtc;
+        var reservedBy = reservationEvent?.ActorName ?? commitment.ReservedByName;
+        var reservationCorrelation = reservationEvent?.CorrelationId ?? commitment.CorrelationId;
+        var adjustments = await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.PurchaseOrderId == purchaseOrder.Id &&
+                item.PurchaseRequisitionId == commitment.PurchaseRequisitionId &&
+                item.BudgetCommitmentId == commitment.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .OrderBy(item => item.Sequence)
+            .ToListAsync(HttpContext.RequestAborted);
+        var effectiveAmount = decimal.Round(
+            exposure.Amount + adjustments.Sum(item => item.DeltaAmount),
+            2,
+            MidpointRounding.AwayFromZero);
+        var history = new List<PurchaseOrderBudgetCommitmentHistoryDto>
+        {
+            new()
+            {
+                Sequence = historyReservationSequence,
+                Status = "Reserved",
+                Event = "Reservation",
+                Action = reservationEvent?.Action ?? "BudgetCommitmentReserved",
+                Amount = reservationAmount,
+                OccurredAtUtc = reservedAt,
+                ActorName = reservedBy,
+                CorrelationId = reservationCorrelation,
+                BeforeSnapshotJson = reservationEvent?.BeforeJson,
+                AfterSnapshotJson = reservationEvent?.AfterJson
+            },
+            new()
+            {
+                Sequence = historyReservationSequence + 1,
+                Status = exposure.EntryType ==
+                    ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation
+                        ? "Allocated"
+                        : "Committed",
+                Event = exposure.EntryType.ToString(),
+                Action = exposure.EntryType ==
+                    ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation
+                        ? "AllocatedToContractCommitment"
+                        : "FormallyCommitted",
+                Amount = exposure.Amount,
+                OccurredAtUtc = exposure.OccurredAtUtc,
+                ActorName = exposure.ActorName,
+                CorrelationId = exposure.CorrelationId
+            }
+        };
+        history.AddRange(adjustments.Select(adjustment =>
+            new PurchaseOrderBudgetCommitmentHistoryDto
+            {
+                Sequence = historyReservationSequence + 1 + adjustment.Sequence,
+                Status = "Adjusted",
+                Event = "PurchaseOrderCommitmentAdjustment",
+                Action = adjustment.DeltaAmount >= 0m
+                    ? "CommitmentIncreased"
+                    : "CommitmentDecreased",
+                Amount = adjustment.DeltaAmount,
+                OccurredAtUtc = adjustment.AppliedAtUtc,
+                ActorName = adjustment.AppliedByName,
+                CorrelationId = adjustment.CorrelationId,
+                CommittedBalanceAfter = adjustment.BudgetCommittedAfter,
+                AvailableBalanceAfter = adjustment.BudgetAvailableAfter
+            }));
+
+        return new PurchaseOrderBudgetCommitmentDto
+        {
+            CommitmentId = commitment.Id,
+            Reference = commitment.ReservationReference,
+            // The aggregate reservation envelope remains Reserved so later POs
+            // under the same PR can consume its outstanding capacity. This PO's
+            // immutable formal entry is nevertheless a completed commitment.
+            Status = exposure.EntryType ==
+                ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation
+                    ? "Allocated"
+                    : "Committed",
+            ReservationStatus = commitment.Status.ToString(),
+            Amount = effectiveAmount,
+            ReservedAmount = commitment.ReservedAmount,
+            FormallyCommittedAmount = commitment.FormallyCommittedAmount,
+            Currency = exposure.Currency,
+            ReservationSequence = currentReservationSequence,
+            History = history
+        };
+    }
+
+    private static decimal? ReadSnapshotDecimal(string? json, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty(propertyName, out var value) &&
+                   value.TryGetDecimal(out var result)
+                ? result
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int ResolveHistoryReservationSequence(
+        string? reservationAfterJson,
+        int currentReservationSequence)
+    {
+        if (!string.IsNullOrWhiteSpace(reservationAfterJson))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(reservationAfterJson);
+                if (document.RootElement.TryGetProperty("reservationSequence", out var value) &&
+                    value.TryGetInt32(out var sequence) &&
+                    sequence > 0)
+                {
+                    return sequence;
+                }
+            }
+            catch (JsonException)
+            {
+                // A legacy event without a readable snapshot falls back to the
+                // current aggregate sequence rather than hiding the history.
+            }
+        }
+
+        return Math.Max(1, currentReservationSequence);
     }
 
     #endregion
@@ -3467,6 +3725,16 @@ public class PurchaseOrdersController : ControllerBase
 
     internal static bool CanRecordApprovalDecision(string? status) =>
         string.Equals(status, "Pending Approval", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFinalExposureStatus(string? status) =>
+        status is not null &&
+        (status.Equals("Approved", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("Open", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("Sent", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("Acknowledged", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("Partially Received", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("PartiallyReceived", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("Received", StringComparison.OrdinalIgnoreCase));
 
     private Task<bool> IsFrameworkCallOffAsync(Guid purchaseOrderId) =>
         _unitOfWork.Repository<ProcurementFrameworkCallOff>()

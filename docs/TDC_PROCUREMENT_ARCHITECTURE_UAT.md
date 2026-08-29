@@ -117,8 +117,8 @@ Expected:
 - The requester cannot approve their own PR.
 - Only configured stages apply; the architecture does not impose an unconfigured authority band.
 - APP acknowledgement and policy-authority guidance are advisory unless explicitly configured as part of an approved route.
-- The approved outcome and actor metadata are retained once; replay does not duplicate workflow history or budget reservation.
-- PR approval reserves budget availability but does not yet create the formal PO/contract commitment.
+- The approved outcome and actor metadata are retained once; replay does not duplicate workflow history.
+- PR submission and approval validate the effective approved budget and current availability only. They do not reserve funds, create a formal commitment or reduce availability.
 
 ## 6. Sourcing method, RFQ and tender lifecycle
 
@@ -149,17 +149,20 @@ Expected:
 2. Verify supplier, source, PR, items, quantities, prices, currency, warehouse and budget are copied from controlled records.
 3. Submit the PO for approval as its creator.
 4. Approve it as a different assigned procurement approver.
-5. Where the award produces a contract, create, approve and activate the contract; then create any governed child POs.
-6. Open the contract register and contract operations view.
+5. Open the approved PO and verify its Finance commitment reference, active reservation-envelope status, formally committed PO amount and ordered evidence history.
+6. Refresh the approved record and confirm the same commitment evidence. Where an API/concurrency test deliberately repeats the now-invalid approval or activation command, confirm it is rejected without changing any budget or ledger row.
+7. Where the award produces a contract, create, approve and activate the contract; then create any governed child POs.
+8. Open the contract register and contract operations view.
 
 Expected:
 
 - The action is labelled **Submit for Approval**, not **Finalize**.
 - The creator cannot approve the PO and cannot confirm its governed receipt.
-- Formal budget commitment is created exactly once when the PO is finally approved/issued or the approved contract is activated.
-- Multiple POs cannot cumulatively exceed the PR reservation.
+- Final PO approval or approved-contract activation revalidates the effective approved budget, creates or reuses the requisition's reservation envelope, and atomically appends one immutable formal commitment keyed to the PO or contract source ID.
+- The approved PO shows one commitment reference, the active reservation-envelope status and its formally committed PO amount. Ordered history identifies the `BudgetCommitmentReserved` (or reuse) control event followed by the immutable `FormalCommitment` ledger entry; it is not presented as a change to the reservation envelope's status.
+- Multiple POs cannot cumulatively exceed the approved source exposure or current budget availability.
 - A contract plus its child POs does not double-count commitment; child POs consume allocations within the parent contract commitment.
-- Replaying approval/activation does not duplicate the commitment ledger.
+- Refreshing after success returns the same commitment. A repeated terminal-state approval/activation command is rejected without duplicating the commitment ledger or reducing availability twice; concurrent attempts leave exactly one successful final transition.
 - The contract register shows contract number, supplier, project, value, approval/start/end dates, retention, variations, certificates, invoices, payments and balance.
 - Contract/project monitoring exposes delivery, certificate and commercial progress appropriate to the configured project/QS route.
 

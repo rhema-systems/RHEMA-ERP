@@ -242,8 +242,41 @@ public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
     public decimal? ContractRemainingValue { get; set; }
     public decimal? ContractUtilizationPercent { get; set; }
 
+    public PurchaseOrderBudgetCommitmentDto? BudgetCommitment { get; set; }
+
     public List<PurchaseOrderItemDto> Items { get; set; } = new();
     public List<PurchaseOrderReceiptDto> Receipts { get; set; } = new();
+}
+
+public sealed class PurchaseOrderBudgetCommitmentDto
+{
+    public Guid CommitmentId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string ReservationStatus { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal ReservedAmount { get; set; }
+    public decimal FormallyCommittedAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public int ReservationSequence { get; set; }
+    public List<PurchaseOrderBudgetCommitmentHistoryDto> History { get; set; } = new();
+}
+
+public sealed class PurchaseOrderBudgetCommitmentHistoryDto
+{
+    public int Sequence { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Event { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public string? BeforeSnapshotJson { get; set; }
+    public string? AfterSnapshotJson { get; set; }
+    public decimal? ReservedBalanceAfter { get; set; }
+    public decimal? CommittedBalanceAfter { get; set; }
+    public decimal? AvailableBalanceAfter { get; set; }
 }
 
 /// <summary>

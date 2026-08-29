@@ -974,6 +974,15 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
             amendment.ProposedSourceId ||
             purchaseOrder.BusinessPartnerId !=
             amendment.ProposedBusinessPartnerId;
+        var exposureLineageChanged = sourceChanged ||
+            purchaseOrder.SourceRequisitionId !=
+            amendment.ProposedSourceRequisitionId ||
+            purchaseOrder.SourcingReleaseId !=
+            amendment.ProposedSourcingReleaseId;
+        if (exposureLineageChanged)
+            throw Conflict(
+                "PO_AMENDMENT_EXPOSURE_REALLOCATION_REQUIRED",
+                "An approved governed purchase order cannot change supplier, source, requisition, or contract exposure lineage until an atomic formal-ledger reallocation is available.");
         ProcurementPurchaseOrderSourceResolution source;
         if (sourceChanged)
         {
@@ -1027,14 +1036,25 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
         await Amendments.UpdateAsync(amendment);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        ProcurementPurchaseOrderCommitmentAdjustment adjustment;
         var contextSet = false;
         try
         {
+            // Bind the aggregate mutation, immutable adjustment, and PO update
+            // to this exact approved amendment for the full database sequence.
+            await _amendmentStore.SetApprovedSourceMutationContextAsync(
+                amendment.Id, cancellationToken);
+            contextSet = true;
+
+            adjustment = await AdjustCommitmentAsync(
+                amendment,
+                purchaseOrder,
+                now,
+                correlationId,
+                cancellationToken);
+
             if (sourceChanged)
             {
-                await _amendmentStore.SetApprovedSourceMutationContextAsync(
-                    amendment.Id, cancellationToken);
-                contextSet = true;
                 _sources.Apply(purchaseOrder, source);
             }
             ApplyProposal(purchaseOrder, proposal, now);
@@ -1052,12 +1072,6 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
             }
         }
 
-        var adjustment = await AdjustCommitmentAsync(
-            amendment,
-            purchaseOrder,
-            now,
-            correlationId,
-            cancellationToken);
         await _compliance.EnforceAsync(
             purchaseOrder,
             "Approve",
@@ -1115,9 +1129,6 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw Conflict("PO_AMENDMENT_BUDGET_COMMITMENT_REQUIRED",
                 "The approved requisition has no budget commitment.");
-        if (commitment.Status != ProcurementBudgetCommitmentStatus.Reserved)
-            throw Conflict("PO_AMENDMENT_BUDGET_COMMITMENT_INACTIVE",
-                "The requisition budget commitment is not active.");
         var budget = await _budgetStore.GetBudgetForUpdateAsync(
                          _currentUser.TenantId,
                          commitment.ProcurementBudgetId,
@@ -1125,67 +1136,179 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
                      ?? throw Conflict("PO_AMENDMENT_BUDGET_NOT_FOUND",
                          "The committed budget was not found in the current tenant.");
         if (!string.Equals(
-                budget.Status, "Approved",
-                StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(
-                budget.Status, "Active",
-                StringComparison.OrdinalIgnoreCase))
-            throw Conflict("PO_AMENDMENT_BUDGET_NOT_APPROVED",
-                "The committed budget is no longer approved and active.");
-        if (!string.Equals(
                 budget.Currency,
                 purchaseOrder.Currency,
                 StringComparison.OrdinalIgnoreCase))
             throw Conflict("PO_AMENDMENT_BUDGET_CURRENCY_MISMATCH",
                 "The amended purchase order currency does not match the committed budget.");
 
-        var exposureAfter = await PurchaseOrders.GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId &&
-                item.SourceRequisitionId ==
-                purchaseOrder.SourceRequisitionId &&
-                !item.IsDeleted &&
-                item.Status != "Cancelled" &&
-                item.Status != "Rejected")
-            .Select(item => (decimal?)item.TotalAmount)
-            .SumAsync(cancellationToken) ?? 0m;
-        var exposureBefore =
-            ProcurementPurchaseOrderAmendmentRules.Round(
-                exposureAfter - amendment.ProposedTotalAmount +
-                amendment.BeforeTotalAmount);
+        var ledger = _unitOfWork.Repository<ProcurementBudgetCommitmentLedgerEntry>();
+        var delta = ProcurementPurchaseOrderAmendmentRules.Round(
+            amendment.ProposedTotalAmount - amendment.BeforeTotalAmount);
+        var isContractChild = purchaseOrder.ContractId.HasValue;
+        if (isContractChild && delta != 0m)
+            throw Conflict(
+                "PO_AMENDMENT_CONTRACT_ALLOCATION_LEDGER_REQUIRED",
+                "A contract-child purchase-order value cannot change until a dedicated atomic allocation-adjustment ledger is available. Non-commercial amendments remain permitted.");
+        decimal exposureBefore;
+        decimal exposureAfter;
         var commitmentBefore = commitment.ReservedAmount;
-        var commitmentAfter =
-            ProcurementPurchaseOrderAmendmentRules.Round(exposureAfter);
-        var delta =
-            ProcurementPurchaseOrderAmendmentRules.Round(
-                commitmentAfter - commitmentBefore);
+        var commitmentAfter = commitmentBefore;
         var budgetCommittedBefore = budget.CommittedAmount;
         var budgetAvailableBefore = Available(budget);
-        if (delta > 0 && budgetAvailableBefore < delta)
-            throw Conflict("PO_AMENDMENT_BUDGET_INSUFFICIENT",
-                $"The approved budget is short by {delta - budgetAvailableBefore:N2} {budget.Currency} for this amendment.");
+        if (isContractChild)
+        {
+            var allocation = await ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation &&
+                    item.SourceType == "PurchaseOrder" &&
+                    item.SourceId == purchaseOrder.Id &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw Conflict(
+                    "PO_AMENDMENT_CONTRACT_ALLOCATION_REQUIRED",
+                    "The contract-child purchase order has no immutable allocation under its parent formal commitment.");
+            var parent = allocation.FormalCommitmentEntryId.HasValue
+                ? await ledger.GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.Id == allocation.FormalCommitmentEntryId.Value &&
+                        item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                        item.SourceType == "Contract" &&
+                        item.SourceId == purchaseOrder.ContractId.Value &&
+                        !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken)
+                : null;
+            if (parent is null)
+                throw Conflict(
+                    "PO_AMENDMENT_CONTRACT_COMMITMENT_REQUIRED",
+                    "The contract-child allocation has no exact parent formal contract commitment.");
+            var contractIsActive = await _unitOfWork.Repository<Contract>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == purchaseOrder.ContractId.Value &&
+                    item.Status == "Active" &&
+                    !item.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (!contractIsActive)
+                throw Conflict(
+                    "PO_AMENDMENT_CONTRACT_INACTIVE",
+                    "The contract-child allocation cannot change outside an active parent contract.");
 
-        budget.CommittedAmount =
-            ProcurementPurchaseOrderAmendmentRules.Round(
+            var siblingAllocationIds = ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation &&
+                    item.FormalCommitmentEntryId == parent.Id &&
+                    !item.IsDeleted)
+                .Select(item => item.SourceId);
+            var baseAllocated = await ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation &&
+                    item.FormalCommitmentEntryId == parent.Id &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+            var priorAllocationAdjustments = await Adjustments.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.BudgetCommitmentId == parent.ProcurementBudgetCommitmentId &&
+                    siblingAllocationIds.Contains(item.PurchaseOrderId) &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+            var thisPurchaseOrderAdjustments = await Adjustments.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseOrderId == purchaseOrder.Id &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+            var effectiveAllocationBefore = ProcurementPurchaseOrderAmendmentRules.Round(
+                allocation.Amount + thisPurchaseOrderAdjustments);
+            if (effectiveAllocationBefore != amendment.BeforeTotalAmount)
+                throw Conflict(
+                    "PO_AMENDMENT_CONTRACT_ALLOCATION_STALE",
+                    "The retained amendment amount no longer matches the effective child allocation.");
+            exposureBefore = ProcurementPurchaseOrderAmendmentRules.Round(
+                baseAllocated + priorAllocationAdjustments);
+            exposureAfter = ProcurementPurchaseOrderAmendmentRules.Round(exposureBefore + delta);
+            if (effectiveAllocationBefore + delta < 0m || exposureAfter > parent.Amount)
+                throw Conflict(
+                    "PO_AMENDMENT_CONTRACT_ALLOCATION_EXCEEDED",
+                    "The amended cumulative child allocations exceed the fixed parent contract commitment.");
+        }
+        else
+        {
+            if (commitment.Status != ProcurementBudgetCommitmentStatus.Reserved)
+                throw Conflict("PO_AMENDMENT_BUDGET_COMMITMENT_INACTIVE",
+                    "The requisition budget commitment is not active.");
+            if (!string.Equals(
+                    budget.Status, "Approved",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(
+                    budget.Status, "Active",
+                    StringComparison.OrdinalIgnoreCase))
+                throw Conflict("PO_AMENDMENT_BUDGET_NOT_APPROVED",
+                    "The committed budget is no longer approved and active.");
+
+            var formalExposure = await ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+            var releasedFormalExposure = await ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                    item.FormalCommitmentEntryId != null &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+            var directPurchaseOrderIds = ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                    item.SourceType == "PurchaseOrder" &&
+                    !item.IsDeleted)
+                .Select(item => item.SourceId);
+            var priorDirectAdjustments = await Adjustments.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
+                    directPurchaseOrderIds.Contains(item.PurchaseOrderId) &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+            exposureBefore = ProcurementPurchaseOrderAmendmentRules.Round(
+                formalExposure - releasedFormalExposure + priorDirectAdjustments);
+            exposureAfter = ProcurementPurchaseOrderAmendmentRules.Round(exposureBefore + delta);
+            var outstandingReservation = ProcurementPurchaseOrderAmendmentRules.Round(
+                Math.Max(0m,
+                    commitment.ReservedAmount -
+                    commitment.FormallyCommittedAmount));
+            commitmentAfter = ProcurementPurchaseOrderAmendmentRules.Round(
+                exposureAfter + outstandingReservation);
+            if (delta > 0 && budgetAvailableBefore < delta)
+                throw Conflict("PO_AMENDMENT_BUDGET_INSUFFICIENT",
+                    $"The approved budget is short by {delta - budgetAvailableBefore:N2} {budget.Currency} for this amendment.");
+
+            budget.CommittedAmount = ProcurementPurchaseOrderAmendmentRules.Round(
                 Math.Max(0, budget.CommittedAmount + delta));
-        budget.RemainingAmount = Available(budget);
-        budget.UpdatedAt = now;
-        budget.UpdatedBy = ActorName();
-        budget.LastModifiedById = _currentUser.UserId;
-        commitment.ReservationSequence += 1;
-        commitment.ReservedAmount = commitmentAfter;
-        commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
-        commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
-        commitment.BudgetCommittedBefore = budgetCommittedBefore;
-        commitment.BudgetAvailableBefore = budgetAvailableBefore;
-        commitment.BudgetCommittedAfter = budget.CommittedAmount;
-        commitment.BudgetAvailableAfter = budget.RemainingAmount;
-        commitment.ReservedAtUtc = now;
-        commitment.ReservedById = _currentUser.UserId;
-        commitment.ReservedByName = ActorName();
-        commitment.CorrelationId = correlationId;
-        commitment.UpdatedAt = now;
-        commitment.UpdatedBy = ActorName();
-        commitment.LastModifiedById = _currentUser.UserId;
+            budget.RemainingAmount = Available(budget);
+            budget.UpdatedAt = now;
+            budget.UpdatedBy = ActorName();
+            budget.LastModifiedById = _currentUser.UserId;
+            commitment.ReservationSequence += 1;
+            commitment.ReservedAmount = commitmentAfter;
+            commitment.FormallyCommittedAmount = ProcurementPurchaseOrderAmendmentRules.Round(
+                Math.Max(0m, commitment.FormallyCommittedAmount + delta));
+            commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
+            commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
+            commitment.BudgetCommittedBefore = budgetCommittedBefore;
+            commitment.BudgetAvailableBefore = budgetAvailableBefore;
+            commitment.BudgetCommittedAfter = budget.CommittedAmount;
+            commitment.BudgetAvailableAfter = budget.RemainingAmount;
+            commitment.ReservedAtUtc = now;
+            commitment.ReservedById = _currentUser.UserId;
+            commitment.ReservedByName = ActorName();
+            commitment.CorrelationId = correlationId;
+            commitment.UpdatedAt = now;
+            commitment.UpdatedBy = ActorName();
+            commitment.LastModifiedById = _currentUser.UserId;
+        }
 
         var sequence = (await Adjustments.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId &&
@@ -1255,8 +1378,12 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
             adjustment.AppliedById,
             amendment.ProposedIntegrityHash
         }));
-        await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
-        await Commitments.UpdateAsync(commitment);
+        if (!isContractChild)
+        {
+            await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
+            await Commitments.UpdateAsync(commitment);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
         await Adjustments.AddAsync(adjustment);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return adjustment;
@@ -2546,7 +2673,8 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
         ProcurementPurchaseOrderAmendmentRules.Round(
             budget.AllocatedAmount -
             budget.UtilizedAmount -
-            budget.CommittedAmount);
+            budget.CommittedAmount -
+            budget.ReservedAmount);
 
     private static string? Trim(string? value, int maximum) =>
         string.IsNullOrWhiteSpace(value)

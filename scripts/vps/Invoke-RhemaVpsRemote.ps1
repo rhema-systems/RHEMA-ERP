@@ -45,6 +45,17 @@ function Get-ApiConfigurationXml {
     return [xml](Get-Content -LiteralPath $ApiServiceXml)
 }
 
+function Assert-SyncfusionLicenseConfigured {
+    $xml = Get-ApiConfigurationXml
+    $configured = @($xml.service.env | Where-Object {
+        $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.value)
+    })
+    Assert-True ($configured.Count -gt 0) `
+        'The protected Syncfusion license is missing from the API service environment.'
+    Write-Output 'SYNCFUSION_LICENSE|CONFIGURED'
+}
+
 function Get-DatabaseConnectionString {
     $xml = Get-ApiConfigurationXml
     $value = [string](($xml.service.env | Where-Object {
@@ -479,6 +490,26 @@ BEGIN
               AND formal.ContractAmount + purchaseOrders.DirectPurchaseOrderAmount > c.ReservedAmount');
     END;
 END;
+IF EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle')
+   AND NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment')
+BEGIN
+    IF OBJECT_ID(N'dbo.PurchaseOrders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementRequisitionSourcingReleases', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.PurchaseRequisitions', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementBudgetCommitments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementBudgets', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementPurchaseOrderCommitmentAdjustments', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'EntryType') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'SourceType') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'SourceId') IS NULL
+       OR OBJECT_ID(N'dbo.TR_PurchaseOrders_GovernedCommitment', N'TR') IS NULL
+        INSERT @R VALUES(N'Atomic PO budget commitment trigger prerequisites', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -522,6 +553,7 @@ function Invoke-Preflight {
     Assert-True ($freeGb -ge 5) 'Less than 5 GB of free disk space remains on the VPS.'
 
     $xml = Get-ApiConfigurationXml
+    Assert-SyncfusionLicenseConfigured
     $requiredSettings = @{
         'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
         'StartupInitialization__SeedDevelopmentData' = 'true'
@@ -649,6 +681,10 @@ function Invoke-Preflight {
     # immutable ledger. The probes above mirror every legacy-data THROW in the
     # migration so over-exposed reservations fail before any schema change.
     Write-Output 'GUARD_COVERAGE|20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle'
+    # This forward correction replaces only the PO exposure trigger. The
+    # prerequisite probe prevents a partially applied FR-PR-005 baseline from
+    # reaching migration startup without the immutable ledger it must enforce.
+    Write-Output 'GUARD_COVERAGE|20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
@@ -1114,6 +1150,7 @@ function Invoke-ResumeFrontend {
 }
 
 function Invoke-Verify {
+    Assert-SyncfusionLicenseConfigured
     Write-ServiceState
     $notRunning = @(Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
         Where-Object { $_.Status -ne 'Running' })

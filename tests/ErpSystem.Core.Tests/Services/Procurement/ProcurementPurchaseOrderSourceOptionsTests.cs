@@ -186,6 +186,7 @@ public sealed class ProcurementPurchaseOrderSourceOptionsTests
             new Mock<IProcurementAccessControlService>().Object,
             new Mock<IProcurementControlEventService>().Object,
             new Mock<IProcurementRequisitionBudgetControlService>().Object,
+            new Mock<IProcurementBudgetReservationStore>().Object,
             new Mock<INotificationTopicPublisher>().Object,
             NullLogger<ProcurementPurchaseOrderSourceService>.Instance);
 

@@ -227,7 +227,7 @@ public class PurchaseOrder : TenantEntity
     public DateTime? ReceivedDate { get; set; }
 
     // Status and Approval
-    [MaxLength(20)]
+    [MaxLength(50)]
     public string Status { get; set; } = "Draft"; // Draft, Approved, Sent, Acknowledged, PartiallyReceived, Received, Cancelled
 
     public Guid? RequestedById { get; set; }

@@ -16,6 +16,47 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementPurchaseOrderSourceFrameworkTests
 {
     [Fact]
+    public void Framework_final_approval_posts_finance_before_po_status_and_approved_cancel_fails_closed()
+    {
+        var source = ReadFrameworkCallOffService();
+        var decideStart = source.IndexOf(
+            "public async Task<ProcurementFrameworkCallOffDto> DecideAsync(",
+            StringComparison.Ordinal);
+        var issueStart = source.IndexOf(
+            "public async Task<ProcurementFrameworkCallOffDto> IssueAsync(",
+            decideStart,
+            StringComparison.Ordinal);
+        var cancelStart = source.IndexOf(
+            "public async Task<ProcurementFrameworkCallOffDto> CancelAsync(",
+            issueStart,
+            StringComparison.Ordinal);
+        var cancelEnd = source.IndexOf(
+            "public async Task<int> ProcessExpiryAlertsAsync(",
+            cancelStart,
+            StringComparison.Ordinal);
+        var decide = source[decideStart..issueStart];
+        var cancel = source[cancelStart..cancelEnd];
+        var reserve = decide.IndexOf(
+            "EnsureBudgetCommitmentForIssueAsync(", StringComparison.Ordinal);
+        var formal = decide.IndexOf(
+            "CommitPurchaseOrderAsync(", reserve, StringComparison.Ordinal);
+        var formalSave = decide.IndexOf(
+            "SaveChangesAsync(", formal, StringComparison.Ordinal);
+        var applyPoStatus = decide.IndexOf(
+            "ApplyApprovalOutcome(", formalSave, StringComparison.Ordinal);
+
+        reserve.Should().BeGreaterThanOrEqualTo(0);
+        formal.Should().BeGreaterThan(reserve);
+        formalSave.Should().BeGreaterThan(formal);
+        applyPoStatus.Should().BeGreaterThan(formalSave,
+            "the trigger must observe the immutable ledger before PO Approved");
+        decide.Should().Contain("await ExecuteAsync(");
+        source.Should().Contain("IsolationLevel.Serializable");
+        cancel.Should().Contain("FRAMEWORK_CALL_OFF_COMMITMENT_REVERSAL_REQUIRED")
+            .And.NotContain("await ReleaseBalanceAsync(");
+    }
+
+    [Fact]
     public async Task ExceptionalFrameworkLineageResolvesControlByTenderId()
     {
         await using var fixture = new Fixture();
@@ -75,8 +116,9 @@ public sealed class ProcurementPurchaseOrderSourceFrameworkTests
             var options =
                 new DbContextOptionsBuilder<ApplicationDbContext>()
                     .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                    .EnableServiceProviderCaching(false)
                     .Options;
-            Context = new ApplicationDbContext(options);
+            Context = new ApplicationDbContext(options, TenantId);
             _unitOfWork = new UnitOfWork(Context);
 
             var requisition = new PurchaseRequisition
@@ -195,6 +237,7 @@ public sealed class ProcurementPurchaseOrderSourceFrameworkTests
                 new Mock<IProcurementAccessControlService>().Object,
                 new Mock<IProcurementControlEventService>().Object,
                 new Mock<IProcurementRequisitionBudgetControlService>().Object,
+                new Mock<IProcurementBudgetReservationStore>().Object,
                 new Mock<INotificationTopicPublisher>().Object,
                 NullLogger<ProcurementPurchaseOrderSourceService>.Instance);
         }
@@ -215,5 +258,23 @@ public sealed class ProcurementPurchaseOrderSourceFrameworkTests
             _unitOfWork.Dispose();
             return ValueTask.CompletedTask;
         }
+    }
+
+    private static string ReadFrameworkCallOffService(
+        [System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")
+    {
+        for (var directory = new FileInfo(sourceFile).Directory;
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (!File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+                continue;
+            return File.ReadAllText(Path.Combine(
+                directory.FullName,
+                "src", "ErpSystem.Core", "Services", "Procurement",
+                "ProcurementFrameworkCallOffService.cs"));
+        }
+        throw new DirectoryNotFoundException(
+            "Repository root containing ErpSystem.sln was not found.");
     }
 }

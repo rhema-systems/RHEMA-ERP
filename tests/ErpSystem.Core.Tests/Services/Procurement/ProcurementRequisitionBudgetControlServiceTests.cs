@@ -122,6 +122,42 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         readiness.CommitmentStatus.Should().Be("Reserved");
     }
 
+    [Theory]
+    [InlineData("Closed", false)]
+    [InlineData("Approved", true)]
+    public async Task ActiveReservationCannotMakeAnIneligibleBudgetCurrentAgain(
+        string budgetStatus,
+        bool expireBudget)
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(1_000m);
+        var requisition = fixture.NewRequisition(budget, 400m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            400m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-current-reservation");
+        budget.Status = budgetStatus;
+        if (expireBudget)
+            budget.ExpiryDate = DateTime.UtcNow.AddDays(-1);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.GetDownstreamReadinessAsync(
+            requisition.Id,
+            400m,
+            "GHS");
+
+        readiness.CanReserve.Should().BeFalse();
+        readiness.DecisionCode.Should().Be(
+            expireBudget ? "PR_BUDGET_EXPIRED" : "PR_BUDGET_NOT_APPROVED");
+        readiness.DecisionCode.Should().NotBe("PR_BUDGET_COMMITMENT_ACTIVE");
+    }
+
     [Fact]
     public async Task DownstreamReadinessUsesPoExposureInsteadOfLargerPrEstimate()
     {
@@ -173,6 +209,163 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
     }
 
     [Fact]
+    public async Task LaterPoAfterApprovedAmendmentExpandsEnvelopeThenCommitsAndReplays()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(200m);
+        budget.CommittedAmount = 120m;
+        budget.RemainingAmount = 80m;
+        var requisition = fixture.NewRequisition(budget, 150m);
+        requisition.Status = "Approved";
+        var firstPurchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            OrderNumber = "PO-AMENDED-001", SourceRequisitionId = requisition.Id,
+            TotalAmount = 120m, Currency = "GHS", Status = "Approved"
+        };
+        var secondPurchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            OrderNumber = "PO-AFTER-AMENDMENT-002", SourceRequisitionId = requisition.Id,
+            TotalAmount = 30m, Currency = "GHS", Status = "Approved"
+        };
+        var commitment = new ProcurementBudgetCommitment
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementBudgetId = budget.Id, PurchaseRequisitionId = requisition.Id,
+            ReservationReference = $"{requisition.RequisitionNumber}/BUDGET/A1",
+            ReservationSequence = 1, Status = ProcurementBudgetCommitmentStatus.Reserved,
+            ReservedAmount = 120m, FormallyCommittedAmount = 120m,
+            Currency = "GHS", ReservedAtUtc = DateTime.UtcNow,
+            ReservedById = fixture.UserId, ReservedByName = "Budget Controller",
+            CorrelationId = "po1-amendment"
+        };
+        var formal = new ProcurementBudgetCommitmentLedgerEntry
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementBudgetCommitmentId = commitment.Id,
+            ProcurementBudgetId = budget.Id, PurchaseRequisitionId = requisition.Id,
+            EntryType = ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+            SourceType = "PurchaseOrder", SourceId = firstPurchaseOrder.Id,
+            SourceReference = firstPurchaseOrder.OrderNumber, Amount = 100m,
+            Currency = "GHS", OccurredAtUtc = DateTime.UtcNow,
+            ActorUserId = fixture.UserId, ActorName = "Budget Controller",
+            CorrelationId = "po1-formal"
+        };
+        var amendment = new ProcurementPurchaseOrderAmendment
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            PurchaseOrderId = firstPurchaseOrder.Id, AmendmentNumber = "PO-AMENDED-001/A1",
+            AmendmentSequence = 1, Status = ProcurementPurchaseOrderAmendmentStatus.Applied,
+            Reason = "Increase PO1", ChangeScope = "Quantity",
+            ProposedSourceRequisitionId = requisition.Id,
+            BeforeTotalAmount = 100m, ProposedTotalAmount = 120m,
+            CommitmentDelta = 20m, Currency = "GHS",
+            AppliedAtUtc = DateTime.UtcNow, AppliedById = fixture.UserId,
+            AppliedByName = "Budget Controller", IdempotencyKey = "amend-po1",
+            CorrelationId = "po1-amendment"
+        };
+        var adjustment = new ProcurementPurchaseOrderCommitmentAdjustment
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            AmendmentId = amendment.Id, PurchaseOrderId = firstPurchaseOrder.Id,
+            PurchaseRequisitionId = requisition.Id, ProcurementBudgetId = budget.Id,
+            BudgetCommitmentId = commitment.Id, Sequence = 1,
+            PurchaseOrderAmountBefore = 100m, PurchaseOrderAmountAfter = 120m,
+            RequisitionExposureBefore = 100m, RequisitionExposureAfter = 120m,
+            CommitmentAmountBefore = 100m, CommitmentAmountAfter = 120m,
+            DeltaAmount = 20m, BudgetCommittedBefore = 100m, BudgetCommittedAfter = 120m,
+            BudgetAvailableBefore = 100m, BudgetAvailableAfter = 80m,
+            Currency = "GHS", AppliedAtUtc = amendment.AppliedAtUtc!.Value,
+            AppliedById = fixture.UserId, AppliedByName = "Budget Controller",
+            IntegrityHash = new string('a', 64), CorrelationId = "po1-amendment"
+        };
+        fixture.Context.AddRange(
+            budget, requisition, firstPurchaseOrder, secondPurchaseOrder,
+            commitment, formal, amendment, adjustment);
+        await fixture.Context.SaveChangesAsync();
+
+        var expanded = await fixture.Service.ReserveForDownstreamAsync(
+            requisition, 150m, "GHS", "procurement.purchase-order.approve", "po2-reserve");
+        var committed = await fixture.Lifecycle.CommitPurchaseOrderAsync(
+            secondPurchaseOrder, "po2-commit");
+        await fixture.Context.SaveChangesAsync();
+        var replay = await fixture.Lifecycle.CommitPurchaseOrderAsync(
+            secondPurchaseOrder, "po2-commit-replay");
+
+        expanded.CanReserve.Should().BeTrue();
+        expanded.RequestedAmount.Should().Be(150m);
+        commitment.ReservedAmount.Should().Be(150m);
+        commitment.ReservationSequence.Should().Be(2);
+        commitment.FormallyCommittedAmount.Should().Be(150m);
+        budget.ReservedAmount.Should().Be(0m);
+        budget.CommittedAmount.Should().Be(150m);
+        replay.Id.Should().Be(committed.Id);
+    }
+
+    [Fact]
+    public async Task FullyUtilizedFirstPoKeepsEnvelopeActiveForLaterPoCommitAndReplay()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(200m);
+        var requisition = fixture.NewRequisition(budget, 150m);
+        requisition.Status = "Approved";
+        var firstPurchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            OrderNumber = "PO-STAGGERED-001", SourceRequisitionId = requisition.Id,
+            TotalAmount = 100m, Currency = "GHS", Status = "Approved"
+        };
+        var secondPurchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            OrderNumber = "PO-STAGGERED-002", SourceRequisitionId = requisition.Id,
+            TotalAmount = 50m, Currency = "GHS", Status = "Approved"
+        };
+        var receipt = new PurchaseOrderReceipt
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            PurchaseOrderId = firstPurchaseOrder.Id,
+            ReceiptNumber = "REC-STAGGERED-001"
+        };
+        fixture.Context.AddRange(
+            budget, requisition, firstPurchaseOrder, secondPurchaseOrder, receipt);
+        await fixture.Context.SaveChangesAsync();
+
+        (await fixture.Service.ReserveForDownstreamAsync(
+            requisition, 100m, "GHS", "procurement.purchase-order.approve", "po1-reserve"))
+            .CanReserve.Should().BeTrue();
+        await fixture.Lifecycle.CommitPurchaseOrderAsync(firstPurchaseOrder, "po1-commit");
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Lifecycle.UtilizePurchaseOrderAsync(
+            firstPurchaseOrder.Id, receipt.Id, receipt.ReceiptNumber,
+            100m, "po1-receipt");
+        await fixture.Context.SaveChangesAsync();
+
+        var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
+        commitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Reserved);
+        commitment.ConsumedAtUtc.Should().BeNull();
+
+        (await fixture.Service.ReserveForDownstreamAsync(
+            requisition, 150m, "GHS", "procurement.purchase-order.approve", "po2-reserve"))
+            .CanReserve.Should().BeTrue();
+        var committed = await fixture.Lifecycle.CommitPurchaseOrderAsync(
+            secondPurchaseOrder, "po2-commit");
+        await fixture.Context.SaveChangesAsync();
+        var replay = await fixture.Lifecycle.CommitPurchaseOrderAsync(
+            secondPurchaseOrder, "po2-commit-replay");
+
+        replay.Id.Should().Be(committed.Id);
+        commitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Reserved);
+        commitment.ReservedAmount.Should().Be(150m);
+        commitment.FormallyCommittedAmount.Should().Be(150m);
+        commitment.UtilizedAmount.Should().Be(100m);
+        budget.ReservedAmount.Should().Be(0m);
+        budget.CommittedAmount.Should().Be(50m);
+        budget.UtilizedAmount.Should().Be(100m);
+    }
+
+    [Fact]
     public async Task InsufficientBudgetBlocksWithoutCreatingACommitmentOrMutatingFinanceTotals()
     {
         await using var fixture = new Fixture();
@@ -214,6 +407,55 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
             .Contain(item => item.Action == "BudgetReservationReused");
     }
 
+    [Theory]
+    [InlineData(ProcurementBudgetCommitmentStatus.Consumed, "PR_BUDGET_COMMITMENT_CONSUMED")]
+    [InlineData(ProcurementBudgetCommitmentStatus.Released, "PR_BUDGET_COMMITMENT_RELEASED")]
+    public async Task TerminalRequisitionEnvelopeRequiresNewOrAmendedApprovalForReplacementProcurement(
+        ProcurementBudgetCommitmentStatus status,
+        string expectedCode)
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(100m);
+        budget.UtilizedAmount = 40m;
+        budget.RemainingAmount = 60m;
+        var requisition = fixture.NewRequisition(budget, 100m);
+        requisition.Status = "Approved";
+        var commitment = new ProcurementBudgetCommitment
+        {
+            Id = Guid.NewGuid(), TenantId = requisition.TenantId,
+            ProcurementBudgetId = budget.Id, PurchaseRequisitionId = requisition.Id,
+            ReservationReference = $"{requisition.RequisitionNumber}/BUDGET/A1",
+            ReservationSequence = 1, Status = status,
+            ReservedAmount = status == ProcurementBudgetCommitmentStatus.Consumed ? 40m : 0m,
+            FormallyCommittedAmount = status == ProcurementBudgetCommitmentStatus.Consumed ? 40m : 0m,
+            UtilizedAmount = status == ProcurementBudgetCommitmentStatus.Consumed ? 40m : 0m,
+            Currency = "GHS", ReservedAtUtc = DateTime.UtcNow,
+            ReservedById = requisition.RequestedById, ReservedByName = "Procurement Approver",
+            ConsumedAtUtc = status == ProcurementBudgetCommitmentStatus.Consumed
+                ? DateTime.UtcNow
+                : null,
+            ReleasedAtUtc = status == ProcurementBudgetCommitmentStatus.Released
+                ? DateTime.UtcNow
+                : null,
+            CorrelationId = "closed-contract"
+        };
+        fixture.Context.AddRange(budget, requisition, commitment);
+        await fixture.Context.SaveChangesAsync();
+
+        var advisory = await fixture.Service.GetDownstreamReadinessAsync(
+            requisition.Id, 60m, "GHS");
+        var final = await fixture.Service.ReserveForDownstreamAsync(
+            requisition, 60m, "GHS", "procurement.contract.approve", "replacement-contract");
+
+        advisory.CanReserve.Should().BeFalse();
+        advisory.DecisionCode.Should().Be(expectedCode);
+        advisory.RequiredActions.Should().ContainSingle()
+            .Which.Should().Contain("new or formally amended requisition");
+        final.CanReserve.Should().BeFalse();
+        final.DecisionCode.Should().Be(expectedCode);
+        budget.ReservedAmount.Should().Be(0m);
+    }
+
     [Fact]
     public async Task CompetingRequisitionsSeeTheLatestCommittedBalanceAndCannotOverspend()
     {
@@ -236,7 +478,7 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
     }
 
     [Fact]
-    public async Task ReleaseRestoresAvailabilityAndResubmissionAdvancesTheReservationSequence()
+    public async Task ReleasedEnvelopeRestoresFinanceAvailabilityButRequiresNewOrAmendedRequisition()
     {
         await using var fixture = new Fixture();
         var budget = fixture.NewBudget(300m);
@@ -251,14 +493,20 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
 
         release.Released.Should().BeTrue();
         release.ReleasedAmount.Should().Be(120m);
-        reserveAgain.ReservationSequence.Should().Be(2);
+        reserveAgain.CanReserve.Should().BeFalse();
+        reserveAgain.DecisionCode.Should().Be("PR_BUDGET_COMMITMENT_RELEASED");
         budget.CommittedAmount.Should().Be(0m);
-        budget.ReservedAmount.Should().Be(120m);
+        budget.ReservedAmount.Should().Be(0m);
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
-        commitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Reserved);
-        commitment.ReleaseReason.Should().BeNull();
+        commitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Released);
+        commitment.ReservedAmount.Should().Be(0m);
+        commitment.FormallyCommittedAmount.Should().Be(0m);
+        commitment.BudgetReservedAfter.Should().Be(0m);
+        commitment.BudgetAvailableAfter.Should().Be(300m);
+        commitment.ReservationSequence.Should().Be(1);
+        commitment.ReleaseReason.Should().NotBeNull();
         (await fixture.Service.GetHistoryAsync(requisition.Id)).Select(item => item.Action).Should()
-            .Contain(["BudgetCommitmentReleased", "BudgetCommitmentReserved"]);
+            .Contain(["BudgetCommitmentReleased", "BudgetReservationBlocked"]);
     }
 
     [Fact]
@@ -457,9 +705,12 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
                 .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true, Code = "ACCESS_ALLOWED", Message = "Allowed" });
             var controlEvents = new ProcurementControlEventService(_unitOfWork, _currentUser.Object,
                 NullLogger<ProcurementControlEventService>.Instance);
+            var reservationStore = new ProcurementBudgetReservationStore(Context);
             Service = new ProcurementRequisitionBudgetControlService(
                 _unitOfWork, _currentUser.Object, Access.Object, controlEvents,
-                new ProcurementBudgetReservationStore(Context));
+                reservationStore);
+            Lifecycle = new ProcurementBudgetCommitmentLifecycleService(
+                _unitOfWork, _currentUser.Object, reservationStore);
         }
 
         public Guid TenantId { get; }
@@ -468,6 +719,7 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         public ApplicationDbContext Context { get; }
         public Mock<IProcurementAccessControlService> Access { get; }
         public ProcurementRequisitionBudgetControlService Service { get; }
+        public ProcurementBudgetCommitmentLifecycleService Lifecycle { get; }
 
         public ProcurementBudget NewBudget(decimal allocated) => new()
         {

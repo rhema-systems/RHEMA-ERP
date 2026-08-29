@@ -64,8 +64,8 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
     {
         var fixture = new ControllerFixture();
         var readiness = fixture.BudgetReadiness(canReserve: false, "PR_BUDGET_INSUFFICIENT");
-        fixture.Budget.Setup(item => item.ReserveAsync(
-                fixture.Requisition, "trace-pr-budget", It.IsAny<CancellationToken>()))
+        fixture.Budget.Setup(item => item.GetReadinessAsync(
+                fixture.Requisition.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(readiness);
 
         var result = (ObjectResult)await fixture.Controller.SubmitPurchaseRequisition(fixture.Requisition.Id);
@@ -78,29 +78,43 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
         fixture.Workflow.Verify(item => item.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
         fixture.Repository.Verify(item => item.UpdateRequisitionAsync(It.IsAny<PurchaseRequisition>()), Times.Never);
         fixture.Requisition.Status.Should().Be("Draft");
-        fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Budget.Verify(item => item.ReserveAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task ExistingCommitmentReturnsIdempotentSuccessWithoutStartingAnotherWorkflow()
+    public async Task DraftSubmissionChecksAvailabilityAndStartsWorkflowWithoutReservingBudget()
     {
         var fixture = new ControllerFixture();
-        var readiness = fixture.BudgetReadiness(canReserve: true, "PR_BUDGET_COMMITMENT_ACTIVE");
-        readiness.Basis = "ExistingCommitment";
-        readiness.CommitmentId = Guid.NewGuid();
-        readiness.CommitmentReference = "BCR-PR-2026-105";
-        readiness.CommitmentStatus = "Reserved";
-        fixture.Budget.Setup(item => item.ReserveAsync(
-                fixture.Requisition, "trace-pr-budget", It.IsAny<CancellationToken>()))
+        var readiness = fixture.BudgetReadiness(canReserve: true, "PR_BUDGET_AVAILABLE");
+        fixture.Budget.Setup(item => item.GetReadinessAsync(
+                fixture.Requisition.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(readiness);
+        fixture.Workflow.Setup(item => item.HasActiveApprovalWorkflowAsync("PurchaseRequisition"))
+            .ReturnsAsync(true);
+        fixture.Workflow.Setup(item => item.SubmitAsync(
+                "PurchaseRequisition", fixture.Requisition.Id))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.InProgress,
+                    WorkflowInstanceId = Guid.NewGuid()
+                },
+                WorkflowOutcome.Pending));
 
         var result = (OkObjectResult)await fixture.Controller.SubmitPurchaseRequisition(fixture.Requisition.Id);
 
         result.Value.Should().NotBeNull();
-        fixture.Workflow.Verify(item => item.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
-        fixture.Workflow.Verify(item => item.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
-        fixture.Repository.Verify(item => item.UpdateRequisitionAsync(It.IsAny<PurchaseRequisition>()), Times.Never);
+        fixture.Workflow.Verify(item => item.SubmitAsync(
+            "PurchaseRequisition", fixture.Requisition.Id), Times.Once);
+        fixture.Budget.Verify(item => item.ReserveAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Repository.Verify(item => item.UpdateRequisitionAsync(fixture.Requisition), Times.Once);
         fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Requisition.Status.Should().Be("Pending Approval");
     }
 
     [Fact]
@@ -158,14 +172,16 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
     }
 
     [Fact]
-    public async Task WorkflowFailureRollsBackTheAtomicReservationTransaction()
+    public async Task WorkflowFailureRollsBackSubmissionWithoutCreatingABudgetReservation()
     {
         var fixture = new ControllerFixture();
-        fixture.Budget.Setup(item => item.ReserveAsync(
-                fixture.Requisition, "trace-pr-budget", It.IsAny<CancellationToken>()))
+        fixture.Budget.Setup(item => item.GetReadinessAsync(
+                fixture.Requisition.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(fixture.BudgetReadiness(canReserve: true, "PR_BUDGET_AVAILABLE"));
+        fixture.Workflow.Setup(item => item.HasActiveApprovalWorkflowAsync("PurchaseRequisition"))
+            .ReturnsAsync(true);
         fixture.Workflow.Setup(item => item.SubmitAsync(
-                "PurchaseRequisition", fixture.Requisition.Id, fixture.AuthorityRoute.WorkflowDefinitionId))
+                "PurchaseRequisition", fixture.Requisition.Id))
             .ThrowsAsync(new InvalidOperationException("No active workflow definition."));
 
         var result = (ObjectResult)await fixture.Controller.SubmitPurchaseRequisition(fixture.Requisition.Id);
@@ -173,6 +189,8 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
         result.StatusCode.Should().Be(400);
         fixture.UnitOfWork.Verify(item => item.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Budget.Verify(item => item.ReserveAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.Repository.Verify(item => item.UpdateRequisitionAsync(It.IsAny<PurchaseRequisition>()), Times.Never);
     }
 
@@ -217,6 +235,67 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
         fixture.Budget.VerifyAll();
         fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.Repository.Verify(item => item.UpdateRequisitionAsync(fixture.Requisition), Times.Once);
+    }
+
+    [Fact]
+    public async Task PositiveApprovalRechecksAvailabilityWithoutReservingBudget()
+    {
+        var fixture = new ControllerFixture(status: "Pending Approval");
+        fixture.Requisition.RequestedById = Guid.NewGuid();
+        fixture.Workflow.Setup(item => item.CanUserApproveAsync(
+                "PurchaseRequisition", fixture.Requisition.Id, fixture.UserId))
+            .ReturnsAsync(true);
+        fixture.Workflow.Setup(item => item.ProcessApprovalAsync(
+                "PurchaseRequisition", fixture.Requisition.Id, fixture.UserId,
+                "approve", It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.Completed,
+                    WorkflowInstanceId = Guid.NewGuid()
+                },
+                WorkflowOutcome.Approved));
+        fixture.Budget.Setup(item => item.GetReadinessAsync(
+                fixture.Requisition.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fixture.BudgetReadiness(canReserve: true, "PR_BUDGET_AVAILABLE"));
+
+        var result = await fixture.Controller.ApprovePurchaseRequisition(
+            fixture.Requisition.Id,
+            new ApprovalDto { Approved = true, Comments = "Approved." });
+
+        result.Should().BeOfType<OkObjectResult>();
+        fixture.Requisition.Status.Should().Be("Approved");
+        fixture.Budget.Verify(item => item.GetReadinessAsync(
+            fixture.Requisition.Id, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Budget.Verify(item => item.ReserveAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PositiveApprovalStopsBeforeWorkflowWhenBudgetIsNoLongerAvailable()
+    {
+        var fixture = new ControllerFixture(status: "Pending Approval");
+        fixture.Requisition.RequestedById = Guid.NewGuid();
+        fixture.Workflow.Setup(item => item.CanUserApproveAsync(
+                "PurchaseRequisition", fixture.Requisition.Id, fixture.UserId))
+            .ReturnsAsync(true);
+        fixture.Budget.Setup(item => item.GetReadinessAsync(
+                fixture.Requisition.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fixture.BudgetReadiness(canReserve: false, "PR_BUDGET_INSUFFICIENT"));
+
+        var result = await fixture.Controller.ApprovePurchaseRequisition(
+            fixture.Requisition.Id,
+            new ApprovalDto { Approved = true, Comments = "Approved." });
+
+        var problem = result.Should().BeOfType<UnprocessableEntityObjectResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        fixture.Workflow.Verify(item => item.ProcessApprovalAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        fixture.UnitOfWork.Verify(item => item.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+        fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private sealed class ControllerFixture

@@ -43,6 +43,7 @@ public sealed class ProcurementContractActivationService :
     private readonly IProcurementContractActivationStore _store;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementRequisitionBudgetControlService _budgetControl;
+    private readonly IProcurementBudgetReservationStore _budgetReservationStore;
     private readonly INotificationTopicPublisher _notifications;
     private readonly IContractService _contracts;
     private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
@@ -59,6 +60,7 @@ public sealed class ProcurementContractActivationService :
         IProcurementContractActivationStore store,
         IProcurementControlEventService controlEvents,
         IProcurementRequisitionBudgetControlService budgetControl,
+        IProcurementBudgetReservationStore budgetReservationStore,
         INotificationTopicPublisher notifications,
         IContractService contracts,
         IProcurementBudgetCommitmentLifecycleService budgetCommitments,
@@ -74,6 +76,7 @@ public sealed class ProcurementContractActivationService :
         _store = store;
         _controlEvents = controlEvents;
         _budgetControl = budgetControl;
+        _budgetReservationStore = budgetReservationStore;
         _notifications = notifications;
         _contracts = contracts;
         _budgetCommitments = budgetCommitments;
@@ -221,8 +224,6 @@ public sealed class ProcurementContractActivationService :
                 throw Conflict("CONTRACT_ACTIVATION_OPEN_REQUEST",
                     "The contract already has an open activation request.");
 
-            await EnsureBudgetCommitmentForActivationAsync(
-                contract, correlation, cancellationToken);
             var evidence = await ValidateEvidenceAsync(
                 contract, request.Evidence, cancellationToken);
             var evaluation = await EvaluateAsync(
@@ -500,6 +501,12 @@ public sealed class ProcurementContractActivationService :
             await _store.SetMutationContextAsync(activation.Id, cancellationToken);
             try
             {
+                await EnsureBudgetCommitmentForActivationAsync(
+                    activation.Contract, correlation, cancellationToken);
+                await _budgetCommitments.CommitContractAsync(
+                    activation.Contract, correlation, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
                 activation.Contract.Status = "Active";
                 activation.Contract.ActivatedAt = now;
                 activation.Contract.SignedDate = now;
@@ -533,8 +540,6 @@ public sealed class ProcurementContractActivationService :
                 await ContractRows.UpdateAsync(activation.Contract);
                 await Awards.UpdateAsync(award);
                 await Activations.UpdateAsync(activation);
-                await _budgetCommitments.CommitContractAsync(
-                    activation.Contract, correlation, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await RecordEventAsync(activation, "ContractActivated",
                     ProcurementControlEventResult.Allowed,
@@ -609,7 +614,7 @@ public sealed class ProcurementContractActivationService :
                 "CONTRACT_ACTIVATION_AWARD_MISMATCH",
                 "Contract supplier, bid, amount, currency, tender, or award status differs from the approved award."));
 
-        checks.Add(await EvaluateBudgetCommitmentAsync(
+        checks.Add(await EvaluateBudgetAvailabilityAsync(
             contract, cancellationToken));
 
         checks.Add(await EvaluateQuantitySurveyCommercialTermsAsync(contract, cancellationToken));
@@ -947,7 +952,7 @@ public sealed class ProcurementContractActivationService :
         }
     }
 
-    private async Task<ProcurementContractActivationCheckDto> EvaluateBudgetCommitmentAsync(
+    private async Task<ProcurementContractActivationCheckDto> EvaluateBudgetAvailabilityAsync(
         Contract contract,
         CancellationToken cancellationToken)
     {
@@ -961,7 +966,7 @@ public sealed class ProcurementContractActivationService :
         if (tender is null || !tender.SourcePurchaseRequisitionId.HasValue ||
             !tender.SourcingReleaseId.HasValue)
         {
-            return Failed("commitment", "Budget commitment",
+            return Failed("commitment", "Budget availability",
                 "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
                 "The contract tender does not identify an approved requisition and sourcing release.");
         }
@@ -975,62 +980,47 @@ public sealed class ProcurementContractActivationService :
             .Include(item => item.PurchaseRequisition)
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken);
-        var commitment = release is null
-            ? null
-            : await _unitOfWork.Repository<ProcurementBudgetCommitment>()
-                .GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId &&
-                    item.PurchaseRequisitionId == release.PurchaseRequisitionId &&
-                    !item.IsDeleted)
-                .Include(item => item.ProcurementBudget)
-                .AsNoTracking()
-                .SingleOrDefaultAsync(cancellationToken);
-        if (release is null || commitment?.ProcurementBudget is null)
+        if (release is null)
         {
-            return Failed("commitment", "Budget commitment",
-                "CONTRACT_ACTIVATION_BUDGET_COMMITMENT_MISSING",
-                "The contract sourcing release has no authoritative budget commitment.");
+            return Failed("commitment", "Budget availability",
+                "CONTRACT_ACTIVATION_SOURCING_RELEASE_MISSING",
+                "The contract source has no current requisition sourcing release.");
         }
 
-        var budget = commitment.ProcurementBudget;
-        var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
-            new ProcurementCommitmentLifecycleSnapshot(
-                _currentUser.TenantId,
-                release.PurchaseRequisition.Id,
-                release.PurchaseRequisition.TenantId,
-                release.PurchaseRequisition.Currency,
-                release.PurchaseRequisition.BudgetId,
-                release.TenantId,
+        var committedExposure = await GetNetCommittedExposureAsync(
+            release.PurchaseRequisitionId,
+            cancellationToken);
+        var requiredExposure = decimal.Round(
+            committedExposure + contract.ContractValue,
+            2,
+            MidpointRounding.AwayFromZero);
+
+        PurchaseRequisitionBudgetReadinessDto readiness;
+        try
+        {
+            readiness = await _budgetControl.GetDownstreamReadinessAsync(
                 release.PurchaseRequisitionId,
-                release.BudgetCommitmentId,
-                release.BudgetCommitmentReference,
-                commitment.Id,
-                commitment.TenantId,
-                commitment.PurchaseRequisitionId,
-                commitment.ProcurementBudgetId,
-                commitment.ReservationReference,
-                commitment.Status,
-                commitment.ReservedAmount,
-                commitment.FormallyCommittedAmount,
-                commitment.Currency,
-                budget.Id,
-                budget.TenantId,
-                budget.Status,
-                budget.Currency,
-                budget.CommittedAmount,
-                budget.ReservedAmount,
-                budget.ApprovedById,
-                budget.ApprovedDate,
-                budget.EffectiveDate,
-                budget.ExpiryDate,
-                contract.ContractValue,
+                requiredExposure,
                 contract.Currency,
-                DateTime.UtcNow));
-        return result.IsValid
-            ? Passed("commitment", "Budget commitment", result.Code,
-                result.Message, commitment.Id, commitment.ReservationReference)
-            : Failed("commitment", "Budget commitment", result.Code,
-                result.Message);
+                cancellationToken);
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException exception)
+        {
+            return Failed("commitment", "Budget availability",
+                exception.Code, exception.Message);
+        }
+        catch (ProcurementRequisitionBudgetValidationException exception)
+        {
+            return Failed("commitment", "Budget availability",
+                exception.Code, exception.Message);
+        }
+
+        return readiness.IsCompliant
+            ? Passed("commitment", "Budget availability",
+                readiness.DecisionCode, readiness.Message,
+                readiness.BudgetId, readiness.BudgetCode)
+            : Failed("commitment", "Budget availability",
+                readiness.DecisionCode, readiness.Message);
     }
 
     private async Task EnsureBudgetCommitmentForActivationAsync(
@@ -1050,11 +1040,21 @@ public sealed class ProcurementContractActivationService :
                 !item.IsDeleted)
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken);
-        if (tender is null || !tender.SourcePurchaseRequisitionId.HasValue ||
-            !tender.SourcingReleaseId.HasValue)
+        if (tender is null || !tender.SourcePurchaseRequisitionId.HasValue)
             throw Validation(
                 "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
-                "The approved contract source must identify its purchase requisition and sourcing release.");
+                "The approved contract source must identify its purchase requisition.");
+
+        if (await HasIdempotentContractExposureAsync(
+                contract,
+                tender.SourcePurchaseRequisitionId.Value,
+                cancellationToken))
+            return;
+
+        if (!tender.SourcingReleaseId.HasValue)
+            throw Validation(
+                "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
+                "The approved contract source must identify its sourcing release.");
 
         var release = await _unitOfWork.Repository<ProcurementRequisitionSourcingRelease>()
             .GetQueryable(item =>
@@ -1068,17 +1068,136 @@ public sealed class ProcurementContractActivationService :
                 "CONTRACT_ACTIVATION_SOURCING_RELEASE_MISSING",
                 "The contract source has no current requisition sourcing release.");
 
+        var requisition = release.PurchaseRequisition
+            ?? throw Validation(
+                "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
+                "The contract sourcing release no longer identifies its approved requisition.");
+        if (!requisition.BudgetId.HasValue)
+            throw Validation(
+                "PR_BUDGET_NOT_FOUND",
+                "The approved requisition no longer identifies its procurement budget.");
+
+        _ = await _budgetReservationStore.GetBudgetForUpdateAsync(
+                _currentUser.TenantId,
+                requisition.BudgetId.Value,
+                cancellationToken)
+            ?? throw Validation(
+                "PR_BUDGET_NOT_FOUND",
+                "The linked approved procurement budget is unavailable.");
+
+        if (await HasIdempotentContractExposureAsync(
+                contract,
+                requisition.Id,
+                cancellationToken))
+            return;
+
+        var committedExposure = await GetNetCommittedExposureAsync(
+            requisition.Id,
+            cancellationToken);
+        var requiredExposure = decimal.Round(
+            committedExposure + contract.ContractValue,
+            2,
+            MidpointRounding.AwayFromZero);
+
         var readiness = await _budgetControl.ReserveForDownstreamAsync(
-            release.PurchaseRequisition,
-            contract.ContractValue,
+            requisition,
+            requiredExposure,
             contract.Currency,
-            ManagePermission,
+            ApprovePermission,
             correlationId,
             cancellationToken);
         if (!readiness.IsCompliant || !readiness.CommitmentId.HasValue)
             throw Validation(readiness.DecisionCode, readiness.Message);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<bool> HasIdempotentContractExposureAsync(
+        Contract contract,
+        Guid purchaseRequisitionId,
+        CancellationToken cancellationToken)
+    {
+        var entries = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceType == SourceType &&
+                item.SourceId == contract.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (entries.Count == 0)
+            return false;
+        if (entries.Count != 1)
+            throw Conflict(
+                "CONTRACT_ACTIVATION_BUDGET_IDEMPOTENCY_CONFLICT",
+                "The contract has conflicting formal budget commitment entries.");
+
+        var existing = entries[0];
+        if (existing.PurchaseRequisitionId != purchaseRequisitionId ||
+            existing.Amount != contract.ContractValue ||
+            !string.Equals(
+                existing.Currency?.Trim(),
+                contract.Currency?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            throw Conflict(
+                "CONTRACT_ACTIVATION_BUDGET_IDEMPOTENCY_CONFLICT",
+                "The contract was already committed with different requisition, amount, or currency values.");
+
+        return true;
+    }
+
+    private async Task<decimal> GetDirectPurchaseOrderAdjustmentExposureAsync(
+        Guid purchaseRequisitionId,
+        CancellationToken cancellationToken)
+    {
+        var directPurchaseOrderIds = _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == purchaseRequisitionId &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == "PurchaseOrder" &&
+                !item.IsDeleted)
+            .Select(item => item.SourceId);
+        return await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == purchaseRequisitionId &&
+                directPurchaseOrderIds.Contains(item.PurchaseOrderId) &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+    }
+
+    private async Task<decimal> GetNetCommittedExposureAsync(
+        Guid purchaseRequisitionId,
+        CancellationToken cancellationToken)
+    {
+        var formalCommitments = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == purchaseRequisitionId &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var releasedFormalCommitments = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == purchaseRequisitionId &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                item.FormalCommitmentEntryId != null &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var directPurchaseOrderAdjustments = await GetDirectPurchaseOrderAdjustmentExposureAsync(
+            purchaseRequisitionId,
+            cancellationToken);
+
+        return formalCommitments - releasedFormalCommitments + directPurchaseOrderAdjustments;
     }
 
     private async Task<bool> IsEvidenceCurrentAsync(
