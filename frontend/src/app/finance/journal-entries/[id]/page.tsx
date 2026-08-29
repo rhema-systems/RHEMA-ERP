@@ -744,6 +744,11 @@ export default function JournalEntryDetailPage() {
                                     </Alert>
                                 ) : budgetControl && (
                                     <>
+                                        {budgetControl.isPostingSnapshot && (
+                                            <p className="text-xs text-muted-foreground">
+                                                Amounts below are the immutable budget evidence captured for this posting.
+                                            </p>
+                                        )}
                                         <Alert variant={budgetControl.isAllowed ? 'default' : 'destructive'}>
                                             <AlertTriangle className="h-4 w-4" />
                                             <AlertTitle>
@@ -780,7 +785,7 @@ export default function JournalEntryDetailPage() {
                                                     </div>
                                                     <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                                                         <span>Budget: {formatCurrency(line.budgetAmount, budgetControl.currencyCode)}</span>
-                                                        <span>Posted: {formatCurrency(line.postedActualAmount, budgetControl.currencyCode)}</span>
+                                                        <span>{budgetControl.isPostingSnapshot ? 'Posted before entry' : 'Posted'}: {formatCurrency(line.postedActualAmount, budgetControl.currencyCode)}</span>
                                                         <span>Reserved: {formatCurrency(line.reservedAmount, budgetControl.currencyCode)}</span>
                                                         <span>Available: {formatCurrency(line.availableAmount, budgetControl.currencyCode)}</span>
                                                         <span>Requested: {formatCurrency(line.requestedAmount, budgetControl.currencyCode)}</span>

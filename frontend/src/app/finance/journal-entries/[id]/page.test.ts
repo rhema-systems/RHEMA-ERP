@@ -32,4 +32,12 @@ describe('Journal entry action visibility', () => {
     expect(approvedActions).toContain('onClick={handlePost}');
     expect(approvedActions).toContain('Post to General Ledger');
   });
+
+  it('labels posted budget evidence as an immutable posting snapshot', () => {
+    expect(pageSource).toContain('budgetControl.isPostingSnapshot');
+    expect(pageSource).toContain(
+      'Amounts below are the immutable budget evidence captured for this posting.'
+    );
+    expect(pageSource).toContain("'Posted before entry'");
+  });
 });

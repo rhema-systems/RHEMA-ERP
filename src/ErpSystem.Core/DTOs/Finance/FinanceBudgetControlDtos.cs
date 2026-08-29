@@ -7,6 +7,7 @@ public sealed class FinanceBudgetControlEvaluationDto
     public string CurrencyCode { get; set; } = string.Empty;
     public string EvaluationHash { get; set; } = string.Empty;
     public bool HasTrackedExpenseLines { get; set; }
+    public bool IsPostingSnapshot { get; set; }
     public bool IsAllowed { get; set; }
     public bool RequiresOverride { get; set; }
     public bool HasApprovedOverride { get; set; }
