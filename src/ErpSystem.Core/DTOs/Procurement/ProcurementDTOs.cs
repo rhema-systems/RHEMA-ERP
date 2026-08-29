@@ -512,6 +512,7 @@ public class PurchaseRequisitionSummaryDto
     public int ItemCount { get; set; }
     public string? SourcePlanNumber { get; set; }
     public Guid? SourcePlanItemId { get; set; }
+    public List<Guid> SourcePlanItemIds { get; set; } = new();
     public string? SourcePlanItemDescription { get; set; }
     public string? BudgetCode { get; set; }
     public ProcurementCategoryClass? ProcurementCategory { get; set; }
@@ -548,6 +549,7 @@ public class PurchaseRequisitionItemDto
     public Guid Id { get; set; }
     public Guid RequisitionId { get; set; }
     public Guid? InventoryItemId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public string ItemDescription { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public string UnitOfMeasure { get; set; } = string.Empty;
@@ -608,6 +610,7 @@ public sealed class UpdatePurchaseRequisitionDto : CreatePurchaseRequisitionDto
 public sealed class SavePurchaseRequisitionLinkageRequest
 {
     public Guid? SourcePlanItemId { get; set; }
+    public List<Guid> SourcePlanItemIds { get; set; } = new();
     public Guid? BudgetId { get; set; }
     public ProcurementCategoryClass? ProcurementCategory { get; set; }
 
@@ -915,6 +918,7 @@ public sealed class PurchaseRequisitionAuthorityRouteHistoryDto
 public class CreatePurchaseRequisitionItemDto
 {
     public Guid? InventoryItemId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
 
     [Required]
     public string ItemDescription { get; set; } = string.Empty;

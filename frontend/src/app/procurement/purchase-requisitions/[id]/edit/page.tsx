@@ -169,6 +169,7 @@ export default function EditPurchaseRequisitionPage() {
         const loadedItems: PRItemFormData[] = pr.items.map((item, index) => ({
           tempId: `existing-${index}`,
           inventoryItemId: item.inventoryItemId || '',
+          sourcePlanItemId: item.sourcePlanItemId,
           itemCode: item.itemCode,
           itemName: item.itemName,
           itemDescription: item.itemDescription,
@@ -436,6 +437,7 @@ export default function EditPurchaseRequisitionPage() {
         linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
+          sourcePlanItemId: item.sourcePlanItemId || undefined,
           itemDescription: item.itemDescription,
           quantity: item.quantity,
           unitOfMeasure: item.unitOfMeasure || undefined,

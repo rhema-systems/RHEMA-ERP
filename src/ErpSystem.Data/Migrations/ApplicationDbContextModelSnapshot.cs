@@ -125191,6 +125191,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("RequisitionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("SourcePlanItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Specifications")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -125224,7 +125227,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("RequisitionId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("SourcePlanItemId");
+
+                    b.HasIndex("TenantId", "SourcePlanItemId");
 
                     b.ToTable("PurchaseRequisitionItems");
                 });
@@ -190878,6 +190883,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPlanItem", "SourcePlanItem")
+                        .WithMany()
+                        .HasForeignKey("SourcePlanItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -190891,6 +190901,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("PurchaseOrder");
 
                     b.Navigation("Requisition");
+
+                    b.Navigation("SourcePlanItem");
 
                     b.Navigation("Tenant");
                 });

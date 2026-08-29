@@ -193,6 +193,7 @@ export default function NewPurchaseRequisitionPage() {
     if (option.requiredDate) setRequiredDate(option.requiredDate.slice(0, 10));
     setItems([{
       tempId: `plan-${option.id}`,
+      sourcePlanItemId: option.id,
       inventoryItemId: option.inventoryItemId || '',
       itemName: option.name,
       itemDescription: option.name,
@@ -387,6 +388,7 @@ export default function NewPurchaseRequisitionPage() {
         linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
+          sourcePlanItemId: item.sourcePlanItemId || undefined,
           itemDescription: item.itemDescription,
           quantity: item.quantity,
           unitOfMeasure: item.unitOfMeasure || undefined,
@@ -461,6 +463,7 @@ export default function NewPurchaseRequisitionPage() {
         linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
+          sourcePlanItemId: item.sourcePlanItemId || undefined,
           itemDescription: item.itemDescription,
           quantity: item.quantity,
           unitOfMeasure: item.unitOfMeasure || undefined,

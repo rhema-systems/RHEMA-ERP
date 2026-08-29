@@ -232,22 +232,29 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         PurchaseRequisition requisition,
         CancellationToken cancellationToken)
     {
-        const string defaultAction = "Link the Draft to a non-cancelled item in an approved, published Active plan whose latest APP attempt is Acknowledged.";
-        if (!requisition.SourcePlanItemId.HasValue)
+        const string defaultAction = "Link every requisition line to a non-cancelled item in one approved, published Active plan.";
+        var sourcePlanItemIds = requisition.Items.Where(line => !line.IsDeleted &&
+                !string.Equals(line.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                line.SourcePlanItemId.HasValue)
+            .Select(line => line.SourcePlanItemId!.Value).Distinct().ToList();
+        if (sourcePlanItemIds.Count == 0 && requisition.SourcePlanItemId.HasValue)
+            sourcePlanItemIds.Add(requisition.SourcePlanItemId.Value);
+        if (sourcePlanItemIds.Count == 0)
             return AppPath.Missing("PR_PLAN_ITEM_REQUIRED", "No procurement-plan item is linked.", defaultAction);
 
-        var item = await PlanItems.GetQueryable(row => row.Id == requisition.SourcePlanItemId.Value &&
+        var items = await PlanItems.GetQueryable(row => sourcePlanItemIds.Contains(row.Id) &&
                 row.TenantId == _currentUser.TenantId && !row.IsDeleted)
-            .Include(row => row.ProcurementPlan).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-        if (item is null || item.ProcurementPlan.IsDeleted)
-            return AppPath.Invalid("PR_PLAN_ITEM_NOT_ELIGIBLE", "The linked plan item is not available in the current tenant.", defaultAction, item);
-        if (requisition.SourcePlanId != item.ProcurementPlanId)
-            return AppPath.Invalid("PR_PLAN_ITEM_MISMATCH", "The requisition plan snapshot does not match the linked plan item.", defaultAction, item);
-        if (string.Equals(item.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
-            return AppPath.Invalid("PR_PLAN_ITEM_CANCELLED", "The linked plan item is cancelled.", defaultAction, item);
-        if (!string.Equals(item.ProcurementPlan.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
-            !item.ProcurementPlan.PublishedDate.HasValue)
-            return AppPath.Invalid("PR_PLAN_NOT_PUBLISHED", "The linked plan version is not an approved, published Active plan.", defaultAction, item);
+            .Include(row => row.ProcurementPlan).AsNoTracking().ToListAsync(cancellationToken);
+        var item = items.FirstOrDefault();
+        if (items.Count != sourcePlanItemIds.Count || item is null || items.Any(row => row.ProcurementPlan.IsDeleted))
+            return AppPath.Invalid("PR_PLAN_ITEM_NOT_ELIGIBLE", "One or more linked plan items are not available in the current tenant.", defaultAction, item);
+        if (items.Any(row => requisition.SourcePlanId != row.ProcurementPlanId))
+            return AppPath.Invalid("PR_PLAN_ITEM_MISMATCH", "The requisition plan snapshot does not match every linked plan item.", defaultAction, item);
+        if (items.Any(row => string.Equals(row.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)))
+            return AppPath.Invalid("PR_PLAN_ITEM_CANCELLED", "A linked plan item is cancelled.", defaultAction, item);
+        if (items.Any(row => !string.Equals(row.ProcurementPlan.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
+            !row.ProcurementPlan.PublishedDate.HasValue))
+            return AppPath.Invalid("PR_PLAN_NOT_PUBLISHED", "Every linked plan item must belong to the same approved, published Active plan.", defaultAction, item);
 
         var latest = await AppSubmissions.GetQueryable(row => row.ProcurementPlanId == item.ProcurementPlanId &&
                 row.TenantId == _currentUser.TenantId && !row.IsDeleted)

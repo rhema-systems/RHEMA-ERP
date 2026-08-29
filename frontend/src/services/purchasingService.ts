@@ -114,6 +114,7 @@ export interface PurchaseRequisitionSummaryDto {
   currentWorkflowStepName?: string;
   sourcePlanNumber?: string;
   sourcePlanItemId?: string;
+  sourcePlanItemIds?: string[];
   sourcePlanItemDescription?: string;
   budgetCode?: string;
   procurementCategory?: ProcurementCategoryClass;
@@ -151,6 +152,7 @@ export type PurchaseRequisitionType =
 
 export interface SavePurchaseRequisitionLinkageRequest {
   sourcePlanItemId?: string;
+  sourcePlanItemIds?: string[];
   budgetId?: string;
   procurementCategory?: ProcurementCategoryClass;
   costCenter?: string;
@@ -483,6 +485,7 @@ export interface PurchaseRequisitionItemDto {
   id: string;
   requisitionId: string;
   inventoryItemId?: string;
+  sourcePlanItemId?: string;
   itemCode?: string;
   itemName?: string;
   itemDescription: string;
@@ -531,6 +534,7 @@ export interface UpdatePurchaseRequisitionDto extends CreatePurchaseRequisitionD
 
 export interface CreatePurchaseRequisitionItemDto {
   inventoryItemId?: string;
+  sourcePlanItemId?: string;
   itemDescription: string;
   quantity: number;
   unitOfMeasure?: string;

@@ -52,6 +52,106 @@ public sealed class ProcurementRequisitionLinkageServiceTests
     }
 
     [Fact]
+    public async Task CompatiblePlanItemsCanShareOneRequisitionAndRetainPrimaryHeaderLineage()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var secondPlanItem = new ProcurementPlanItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementPlanId = references.Plan.Id, ProcurementBudgetId = references.Budget.Id,
+            ItemDescription = "Laptop docking stations", ItemCategory = "Goods",
+            EstimatedQuantity = 10, EstimatedUnitPrice = 1000, EstimatedTotalCost = 10000,
+            Status = "Approved", Currency = "GHS"
+        };
+        fixture.Context.ProcurementPlanItems.Add(secondPlanItem);
+        await fixture.Context.SaveChangesAsync();
+        var requisition = fixture.NewRequisition();
+
+        await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            SourcePlanItemIds = [references.PlanItem.Id, secondPlanItem.Id],
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-multi-line-plan");
+
+        requisition.SourcePlanId.Should().Be(references.Plan.Id);
+        requisition.SourcePlanItemId.Should().Be(references.PlanItem.Id,
+            "the primary header reference remains available to legacy integrations");
+        requisition.SourcePlanItemDescription.Should().Be("2 approved plan items");
+        requisition.BudgetId.Should().Be(references.Budget.Id);
+        requisition.Currency.Should().Be("GHS");
+        requisition.ProcurementCategory.Should().Be(ProcurementCategoryClass.Goods);
+    }
+
+    [Fact]
+    public async Task PlanItemsFromDifferentBudgetsMustBeSplitIntoSeparateRequisitions()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var secondBudget = new ProcurementBudget
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, BudgetCode = "BUD-2026-02",
+            Title = "Second goods budget", DepartmentId = references.Plan.DepartmentId,
+            ProcurementPlanId = references.Plan.Id, FiscalYear = 2026, AllocatedAmount = 50000,
+            RemainingAmount = 50000, Currency = "GHS", Status = "Approved"
+        };
+        var secondPlanItem = new ProcurementPlanItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            ProcurementPlanId = references.Plan.Id, ProcurementBudgetId = secondBudget.Id,
+            ItemDescription = "Network switches", ItemCategory = "Goods",
+            EstimatedQuantity = 2, EstimatedUnitPrice = 5000, EstimatedTotalCost = 10000,
+            Status = "Approved", Currency = "GHS"
+        };
+        fixture.Context.AddRange(secondBudget, secondPlanItem);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                SourcePlanItemIds = [references.PlanItem.Id, secondPlanItem.Id],
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            }, "trace-mixed-budget-plan-items");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageValidationException>()
+            .Where(exception => exception.Code == "PLAN_ITEMS_BUDGET_MISMATCH");
+    }
+
+    [Fact]
+    public async Task ExistingRequisitionLinePreventsDuplicatePlanItemRequisition()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        var existing = fixture.NewRequisition();
+        existing.RequisitionNumber = "PR-2026-LINE-LINK";
+        existing.Items.Add(new PurchaseRequisitionItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            RequisitionId = existing.Id, SourcePlanItemId = references.PlanItem.Id,
+            ItemDescription = references.PlanItem.ItemDescription,
+            Quantity = references.PlanItem.EstimatedQuantity,
+            EstimatedUnitPrice = references.PlanItem.EstimatedUnitPrice,
+            LineTotal = references.PlanItem.EstimatedTotalCost
+        });
+        fixture.Context.PurchaseRequisitions.Add(existing);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                SourcePlanItemIds = [references.PlanItem.Id],
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            }, "trace-duplicate-plan-line");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_ITEM_REQUISITION_EXISTS" &&
+                                exception.Message.Contains(existing.RequisitionNumber));
+    }
+
+    [Fact]
     public async Task PlanItemAutomaticallyCarriesItsBudgetWithoutMakingLinkageMandatory()
     {
         await using var fixture = new Fixture();

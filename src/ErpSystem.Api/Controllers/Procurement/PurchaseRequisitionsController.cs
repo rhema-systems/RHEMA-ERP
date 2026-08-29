@@ -98,6 +98,7 @@ public class PurchaseRequisitionsController : ControllerBase
             if (!requisition.RowVersion.SequenceEqual(suppliedVersion))
                 return Conflict(Problem("ROW_VERSION_STALE", "The purchase requisition changed after it was loaded. Refresh and try again.", 409));
 
+            NormalizePlanItemLineage(updateDto);
             var before = _linkageService.Map(requisition);
             var departmentName = await ResolveDepartmentNameAsync(
                 updateDto.DepartmentId,
@@ -107,7 +108,6 @@ public class PurchaseRequisitionsController : ControllerBase
             await ApplyAuthoritativeInventoryPricingAsync(
                 updateDto.Items,
                 requisition.TenantId,
-                updateDto.Linkage.SourcePlanItemId,
                 cancellationToken);
             requisition.Currency = await ResolveRequisitionCurrencyAsync(
                 updateDto.Currency,
@@ -553,6 +553,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Unauthorized(Problem("AUTHENTICATION_REQUIRED", "An authenticated user is required.", 401));
 
             var tenantId = _tenantContext.GetCurrentTenantId();
+            NormalizePlanItemLineage(createDto);
             var departmentName = await ResolveDepartmentNameAsync(
                 createDto.DepartmentId,
                 createDto.Linkage.SourcePlanItemId,
@@ -561,7 +562,6 @@ public class PurchaseRequisitionsController : ControllerBase
             await ApplyAuthoritativeInventoryPricingAsync(
                 createDto.Items,
                 tenantId,
-                createDto.Linkage.SourcePlanItemId,
                 cancellationToken);
             var requisitionNumber = await _purchaseRequisitionRepository.GenerateRequisitionNumberAsync();
             var totalAmount = createDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
@@ -1439,6 +1439,9 @@ public class PurchaseRequisitionsController : ControllerBase
         ItemCount = requisition.Items?.Count ?? 0,
         SourcePlanNumber = requisition.SourcePlanNumber,
         SourcePlanItemId = requisition.SourcePlanItemId,
+        SourcePlanItemIds = requisition.Items?
+            .Where(item => !item.IsDeleted && item.SourcePlanItemId.HasValue)
+            .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList() ?? [],
         SourcePlanItemDescription = requisition.SourcePlanItemDescription,
         BudgetCode = requisition.BudgetCode,
         ProcurementCategory = requisition.ProcurementCategory,
@@ -1479,6 +1482,8 @@ public class PurchaseRequisitionsController : ControllerBase
             ItemCount = items.Count(),
             SourcePlanNumber = requisition.SourcePlanNumber,
             SourcePlanItemId = requisition.SourcePlanItemId,
+            SourcePlanItemIds = items.Where(item => item.SourcePlanItemId.HasValue)
+                .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList(),
             SourcePlanItemDescription = requisition.SourcePlanItemDescription,
             BudgetCode = requisition.BudgetCode,
             ProcurementCategory = requisition.ProcurementCategory,
@@ -1493,6 +1498,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 Id = item.Id,
                 RequisitionId = item.RequisitionId,
                 InventoryItemId = item.InventoryItemId,
+                SourcePlanItemId = item.SourcePlanItemId,
                 ItemDescription = item.ItemDescription,
                 Quantity = item.Quantity,
                 UnitOfMeasure = item.UnitOfMeasure,
@@ -1633,40 +1639,39 @@ public class PurchaseRequisitionsController : ControllerBase
     private async Task ApplyAuthoritativeInventoryPricingAsync(
         IEnumerable<CreatePurchaseRequisitionItemDto> items,
         Guid tenantId,
-        Guid? sourcePlanItemId,
         CancellationToken cancellationToken)
     {
         var requestItems = items.ToList();
         var planPricedLines = new HashSet<CreatePurchaseRequisitionItemDto>();
-        ProcurementPlanItem? planItem = null;
-        if (sourcePlanItemId.HasValue && sourcePlanItemId.Value != Guid.Empty)
-        {
-            planItem = await _unitOfWork.Repository<ProcurementPlanItem>()
-                .GetQueryable(item => item.Id == sourcePlanItemId.Value &&
+        var sourcePlanItemIds = requestItems.Where(item => item.SourcePlanItemId.HasValue)
+            .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList();
+        var planItems = sourcePlanItemIds.Count == 0
+            ? new Dictionary<Guid, ProcurementPlanItem>()
+            : await _unitOfWork.Repository<ProcurementPlanItem>()
+                .GetQueryable(item => sourcePlanItemIds.Contains(item.Id) &&
                     item.TenantId == tenantId && !item.IsDeleted)
-                .AsNoTracking()
-                .SingleOrDefaultAsync(cancellationToken);
-        }
+                .AsNoTracking().ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (planItems.Count != sourcePlanItemIds.Count)
+            throw new ProcurementRequisitionLinkageNotFoundException(
+                "PLAN_ITEM_NOT_FOUND", "One or more requisition lines reference an unavailable procurement-plan item.");
 
-        if (planItem is not null)
+        foreach (var line in requestItems.Where(item => item.SourcePlanItemId.HasValue))
         {
+            var planItem = planItems[line.SourcePlanItemId!.Value];
+            if (planItem.InventoryItemId.HasValue && line.InventoryItemId.HasValue &&
+                planItem.InventoryItemId.Value != line.InventoryItemId.Value)
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PLAN_ITEM_LINE_MISMATCH",
+                    $"Requisition line {line.ItemDescription} does not match its linked procurement-plan item.");
             var plannedUnitEstimate = planItem.EstimatedUnitPrice > 0
                 ? planItem.EstimatedUnitPrice
                 : planItem.EstimatedQuantity > 0 && planItem.EstimatedTotalCost > 0
                     ? planItem.EstimatedTotalCost / planItem.EstimatedQuantity
                     : 0;
-            var matchingLines = requestItems.Where(item =>
-                    planItem.InventoryItemId.HasValue && item.InventoryItemId == planItem.InventoryItemId)
-                .ToList();
-            if (matchingLines.Count == 0 && requestItems.Count == 1)
-                matchingLines.Add(requestItems[0]);
             if (plannedUnitEstimate > 0)
             {
-                foreach (var line in matchingLines)
-                {
-                    line.EstimatedUnitPrice = plannedUnitEstimate;
-                    planPricedLines.Add(line);
-                }
+                line.EstimatedUnitPrice = plannedUnitEstimate;
+                planPricedLines.Add(line);
             }
         }
 
@@ -1727,6 +1732,7 @@ public class PurchaseRequisitionsController : ControllerBase
             TenantId = tenantId,
             RequisitionId = requisitionId,
             InventoryItemId = itemDto.InventoryItemId,
+            SourcePlanItemId = itemDto.SourcePlanItemId,
             ItemDescription = itemDto.ItemDescription.Trim(),
             Quantity = itemDto.Quantity,
             UnitOfMeasure = string.IsNullOrWhiteSpace(itemDto.UnitOfMeasure) ? "EA" : itemDto.UnitOfMeasure.Trim(),
@@ -1740,6 +1746,35 @@ public class PurchaseRequisitionsController : ControllerBase
             CreatedAt = now,
             UpdatedAt = now
         };
+    }
+
+    private static void NormalizePlanItemLineage(CreatePurchaseRequisitionDto request)
+    {
+        var primaryId = request.Linkage.SourcePlanItemId is { } value && value != Guid.Empty
+            ? value
+            : (Guid?)null;
+        var explicitLineIds = request.Items.Where(item => item.SourcePlanItemId.HasValue &&
+                item.SourcePlanItemId.Value != Guid.Empty)
+            .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList();
+
+        if (explicitLineIds.Count == 0 && primaryId.HasValue)
+        {
+            foreach (var item in request.Items)
+                item.SourcePlanItemId = primaryId.Value;
+            explicitLineIds.Add(primaryId.Value);
+        }
+        else if (explicitLineIds.Count > 0 && request.Items.Any(item => !item.SourcePlanItemId.HasValue ||
+                     item.SourcePlanItemId.Value == Guid.Empty))
+        {
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_PLAN_LINEAGE_INCOMPLETE",
+                "Every line in a plan-linked requisition must retain its exact procurement-plan item reference.");
+        }
+
+        request.Linkage.SourcePlanItemIds = explicitLineIds;
+        request.Linkage.SourcePlanItemId = primaryId.HasValue && explicitLineIds.Contains(primaryId.Value)
+            ? primaryId.Value
+            : explicitLineIds.Count > 0 ? explicitLineIds[0] : null;
     }
 
     private static string? SpecificationReference(PurchaseRequisition requisition) =>

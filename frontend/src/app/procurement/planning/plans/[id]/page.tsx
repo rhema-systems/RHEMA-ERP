@@ -887,7 +887,8 @@ export default function ProcurementPlanDetailPage() {
   const getLinkedRequisition = (itemId: string) =>
     linkedRequisitions.find(
       (requisition) =>
-        requisition.sourcePlanItemId === itemId &&
+        (requisition.sourcePlanItemId === itemId ||
+          requisition.sourcePlanItemIds?.includes(itemId)) &&
         !['Rejected', 'Cancelled'].includes(requisition.status)
     );
 
@@ -963,6 +964,17 @@ export default function ProcurementPlanDetailPage() {
     const failures: string[] = [];
     let completed = 0;
     let navigationTarget: string | undefined;
+    const processedPrGroups = new Set<string>();
+    const processedPrIds = new Set<string>();
+    const prGroupKey = (item: ProcurementPlanItemDto) =>
+      `${item.procurementBudgetId || plan.budgetId || 'unassigned'}|${(item.itemCategory || 'uncategorized').replace(/\s+/g, '').toLowerCase()}`;
+    const unlinkedPrGroups = new Set(
+      items.filter((item) => !getLinkedRequisition(item.id)).map(prGroupKey)
+    );
+    const linkedPrIds = new Set(
+      items.map((item) => getLinkedRequisition(item.id)?.id).filter(Boolean)
+    );
+    const expectedPrDocumentCount = unlinkedPrGroups.size + linkedPrIds.size;
 
     try {
       setExecutionLoading(true);
@@ -990,54 +1002,89 @@ export default function ProcurementPlanDetailPage() {
 
           if (executionAction === 'pr') {
             if (linkedRequisition) {
-              completed += 1;
-              navigationTarget =
-                items.length === 1
-                  ? `/procurement/purchase-requisitions/${linkedRequisition.id}`
-                  : navigationTarget;
+              if (!processedPrIds.has(linkedRequisition.id)) {
+                processedPrIds.add(linkedRequisition.id);
+                completed += 1;
+                if (expectedPrDocumentCount === 1) {
+                  navigationTarget = `/procurement/purchase-requisitions/${linkedRequisition.id}`;
+                }
+              }
               continue;
             }
 
+            const groupKey = prGroupKey(item);
+            if (processedPrGroups.has(groupKey)) continue;
+            processedPrGroups.add(groupKey);
+            const groupedItems = items.filter(
+              (candidate) =>
+                !getLinkedRequisition(candidate.id) &&
+                prGroupKey(candidate) === groupKey
+            );
+            const sourcePlanItemIds = groupedItems.map((candidate) => candidate.id);
+            const requiredDates = groupedItems
+              .map((candidate) => candidate.requiredDate?.slice(0, 10))
+              .filter((value): value is string => Boolean(value))
+              .sort();
+            const priorityRank: Record<string, number> = {
+              Low: 0,
+              Normal: 1,
+              Medium: 1,
+              High: 2,
+              Urgent: 3,
+              Critical: 3,
+            };
+            const highestPriority = groupedItems.reduce(
+              (current, candidate) =>
+                (priorityRank[candidate.priority] ?? 1) >
+                (priorityRank[current] ?? 1)
+                  ? candidate.priority
+                  : current,
+              'Normal'
+            );
+            const singleItemJustification =
+              groupedItems.length === 1
+                ? groupedItems[0].justification?.trim()
+                : undefined;
             const requisition: CreatePurchaseRequisitionDto = {
               requestedById,
-              requiredDate: item.requiredDate?.slice(0, 10),
+              requiredDate: requiredDates[0],
               priority:
-                item.priority === 'Critical'
+                highestPriority === 'Critical'
                   ? 'Urgent'
-                  : item.priority === 'Medium'
+                  : highestPriority === 'Medium'
                     ? 'Normal'
-                    : item.priority,
+                    : highestPriority,
               departmentId: plan.departmentId,
               currency: plan.currency,
               justification:
-                item.justification?.trim() ||
-                `Planned procurement for ${item.itemDescription} under ${plan.planNumber}.`,
-              notes: `Created from approved plan item ${item.itemDescription}.`,
+                singleItemJustification
+                  ? singleItemJustification
+                  : `Planned procurement for ${groupedItems.length} approved items under ${plan.planNumber}.`,
+              notes: `Created from ${groupedItems.length} approved plan item${groupedItems.length === 1 ? '' : 's'}.`,
               linkage: {
-                sourcePlanItemId: item.id,
+                sourcePlanItemId: sourcePlanItemIds[0],
+                sourcePlanItemIds,
                 requisitionType: bulkRequisitionType,
               },
-              items: [
-                {
-                  inventoryItemId: item.inventoryItemId,
-                  itemDescription: item.itemDescription,
-                  quantity: item.estimatedQuantity,
-                  unitOfMeasure: item.unitOfMeasure,
-                  estimatedUnitPrice: item.estimatedUnitPrice,
-                  requiredDate: item.requiredDate?.slice(0, 10),
-                  preferredSupplierId: item.preferredSupplierId,
-                  notes: item.notes,
-                  specifications: item.specifications,
-                },
-              ],
+              items: groupedItems.map((candidate) => ({
+                sourcePlanItemId: candidate.id,
+                inventoryItemId: candidate.inventoryItemId,
+                itemDescription: candidate.itemDescription,
+                quantity: candidate.estimatedQuantity,
+                unitOfMeasure: candidate.unitOfMeasure,
+                estimatedUnitPrice: candidate.estimatedUnitPrice,
+                requiredDate: candidate.requiredDate?.slice(0, 10),
+                preferredSupplierId: candidate.preferredSupplierId,
+                notes: candidate.notes,
+                specifications: candidate.specifications,
+              })),
             };
             const created =
               await purchasingService.createPurchaseRequisition(requisition);
             completed += 1;
-            navigationTarget =
-              items.length === 1
-                ? `/procurement/purchase-requisitions/${created.id}`
-                : navigationTarget;
+            if (expectedPrDocumentCount === 1) {
+              navigationTarget = `/procurement/purchase-requisitions/${created.id}`;
+            }
             continue;
           }
 
@@ -1721,9 +1768,8 @@ export default function ProcurementPlanDetailPage() {
                           {selectedPlanItemIds.length === 1 ? '' : 's'} selected
                         </p>
                         <p className="text-xs text-blue-800">
-                          Batch actions create one governed document per plan
-                          item so each retains its exact plan, budget and
-                          approval lineage.
+                          Compatible items create one multi-line PR while every
+                          line retains its exact plan and budget lineage.
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -3050,9 +3096,10 @@ export default function ProcurementPlanDetailPage() {
           <div className="space-y-2">
             <p>
               {executionItemIds.length} selected plan item
-              {executionItemIds.length === 1 ? '' : 's'} will be processed. Each
-              item keeps a separate controlled document and immutable plan-item
-              lineage.
+              {executionItemIds.length === 1 ? '' : 's'} will be processed.
+              {executionAction === 'pr'
+                ? ' Compatible items will be combined as lines on one Purchase Requisition; different budgets or categories create separate requisitions.'
+                : ' Each item keeps its controlled source lineage.'}
             </p>
             {executionAction !== 'pr' && (
               <p>

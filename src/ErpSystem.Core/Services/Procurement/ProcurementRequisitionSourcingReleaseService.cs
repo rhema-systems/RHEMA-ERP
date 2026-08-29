@@ -283,6 +283,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             ItemState = items.Select(item => new
             {
                 item.Id,
+                item.SourcePlanItemId,
                 item.ItemDescription,
                 item.Specifications,
                 item.Quantity,
@@ -405,8 +406,11 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         Add(requirements, "MANDATORY_FIELDS", "Mandatory requisition fields", mandatory,
             "PR_SOURCING_FIELDS_INCOMPLETE", "Required date, cost centre, justification, budget, category, currency, amount, project linkage where applicable, and complete positive lines are required.");
 
+        var exactPlanItemLineage = items.All(item => item.Status == "Cancelled" || item.SourcePlanItemId.HasValue) ||
+            items.All(item => item.Status == "Cancelled" || !item.SourcePlanItemId.HasValue) && requisition.SourcePlanItemId.HasValue;
         Add(requirements, "PLAN_LINKAGE", "APP plan and item linkage",
             requisition.SourcePlanId.HasValue && requisition.SourcePlanItemId.HasValue &&
+            exactPlanItemLineage &&
             submission.SourcePlanId == requisition.SourcePlanId && submission.SourcePlanItemId == requisition.SourcePlanItemId,
             "PR_SOURCING_PLAN_LINK_REQUIRED", "The requisition must retain exact source procurement-plan and plan-item lineage.",
             requisition.SourcePlanNumber);

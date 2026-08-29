@@ -10013,6 +10013,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<ApplicationUser>().WithMany()
                 .HasForeignKey(item => item.LinkageLastUpdatedById).OnDelete(DeleteBehavior.Restrict);
         });
+
+        builder.Entity<PurchaseRequisitionItem>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.SourcePlanItemId });
+            entity.HasOne(item => item.SourcePlanItem).WithMany()
+                .HasForeignKey(item => item.SourcePlanItemId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     private static void ConfigureInventoryEntities(ModelBuilder builder)

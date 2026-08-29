@@ -196,27 +196,61 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
 
         var tenantId = _currentUser.TenantId;
         var now = DateTime.UtcNow;
-        var sourcePlanItem = request.SourcePlanItemId.HasValue
-            ? await PlanItems.GetQueryable(item => item.Id == request.SourcePlanItemId.Value && item.TenantId == tenantId && !item.IsDeleted)
+        var requestedSourcePlanItemIds = (request.SourcePlanItemIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .Concat(request.SourcePlanItemId is { } primaryId && primaryId != Guid.Empty ? [primaryId] : [])
+            .Distinct()
+            .ToList();
+        List<ProcurementPlanItem> sourcePlanItems = requestedSourcePlanItemIds.Count == 0
+            ? []
+            : await PlanItems.GetQueryable(item => requestedSourcePlanItemIds.Contains(item.Id) &&
+                    item.TenantId == tenantId && !item.IsDeleted)
                 .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.Department)
-                .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
-                ?? throw new ProcurementRequisitionLinkageNotFoundException("PLAN_ITEM_NOT_FOUND", "The plan item was not found in the current tenant.")
-            : null;
+                .AsNoTracking().ToListAsync(cancellationToken);
+        if (sourcePlanItems.Count != requestedSourcePlanItemIds.Count)
+            throw new ProcurementRequisitionLinkageNotFoundException(
+                "PLAN_ITEM_NOT_FOUND", "One or more selected plan items were not found in the current tenant.");
+        var sourcePlanItem = request.SourcePlanItemId.HasValue
+            ? sourcePlanItems.SingleOrDefault(item => item.Id == request.SourcePlanItemId.Value)
+            : sourcePlanItems.FirstOrDefault();
 
-        if (sourcePlanItem is not null &&
-            (!string.Equals(sourcePlanItem.ProcurementPlan.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
-             !string.Equals(sourcePlanItem.ProcurementPlan.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
-             !string.Equals(sourcePlanItem.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
-             !string.Equals(sourcePlanItem.Status, "Planned", StringComparison.OrdinalIgnoreCase)))
+        if (sourcePlanItems.Any(item =>
+                !string.Equals(item.ProcurementPlan.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(item.ProcurementPlan.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(item.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(item.Status, "Planned", StringComparison.OrdinalIgnoreCase)))
             throw new ProcurementRequisitionLinkageConflictException(
-                "PLAN_ITEM_NOT_EXECUTABLE", "Only an Approved item from an Approved or Active procurement plan can start a purchase requisition.");
+                "PLAN_ITEM_NOT_EXECUTABLE", "Every selected item must be Approved in an Approved or Active procurement plan before it can start a purchase requisition.");
 
-        if (sourcePlanItem is not null)
+        if (sourcePlanItems.Select(item => item.ProcurementPlanId).Distinct().Count() > 1)
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PLAN_ITEMS_PLAN_MISMATCH", "Selected plan items from different procurement plans cannot be combined on one requisition.");
+
+        var sourceBudgetIds = sourcePlanItems
+            .Select(item => item.ProcurementBudgetId ?? item.ProcurementPlan.BudgetId)
+            .ToList();
+        if (sourcePlanItems.Count > 0 && sourceBudgetIds.Any(id => !id.HasValue))
+            throw new ProcurementRequisitionLinkageConflictException(
+                "PLAN_BUDGET_REQUIRED", "Every selected plan item must be linked to an approved procurement budget.");
+        if (sourceBudgetIds.Where(id => id.HasValue).Select(id => id!.Value).Distinct().Count() > 1)
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PLAN_ITEMS_BUDGET_MISMATCH", "Selected plan items assigned to different budgets must be placed on separate requisitions.");
+
+        var sourceCategories = sourcePlanItems.Select(item => ParseCategory(item.ItemCategory))
+            .Where(category => category.HasValue).Select(category => category!.Value).Distinct().ToList();
+        if (sourceCategories.Count > 1 || request.ProcurementCategory.HasValue &&
+            sourceCategories.Any(category => category != request.ProcurementCategory.Value))
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PLAN_ITEMS_CATEGORY_MISMATCH", "Selected plan items from different procurement categories must be placed on separate requisitions.");
+
+        if (sourcePlanItems.Count > 0)
         {
             var existingRequisition = await Requisitions.GetQueryable(item =>
                     item.TenantId == tenantId && !item.IsDeleted && item.Id != requisition.Id &&
-                    item.SourcePlanItemId == sourcePlanItem.Id &&
-                    item.Status != "Rejected" && item.Status != "Cancelled")
+                    item.Status != "Rejected" && item.Status != "Cancelled" &&
+                    (item.SourcePlanItemId.HasValue && requestedSourcePlanItemIds.Contains(item.SourcePlanItemId.Value) ||
+                     item.Items.Any(line => !line.IsDeleted && line.SourcePlanItemId.HasValue &&
+                         requestedSourcePlanItemIds.Contains(line.SourcePlanItemId.Value))))
                 .AsNoTracking()
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new { item.Id, item.RequisitionNumber, item.Status })
@@ -224,15 +258,10 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
             if (existingRequisition is not null)
                 throw new ProcurementRequisitionLinkageConflictException(
                     "PLAN_ITEM_REQUISITION_EXISTS",
-                    $"Plan item {sourcePlanItem.ItemDescription} is already linked to {existingRequisition.RequisitionNumber} ({existingRequisition.Status}). Open that requisition instead of creating a duplicate.");
+                    $"One or more selected plan items are already linked to {existingRequisition.RequisitionNumber} ({existingRequisition.Status}). Open that requisition instead of creating a duplicate.");
         }
 
-        var sourceBudgetId = sourcePlanItem is null
-            ? null
-            : sourcePlanItem.ProcurementBudgetId ?? sourcePlanItem.ProcurementPlan.BudgetId;
-        if (sourcePlanItem is not null && !sourceBudgetId.HasValue)
-            throw new ProcurementRequisitionLinkageConflictException(
-                "PLAN_BUDGET_REQUIRED", "The selected plan item is not linked to an approved procurement budget.");
+        var sourceBudgetId = sourceBudgetIds.FirstOrDefault();
         if (sourceBudgetId.HasValue && request.BudgetId.HasValue && sourceBudgetId.Value != request.BudgetId.Value)
             throw new ProcurementRequisitionLinkageValidationException(
                 "PLAN_BUDGET_MISMATCH", "The selected budget does not match the budget assigned to the selected plan item.");
@@ -244,7 +273,7 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
                 ?? throw new ProcurementRequisitionLinkageNotFoundException("BUDGET_NOT_FOUND", "The procurement budget was not found in the current tenant.")
             : null;
 
-        if (sourcePlanItem is not null && budget is not null && budget.DepartmentId != sourcePlanItem.ProcurementPlan.DepartmentId)
+        if (sourcePlanItems.Any(item => budget is not null && budget.DepartmentId != item.ProcurementPlan.DepartmentId))
             throw new ProcurementRequisitionLinkageValidationException(
                 "PLAN_BUDGET_DEPARTMENT_MISMATCH", "The plan item budget does not belong to the procurement plan department.");
         if (sourcePlanItem is not null && budget is not null &&
@@ -337,7 +366,12 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         requisition.SourcePlanItemId = sourcePlanItem?.Id;
         requisition.SourcePlanNumber = sourcePlanItem?.ProcurementPlan.PlanNumber;
         requisition.SourcePlanTitle = sourcePlanItem?.ProcurementPlan.Title;
-        requisition.SourcePlanItemDescription = sourcePlanItem?.ItemDescription;
+        requisition.SourcePlanItemDescription = sourcePlanItems.Count switch
+        {
+            0 => null,
+            1 => sourcePlanItem?.ItemDescription,
+            _ => $"{sourcePlanItems.Count} approved plan items"
+        };
         requisition.BudgetId = budget?.Id;
         requisition.BudgetCode = budget?.BudgetCode;
         requisition.BudgetAllocated = budget?.AllocatedAmount;
@@ -345,7 +379,8 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         requisition.BudgetValidated = false;
         if (budget is not null)
             requisition.Currency = budget.Currency;
-        requisition.ProcurementCategory = request.ProcurementCategory ?? ParseCategory(sourcePlanItem?.ItemCategory);
+        requisition.ProcurementCategory = request.ProcurementCategory ??
+            (sourceCategories.Count == 1 ? sourceCategories[0] : null);
         // A planned requisition already carries its accounting ownership through the
         // source plan department. Keep the field out of the requester UI, but persist a
         // stable Finance dimension so the downstream commitment/release gate is not left
