@@ -711,12 +711,16 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     #region Document Operations
 
-    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee, stamped onto the entity's <c>UploadedById</c> FK. Never
+    /// taken from the request body — that is the defect this parameter exists to close.
+    /// </param>
+    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         if (createDto.SuccessionPlanId.HasValue)
             await GetOwnedPlanAsync(createDto.SuccessionPlanId.Value);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, uploadedByEmployeeId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1862,14 +1866,18 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     #region Document Operations
 
-    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee, stamped onto the entity's <c>UploadedById</c> FK. Never
+    /// taken from the request body — that is the defect this parameter exists to close.
+    /// </param>
+    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         if (createDto.CandidateId.HasValue)
             await GetOwnedCandidateAsync(createDto.CandidateId.Value);
         if (createDto.SuccessionPlanId.HasValue)
             await GetOwnedPlanAsync(createDto.SuccessionPlanId.Value);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, uploadedByEmployeeId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2575,12 +2583,16 @@ public class TalentPoolService : ITalentPoolService
 
     #region Document Operations
 
-    public async Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee, stamped onto the entity's <c>UploadedById</c> FK. Never
+    /// taken from the request body — that is the defect this parameter exists to close.
+    /// </param>
+    public async Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         if (createDto.TalentPoolMemberId.HasValue)
             await GetOwnedMemberAsync(createDto.TalentPoolMemberId.Value);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, uploadedByEmployeeId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

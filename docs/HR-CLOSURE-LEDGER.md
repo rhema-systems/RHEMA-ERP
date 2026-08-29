@@ -12,9 +12,9 @@ yet classified.
 
 | Measure | Count |
 | --- | ---: |
-| HR write endpoints | 2149 |
+| HR write endpoints | 2151 |
 | Wired to a screen | 1747 |
-| No caller found (instrument 01) | 402 |
+| No caller found (instrument 01) | 404 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
 | Write-DTO fields no form can set | 97 across 42 DTOs |
 
@@ -38,6 +38,15 @@ yet classified.
 | 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |
 | 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
 | 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
+| 2026-08-29 | **The succession, talent-pool and NHIS document families now go through the controlled upload gate** (D-14). The succession half is served by one new controller, `api/succession-documents`, rather than three copies of the same transport: one table and one DTO serve the plan, the candidate and the pool member, so the upload takes the owner as a parameter — the same shape `api/succession-development` already uses for development activities. All four metadata routes survive for the legacy migration utility and refuse every file-location field. |
+| 2026-08-29 | **Succession document uploaders are stamped from the token** (D-15). `UploadedById` is an explicit service parameter, not a DTO field, so it cannot be asserted by a caller. Fifth instance of the D-05 shape. |
+| 2026-08-29 | **Medical clinical transitions stamp an actor** (D-16). Eight helpers now set `UpdatedAt`/`UpdatedBy`. Not just a blocker — cancel, check-in and check-out were wired and shipped, so the defect was live. Neither the appointment nor the referral carries a domain actor FK, so the audit column is the only place an actor can go without a schema change. |
+| 2026-08-29 | **The section D hand-review queue is classified per endpoint, not per controller.** A controller is rarely one verdict: `Assets` is two path-builder artefacts, two employee-portal duplicates and eight genuine gaps. `ENDPOINT_DISPOSITIONS` in the generator keys on `(file, VERB, route)` so the mix survives a regeneration, and section D2 carries the reason for every line. |
+| 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 are instrument artefacts — the endpoint is wired and 01 could not see it (31 through `hrDocumentService.upload`, 4 through `<DocumentUploadField>`, 20 through a second `[Route]` alias, 1 through an interpolated query string). 38 are `INTENTIONAL`: a duplicate route onto an operation that is already reachable, a raw-CRUD escape hatch superseded by a workflow, a replace-set parent that owns its children, or a boundary held on purpose. The remaining 65 are gaps with a screen to build. |
+| 2026-08-29 | **The dominant real gap is the missing edit.** Assets, medical clinical records, medical expense claims and their items, travel policy rules, travel groups, and the four movement sub-types all wire create and (mostly) delete, and not the correction. A record raised wrongly can be destroyed but not fixed — which is the worse of the two on anything a person is charged, paid or moved by. |
+| 2026-08-29 | **Two wired approval queues can never have anything in them.** `CreateExceptionAsync` (travel policy exceptions) and `CreateAlertNotificationAsync` (travel compliance alerts) each have exactly one caller — their own endpoint — and no screen calls either, while the pending-queue read and the decide/acknowledge action on both are wired. Nothing raises the thing the queue exists to work through. |
+| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so HR's wired `pending-appeals` queue is unfillable and the employee surface has to be built. |
+| 2026-08-29 | **Manpower budgets can be created and approved but not edited or deleted.** `PUT`/`DELETE api/JobAnalysis/budgets/{}` and `PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller — surfaced when the whole JobAnalysis controller was enumerated, and outside that slice's scope (its disposition named the twelve job-description child collections). Area 18, unscheduled. |
 
 ## B. Blockers — must clear before the dependent build starts
 
@@ -113,6 +122,30 @@ yet classified.
 
   _Was letting a case note be attributed to a colleague — cleared_
 
+- [x] **D-14 — The succession, talent-pool and NHIS document families were on a caller-supplied file path** · `DONE 2026-08-29`
+
+  The fourth and fifth instances of the sink D-10 closed for provider documents. `CreateSuccessionDocumentDto.DocumentUrl` is `[Required]`, 1000 characters, and copied verbatim onto the entity by the mapper; `CreateNHISClaimDocumentDto.FilePath` is the same shape. Neither family has an upload route, a download route or a single DMS column, so a row can only ever name a file the server never received — unreadable even when the path is honest. One DTO serves all three succession doors (`succession-plans/{}/documents`, `succession-candidates/{}/documents`, `talent-pools/members/{}/documents`), which is why eight endpoints are blocked by one defect. The fix is the D-10 recipe: nullable DMS columns behind a COL_LENGTH-guarded migration, a multipart upload through the scanning + DMS gate, a token-bearing download, and the metadata route refusing every file-location field. ⚠ Register the new upload categories in **both** `ControlledFileUploadCategories` **and** `SystemCleanScanRequired` — that is D-11, and it is the step that gets missed.
+
+  **Done 2026-08-29.** Six nullable DMS columns across the two tables (migration `AddSuccessionAndNhisDocumentDmsColumns`, hand-guarded on `COL_LENGTH` and listed in `FastBuildMigrationMetadata`), `HrSuccessionDocuments` declared **and** registered as scan-mandatory in the same edit, and all four metadata routes now refuse every file-location field. The succession transport went into ONE new controller, `api/succession-documents`, rather than three copies: one table and one DTO serve all three owners, so the upload takes the owner as a parameter and refuses anything but exactly one of them — none writes a row invisible to every read, two puts it in two collections. NHIS reuses `HrMedicalClaimDocuments`: same artefact, same person, same permission family. Two things the work turned up on the way — the confidential-document download is gated to Succession.Admin, because the confidential list is a separate read rather than a filter and a blind download would hand back through one door what the other withholds; and the NHIS upload checks the claim's tenant before storing bytes, because `AddClaimDocumentAsync` checks the tenant but never the claim, so the FK alone was deciding. **Needs a backend rebuild and a database update.**
+
+  _Was blocking 8 of the queue's BUILD endpoints — cleared_
+
+- [x] **D-15 — Succession document uploader was assertable by the request body** · `DONE 2026-08-29`
+
+  The fifth instance of the D-05 shape, and it travels with D-14. `CreateSuccessionDocumentDto.UploadedById` is `[Required]` and the mapper writes `UploadedById = dto.UploadedById` while the token's employee id goes only to `CreatedBy` — so on a succession plan, a candidate file or a talent-pool member's file, the person recorded as having produced a document is whoever the client says. Both controllers already resolve `_currentUser.EmployeeId` and hand it to the service; it simply never reaches the field. Fix it in the same commit as D-14: nothing has ever sent the field, so no caller breaks.
+
+  **Done 2026-08-29.** The field is gone from the create DTO and the uploader is now an explicit `uploadedByEmployeeId` parameter on all three writers — a parameter rather than a DTO field precisely so it cannot be asserted by a caller. Nothing had ever sent it, and no caller broke. **Needs a backend rebuild.**
+
+  _Was blocking the same 8 endpoints as D-14 — cleared_
+
+- [x] **D-16 — Medical clinical status transitions recorded no actor at all** · `DONE 2026-08-29`
+
+  `UpdateAppointmentStatusAsync`, `CancelAppointmentAsync`, `CheckIn`, `CheckOut`, `UpdateReferralStatusAsync`, `CompleteReferralAsync` and `RejectPreAuthorizationAsync` are declared without a `userId` parameter, their DTOs carry no actor field, and the service sets no `UpdatedBy` — so the row after the transition is indistinguishable from the row before it as to who moved it. Worse than D-07, where the audit string at least survived: here there is no actor anywhere on the path to stamp. This is **not** only a blocker for the new work — cancel, check-in and check-out are wired today and shipped, so the defect is live. The sibling writes on the same controller (`CreatePreAuthorization`, `UpdateReferral`, `UpdateAppointment`) all take a userId through `TryGetWriteContext`; the pattern exists beside them and the transitions did not follow it.
+
+  **Done 2026-08-29.** All eight transition helpers take the actor and stamp `UpdatedAt`/`UpdatedBy`, the same two lines their `UpdateEntity` siblings in the same file already used. Two calls recorded rather than assumed: **neither `MedicalAppointment` nor `MedicalReferral` carries a domain actor FK at all** — no `CancelledById`, no `CheckedInById` — so `UpdatedBy` is the only place an actor can go without a schema change; and pre-authorization **reject** sets `UpdatedBy` but deliberately NOT `ApprovedBy`, because writing the approver's field on a rejection would make a rejected authorization read as approved-by-that-person on every screen that binds it. A dedicated rejector column needs a migration and belongs with the pre-authorization edit build. ⚠ Residue: `CancelPolicyAsync`, `UpdateInsuranceClaimStatusAsync` and NHIS `UpdateClaimStatusAsync` have the identical defect — same file, different families, all three wired and shipped. Left alone rather than widening a scoped slice; three lines when someone wants them. **Needs a backend rebuild.**
+
+  _Was blocking the MedicalClinical edit/delete build, and was already wrong on three shipped actions — cleared_
+
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
   events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write policy, so today it means 'HR records the response'. That is correct for the HR screens being built now. Before any /me surface offers 'accept this invitation', it needs a self-or-permission check against the participant's own employee id.
@@ -184,9 +217,9 @@ Batch assessment.
 
 - [ ] `POST   api/employee-competencies/batch-assess`
 
-### PerformanceAppraisals — `REVIEW`
+### PerformanceAppraisals — `BUILD`
 
-calculate-score may be server-driven on submit.
+Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2.
 
 - [ ] `POST   api/PerformanceAppraisals/{}/calculate-score`
 
@@ -208,9 +241,9 @@ Clearance — refresh assets.
 
 - [ ] `POST   api/hr/separations/{}/clearance/refresh-assets`
 
-### StaffMovements — `REVIEW`
+### StaffMovements — `INTENTIONAL`
 
-summaries/by-ids looks like an internal batch read.
+Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap.
 
 - [ ] `POST   api/staff-movements/summaries/by-ids`
 
@@ -222,9 +255,15 @@ Recruitment candidate CRM. Controller remarks already say 'bare since the port, 
 
 ## C2. Build checklists — committed work, every endpoint enumerated
 
-**These tick themselves.** A box is checked when instrument 01 finds a frontend call for that
-exact verb and path, so the list cannot drift from the code. Writes are what the instrument
-measures; reads are listed for completeness and are checked the same way.
+**Write boxes tick themselves.** A write box is checked when instrument 01 finds a frontend
+call for that exact verb and path, so the write lists cannot drift from the code.
+
+⚠ **READ boxes never tick, and an unticked GET means nothing.** Instrument 01 skips GETs
+outright (`if r["verb"] == "Get": continue`), so every read below is unchecked whether or
+not a screen calls it — Company Schedule shows 40 of 40 writes wired and zero reads. Reads are
+listed only so the surface is visible. Do not read an unticked GET as a gap; this line used to
+claim reads were "checked the same way", which was false and would have sent someone hunting
+for hundreds of gaps that do not exist.
 
 ### Company Schedule — 40 of 40 writes wired
 
@@ -639,90 +678,569 @@ measures; reads are listed for completeness and are checked the same way.
 ## D. Hand-review queue (flagged by 01 only)
 
 Instrument 01 found no caller but instrument 02 still sees the path segment in the frontend, so
-each of these is *either* a real gap *or* one of the three documented artefacts. Classify, then
-move the real ones into section C's disposition map.
+each of these is *either* a real gap *or* one of the three documented artefacts.
+
+**A controller is rarely one verdict.** `Assets` mixes two path-builder artefacts, two
+employee-portal duplicates and eight genuine gaps. So the queue is classified per endpoint in
+`ENDPOINT_DISPOSITIONS`, and the Disposition column below is the *mix* — the per-endpoint
+verdicts and their reasons are in **D2**. A row still reading plain `REVIEW` has not been
+looked at; a row with a mix has been looked at endpoint by endpoint.
 
 | Controller | Flagged | Total writes | Disposition | Note |
 | --- | ---: | ---: | --- | --- |
 | Employees | 73 | 81 | `FALSE` | Fully wired through the path-builder helper employeeService.sub(id, 'contacts'). Instrument 01 cannot resolve a method call. |
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
-| PerformanceImprovementPlans | 22 | 36 | `REVIEW` | 18 of 22 flags are the api/PerformanceImprovementPlans alias of api/Pip. Real: attachments, review meetings, complete. |
+| PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
 | StaffDisciplineLookup | 20 | 20 | `BUILD` | Offence catalogue is GET-only in the UI; clients cannot maintain their own offence library. |
-| PerformanceAppraisals | 15 | 29 | `REVIEW` | calculate-score may be server-driven on submit. |
+| PerformanceAppraisals | 15 | 29 | `BUILD` 5 · `INTENTIONAL` 10 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
 | StaffDisciplineSubEntity | 15 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
-| Assets | 12 | 63 | `REVIEW` |  |
+| Assets | 12 | 63 | `BUILD` 8 · `INTENTIONAL` 2 · `FALSE` 2 | Classified 2026-08-29: 8 real. Every asset child wires create and delete and none wires the edit; surcharges wire neither, and have no recall while requisitions and transfers both do. The other 4 are 2 upload artefacts and the 2 employee-portal duplicates. See D2. |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
 | MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
-| SuccessionPlan | 8 | 14 | `REVIEW` |  |
-| MedicalClinical | 7 | 17 | `REVIEW` |  |
+| SuccessionPlan | 8 | 14 | `BUILD` 7 · `INTENTIONAL` 1 | Classified 2026-08-29: all 8 real. Competency requirements and actions are read-only in the UI; the 2 document endpoints are blocked on D-14/D-15. |
+| MedicalClinical | 7 | 17 | `BUILD` | Classified 2026-08-29: all 7 real. Pre-authorizations, referrals and appointments each wire create and the transitions but neither edit nor delete. Read D-16 before building - the transitions stamp no actor. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
-| MedicalExpenseClaims | 6 | 13 | `REVIEW` |  |
-| StaffTravelRequests | 5 | 18 | `REVIEW` |  |
-| SuccessionCandidates | 5 | 17 | `REVIEW` |  |
+| MedicalExpenseClaims | 6 | 13 | `BUILD` 5 · `FALSE` 1 | Classified 2026-08-29: 5 real. Neither a claim nor its items can be edited or removed, and a receipt attached in error cannot be taken off. |
+| StaffTravelRequests | 5 | 18 | `BUILD` 3 · `FALSE` 2 | Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed. |
+| SuccessionCandidates | 5 | 17 | `BUILD` 1 · `INTENTIONAL` 4 | Classified 2026-08-29: 2 real (documents, blocked on D-14/D-15). The development-activity trio duplicates api/succession-development. |
 | CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
 | ConsultantClientPortalAuth | 4 | 7 | `BUILD` | Client portal authentication. |
 | JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
 | SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
-| AppraisalCycleTarget | 3 | 6 | `REVIEW` |  |
+| AppraisalCycleTarget | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired. |
 | ConsultantClientPortal | 3 | 3 | `BUILD` | Client portal for consultant engagements. |
 | EmployeeCareerPath | 3 | 3 | `BUILD` | Decided 2026-08-28: career paths are NOT server-write-only and should have a UI. |
-| InterviewQuestionPreset | 3 | 6 | `REVIEW` |  |
+| InterviewQuestionPreset | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows. |
 | JobVacancy | 3 | 17 | `BUILD` | Stage assignments — create, edit, skip, delete. |
-| PositionCompetency | 3 | 4 | `REVIEW` |  |
-| PositionVacancies | 3 | 5 | `REVIEW` |  |
-| TalentPools | 3 | 9 | `REVIEW` |  |
-| TrainingServiceBonds | 3 | 8 | `REVIEW` |  |
-| CheckIns | 2 | 9 | `REVIEW` |  |
+| NHISClaims | 3 | 9 | `BUILD` 2 · `INTENTIONAL` 1 | Classified 2026-08-29: both real and both blocked on D-14 - the fifth caller-supplied file path in the medical module. |
+| PositionCompetency | 3 | 4 | `INTENTIONAL` | Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set. |
+| PositionVacancies | 3 | 5 | `BUILD` | Classified 2026-08-29: all 3 real. The establishment screen wires reconcile and raise-requisition only; a vacancy cannot be closed by hand, annotated, or have its status set. |
+| TalentPools | 3 | 9 | `BUILD` 1 · `INTENTIONAL` 2 | Classified 2026-08-29: 2 real (member documents, blocked on D-14/D-15); the development-activity route duplicates api/succession-development. |
+| TrainingServiceBonds | 3 | 8 | `BUILD` | Classified 2026-08-29: all 3 real. Bonds are minted server-side on nomination submit, so a bond with the wrong amount copied off its program has no correction path - and it is money. |
+| CheckIns | 2 | 9 | `BUILD` | Classified 2026-08-29: both real. Goals and review events wire an attachment panel; check-ins do not. |
 | ClientTimesheetConfirmation | 2 | 2 | `BUILD` | Anonymous client confirmation link. Without it consultant billing has no client step. |
-| Competency | 2 | 12 | `REVIEW` |  |
-| ConsultantClients | 2 | 8 | `REVIEW` |  |
+| Competency | 2 | 12 | `FALSE` | Classified 2026-08-29: both flags are the api/competency-skill-indicators alias of api/competencies routes that are wired. |
+| ConsultantClients | 2 | 8 | `INTENTIONAL` | Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired. |
 | HrLegacyFileMigration | 2 | 2 | `INTENTIONAL` | One-off ops tool, invoked by script. |
-| JobCandidate | 2 | 25 | `REVIEW` |  |
-| JobOffer | 2 | 19 | `REVIEW` |  |
-| Leaves | 2 | 14 | `REVIEW` |  |
-| NHISClaims | 2 | 8 | `REVIEW` |  |
-| PeerNomination | 2 | 4 | `REVIEW` |  |
-| PreEmploymentCheck | 2 | 11 | `REVIEW` |  |
+| JobCandidate | 2 | 25 | `BUILD` 1 · `FALSE` 1 | Classified 2026-08-29: 1 real - a candidate's expressed interest can be added and removed but not edited. |
+| JobOffer | 2 | 19 | `FALSE` | hrDocumentService.upload artefact (both letter uploads). |
+| Leaves | 2 | 14 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route. |
+| PeerNomination | 2 | 4 | `INTENTIONAL` | Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation. |
+| PreEmploymentCheck | 2 | 11 | `FALSE` | hrDocumentService.upload artefact (both document routes). |
 | PublicRecruitment | 2 | 3 | `BUILD` | Public job board / anonymous apply. |
 | Separations | 2 | 31 | `BUILD` | Clearance — refresh assets. |
-| StaffDemotions | 2 | 4 | `REVIEW` |  |
+| StaffDemotions | 2 | 4 | `BUILD` | Classified 2026-08-29: both real. No delete, and the employee's own response has no surface at all, so HR's wired pending-appeals queue cannot fill. |
 | StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
-| StaffMovements | 2 | 19 | `REVIEW` | summaries/by-ids looks like an internal batch read. |
-| StaffTravelPolicies | 2 | 10 | `REVIEW` |  |
-| AppraisalNotifications | 1 | 3 | `REVIEW` |  |
-| AppraisalReviewEvents | 1 | 9 | `REVIEW` |  |
-| AppraisalWorkflow | 1 | 1 | `REVIEW` | Single transition endpoint; check whether the appraisal screens drive transitions elsewhere. |
-| AwardsMe | 1 | 8 | `REVIEW` |  |
-| CalibrationSessions | 1 | 15 | `REVIEW` |  |
+| StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
+| StaffTravelPolicies | 2 | 10 | `BUILD` | Classified 2026-08-29: both real. A rule cannot be edited, and nothing raises the policy exception the wired decide queue exists to rule on. |
+| AppraisalNotifications | 1 | 3 | `INTENTIONAL` | Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant. |
+| AppraisalReviewEvents | 1 | 9 | `FALSE` | hrDocumentService.upload artefact. |
+| AppraisalWorkflow | 1 | 1 | `INTENTIONAL` | Checked 2026-08-29: they do. The appraisal screens move status through the named transitions on api/PerformanceAppraisals, each with its own preconditions. |
+| AwardsMe | 1 | 8 | `BUILD` | Classified 2026-08-29: real - a score the caller gave cannot be revised. |
+| CalibrationSessions | 1 | 15 | `FALSE` | hrDocumentService.upload artefact. |
 | EmployeeCompetency | 1 | 4 | `BUILD` | Batch assessment. |
-| EmployeeHealth | 1 | 14 | `REVIEW` |  |
-| HrAnnouncements | 1 | 7 | `REVIEW` |  |
-| HrLetterRequests | 1 | 3 | `REVIEW` |  |
-| HrPolicies | 1 | 6 | `REVIEW` |  |
-| JobInterview | 1 | 33 | `REVIEW` |  |
-| JobPosting | 1 | 7 | `REVIEW` |  |
-| LeaveTypes | 1 | 14 | `REVIEW` |  |
+| EmployeeHealth | 1 | 14 | `FALSE` | hrDocumentService.upload artefact. |
+| HrAnnouncements | 1 | 7 | `FALSE` | DocumentUploadField artefact. |
+| HrLetterRequests | 1 | 3 | `FALSE` | DocumentUploadField artefact. |
+| HrPolicies | 1 | 6 | `FALSE` | DocumentUploadField artefact. |
+| JobInterview | 1 | 33 | `BUILD` | Classified 2026-08-29: real - an external panellist's own details cannot be corrected. |
+| JobPosting | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
+| LeaveTypes | 1 | 14 | `BUILD` | Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either. |
 | LocationContact | 1 | 4 | `BUILD` | No screen. |
-| Location | 1 | 4 | `REVIEW` |  |
-| MedicalSelfService | 1 | 3 | `REVIEW` |  |
-| MyProfile | 1 | 4 | `REVIEW` |  |
+| Location | 1 | 4 | `INTENTIONAL` | Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync. |
+| MedicalSelfService | 1 | 3 | `FALSE` | hrDocumentService.upload artefact. |
+| MyProfile | 1 | 4 | `FALSE` | DocumentUploadField artefact. |
 | OfferResponse | 1 | 1 | `BUILD` | Candidate offer response. |
-| PayComponents | 1 | 5 | `REVIEW` |  |
+| PayComponents | 1 | 5 | `INTENTIONAL` | The endpoint's own summary says it: create the component in Payroll, then sync. |
 | SalaryNotches | 1 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
-| SheControlledDocument | 1 | 7 | `REVIEW` |  |
-| SheEnvironmentalCompliance | 1 | 20 | `REVIEW` |  |
-| StaffActingAppointments | 1 | 6 | `REVIEW` |  |
-| StaffPromotions | 1 | 3 | `REVIEW` |  |
-| StaffRequisitions | 1 | 19 | `REVIEW` |  |
-| StaffSecondments | 1 | 4 | `REVIEW` |  |
-| StaffTransfers | 1 | 3 | `REVIEW` |  |
-| StaffTravelCompliance | 1 | 25 | `REVIEW` |  |
-| TrainingCompletions | 1 | 6 | `REVIEW` |  |
-| TrainingNominations | 1 | 14 | `REVIEW` |  |
-| UnitGoals | 1 | 5 | `REVIEW` |  |
+| SheControlledDocument | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
+| SheEnvironmentalCompliance | 1 | 20 | `FALSE` | hrDocumentService.upload artefact. |
+| StaffActingAppointments | 1 | 6 | `BUILD` | Classified 2026-08-29: real - the one movement sub-type where the edit rather than the delete is missing. |
+| StaffPromotions | 1 | 3 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
+| StaffRequisitions | 1 | 19 | `FALSE` | hrDocumentService.upload artefact. |
+| StaffSecondments | 1 | 4 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
+| StaffTransfers | 1 | 3 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
+| StaffTravelCompliance | 1 | 25 | `BUILD` | Classified 2026-08-29: real - nothing raises a compliance alert, so the wired acknowledge action has nothing to acknowledge. |
+| SuccessionDocuments | 1 | 1 | `BUILD` |  |
+| TrainingCompletions | 1 | 6 | `BUILD` | Classified 2026-08-29: real, and already in section F - bulk completion has no UI. |
+| TrainingNominations | 1 | 14 | `BUILD` | Classified 2026-08-29: real, and already in section F - the availability check is never shown. |
+| UnitGoals | 1 | 5 | `FALSE` | hrDocumentService.upload artefact. |
+
+## D2. Hand-review dispositions, endpoint by endpoint
+
+Each line was hand-verified in source: the controller, the write DTO and the frontend service
+that would call it. `FALSE` means the endpoint **is** wired and the instrument could not see it;
+`INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
+`BUILD` means nothing reaches it and something should.
+
+**151 of the 377 queued endpoints are classified here — 63 BUILD, 42 INTENTIONAL, 46 FALSE.** The remaining 226 were already carried by a controller-level disposition in section C's map and are not re-argued.
+
+### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
+
+- `POST   api/PerformanceImprovementPlans` — **FALSE**
+  <br>Alias route. The controller carries two `[Route]` attributes, so every action yields two rows; the frontend calls `api/Pip`.
+- `DELETE api/PerformanceImprovementPlans/attachments/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `DELETE api/PerformanceImprovementPlans/goals/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PUT    api/PerformanceImprovementPlans/goals/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `DELETE api/PerformanceImprovementPlans/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PUT    api/PerformanceImprovementPlans/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/approve` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/complete` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/recall` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/reject` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PATCH  api/PerformanceImprovementPlans/{}/status` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/submit` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/attachments` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/goals` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/outcome` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/review-meetings` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `DELETE api/PerformanceImprovementPlans/{}/review-meetings/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PUT    api/PerformanceImprovementPlans/{}/review-meetings/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/Pip/{}/attachments` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+- `POST   api/Pip/{}/complete` — **INTENTIONAL**
+  <br>`POST {}/outcome` is wired and both call the same `CompletePipAsync(CompletePipDto)` — the outcome route just builds the DTO from its own request shape. One operation, two doors.
+- `POST   api/Pip/{}/review-meetings` — **INTENTIONAL**
+  <br>`POST api/PipMeeting` is wired and calls the same `AddReviewMeetingAsync`, plus it applies the form's goal updates. The meeting form is the supported way in.
+- `PUT    api/Pip/{}/review-meetings/{}` — **INTENTIONAL**
+  <br>`PUT api/PipMeeting/{}` is wired onto the same `UpdateReviewMeetingAsync`.
+
+### PerformanceAppraisals — 5 BUILD · 10 INTENTIONAL
+
+- `POST   api/PerformanceAppraisals/{}/attachments` — **BUILD**
+  <br>The gated multipart upload exists and was purpose-built here — the controller's own remarks record replacing a caller-supplied filePath route and adding the entitlement test — and nothing calls it. An appraisal cannot carry evidence.
+- `DELETE api/PerformanceAppraisals/{}/attachments/{}` — **BUILD**
+  <br>The other half of the same gap.
+- `POST   api/PerformanceAppraisals/{}/responses` — **BUILD**
+  <br>The employee's written answer to their appraisal, gated on the cycle's `AllowEmployeeResponse` setting. The read is there, the write has no screen, and the setting therefore does nothing. Note before building: the create DTO carries no author and the service stamps none — the response is keyed to the appraisal alone — and it sits on the HR-desk write policy, so as it stands 'the employee's response' is whatever HR types.
+- `DELETE api/PerformanceAppraisals/{}` — **BUILD**
+  <br>Admin-tier cleanup for an appraisal generated against someone who should not have been in scope. No other route removes one.
+- `PUT    api/PerformanceAppraisals/{}` — **BUILD**
+  <br>A generated appraisal's header — dates, evaluator, template — has no correction path. Regenerating the cycle is not one: it would not touch an appraisal that already exists.
+- `POST   api/PerformanceAppraisals` — **INTENTIONAL**
+  <br>Appraisals are generated in bulk from the cycle — `POST api/AppraisalCycle/{}/generate-appraisals` is wired and is how every appraisal in the model comes to exist. A hand-made appraisal outside a cycle has no template, no settings profile and no roll-up.
+- `POST   api/PerformanceAppraisals/appeal/{}/resolve` — **INTENTIONAL**
+  <br>Superseded by `POST {}/resolve-appeal`, wired, which also handles Remanded (snapshot, rollback, re-evaluation deadline) and the score-modification gate.
+- `POST   api/PerformanceAppraisals/evaluations/{}/scores` — **INTENTIONAL**
+  <br>Raw model CRUD, superseded by the workflow routes the screens drive: self-evaluation, manager-evaluation, the peer draft/submit pair, progress-to-hr-review, approve, return-to-manager and acknowledge. Writing an evaluation or a score directly would bypass every one of the cycle's gates.
+- `DELETE api/PerformanceAppraisals/evaluations/{}/scores/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `PUT    api/PerformanceAppraisals/evaluations/{}/scores/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `POST   api/PerformanceAppraisals/{}/evaluations` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `DELETE api/PerformanceAppraisals/{}/evaluations/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `PUT    api/PerformanceAppraisals/{}/evaluations/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `POST   api/PerformanceAppraisals/{}/appeal` — **INTENTIONAL**
+  <br>Superseded by `POST {}/submit-appeal`, which is wired and enforces the at-least-one-appealed-item rule.
+- `PATCH  api/PerformanceAppraisals/{}/status` — **INTENTIONAL**
+  <br>Raw status set. Status is moved by the named workflow transitions, each of which enforces its own preconditions.
+
+### Assets — 8 BUILD · 2 INTENTIONAL · 2 FALSE
+
+- `PUT    api/Assets/assignments/{}` — **BUILD**
+  <br>Create and delete are wired; the edit is not. The record can be raised and destroyed but never corrected.
+- `PUT    api/Assets/attributes/{}` — **BUILD**
+  <br>_As `PUT api/Assets/assignments/{}`._
+- `PUT    api/Assets/maintenance/{}` — **BUILD**
+  <br>_As `PUT api/Assets/assignments/{}`._
+- `PUT    api/Assets/requisitions/{}` — **BUILD**
+  <br>The requester may correct their own undecided request and HR may correct anyone's — the controller says so — and no screen offers it.
+- `DELETE api/Assets/surcharges/{}` — **BUILD**
+  <br>The only asset child with no delete wired; attributes, assignments, maintenance, requisitions and transfers all have one.
+- `PUT    api/Assets/surcharges/{}` — **BUILD**
+  <br>Surcharges have neither an edit nor a delete: a charge raised for the wrong amount can only be waived or cancelled, which is a different fact about the employee.
+- `POST   api/Assets/surcharges/{}/recall` — **BUILD**
+  <br>Requisitions and transfers both wire recall. The surcharge ladder wires submit but not the way back, so a charge sent for approval in error is stuck there.
+- `PUT    api/Assets/transfers/{}` — **BUILD**
+  <br>_As `PUT api/Assets/assignments/{}`._
+- `POST   api/Assets/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/Assets/{}/images` — **FALSE**
+  <br>_As `POST api/Assets/{}/attachments`._
+- `POST   api/Assets/assignments/{}/acknowledge` — **INTENTIONAL**
+  <br>The assignee's own signature, and `InternalOnly` refuses HR by name (AssetActor.EnsureIsSubject). It is served by the employee's own route, `POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls — a portal route takes no employee id, so there is nothing to get wrong.
+- `POST   api/Assets/surcharges/{}/respond` — **INTENTIONAL**
+  <br>Same shape and same reason as acknowledge: the employee's right of reply, refused for HR. Served by `POST api/employee-portal/asset-surcharges/{}/respond`, wired from /me/assets.
+
+### SuccessionPlan — 7 BUILD · 1 INTENTIONAL
+
+- `DELETE api/succession-plans/actions/{}` — **BUILD**
+  <br>Same collection.
+- `PUT    api/succession-plans/actions/{}` — **BUILD**
+  <br>_As `DELETE api/succession-plans/actions/{}`._
+- `DELETE api/succession-plans/competency-requirements/{}` — **BUILD**
+  <br>_As `DELETE api/succession-plans/actions/{}`._
+- `PUT    api/succession-plans/competency-requirements/{}` — **BUILD**
+  <br>_As `DELETE api/succession-plans/actions/{}`._
+- `DELETE api/succession-plans/documents/{}` — **BUILD**
+  <br>Unblocked 2026-08-29 (D-14, D-15). The upload, the download and the actor stamping all exist now; what is still missing is a screen. Removing a document attached in error has no caller.
+- `POST   api/succession-plans/{}/actions` — **BUILD**
+  <br>`getActions` is wired; the plan's action list is read-only in the UI.
+- `POST   api/succession-plans/{}/competency-requirements` — **BUILD**
+  <br>The read is wired and the panel renders; nothing can author a row.
+- `POST   api/succession-plans/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### MedicalClinical — 7 BUILD
+
+- `DELETE api/medical-clinical/appointments/{}` — **BUILD**
+  <br>Create and the lifecycle transitions are wired; edit and delete are not. Every one of the three clinical entities has the same hole, so a pre-authorization, referral or appointment entered wrongly can only be cancelled, never corrected. The per-record reads already return the full DTO (the list reads are the summaries), so an edit panel has the fields it needs — but see D-16 before building: the status transitions stamp no actor at all.
+- `PUT    api/medical-clinical/appointments/{}` — **BUILD**
+  <br>_As `DELETE api/medical-clinical/appointments/{}`._
+- `PUT    api/medical-clinical/appointments/{}/status` — **BUILD**
+  <br>A free status set, distinct from cancel / check-in / check-out. See D-16: it takes no actor and the service records none, not even `UpdatedBy`.
+- `DELETE api/medical-clinical/pre-authorizations/{}` — **BUILD**
+  <br>_As `DELETE api/medical-clinical/appointments/{}`._
+- `PUT    api/medical-clinical/pre-authorizations/{}` — **BUILD**
+  <br>_As `DELETE api/medical-clinical/appointments/{}`._
+- `DELETE api/medical-clinical/referrals/{}` — **BUILD**
+  <br>_As `DELETE api/medical-clinical/appointments/{}`._
+- `PUT    api/medical-clinical/referrals/{}` — **BUILD**
+  <br>_As `DELETE api/medical-clinical/appointments/{}`._
+
+### MedicalExpenseClaims — 5 BUILD · 1 FALSE
+
+- `DELETE api/medical-expense-claims/documents/{}` — **BUILD**
+  <br>The upload is wired and the download is wired; removing a receipt attached in error is not.
+- `DELETE api/medical-expense-claims/items/{}` — **BUILD**
+  <br>The claim ladder wires create, approval, payment, flag, unflag, items and notes — but neither the claim nor its items can be edited or removed. A claim captured with the wrong amount has no correction path short of approving and paying it.
+- `PUT    api/medical-expense-claims/items/{}` — **BUILD**
+  <br>_As `DELETE api/medical-expense-claims/items/{}`._
+- `DELETE api/medical-expense-claims/{}` — **BUILD**
+  <br>_As `DELETE api/medical-expense-claims/items/{}`._
+- `PUT    api/medical-expense-claims/{}` — **BUILD**
+  <br>_As `DELETE api/medical-expense-claims/items/{}`._
+- `POST   api/medical-expense-claims/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### StaffTravelRequests — 3 BUILD · 2 FALSE
+
+- `DELETE api/staff-travel/requests/groups/{}/participants/{}` — **BUILD**
+  <br>Group travel can be created and given participants, and then nothing: the group cannot be edited, cannot be deleted, and a participant cannot be taken off it.
+- `DELETE api/staff-travel/requests/groups/{}` — **BUILD**
+  <br>_As `DELETE api/staff-travel/requests/groups/{}/participants/{}`._
+- `PUT    api/staff-travel/requests/groups/{}` — **BUILD**
+  <br>_As `DELETE api/staff-travel/requests/groups/{}/participants/{}`._
+- `POST   api/staff-travel/requests/{}/reject` — **FALSE**
+  <br>Wired at travel.service.ts `reject()`. The reason is a query parameter, so the call site reads `${baseUrl}/${id}/reject${query}` and instrument 01 folds the interpolation into the path segment instead of dropping it.
+- `POST   api/staff-travel/requests/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### SuccessionCandidates — 1 BUILD · 4 INTENTIONAL
+
+- `DELETE api/succession-candidates/documents/{}` — **BUILD**
+  <br>Unblocked 2026-08-29 (D-14, D-15). The upload, the download and the actor stamping all exist now; what is still missing is a screen. Removing a document attached in error has no caller.
+- `DELETE api/succession-candidates/development-activities/{}` — **INTENTIONAL**
+  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
+- `PUT    api/succession-candidates/development-activities/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
+- `POST   api/succession-candidates/{}/development-activities` — **INTENTIONAL**
+  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
+- `POST   api/succession-candidates/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### AppraisalCycleTarget — 3 INTENTIONAL
+
+- `POST   api/AppraisalCycleTarget` — **INTENTIONAL**
+  <br>Duplicate. Target CRUD goes through the cycle-nested `api/AppraisalCycle/{}/targets` routes, which are wired and validate the cycle with the target; the frontend service says so at the point of use. Only this controller's exclusion routes are called.
+- `DELETE api/AppraisalCycleTarget/{}` — **INTENTIONAL**
+  <br>_As `POST api/AppraisalCycleTarget`._
+- `PUT    api/AppraisalCycleTarget/{}` — **INTENTIONAL**
+  <br>_As `POST api/AppraisalCycleTarget`._
+
+### InterviewQuestionPreset — 3 INTENTIONAL
+
+- `DELETE api/interview-question-presets/items/{}` — **INTENTIONAL**
+  <br>`PUT api/interview-question-presets/{}` is wired and its `items` is a replace-set: the service deletes every existing item absent from the payload, updates the ones present and adds the new ones. The preset form authors the whole list, so a per-item route would be a second writer over the same rows.
+- `POST   api/interview-question-presets/{}/items` — **INTENTIONAL**
+  <br>_As `DELETE api/interview-question-presets/items/{}`._
+- `PUT    api/interview-question-presets/{}/items/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/interview-question-presets/items/{}`._
+
+### NHISClaims — 2 BUILD · 1 INTENTIONAL
+
+- `POST   api/nhis-claims/documents/upload` — **BUILD**
+  <br>Unblocked 2026-08-29 (D-14). The gated upload and the token-bearing download both exist; NHIS claim documents still have no screen.
+- `DELETE api/nhis-claims/documents/{}` — **BUILD**
+  <br>_As `POST api/nhis-claims/documents/upload`._
+- `POST   api/nhis-claims/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `FilePath` and the three DMS ids outright, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST nhis-claims/documents/upload` is the supported way in.
+
+### PositionCompetency — 3 INTENTIONAL
+
+- `POST   api/position-competencies` — **INTENTIONAL**
+  <br>`PUT api/position-competencies/position/{}/bulk-set` is wired and calls `BulkReplaceForPositionAsync` — the position's whole competency set is authored in one write. Single-row CRUD over the same rows would race it.
+- `DELETE api/position-competencies/{}` — **INTENTIONAL**
+  <br>_As `POST api/position-competencies`._
+- `PUT    api/position-competencies/{}` — **INTENTIONAL**
+  <br>_As `POST api/position-competencies`._
+
+### PositionVacancies — 3 BUILD
+
+- `POST   api/position-vacancies/{}/close` — **BUILD**
+  <br>`reconcile` closes vacancies arithmetically, when the position is no longer below establishment. Closing one deliberately — with a reason — has no screen.
+- `PUT    api/position-vacancies/{}/notes` — **BUILD**
+  <br>No way to annotate a vacancy.
+- `PATCH  api/position-vacancies/{}/status` — **BUILD**
+  <br>The establishment screen wires reconcile and raise-requisition only. A vacancy's status cannot be set by hand.
+
+### TalentPools — 1 BUILD · 2 INTENTIONAL
+
+- `DELETE api/talent-pools/documents/{}` — **BUILD**
+  <br>Unblocked 2026-08-29 (D-14, D-15). The upload, the download and the actor stamping all exist now; what is still missing is a screen. Removing a document attached in error has no caller.
+- `POST   api/talent-pools/members/{}/development-activities` — **INTENTIONAL**
+  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
+- `POST   api/talent-pools/members/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### TrainingServiceBonds — 3 BUILD
+
+- `POST   api/training-service-bonds` — **BUILD**
+  <br>Bonds are minted server-side by `EnsureBondForNominationAsync` when a nomination is submitted and its program has `RequiresServiceBond`. That leaves no way to raise one for a nomination whose program was flagged afterwards.
+- `DELETE api/training-service-bonds/{}` — **BUILD**
+  <br>Admin-tier removal of a bond minted in error. Nothing else removes one.
+- `PUT    api/training-service-bonds/{}` — **BUILD**
+  <br>The duration, amount and currency are copied off the program at mint time. If the program's figures were wrong, the bond is wrong, and this is the only route that corrects it — a financial obligation with no correction path.
+
+### CheckIns — 2 BUILD
+
+- `POST   api/CheckIns/{}/attachments` — **BUILD**
+  <br>Goals and appraisal review events both wire their attachment panel; check-ins do not, so a check-in cannot carry evidence.
+- `DELETE api/CheckIns/{}/attachments/{}` — **BUILD**
+  <br>_As `POST api/CheckIns/{}/attachments`._
+
+### Competency — 2 FALSE
+
+- `POST   api/competency-skill-indicators` — **FALSE**
+  <br>Alias route. The controller carries two `[Route]` attributes, so every action yields two rows; the frontend calls `api/competencies`.
+- `POST   api/competency-skill-indicators/{}/skill-indicators` — **FALSE**
+  <br>Alias route. The controller carries two `[Route]` attributes, so every action yields two rows; the frontend calls `api/competencies/{}/skill-indicators`.
+
+### ConsultantClients — 2 INTENTIONAL
+
+- `DELETE api/consultant-clients/engagements/{}` — **INTENTIONAL**
+  <br>Duplicate. `api/client-engagements/{}` is the flat controller for the same entity and its PUT and DELETE are both wired.
+- `PUT    api/consultant-clients/engagements/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/consultant-clients/engagements/{}`._
+
+### JobCandidate — 1 BUILD · 1 FALSE
+
+- `PUT    api/job-candidates/{}/interests/{}` — **BUILD**
+  <br>A candidate's expressed interest can be added and removed but not edited.
+- `POST   api/job-candidates/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### JobOffer — 2 FALSE
+
+- `POST   api/job-offers/{}/upload-letter` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/job-offers/{}/upload-signed-letter` — **FALSE**
+  <br>_As `POST api/job-offers/{}/upload-letter`._
+
+### Leaves — 1 INTENTIONAL · 1 FALSE
+
+- `POST   api/Leaves/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/Leaves/balances/{}/adjustments` — **INTENTIONAL**
+  <br>Superseded by the flat `POST api/Leaves/adjustments`, which is wired and looks the balance up or creates it, so the caller does not need a balance id it may not have.
+
+### PeerNomination — 2 INTENTIONAL
+
+- `POST   api/PeerNomination` — **INTENTIONAL**
+  <br>Batch nomination lives on the appraisal — `POST api/PerformanceAppraisals/{}/peer-nominations` is wired — and nominating peers one at a time is not how the screen works.
+- `PUT    api/PeerNomination/{}` — **INTENTIONAL**
+  <br>The client deliberately exposes only read, remove and send-invitation for single rows; changing who a peer is means removing the nomination and nominating again, and remove is refused once the invitation has gone out.
+
+### PreEmploymentCheck — 2 FALSE
+
+- `POST   api/pre-employment-checks/items/{}/document` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/pre-employment-checks/reference-responses/{}/document` — **FALSE**
+  <br>_As `POST api/pre-employment-checks/items/{}/document`._
+
+### StaffDemotions — 2 BUILD
+
+- `DELETE api/staff-demotions/{}` — **BUILD**
+  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
+- `POST   api/staff-demotions/{}/respond` — **BUILD**
+  <br>The employee's acceptance of, or appeal against, a demotion notice — the service refuses anyone but the demoted employee, so HR cannot file it for them. HR's side is wired (`pending-appeals` reads the queue); the employee has no surface at all, so the queue can only ever be empty. Unlike the asset acknowledge/respond pair there is no employee-portal route to fall back on: this one needs building on /me.
+
+### StaffMovements — 1 INTENTIONAL · 1 FALSE
+
+- `POST   api/staff-movements/{}/attachments/upload` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/staff-movements/{}/attachments` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired. It rejects FilePath, FileUploadRecordId, DocumentRecordId and DocumentVersionId outright and says so in its 400, exactly as the discipline document route does, so through the API it can only mint a row naming no file. The upload route beside it is the supported way in.
+
+### StaffTravelPolicies — 2 BUILD
+
+- `POST   api/staff-travel/policies/exceptions` — **BUILD**
+  <br>Nothing raises a policy exception. `CreateExceptionAsync` has exactly one caller — this endpoint — and no compliance sweep creates one, so the wired `exceptions/pending` queue and its wired `exceptions/{}/decide` action can never have anything to work on.
+- `PUT    api/staff-travel/policies/rules/{}` — **BUILD**
+  <br>Rules can be added and deleted but not edited — a threshold correction means destroying the rule and its history and re-typing it.
+
+### AppraisalNotifications — 1 INTENTIONAL
+
+- `POST   api/AppraisalNotifications/mark-all-read/{}` — **INTENTIONAL**
+  <br>The employee-id-keyed variant. /me wires `POST api/AppraisalNotifications/me/mark-all-read`, which takes the employee from the token — the same principle the asset portal is built on, and the reason not to wire this one.
+
+### AppraisalReviewEvents — 1 FALSE
+
+- `POST   api/AppraisalReviewEvents/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### AppraisalWorkflow — 1 INTENTIONAL
+
+- `POST   api/AppraisalWorkflow/{}/transition` — **INTENTIONAL**
+  <br>The generic transition. The appraisal screens drive status through the named transitions on `api/PerformanceAppraisals`, each carrying its own preconditions and its own actor rule.
+
+### AwardsMe — 1 BUILD
+
+- `PUT    api/awards/me/reviews/{}` — **BUILD**
+  <br>Scoring a nomination is wired; revising a score the caller themselves gave is not, so a mistyped score is final.
+
+### CalibrationSessions — 1 FALSE
+
+- `POST   api/CalibrationSessions/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### EmployeeHealth — 1 FALSE
+
+- `POST   api/employee-health/exam-documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### HrAnnouncements — 1 FALSE
+
+- `POST   api/hr/announcements/{}/attachment` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### HrLetterRequests — 1 FALSE
+
+- `POST   api/hr/letter-requests/{}/upload` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### HrPolicies — 1 FALSE
+
+- `POST   api/hr/policies/{}/document` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### JobInterview — 1 BUILD
+
+- `PUT    api/job-interviews/external-panelists/{}` — **BUILD**
+  <br>Add, remove, attendance and scores are all wired; correcting an external panellist's own details is not.
+
+### JobPosting — 1 FALSE
+
+- `POST   api/job-postings/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### LeaveTypes — 1 BUILD
+
+- `PATCH  api/hr/leave-types/{}/deactivate` — **BUILD**
+  <br>Leave types can be created and edited but never retired — and there is no delete either, so a type introduced by mistake stays on every picker forever.
+
+### Location — 1 INTENTIONAL
+
+- `POST   api/Location/{}/move` — **INTENTIONAL**
+  <br>`PUT api/Location/{}` is wired, carries `ParentLocationId`, and applies the identical guards — self-parent, cycle, same structure, exactly-one-level-below, single root. Verified line by line against `MoveLocationAsync`.
+
+### MedicalSelfService — 1 FALSE
+
+- `POST   api/medical/me/expense-claims/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### MyProfile — 1 FALSE
+
+- `POST   api/employee-portal/profile/change-requests/{}/evidence` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### PayComponents — 1 INTENTIONAL
+
+- `POST   api/hr/pay-components` — **INTENTIONAL**
+  <br>The endpoint's own summary reads 'Not supported — create the component in Payroll, then sync.' Payroll owns the component master.
+
+### SheControlledDocument — 1 FALSE
+
+- `POST   api/safety/documents/{}/versions` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### SheEnvironmentalCompliance — 1 FALSE
+
+- `POST   api/safety/environmental/permits/{}/document` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### StaffActingAppointments — 1 BUILD
+
+- `PUT    api/staff-acting-appointments/{}` — **BUILD**
+  <br>Create, complete, extend, convert and delete are wired; the plain edit is not. The one sub-type where update rather than delete is the missing half.
+
+### StaffPromotions — 1 BUILD
+
+- `DELETE api/staff-promotions/{}` — **BUILD**
+  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
+
+### StaffRequisitions — 1 FALSE
+
+- `POST   api/StaffRequisitions/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### StaffSecondments — 1 BUILD
+
+- `DELETE api/staff-secondments/{}` — **BUILD**
+  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
+
+### StaffTransfers — 1 BUILD
+
+- `DELETE api/staff-transfers/{}` — **BUILD**
+  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
+
+### StaffTravelCompliance — 1 BUILD
+
+- `POST   api/staff-travel/compliance/alert-notifications` — **BUILD**
+  <br>Same shape as the policy exception above: the alert list and its acknowledge action are wired, and `CreateAlertNotificationAsync` has no caller but this endpoint, so no alert can ever exist to acknowledge.
+
+### SuccessionDocuments — 1 BUILD
+
+- `POST   api/succession-documents/upload` — **BUILD**
+  <br>Built 2026-08-29 to clear D-14, and waiting for a caller. The one gated upload for all three owners — succession plan, plan candidate and talent-pool member — since one table and one DTO serve all three. Its download sibling is a GET and so is invisible to instrument 01.
+
+### TrainingCompletions — 1 BUILD
+
+- `POST   api/training-completions/bulk` — **BUILD**
+  <br>Already carried in section F from the demo feedback: bulk completion has no UI and no client method. Confirmed here against the route.
+
+### TrainingNominations — 1 BUILD
+
+- `POST   api/training-nominations/availability-check` — **BUILD**
+  <br>Already carried in section F: the availability check is never shown, so a nominee is scheduled against a clash the server would have reported.
+
+### UnitGoals — 1 FALSE
+
+- `POST   api/UnitGoals/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
 
 ## E. Fields no form can set (instrument 03)
 
@@ -767,7 +1285,7 @@ missing — the class an endpoint audit cannot see.
 | `UpdateEmployeeMedicalInsurancePolicyDto` | 1 of 10 | BenefitTierId |
 | `CreateNHISClaimDto` | 1 of 16 | LinkedMedicalClaimId |
 | `UpdateNHISClaimDto` | 1 of 13 | LinkedMedicalClaimId |
-| `CreateNHISClaimDocumentDto` | 1 of 4 | NHISClaimId |
+| `CreateNHISClaimDocumentDto` | 1 of 7 | NHISClaimId |
 | `CreateStaffActingAppointmentDto` | 1 of 11 | AllowanceCalculation |
 | `UpdateStaffActingAppointmentDto` | 1 of 6 | AllowanceCalculation |
 | `CreateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
@@ -822,8 +1340,19 @@ things absent from *both* sides, or present but wrong.
 
 Closed decisions. Listed so a future sweep does not re-open them.
 
+- **AppraisalCycleTarget** — Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired.
+- **AppraisalNotifications** — Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant.
+- **AppraisalWorkflow** — Checked 2026-08-29: they do. The appraisal screens move status through the named transitions on api/PerformanceAppraisals, each with its own preconditions.
+- **ConsultantClients** — Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired.
 - **HrLegacyFileMigration** — One-off ops tool, invoked by script.
+- **InterviewQuestionPreset** — Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows.
+- **Leaves** — Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route.
+- **Location** — Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync.
+- **PayComponents** — The endpoint's own summary says it: create the component in Payroll, then sync.
 - **Payroll** — Another team's module; HR integrates read-only.
+- **PeerNomination** — Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation.
+- **PositionCompetency** — Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set.
 - **SalaryGrades** — Decided 2026-08-28: read-only by intent — payroll owns the grade master.
 - **SalaryLevels** — Decided 2026-08-28: read-only by intent — payroll owns the grade master.
 - **SalaryNotches** — Decided 2026-08-28: read-only by intent — payroll owns the grade master.
+- **StaffMovements** — Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap.

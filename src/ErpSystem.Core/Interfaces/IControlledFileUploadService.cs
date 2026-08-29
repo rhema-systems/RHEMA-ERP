@@ -73,6 +73,19 @@ public static class ControlledFileUploadCategories
     public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
 
     /// <summary>
+    /// Documents on a succession plan, a plan candidate or a talent-pool member — assessment
+    /// reports, development plans, signed readiness reviews.
+    /// </summary>
+    /// <remarks>
+    /// One category for all three owners because one table and one DTO serve all three, and
+    /// because they are read by one permission family (<c>HrPermissions.Succession*</c>) rather
+    /// than by the medical or discipline desks. A succession document names a person as a
+    /// candidate to replace someone — frequently someone still in the post — so it is exactly the
+    /// kind of HR file that must not be servable from a path a caller chose.
+    /// </remarks>
+    public const string HrSuccessionDocuments = "hr-succession-documents";
+
+    /// <summary>
     /// Paperwork on an employee-relations case — the grievance statement as filed on paper, evidence
     /// gathered during an investigation, the investigation report itself, and FR-HR-181's final
     /// signed agreement.
@@ -221,6 +234,10 @@ public static class ControlledFileUploadCategories
                 // — so the upload fails with an InvalidOperationException that names neither the
                 // category nor the scan. Declaring the constant is half the job.
                 HrMedicalInsuranceProviderDocuments,
+                // Same reason again, one family further on: succession documents had the identical
+                // caller-supplied-path defect (D-14) and are registered here in the same commit
+                // that gives them an upload route, so the D-11 half-job cannot recur.
+                HrSuccessionDocuments,
                 HrAppraisalAttachments,
                 // A travel attachment is a passport scan, a visa letter or an invitation carrying
                 // a name, a number and an address. A tenant policy should not be able to permit

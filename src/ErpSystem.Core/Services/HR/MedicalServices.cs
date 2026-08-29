@@ -1730,14 +1730,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return entity.ToDto();
     }
 
-    public async Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(approveDto.PreAuthorizationId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{approveDto.PreAuthorizationId}' not found.");
 
-        approveDto.ApplyTo(entity);
+        approveDto.ApplyTo(entity, updatedByUserId);
 
         await _preAuthorizationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1747,14 +1747,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, CancellationToken cancellationToken = default)
+    public async Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(rejectDto.PreAuthorizationId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{rejectDto.PreAuthorizationId}' not found.");
 
-        rejectDto.ApplyTo(entity);
+        rejectDto.ApplyTo(entity, updatedByUserId);
 
         await _preAuthorizationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1847,14 +1847,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return entity.ToDto();
     }
 
-    public async Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _referralRepository.GetByIdAsync(statusDto.ReferralId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{statusDto.ReferralId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _referralRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1862,14 +1862,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _referralRepository.GetByIdAsync(completeDto.ReferralId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{completeDto.ReferralId}' not found.");
 
-        completeDto.ApplyTo(entity);
+        completeDto.ApplyTo(entity, updatedByUserId);
 
         await _referralRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1973,14 +1973,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return entity.ToDto();
     }
 
-    public async Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(statusDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{statusDto.AppointmentId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1988,14 +1988,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(cancelDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{cancelDto.AppointmentId}' not found.");
 
-        cancelDto.ApplyTo(entity);
+        cancelDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2005,14 +2005,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(checkInDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{checkInDto.AppointmentId}' not found.");
 
-        checkInDto.ApplyTo(entity);
+        checkInDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2020,14 +2020,14 @@ public class MedicalClinicalService : IMedicalClinicalService
         return true;
     }
 
-    public async Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByIdAsync(checkOutDto.AppointmentId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{checkOutDto.AppointmentId}' not found.");
 
-        checkOutDto.ApplyTo(entity);
+        checkOutDto.ApplyTo(entity, updatedByUserId);
 
         await _appointmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

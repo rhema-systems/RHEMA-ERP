@@ -213,8 +213,26 @@ public class TalentPoolsController : ControllerBase
         if (tenantId == null) return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
 
+
+        // D-14: a caller-supplied location let any HR user point a document row at arbitrary bytes
+        // on disk. Files arrive through the upload route, which puts them past the scanner into
+        // private storage; this route survives for the legacy migration utility and mints metadata
+        // only. Same guard, same wording, as staff-movement attachments and provider documents.
+        if (!string.IsNullOrWhiteSpace(dto.DocumentUrl) ||
+            dto.FileUploadRecordId.HasValue ||
+            dto.DocumentRecordId.HasValue ||
+            dto.DocumentVersionId.HasValue)
+        {
+            return BadRequest(new
+            {
+                message = "File locations cannot be supplied directly. " +
+                          "Use POST api/succession-documents/upload to attach a file."
+            });
+        }
+
         dto.TalentPoolMemberId = memberId;
-        var created = await _service.AddDocumentForMemberAsync(dto, tenantId.Value, employeeId.Value);
+        var created = await _service.AddDocumentForMemberAsync(
+            dto, tenantId.Value, employeeId.Value, uploadedByEmployeeId: employeeId.Value);
         return CreatedAtAction(nameof(GetDocuments), new { memberId }, created);
     }
 

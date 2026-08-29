@@ -2122,6 +2122,17 @@ public class NHISClaimDocumentDto : BaseDto
     public Guid NHISClaimId { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Set on a row that came through the controlled boundary. A client uses this to tell a
+    /// downloadable document from a legacy row whose <c>FilePath</c> names a file the server never
+    /// received: offer the download only when it is set.
+    /// </summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
+
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
 }
@@ -2132,8 +2143,24 @@ public class CreateNHISClaimDocumentDto : CreateDtoBase
     public Guid NHISClaimId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+
+    /// <summary>
+    /// Legacy storage path, no longer required and refused when an API caller supplies it — see
+    /// the controller. Files arrive through <c>POST nhis-claims/documents/upload</c>, which puts
+    /// them past the malware scanner into private storage and fills the three ids below instead.
+    /// </summary>
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [MaxLength(500)]
     public string? Description { get; set; }
 }

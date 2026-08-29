@@ -1431,9 +1431,26 @@ public class NHISClaimDocument : TenantEntity
     [MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Legacy storage path. Required on the create DTO and stored verbatim - the FIFTH instance of
+    /// the path-injection sink in the medical module, after <see cref="MedicalExpenseDocument"/>,
+    /// <see cref="EmployeeMedicalExamDocument"/> and <see cref="MedicalInsuranceProviderDocument"/>
+    /// were each fixed for it (D-10, D-14). Files now arrive through
+    /// <c>POST api/nhis-claims/documents/upload</c> and this stays empty on new rows. Kept
+    /// non-nullable so existing rows are untouched.
+    /// </summary>
     [Required]
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [MaxLength(500)]
     public string? Description { get; set; }

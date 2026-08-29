@@ -210,8 +210,8 @@ public interface IMedicalClinicalService
     Task<IEnumerable<MedicalClaimPreAuthorizationSummaryDto>> GetPendingPreAuthorizationsAsync(CancellationToken cancellationToken = default);
     Task<MedicalClaimPreAuthorizationDto> CreatePreAuthorizationAsync(CreateMedicalClaimPreAuthorizationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalClaimPreAuthorizationDto> UpdatePreAuthorizationAsync(UpdateMedicalClaimPreAuthorizationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, CancellationToken cancellationToken = default);
-    Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, CancellationToken cancellationToken = default);
+    Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeletePreAuthorizationAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Referral
@@ -222,8 +222,8 @@ public interface IMedicalClinicalService
     Task<IEnumerable<MedicalReferralSummaryDto>> GetPendingReferralsAsync(CancellationToken cancellationToken = default);
     Task<MedicalReferralDto> CreateReferralAsync(CreateMedicalReferralDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalReferralDto> UpdateReferralAsync(UpdateMedicalReferralDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, CancellationToken cancellationToken = default);
+    Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteReferralAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Appointment
@@ -234,10 +234,10 @@ public interface IMedicalClinicalService
     Task<IEnumerable<MedicalAppointmentSummaryDto>> GetUpcomingAppointmentsAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<MedicalAppointmentDto> CreateAppointmentAsync(CreateMedicalAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalAppointmentDto> UpdateAppointmentAsync(UpdateMedicalAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, CancellationToken cancellationToken = default);
-    Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, CancellationToken cancellationToken = default);
-    Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, CancellationToken cancellationToken = default);
+    Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAppointmentAsync(Guid id, CancellationToken cancellationToken = default);
 }
 

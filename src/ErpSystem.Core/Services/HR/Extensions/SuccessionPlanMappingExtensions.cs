@@ -756,6 +756,9 @@ public static class SuccessionPlanMappingExtensions
             DocumentName = entity.DocumentName,
             DocumentType = entity.DocumentType,
             DocumentUrl = entity.DocumentUrl,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId,
             Description = entity.Description,
             CandidateId = entity.CandidateId,
             CandidateEmployeeName = entity.Candidate?.Employee?.FullName,
@@ -771,7 +774,14 @@ public static class SuccessionPlanMappingExtensions
         };
     }
 
-    public static SuccessionDocument ToEntity(this CreateSuccessionDocumentDto dto, Guid tenantId, Guid userId)
+    /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee. <c>UploadedById</c> is an <c>Employee</c> FK the screens
+    /// render as "Uploaded by", and it used to be copied from the request body while the token's
+    /// id went only to <c>CreatedBy</c> — so a document could be attributed to a colleague. It is
+    /// a parameter rather than a DTO field precisely so it cannot be asserted by a caller.
+    /// </param>
+    public static SuccessionDocument ToEntity(
+        this CreateSuccessionDocumentDto dto, Guid tenantId, Guid userId, Guid uploadedByEmployeeId)
     {
         return new SuccessionDocument
         {
@@ -782,9 +792,12 @@ public static class SuccessionPlanMappingExtensions
             DocumentName = dto.DocumentName,
             DocumentType = dto.DocumentType,
             DocumentUrl = dto.DocumentUrl,
+            FileUploadRecordId = dto.FileUploadRecordId,
+            DocumentRecordId = dto.DocumentRecordId,
+            DocumentVersionId = dto.DocumentVersionId,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
-            UploadedById = dto.UploadedById,
+            UploadedById = uploadedByEmployeeId,
             FileSizeBytes = dto.FileSizeBytes,
             FileHash = dto.FileHash,
             IsConfidential = dto.IsConfidential,

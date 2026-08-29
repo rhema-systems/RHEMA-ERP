@@ -1044,6 +1044,17 @@ public class SuccessionDocumentDto : BaseDto
     public DateTime UploadDate { get; set; }
     public Guid UploadedById { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Set on a row that came through the controlled boundary. A client uses this to tell a
+    /// downloadable document from a legacy row whose <c>DocumentUrl</c> names a file the server
+    /// never received: offer the download only when it is set.
+    /// </summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
+
     public long FileSizeBytes { get; set; }
     public string? FileHash { get; set; }
     public bool IsConfidential { get; set; }
@@ -1064,15 +1075,31 @@ public class CreateSuccessionDocumentDto : CreateDtoBase
     [MaxLength(100)]
     public string DocumentType { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// Legacy storage location, no longer required and refused when an API caller supplies it —
+    /// see the controllers. Files arrive through <c>POST api/succession-documents/upload</c>,
+    /// which puts them past the malware scanner into private storage and fills the three ids
+    /// below instead.
+    /// </summary>
     [MaxLength(1000)]
     public string DocumentUrl { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    [Required]
-    public Guid UploadedById { get; set; }
+    // D-15: UploadedById was [Required] here and copied straight onto the entity's Employee FK
+    // while the token's id went only to CreatedBy — so the person recorded as having produced a
+    // succession document was whoever the client said. It is now stamped by the service from the
+    // authenticated employee and has no place in the request body.
 
     public long FileSizeBytes { get; set; }
 
