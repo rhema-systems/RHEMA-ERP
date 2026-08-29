@@ -75,6 +75,72 @@ public sealed class ProcurementRequisitionLinkageServiceTests
     }
 
     [Fact]
+    public async Task FutureEffectiveApprovedBudgetCanBeLinkedWhileRequisitionRemainsDraft()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Budget.Status = "Approved";
+        references.Budget.EffectiveDate = DateTime.UtcNow.Date.AddDays(3);
+        await fixture.Context.SaveChangesAsync();
+        var requisition = fixture.NewRequisition();
+
+        await fixture.Service.PrepareAsync(requisition, new SavePurchaseRequisitionLinkageRequest
+        {
+            SourcePlanItemId = references.PlanItem.Id,
+            RequisitionType = PurchaseRequisitionType.StockReplenishment
+        }, "trace-future-budget-draft");
+
+        requisition.Status.Should().Be("Draft");
+        requisition.BudgetId.Should().Be(references.Budget.Id);
+        requisition.BudgetCode.Should().Be(references.Budget.BudgetCode);
+        requisition.Currency.Should().Be(references.Budget.Currency);
+    }
+
+    [Fact]
+    public async Task ExpiredPlanBudgetCannotBeLinkedToANewDraft()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Budget.ExpiryDate = DateTime.UtcNow.AddMinutes(-1);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(
+            fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            },
+            "trace-expired-plan-budget");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_BUDGET_EXPIRED" &&
+                                exception.Message.Contains(references.Budget.BudgetCode));
+    }
+
+    [Fact]
+    public async Task UnapprovedPlanBudgetCannotBeLinkedToANewDraft()
+    {
+        await using var fixture = new Fixture();
+        var references = fixture.SeedReferences();
+        references.Budget.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.PrepareAsync(
+            fixture.NewRequisition(),
+            new SavePurchaseRequisitionLinkageRequest
+            {
+                SourcePlanItemId = references.PlanItem.Id,
+                RequisitionType = PurchaseRequisitionType.StockReplenishment
+            },
+            "trace-unapproved-plan-budget");
+
+        await action.Should().ThrowAsync<ProcurementRequisitionLinkageConflictException>()
+            .Where(exception => exception.Code == "PLAN_BUDGET_NOT_APPROVED" &&
+                                exception.Message.Contains(references.Budget.BudgetCode));
+    }
+
+    [Fact]
     public async Task PlanItemPrefersDepartmentAccountingCodeForCostCenter()
     {
         await using var fixture = new Fixture();

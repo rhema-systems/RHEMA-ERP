@@ -275,6 +275,10 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
 
         readiness.CanReserve.Should().BeFalse();
         readiness.DecisionCode.Should().Be("PR_BUDGET_NOT_EFFECTIVE");
+        readiness.Message.Should().Contain(budget.BudgetCode).And.Contain("becomes effective on");
+        readiness.Message.Should().Contain("Draft can be prepared now");
+        readiness.RequiredActions.Should().ContainSingle()
+            .Which.Should().Contain("Submit on or after");
     }
 
     [Fact]

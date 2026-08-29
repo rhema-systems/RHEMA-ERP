@@ -248,12 +248,18 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
             throw new ProcurementRequisitionLinkageValidationException(
                 "PLAN_BUDGET_DEPARTMENT_MISMATCH", "The plan item budget does not belong to the procurement plan department.");
         if (sourcePlanItem is not null && budget is not null &&
-            (!string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
-             !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
-             budget.EffectiveDate.HasValue && budget.EffectiveDate.Value > now ||
-             budget.ExpiryDate.HasValue && budget.ExpiryDate.Value < now))
+            !string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase))
             throw new ProcurementRequisitionLinkageConflictException(
-                "PLAN_BUDGET_NOT_EFFECTIVE", "The selected plan item budget is not approved and effective for new requisitions.");
+                "PLAN_BUDGET_NOT_APPROVED",
+                $"Budget {budget.BudgetCode} is {budget.Status} and cannot be linked to a new requisition.");
+        // An approved future budget may be linked while the requisition remains a
+        // Draft. Submission re-evaluates the effective period before it can start
+        // approval or reserve any funds.
+        if (sourcePlanItem is not null && budget?.ExpiryDate is { } expiryDate && expiryDate < now)
+            throw new ProcurementRequisitionLinkageConflictException(
+                "PLAN_BUDGET_EXPIRED",
+                $"Budget {budget.BudgetCode} expired on {expiryDate:dd MMM yyyy} and cannot be linked to a new requisition.");
 
         var project = request.ProjectId.HasValue
             ? await Projects.GetQueryable(item => item.Id == request.ProjectId.Value && item.TenantId == tenantId && !item.IsDeleted)

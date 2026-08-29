@@ -614,11 +614,13 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
                 "Complete budget approval with approver and approval timestamp.");
         var now = DateTime.UtcNow;
         if (budget.EffectiveDate.HasValue && budget.EffectiveDate.Value > now)
-            return Block(result, "PR_BUDGET_NOT_EFFECTIVE", "The linked budget is not yet effective.",
-                "Use a currently effective approved budget.");
+            return Block(result, "PR_BUDGET_NOT_EFFECTIVE",
+                $"Budget {budget.BudgetCode} becomes effective on {budget.EffectiveDate.Value:dd MMM yyyy}. This Draft can be prepared now but cannot be submitted or reserve funds before then.",
+                $"Submit on or after {budget.EffectiveDate.Value:dd MMM yyyy}, or link an approved budget revision that is already effective.");
         if (budget.ExpiryDate.HasValue && budget.ExpiryDate.Value < now)
-            return Block(result, "PR_BUDGET_EXPIRED", "The linked budget has expired.",
-                "Use a currently effective approved budget.");
+            return Block(result, "PR_BUDGET_EXPIRED",
+                $"Budget {budget.BudgetCode} expired on {budget.ExpiryDate.Value:dd MMM yyyy}.",
+                "Link an approved budget revision that is currently effective.");
         if (!string.Equals(budget.Currency, requisition.Currency, StringComparison.OrdinalIgnoreCase))
             return Block(result, "PR_BUDGET_CURRENCY_MISMATCH",
                 $"Budget currency {budget.Currency} does not match requisition currency {requisition.Currency}.",
