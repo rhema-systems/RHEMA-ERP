@@ -41,6 +41,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 {
     private readonly Guid? _tenantId;
 
+    // Referenced directly by global query-filter expressions so EF binds the
+    // value per DbContext instance instead of caching the first tenant Guid in
+    // the shared model.
+    private Guid? CurrentTenantId => _tenantId;
+
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {
     }
@@ -8091,12 +8096,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             // EF Core supports only one query filter per entity. Multiple calls to HasQueryFilter overwrite.
             // Because TenantEntity inherits BaseEntity, we must apply a single combined filter when tenant scoping is enabled,
             // otherwise the tenant filter would override the soft delete filter (and soft-deleted records will reappear).
-            if (typeof(TenantEntity).IsAssignableFrom(type) && _tenantId.HasValue)
+            if (typeof(TenantEntity).IsAssignableFrom(type))
             {
                 var method = typeof(ApplicationDbContext)
-                    .GetMethod(nameof(SetTenantSoftDeleteFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                    .GetMethod(nameof(SetTenantSoftDeleteFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                     .MakeGenericMethod(type);
-                method.Invoke(null, new object[] { builder, entityType, _tenantId.Value });
+                method.Invoke(this, new object[] { builder, entityType });
                 continue;
             }
 
@@ -8592,10 +8597,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<TEntity>().HasQueryFilter(e => !e.IsDeleted);
     }
 
-    private static void SetTenantSoftDeleteFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType, Guid tenantId)
+    private void SetTenantSoftDeleteFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType)
         where TEntity : TenantEntity
     {
-        builder.Entity<TEntity>().HasQueryFilter(e => !e.IsDeleted && e.TenantId == tenantId);
+        builder.Entity<TEntity>().HasQueryFilter(e =>
+            !e.IsDeleted &&
+            (!CurrentTenantId.HasValue ||
+             e.TenantId == CurrentTenantId.GetValueOrDefault()));
     }
 
     private void SeedData(ModelBuilder builder)
@@ -9592,7 +9600,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasTrigger("TR_ProcurementBudgetCommitments_NoDelete");
                 table.HasTrigger("TR_ProcurementBudgetCommitments_TenantAndEvidenceGuard");
                 table.HasTrigger("TR_ProcurementBudgetCommitments_LifecycleGuard");
-                table.HasCheckConstraint("CK_ProcurementBudgetCommitments_Amount", "[ReservedAmount] > 0");
+                table.HasCheckConstraint(
+                    "CK_ProcurementBudgetCommitments_Amount",
+                    "([Status] = 2 AND [ReservedAmount] >= 0) OR ([Status] IN (1, 3) AND [ReservedAmount] > 0)");
                 table.HasCheckConstraint("CK_ProcurementBudgetCommitments_Sequence", "[ReservationSequence] > 0");
                 table.HasCheckConstraint("CK_ProcurementBudgetCommitments_Status", "[Status] IN (1, 2, 3)");
             });

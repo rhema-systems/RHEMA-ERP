@@ -44,6 +44,43 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
     }
 
     [Fact]
+    public void AwardAvailabilitySubtractsOtherRequisitionReservationsAndAddsBackOnlyCurrentEnvelope()
+    {
+        var otherRequisitionReserved =
+            ProcurementPurchaseOrderSourceService.CalculateAwardBudgetAvailability(
+                allocatedAmount: 100m,
+                utilizedAmount: 0m,
+                committedAmount: 0m,
+                reservedAmount: 70m,
+                currentRequisitionReservation: 0m);
+
+        otherRequisitionReserved.Should().Be(30m);
+        var blocked = () =>
+            ProcurementPurchaseOrderSourceService.EnsureAwardBudgetExposure(
+                otherRequisitionReserved,
+                requiredExposure: 50m,
+                currencyCode: "GHS");
+        blocked.Should().Throw<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(exception => exception.Code == "PO_BUDGET_INSUFFICIENT_FOR_AWARD");
+
+        var currentEnvelopeReusable =
+            ProcurementPurchaseOrderSourceService.CalculateAwardBudgetAvailability(
+                allocatedAmount: 100m,
+                utilizedAmount: 0m,
+                committedAmount: 0m,
+                reservedAmount: 70m,
+                currentRequisitionReservation: 20m);
+
+        currentEnvelopeReusable.Should().Be(50m);
+        Action reusable = () =>
+            ProcurementPurchaseOrderSourceService.EnsureAwardBudgetExposure(
+                currentEnvelopeReusable,
+                requiredExposure: 50m,
+                currencyCode: "GHS");
+        reusable.Should().NotThrow();
+    }
+
+    [Fact]
     public async Task AwardedReleaseOnlyRfqResolvesAndAppliesWithoutSourcingCase()
     {
         var tenantId = Guid.NewGuid();
@@ -140,6 +177,7 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
             access.Object,
             controlEvents.Object,
             new Mock<IProcurementRequisitionBudgetControlService>().Object,
+            new Mock<IProcurementBudgetReservationStore>().Object,
             new Mock<INotificationTopicPublisher>().Object,
             NullLogger<ProcurementPurchaseOrderSourceService>.Instance);
 
@@ -315,6 +353,7 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
             access.Object,
             controlEvents.Object,
             new Mock<IProcurementRequisitionBudgetControlService>().Object,
+            new Mock<IProcurementBudgetReservationStore>().Object,
             new Mock<INotificationTopicPublisher>().Object,
             NullLogger<ProcurementPurchaseOrderSourceService>.Instance);
 

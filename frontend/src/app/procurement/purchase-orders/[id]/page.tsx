@@ -52,6 +52,7 @@ import {
 } from '@/services/purchasingService';
 import { PurchaseOrderComplianceGate } from '@/components/procurement/PurchaseOrderComplianceGate';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
+import { PurchaseOrderBudgetCommitment } from '@/components/procurement/PurchaseOrderBudgetCommitment';
 import { PurchaseOrderAmendmentWorkspace } from '@/components/procurement/PurchaseOrderAmendmentWorkspace';
 import { format } from 'date-fns';
 import Link from 'next/link';
@@ -402,6 +403,11 @@ export default function PurchaseOrderDetailPage() {
             status={order.status}
             onReadinessChange={setSodReadiness}
           />
+          {order.budgetCommitment && (
+            <PurchaseOrderBudgetCommitment
+              commitment={order.budgetCommitment}
+            />
+          )}
 
           {/* Order Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

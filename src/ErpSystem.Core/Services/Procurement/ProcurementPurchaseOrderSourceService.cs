@@ -27,6 +27,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementRequisitionBudgetControlService _budgetControl;
+    private readonly IProcurementBudgetReservationStore _budgetReservationStore;
     private readonly INotificationTopicPublisher _notificationTopics;
     private readonly ILogger<ProcurementPurchaseOrderSourceService> _logger;
 
@@ -36,6 +37,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         IProcurementAccessControlService accessControl,
         IProcurementControlEventService controlEvents,
         IProcurementRequisitionBudgetControlService budgetControl,
+        IProcurementBudgetReservationStore budgetReservationStore,
         INotificationTopicPublisher notificationTopics,
         ILogger<ProcurementPurchaseOrderSourceService> logger)
     {
@@ -44,6 +46,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         _accessControl = accessControl;
         _controlEvents = controlEvents;
         _budgetControl = budgetControl;
+        _budgetReservationStore = budgetReservationStore;
         _notificationTopics = notificationTopics;
         _logger = logger;
     }
@@ -326,6 +329,34 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 cancellationToken);
             throw;
         }
+    }
+
+    public async Task AuthorizeDraftCancellationAsync(
+        PurchaseOrder purchaseOrder,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_currentUser.IsAuthenticated || _currentUser.IsExternalUser ||
+            _currentUser.TenantId == Guid.Empty || _currentUser.UserId == Guid.Empty ||
+            purchaseOrder.TenantId != _currentUser.TenantId)
+            throw new ProcurementPurchaseOrderSourceAuthorizationException(
+                "An authenticated internal user in the purchase order tenant is required.");
+        if (purchaseOrder.CreatedById != _currentUser.UserId)
+            throw new ProcurementPurchaseOrderSourceAuthorizationException(
+                "Only the user who created this draft purchase order can cancel it through the generic status route.");
+
+        var decision = await _accessControl.EnforceCapabilityAsync(
+            new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = Permission,
+                SourceType = "PurchaseOrder",
+                SourceReference = purchaseOrder.OrderNumber
+            },
+            NormalizeCorrelation(correlationId),
+            cancellationToken);
+        if (decision is null || !decision.Allowed)
+            throw new ProcurementPurchaseOrderSourceAuthorizationException(
+                decision?.Message ?? "The current user cannot manage purchase orders.");
     }
 
     public async Task<ProcurementPurchaseOrderSourceResolution> EvaluateCurrentAsync(
@@ -652,7 +683,29 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 "PO_BUDGET_TRANSACTION_REQUIRED",
                 "The purchase-order budget commitment must be created inside the final approval transaction.");
 
+        // Always revalidate the immutable source, supplier, commercial lines,
+        // and integrity hash. A successful replay may bypass only current
+        // budget eligibility, because the budget can legitimately expire or
+        // close after the original atomic approval committed.
         var source = await EvaluateCurrentAsync(purchaseOrder, cancellationToken);
+        if (await HasIdempotentPurchaseOrderExposureAsync(
+                purchaseOrder,
+                cancellationToken))
+            return;
+        if (purchaseOrder.ContractId.HasValue)
+        {
+            var formalContractCommitmentExists = await _unitOfWork
+                .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                    item.SourceType == "Contract" &&
+                    item.SourceId == purchaseOrder.ContractId.Value &&
+                    !item.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (formalContractCommitmentExists)
+                return;
+        }
         await EnsureBudgetCommitmentAsync(
             source,
             purchaseOrder.TotalAmount,
@@ -1777,11 +1830,12 @@ public sealed class ProcurementPurchaseOrderSourceService :
             .AsNoTracking()
             .Select(item => (decimal?)item.ReservedAmount)
             .SingleOrDefaultAsync(cancellationToken) ?? 0m;
-        var availableForAward = decimal.Round(
-            budget.AllocatedAmount - budget.UtilizedAmount -
-            budget.CommittedAmount + existingReservation,
-            2,
-            MidpointRounding.AwayFromZero);
+        var availableForAward = CalculateAwardBudgetAvailability(
+            budget.AllocatedAmount,
+            budget.UtilizedAmount,
+            budget.CommittedAmount,
+            budget.ReservedAmount,
+            existingReservation);
         EnsureAwardBudgetExposure(
             availableForAward,
             requiredExposure,
@@ -1806,21 +1860,70 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ?? throw Invalid("PO_BUDGET_SOURCING_RELEASE_NOT_FOUND",
                 "The approved sourcing release and budget commitment were not found in the current tenant.");
 
-        var priorExposure = await PurchaseOrders.GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId &&
-                item.SourceRequisitionId == source.PurchaseRequisitionId &&
-                item.Id != purchaseOrderId &&
-                !item.IsDeleted &&
-                item.Status != "Cancelled" &&
-                item.Status != "Rejected")
-            .Select(item => (decimal?)item.TotalAmount)
-            .SumAsync(cancellationToken) ?? 0m;
-        var requiredExposure = decimal.Round(
-            priorExposure + totalAmount, 2, MidpointRounding.AwayFromZero);
         var requisition = release.PurchaseRequisition
             ?? throw Invalid(
                 "PO_APPROVED_REQUISITION_NOT_FOUND",
                 "The sourcing release no longer identifies its approved requisition.");
+        if (!requisition.BudgetId.HasValue)
+            throw Invalid(
+                "PO_BUDGET_NOT_FOUND",
+                "The approved requisition no longer identifies its procurement budget.");
+
+        _ = await _budgetReservationStore.GetBudgetForUpdateAsync(
+                _currentUser.TenantId,
+                requisition.BudgetId.Value,
+                cancellationToken)
+            ?? throw Invalid(
+                "PO_BUDGET_NOT_FOUND",
+                "The linked approved procurement budget is unavailable.");
+
+        if (await HasIdempotentPurchaseOrderExposureAsync(
+                purchaseOrderId,
+                requisition.Id,
+                totalAmount,
+                currencyCode ?? source.CurrencyCode,
+                cancellationToken))
+            return;
+
+        var committedExposure = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var releasedFormalExposure = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                item.FormalCommitmentEntryId != null &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var directPurchaseOrderIds = _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == "PurchaseOrder" &&
+                !item.IsDeleted)
+            .Select(item => item.SourceId);
+        var approvedAdjustmentExposure = await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                directPurchaseOrderIds.Contains(item.PurchaseOrderId) &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+        var requiredExposure = decimal.Round(
+            committedExposure - releasedFormalExposure +
+            approvedAdjustmentExposure + totalAmount,
+            2,
+            MidpointRounding.AwayFromZero);
         PurchaseRequisitionBudgetReadinessDto readiness;
         try
         {
@@ -1898,6 +2001,81 @@ public sealed class ProcurementPurchaseOrderSourceService :
             throw Invalid(result.Code, result.Message);
     }
 
+    private Task<bool> HasIdempotentPurchaseOrderExposureAsync(
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken)
+    {
+        if (!purchaseOrder.SourceRequisitionId.HasValue)
+            return Task.FromResult(false);
+
+        return HasIdempotentPurchaseOrderExposureAsync(
+            purchaseOrder.Id,
+            purchaseOrder.SourceRequisitionId.Value,
+            purchaseOrder.TotalAmount,
+            purchaseOrder.Currency,
+            cancellationToken);
+    }
+
+    private async Task<bool> HasIdempotentPurchaseOrderExposureAsync(
+        Guid purchaseOrderId,
+        Guid purchaseRequisitionId,
+        decimal amount,
+        string currency,
+        CancellationToken cancellationToken)
+    {
+        var entries = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceType == "PurchaseOrder" &&
+                item.SourceId == purchaseOrderId &&
+                (item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment ||
+                 item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation) &&
+                !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (entries.Count == 0)
+            return false;
+        if (entries.Count != 1)
+            throw Invalid(
+                "PO_BUDGET_IDEMPOTENCY_CONFLICT",
+                "The purchase order has conflicting formal budget exposure entries.");
+
+        var existing = entries[0];
+        var adjustments = await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseOrderId == purchaseOrderId &&
+                !item.IsDeleted)
+            .OrderBy(item => item.Sequence)
+            .ToListAsync(cancellationToken);
+        if (adjustments.Any(item =>
+                item.PurchaseRequisitionId != purchaseRequisitionId ||
+                item.BudgetCommitmentId != existing.ProcurementBudgetCommitmentId ||
+                !string.Equals(
+                    item.Currency?.Trim(),
+                    currency?.Trim(),
+                    StringComparison.OrdinalIgnoreCase)))
+            throw Invalid(
+                "PO_BUDGET_IDEMPOTENCY_CONFLICT",
+                "The purchase order has a commitment adjustment outside its immutable requisition, commitment, or currency lineage.");
+        var effectiveAmount = decimal.Round(
+            existing.Amount + adjustments.Sum(item => item.DeltaAmount),
+            2,
+            MidpointRounding.AwayFromZero);
+        if (existing.PurchaseRequisitionId != purchaseRequisitionId ||
+            effectiveAmount != decimal.Round(amount, 2, MidpointRounding.AwayFromZero) ||
+            !string.Equals(
+                existing.Currency?.Trim(),
+                currency?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            throw Invalid(
+                "PO_BUDGET_IDEMPOTENCY_CONFLICT",
+                "The purchase order was already committed with different requisition, amount, or currency values.");
+
+        return true;
+    }
+
     internal static void EnsureAwardBudgetExposure(
         decimal availableBudgetAmount,
         decimal requiredExposure,
@@ -1918,6 +2096,18 @@ public sealed class ProcurementPurchaseOrderSourceService :
             "PO_BUDGET_INSUFFICIENT_FOR_AWARD",
             $"The selected awarded exposure {required:N2} {currency} exceeds the linked approved budget availability {available:N2} {currency} by {shortfall:N2} {currency}. Revise the award or complete an approved budget adjustment before proceeding.");
     }
+
+    internal static decimal CalculateAwardBudgetAvailability(
+        decimal allocatedAmount,
+        decimal utilizedAmount,
+        decimal committedAmount,
+        decimal reservedAmount,
+        decimal currentRequisitionReservation) =>
+        decimal.Round(
+            allocatedAmount - utilizedAmount - committedAmount -
+            reservedAmount + currentRequisitionReservation,
+            2,
+            MidpointRounding.AwayFromZero);
 
     private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
         ResolveSourceLinkAsync(

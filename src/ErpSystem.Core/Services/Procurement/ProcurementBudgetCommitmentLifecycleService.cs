@@ -35,6 +35,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
     public async Task<ProcurementBudgetCommitmentLedgerEntry> CommitPurchaseOrderAsync(
         PurchaseOrder purchaseOrder, string correlationId, CancellationToken cancellationToken = default)
     {
+        EnsureContextAndTransaction();
         EnsureSourceTenant(purchaseOrder.TenantId);
         if (!purchaseOrder.SourceRequisitionId.HasValue)
             throw Error("PO_BUDGET_REQUISITION_REQUIRED", "The approved purchase order has no source purchase requisition.");
@@ -46,6 +47,21 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
         if (!purchaseOrderExists)
             throw Error("BUDGET_LIFECYCLE_SOURCE_NOT_FOUND",
                 "The purchase order source is unavailable in the current tenant.");
+
+        var idempotentReplay = await FindEntryAsync(
+            ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+            PurchaseOrderSource,
+            purchaseOrder.Id,
+            cancellationToken);
+        if (idempotentReplay is not null)
+        {
+            await EnsurePurchaseOrderIdempotentAsync(
+                idempotentReplay,
+                purchaseOrder,
+                cancellationToken);
+            return idempotentReplay;
+        }
+
         if (purchaseOrder.ContractId.HasValue)
         {
             var contractCommitment = await FindEntryAsync(
@@ -98,6 +114,253 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
         UtilizeAsync(ContractSource, contractId, CertificateSource, certificateId,
             certificateReference, amount, correlationId, cancellationToken);
 
+    public async Task<ProcurementBudgetCommitmentLedgerEntry?> ReleaseUnusedContractAsync(
+        Guid contractId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureContextAndTransaction();
+        var contract = await _unitOfWork.Repository<Contract>()
+            .GetQueryable(item =>
+                item.Id == contractId &&
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Error(
+                "BUDGET_LIFECYCLE_SOURCE_NOT_FOUND",
+                "The contract source is unavailable in the current tenant.");
+        var formal = await FindEntryAsync(
+            ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+            ContractSource,
+            contractId,
+            cancellationToken);
+        if (formal is null)
+            return null;
+
+        var existing = await FindEntryAsync(
+            ProcurementBudgetCommitmentLedgerEntryType.Release,
+            ContractSource,
+            contractId,
+            cancellationToken);
+        if (existing is not null)
+        {
+            EnsureContractReleaseIdempotent(existing, formal);
+            return existing;
+        }
+
+        var budget = await _reservationStore.GetBudgetForUpdateAsync(
+                _currentUser.TenantId,
+                formal.ProcurementBudgetId,
+                cancellationToken)
+            ?? throw Error(
+                "BUDGET_NOT_FOUND",
+                "The committed procurement budget is unavailable.");
+
+        existing = await FindEntryAsync(
+            ProcurementBudgetCommitmentLedgerEntryType.Release,
+            ContractSource,
+            contractId,
+            cancellationToken);
+        if (existing is not null)
+        {
+            EnsureContractReleaseIdempotent(existing, formal);
+            return existing;
+        }
+
+        await EnsureContractAllocationsFullyUtilizedAsync(formal, cancellationToken);
+
+        var utilized = await Ledger.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.FormalCommitmentEntryId == formal.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Utilization &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        if (utilized > formal.Amount)
+            throw Error(
+                "CONTRACT_BUDGET_UTILIZATION_EXCEEDED",
+                "Contract utilization exceeds its immutable formal commitment.");
+
+        var unused = decimal.Round(
+            formal.Amount - utilized,
+            2,
+            MidpointRounding.AwayFromZero);
+        if (unused == 0m)
+        {
+            // Utilization alone cannot close the shared requisition envelope:
+            // another PO may still be awarded under the same approved PR. The
+            // governed contract-close boundary is the explicit terminal event.
+            var fullyUtilizedCommitment = await Commitments.GetQueryable(item =>
+                    item.Id == formal.ProcurementBudgetCommitmentId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    !item.IsDeleted)
+                .SingleAsync(cancellationToken);
+            if (fullyUtilizedCommitment.Status == ProcurementBudgetCommitmentStatus.Reserved &&
+                fullyUtilizedCommitment.ReservedAmount <= fullyUtilizedCommitment.UtilizedAmount)
+            {
+                var closedAt = DateTime.UtcNow;
+                fullyUtilizedCommitment.Status = ProcurementBudgetCommitmentStatus.Consumed;
+                fullyUtilizedCommitment.ConsumedAtUtc = closedAt;
+                fullyUtilizedCommitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
+                fullyUtilizedCommitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
+                fullyUtilizedCommitment.BudgetCommittedAfter = budget.CommittedAmount;
+                fullyUtilizedCommitment.BudgetReservedAfter = budget.ReservedAmount;
+                fullyUtilizedCommitment.BudgetAvailableAfter = budget.RemainingAmount;
+                fullyUtilizedCommitment.UpdatedAt = closedAt;
+                await _reservationStore.SetContractReleaseContextAsync(
+                    contract.Id,
+                    cancellationToken);
+                try
+                {
+                    await Commitments.UpdateAsync(fullyUtilizedCommitment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                finally
+                {
+                    await _reservationStore.SetContractReleaseContextAsync(
+                        null,
+                        cancellationToken);
+                }
+            }
+            return null;
+        }
+        if (budget.CommittedAmount < unused)
+            throw Error(
+                "BUDGET_COMMITTED_BALANCE_MISMATCH",
+                "The procurement budget committed balance does not cover the unused contract commitment.");
+
+        var commitment = await Commitments.GetQueryable(item =>
+                item.Id == formal.ProcurementBudgetCommitmentId &&
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted)
+            .SingleAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        var release = NewEntry(
+            commitment,
+            ProcurementBudgetCommitmentLedgerEntryType.Release,
+            ContractSource,
+            contract.Id,
+            contract.ContractNumber,
+            unused,
+            formal.Currency,
+            correlationId,
+            now);
+        release.FormalCommitmentEntryId = formal.Id;
+
+        // Persist the immutable reversal evidence first inside the same
+        // transaction so the guarded aggregate update can prove its exact
+        // formal-contract lineage. A later failure still rolls both back.
+        await Ledger.AddAsync(release);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        budget.CommittedAmount -= unused;
+        budget.RemainingAmount = Available(budget);
+        budget.UpdatedAt = now;
+        commitment.ReservedAmount = decimal.Round(
+            Math.Max(0m, commitment.ReservedAmount - unused),
+            2,
+            MidpointRounding.AwayFromZero);
+        commitment.FormallyCommittedAmount = decimal.Round(
+            Math.Max(0m, commitment.FormallyCommittedAmount - unused),
+            2,
+            MidpointRounding.AwayFromZero);
+        if (commitment.ReservedAmount == 0m)
+        {
+            commitment.Status = ProcurementBudgetCommitmentStatus.Released;
+            commitment.ReleasedAtUtc = now;
+            commitment.ReleasedById = _currentUser.UserId;
+            commitment.ReleasedByName = ActorName();
+            commitment.ReleaseReason = "Unused formal contract commitment released at governed Works closeout.";
+            commitment.ConsumedAtUtc = null;
+        }
+        else if (commitment.ReservedAmount <= commitment.UtilizedAmount)
+        {
+            commitment.Status = ProcurementBudgetCommitmentStatus.Consumed;
+            commitment.ConsumedAtUtc ??= now;
+        }
+        commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
+        commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
+        commitment.BudgetCommittedAfter = budget.CommittedAmount;
+        commitment.BudgetReservedAfter = budget.ReservedAmount;
+        commitment.BudgetAvailableAfter = budget.RemainingAmount;
+        commitment.UpdatedAt = now;
+
+        await _reservationStore.SetContractReleaseContextAsync(
+            contract.Id,
+            cancellationToken);
+        try
+        {
+            await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
+            await Commitments.UpdateAsync(commitment);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            await _reservationStore.SetContractReleaseContextAsync(
+                null,
+                cancellationToken);
+        }
+        return release;
+    }
+
+    private async Task EnsureContractAllocationsFullyUtilizedAsync(
+        ProcurementBudgetCommitmentLedgerEntry formal,
+        CancellationToken cancellationToken)
+    {
+        var allocations = await Ledger.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.FormalCommitmentEntryId == formal.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        foreach (var allocation in allocations)
+        {
+            var adjustment = await _unitOfWork
+                .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseOrderId == allocation.SourceId &&
+                    item.PurchaseRequisitionId == formal.PurchaseRequisitionId &&
+                    item.BudgetCommitmentId == formal.ProcurementBudgetCommitmentId &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+            var effectiveAllocation = decimal.Round(
+                allocation.Amount + adjustment,
+                2,
+                MidpointRounding.AwayFromZero);
+            if (effectiveAllocation < 0m)
+                throw Error(
+                    "CONTRACT_CHILD_PO_ALLOCATION_INVALID",
+                    $"Purchase order allocation {allocation.SourceReference} has an invalid negative effective amount.");
+
+            var receiptIds = _unitOfWork.Repository<PurchaseOrderReceipt>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseOrderId == allocation.SourceId &&
+                    !item.IsDeleted)
+                .Select(item => item.Id);
+            var utilized = await Ledger.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.FormalCommitmentEntryId == formal.Id &&
+                    item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Utilization &&
+                    item.SourceType == ReceiptSource &&
+                    receiptIds.Contains(item.SourceId) &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+            utilized = decimal.Round(utilized, 2, MidpointRounding.AwayFromZero);
+            if (utilized > effectiveAllocation)
+                throw Error(
+                    "CONTRACT_CHILD_PO_ALLOCATION_UTILIZATION_EXCEEDED",
+                    $"Purchase order allocation {allocation.SourceReference} is utilized above its effective allocation.");
+            if (utilized < effectiveAllocation)
+                throw Error(
+                    "CONTRACT_CHILD_PO_ALLOCATION_OUTSTANDING",
+                    $"Purchase order {allocation.SourceReference} still has {effectiveAllocation - utilized:0.00} {allocation.Currency} of unutilized contract allocation. Complete its governed receipt/utilization lifecycle before closing the contract.");
+        }
+    }
+
     private async Task<ProcurementBudgetCommitmentLedgerEntry> CommitAsync(
         Guid requisitionId, string sourceType, Guid sourceId, string sourceReference,
         decimal amount, string currency, string correlationId, CancellationToken cancellationToken)
@@ -128,6 +391,30 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
                 item.ProcurementBudgetCommitmentId == commitment.Id && !item.IsDeleted &&
                 item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment)
             .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var releasedFormalCommitments = await Ledger.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProcurementBudgetCommitmentId == commitment.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                item.FormalCommitmentEntryId != null &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var directPurchaseOrderIds = Ledger.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProcurementBudgetCommitmentId == commitment.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == PurchaseOrderSource &&
+                !item.IsDeleted)
+            .Select(item => item.SourceId);
+        var directPurchaseOrderAdjustments = await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.BudgetCommitmentId == commitment.Id &&
+                directPurchaseOrderIds.Contains(item.PurchaseOrderId) &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+        alreadyCommitted = alreadyCommitted - releasedFormalCommitments +
+            directPurchaseOrderAdjustments;
         if (alreadyCommitted + amount > commitment.ReservedAmount)
             throw Error("BUDGET_RESERVATION_EXCEEDED", "Cumulative approved PO or contract exposure exceeds the purchase-requisition reservation.");
 
@@ -140,20 +427,48 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
         var now = DateTime.UtcNow;
         var entry = NewEntry(commitment, ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
             sourceType, sourceId, sourceReference, amount, currency, correlationId, now);
-        budget.ReservedAmount -= amount;
-        budget.CommittedAmount += amount;
-        budget.RemainingAmount = Available(budget);
-        budget.UpdatedAt = now;
-        commitment.FormallyCommittedAmount = alreadyCommitted + amount;
-        commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
-        commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
-        commitment.BudgetReservedAfter = budget.ReservedAmount;
-        commitment.BudgetCommittedAfter = budget.CommittedAmount;
-        commitment.BudgetAvailableAfter = budget.RemainingAmount;
-        commitment.UpdatedAt = now;
+        var formallyCommittedBefore = commitment.FormallyCommittedAmount;
+        var formallyCommittedAfter = alreadyCommitted + amount;
+
+        // Persist immutable proof first inside the existing transaction. The
+        // aggregate trigger then accepts only the exact ledger-backed delta.
         await Ledger.AddAsync(entry);
-        await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
-        await Commitments.UpdateAsync(commitment);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _reservationStore.SetFormalCommitmentContextAsync(
+            new ProcurementFormalCommitmentMutationContext(
+                commitment.TenantId,
+                commitment.Id,
+                entry.Id,
+                entry.SourceType,
+                entry.SourceId,
+                formallyCommittedBefore,
+                formallyCommittedAfter,
+                entry.CorrelationId),
+            cancellationToken);
+        try
+        {
+            budget.ReservedAmount -= amount;
+            budget.CommittedAmount += amount;
+            budget.RemainingAmount = Available(budget);
+            budget.UpdatedAt = now;
+            commitment.FormallyCommittedAmount = formallyCommittedAfter;
+            commitment.CorrelationId = entry.CorrelationId;
+            commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
+            commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
+            commitment.BudgetReservedAfter = budget.ReservedAmount;
+            commitment.BudgetCommittedAfter = budget.CommittedAmount;
+            commitment.BudgetAvailableAfter = budget.RemainingAmount;
+            commitment.UpdatedAt = now;
+            await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
+            await Commitments.UpdateAsync(commitment);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            await _reservationStore.SetFormalCommitmentContextAsync(
+                null,
+                cancellationToken);
+        }
         return entry;
     }
 
@@ -217,7 +532,25 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
                 item.FormalCommitmentEntryId == formal.Id && !item.IsDeleted &&
                 item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Utilization)
             .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
-        if (utilized + amount > formal.Amount)
+        var purchaseOrderAdjustment = formalSourceType == PurchaseOrderSource
+            ? await _unitOfWork.Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseOrderId == formalSourceId &&
+                    item.PurchaseRequisitionId == formal.PurchaseRequisitionId &&
+                    item.BudgetCommitmentId == formal.ProcurementBudgetCommitmentId &&
+                    !item.IsDeleted)
+                .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m
+            : 0m;
+        var releasedFormalCapacity = await Ledger.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.FormalCommitmentEntryId == formal.Id &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var formalCapacity = formal.Amount - releasedFormalCapacity +
+            (allocation is null ? purchaseOrderAdjustment : 0m);
+        if (utilized + amount > formalCapacity)
             throw Error("FORMAL_BUDGET_COMMITMENT_EXCEEDED", "Cumulative receipts or certificates exceed the formal commitment.");
         if (allocation is not null)
         {
@@ -230,7 +563,8 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
                     item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Utilization &&
                     item.SourceType == ReceiptSource && purchaseOrderReceiptIds.Contains(item.SourceId))
                 .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
-            if (purchaseOrderUtilized + amount > allocation.Amount)
+            var effectiveAllocation = allocation.Amount + purchaseOrderAdjustment;
+            if (purchaseOrderUtilized + amount > effectiveAllocation)
                 throw Error("PO_CONTRACT_ALLOCATION_EXCEEDED",
                     "Cumulative accepted receipts exceed this purchase order's allocation under the contract commitment.");
         }
@@ -249,23 +583,51 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
             utilizationSourceType, utilizationSourceId, utilizationReference, amount,
             formal.Currency, correlationId, now);
         entry.FormalCommitmentEntryId = formal.Id;
-        budget.CommittedAmount -= amount;
-        budget.UtilizedAmount += amount;
-        budget.RemainingAmount = Available(budget);
-        budget.UpdatedAt = now;
-        commitment.UtilizedAmount += amount;
-        commitment.ConsumedAtUtc = commitment.UtilizedAmount >= commitment.ReservedAmount ? now : null;
-        if (commitment.ConsumedAtUtc.HasValue)
-            commitment.Status = ProcurementBudgetCommitmentStatus.Consumed;
-        commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
-        commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
-        commitment.BudgetCommittedAfter = budget.CommittedAmount;
-        commitment.BudgetReservedAfter = budget.ReservedAmount;
-        commitment.BudgetAvailableAfter = budget.RemainingAmount;
-        commitment.UpdatedAt = now;
+        var utilizedBefore = commitment.UtilizedAmount;
+        var utilizedAfter = utilizedBefore + amount;
+
+        // Persist immutable utilization proof first inside the transaction;
+        // aggregate mutation is accepted only under this exact context.
         await Ledger.AddAsync(entry);
-        await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
-        await Commitments.UpdateAsync(commitment);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _reservationStore.SetUtilizationContextAsync(
+            new ProcurementUtilizationMutationContext(
+                commitment.TenantId,
+                commitment.Id,
+                entry.Id,
+                entry.SourceType,
+                entry.SourceId,
+                utilizedBefore,
+                utilizedAfter,
+                entry.CorrelationId),
+            cancellationToken);
+        try
+        {
+            budget.CommittedAmount -= amount;
+            budget.UtilizedAmount += amount;
+            budget.RemainingAmount = Available(budget);
+            budget.UpdatedAt = now;
+            commitment.UtilizedAmount = utilizedAfter;
+            commitment.CorrelationId = entry.CorrelationId;
+            // Receipt/certificate utilization does not terminalize the shared PR
+            // envelope. A later PO may legitimately expand the same reservation;
+            // only an explicit governed close/release operation terminalizes it.
+            commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
+            commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
+            commitment.BudgetCommittedAfter = budget.CommittedAmount;
+            commitment.BudgetReservedAfter = budget.ReservedAmount;
+            commitment.BudgetAvailableAfter = budget.RemainingAmount;
+            commitment.UpdatedAt = now;
+            await _unitOfWork.Repository<ProcurementBudget>().UpdateAsync(budget);
+            await Commitments.UpdateAsync(commitment);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            await _reservationStore.SetUtilizationContextAsync(
+                null,
+                cancellationToken);
+        }
         return entry;
     }
 
@@ -288,21 +650,40 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
             PurchaseOrderSource, purchaseOrder.Id, cancellationToken);
         if (existing is not null)
         {
-            EnsureIdempotent(existing, purchaseOrder.TotalAmount, purchaseOrder.Currency);
+            await EnsurePurchaseOrderIdempotentAsync(
+                existing,
+                purchaseOrder,
+                cancellationToken);
             if (existing.FormalCommitmentEntryId != contractCommitment.Id)
                 throw Error("PO_CONTRACT_COMMITMENT_IDEMPOTENCY_CONFLICT",
                     "The purchase order was already allocated to a different formal commitment.");
             return existing;
         }
 
-        var allocated = await Ledger.GetQueryable(item =>
+        var allocations = Ledger.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
                 item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.PurchaseOrderAllocation &&
+                item.FormalCommitmentEntryId == contractCommitment.Id);
+        var allocated = await allocations
+            .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
+        var allocationIds = allocations.Select(item => item.SourceId);
+        var allocationAdjustments = await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                allocationIds.Contains(item.PurchaseOrderId) &&
+                !item.IsDeleted)
+            .SumAsync(item => (decimal?)item.DeltaAmount, cancellationToken) ?? 0m;
+        allocated += allocationAdjustments;
+        var released = await Ledger.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.Release &&
                 item.FormalCommitmentEntryId == contractCommitment.Id)
             .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
-        if (allocated + purchaseOrder.TotalAmount > contractCommitment.Amount)
+        var netContractCapacity = contractCommitment.Amount - released;
+        if (allocated + purchaseOrder.TotalAmount > netContractCapacity)
             throw Error("PO_CONTRACT_COMMITMENT_EXCEEDED",
-                "Cumulative purchase orders exceed the formal contract commitment.");
+                "Cumulative purchase orders exceed the remaining formal contract commitment after releases.");
 
         var commitment = await Commitments.GetQueryable(item =>
                 item.Id == contractCommitment.ProcurementBudgetCommitmentId &&
@@ -324,6 +705,47 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
                 item.EntryType == entryType && item.SourceType == sourceType &&
                 item.SourceId == sourceId && !item.IsDeleted)
             .SingleOrDefaultAsync(cancellationToken);
+
+    private async Task EnsurePurchaseOrderIdempotentAsync(
+        ProcurementBudgetCommitmentLedgerEntry existing,
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken)
+    {
+        if (!purchaseOrder.SourceRequisitionId.HasValue ||
+            existing.PurchaseRequisitionId != purchaseOrder.SourceRequisitionId.Value)
+            throw Error(
+                "BUDGET_COMMITMENT_IDEMPOTENCY_CONFLICT",
+                "The purchase order was already committed against a different requisition.");
+
+        var adjustments = await _unitOfWork
+            .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseOrderId == purchaseOrder.Id &&
+                !item.IsDeleted)
+            .OrderBy(item => item.Sequence)
+            .ToListAsync(cancellationToken);
+        if (adjustments.Any(item =>
+                item.PurchaseRequisitionId != existing.PurchaseRequisitionId ||
+                item.BudgetCommitmentId != existing.ProcurementBudgetCommitmentId ||
+                !SameCurrency(item.Currency, existing.Currency)))
+            throw Error(
+                "BUDGET_COMMITMENT_IDEMPOTENCY_CONFLICT",
+                "The purchase order commitment adjustments do not share the immutable formal exposure lineage.");
+
+        var effectiveAmount = decimal.Round(
+            existing.Amount + adjustments.Sum(item => item.DeltaAmount),
+            2,
+            MidpointRounding.AwayFromZero);
+        if (effectiveAmount != decimal.Round(
+                purchaseOrder.TotalAmount,
+                2,
+                MidpointRounding.AwayFromZero) ||
+            !SameCurrency(existing.Currency, purchaseOrder.Currency))
+            throw Error(
+                "BUDGET_COMMITMENT_IDEMPOTENCY_CONFLICT",
+                "The purchase order was already committed with a different effective amount or currency.");
+    }
 
     private ProcurementBudgetCommitmentLedgerEntry NewEntry(
         ProcurementBudgetCommitment commitment, ProcurementBudgetCommitmentLedgerEntryType entryType,
@@ -367,6 +789,21 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
     {
         if (existing.Amount != amount || !SameCurrency(existing.Currency, currency))
             throw Error("BUDGET_COMMITMENT_IDEMPOTENCY_CONFLICT", "This source was already formally committed with different values.");
+    }
+
+    private static void EnsureContractReleaseIdempotent(
+        ProcurementBudgetCommitmentLedgerEntry existing,
+        ProcurementBudgetCommitmentLedgerEntry formal)
+    {
+        if (existing.FormalCommitmentEntryId != formal.Id ||
+            existing.ProcurementBudgetCommitmentId != formal.ProcurementBudgetCommitmentId ||
+            existing.PurchaseRequisitionId != formal.PurchaseRequisitionId ||
+            existing.Amount <= 0m ||
+            existing.Amount > formal.Amount ||
+            !SameCurrency(existing.Currency, formal.Currency))
+            throw Error(
+                "CONTRACT_BUDGET_RELEASE_IDEMPOTENCY_CONFLICT",
+                "The contract has a conflicting formal commitment release entry.");
     }
 
     private static bool SameCurrency(string left, string right) =>

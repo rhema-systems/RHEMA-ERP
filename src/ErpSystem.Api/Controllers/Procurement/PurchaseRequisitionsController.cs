@@ -816,11 +816,30 @@ public class PurchaseRequisitionsController : ControllerBase
 
             WorkflowIntegrationResult? workflowResult = null;
             PurchaseRequisitionBudgetReleaseDto? budgetRelease = null;
+            PurchaseRequisitionBudgetReadinessDto? approvalBudgetReadiness = null;
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
                 await _unitOfWork.BeginTransactionAsync(HttpContext.RequestAborted);
                 try
                 {
+                    if (approvalDto.Approved)
+                    {
+                        // PR approval is an availability checkpoint only. The
+                        // downstream PO/contract transaction owns reservation
+                        // and formal commitment, but an approver must not approve
+                        // against a budget that became ineffective or insufficient
+                        // after submission.
+                        approvalBudgetReadiness = await _budgetControlService.GetReadinessAsync(
+                            requisition.Id,
+                            HttpContext.RequestAborted);
+                        if (!approvalBudgetReadiness.CanReserve)
+                        {
+                            throw new ProcurementRequisitionBudgetValidationException(
+                                approvalBudgetReadiness.DecisionCode,
+                                approvalBudgetReadiness.Message);
+                        }
+                    }
+
                     workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
                         "PurchaseRequisition",
                         id,
@@ -893,6 +912,7 @@ public class PurchaseRequisitionsController : ControllerBase
                     status = requisition.Status,
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
                     workflowOutcome = workflowResult.Outcome.ToString(),
+                    budgetControl = approvalBudgetReadiness,
                     budgetRelease
                 }
             });

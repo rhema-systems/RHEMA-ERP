@@ -1,8 +1,10 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -368,6 +370,15 @@ public class ContractService : IContractService
             var contract = await _contractRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Contract with ID {id} not found");
 
+            if (string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(dto.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsureNoGovernedContractExitAsync(
+                    contract,
+                    "change status",
+                    CancellationToken.None);
+            }
+
             contract.Status = dto.Status;
 
             if (dto.SignedDate.HasValue) contract.SignedDate = dto.SignedDate.Value;
@@ -415,6 +426,11 @@ public class ContractService : IContractService
                 throw new InvalidOperationException($"Cannot complete contract in {contract.Status} status");
             }
 
+            await EnsureNoGovernedContractExitAsync(
+                contract,
+                "complete",
+                CancellationToken.None);
+
             // Check if all milestones are completed or paid
             var incompleteMilestones = contract.Milestones.Where(m => !m.IsDeleted && m.Status != "Completed" && m.Status != "Paid").ToList();
             if (incompleteMilestones.Any())
@@ -458,6 +474,14 @@ public class ContractService : IContractService
                 throw new InvalidOperationException($"Contract is already {contract.Status}");
             }
 
+            if (string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                await EnsureNoGovernedContractExitAsync(
+                    contract,
+                    "terminate",
+                    CancellationToken.None);
+            }
+
             contract.Status = "Terminated";
             contract.TerminatedAt = DateTime.UtcNow;
             contract.TerminationReason = reason;
@@ -478,6 +502,28 @@ public class ContractService : IContractService
     }
 
     #endregion
+
+    private async Task EnsureNoGovernedContractExitAsync(
+        Contract contract,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        var hasFormalCommitment = await _unitOfWork
+            .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+            .GetQueryable(item =>
+                item.TenantId == contract.TenantId &&
+                item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                item.SourceType == "Contract" &&
+                item.SourceId == contract.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .AnyAsync(cancellationToken);
+        if (hasFormalCommitment)
+        {
+            throw new InvalidOperationException(
+                $"CONTRACT_COMMITMENT_CLOSE_LIFECYCLE_REQUIRED: Cannot {operation} an active governed contract until a dedicated serializable close or termination lifecycle atomically reconciles its formal commitment, allocations, and utilization.");
+        }
+    }
 
     #region Milestones
 
@@ -716,6 +762,26 @@ public class ContractService : IContractService
                 // Apply the amendment to the contract
                 var contract = await _contractRepository.GetByIdAsync(amendment.ContractId)
                     ?? throw new InvalidOperationException("Contract not found");
+
+                if (string.Equals(
+                        amendment.AmendmentType,
+                        "ValueChange",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        contract.Status,
+                        "Active",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    await _unitOfWork
+                        .Repository<ProcurementBudgetCommitmentLedgerEntry>()
+                        .GetQueryable(item =>
+                            item.TenantId == contract.TenantId &&
+                            item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
+                            item.SourceType == "Contract" &&
+                            item.SourceId == contract.Id &&
+                            !item.IsDeleted)
+                        .AnyAsync())
+                    throw new InvalidOperationException(
+                        "CONTRACT_VALUE_AMENDMENT_BUDGET_LEDGER_REQUIRED: A governed active contract value cannot change until an atomic contract commitment-adjustment ledger is available.");
 
                 switch (amendment.AmendmentType)
                 {

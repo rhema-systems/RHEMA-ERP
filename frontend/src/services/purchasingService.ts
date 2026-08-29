@@ -710,6 +710,35 @@ export interface PurchaseOrderSummaryDto {
   procurementSourceReference?: string;
 }
 
+export interface PurchaseOrderBudgetCommitmentHistoryDto {
+  sequence: number;
+  status: string;
+  event: string;
+  action: string;
+  amount: number;
+  occurredAtUtc: string;
+  actorName: string;
+  correlationId: string;
+  beforeSnapshotJson?: string;
+  afterSnapshotJson?: string;
+  reservedBalanceAfter?: number;
+  committedBalanceAfter?: number;
+  availableBalanceAfter?: number;
+}
+
+export interface PurchaseOrderBudgetCommitmentDto {
+  commitmentId: string;
+  reference: string;
+  status: string;
+  reservationStatus: string;
+  amount: number;
+  reservedAmount: number;
+  formallyCommittedAmount: number;
+  currency: string;
+  reservationSequence: number;
+  history: PurchaseOrderBudgetCommitmentHistoryDto[];
+}
+
 export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
   receivedDate?: string;
   approvedByName?: string;
@@ -744,6 +773,7 @@ export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
   awardReadinessDecisionId?: string;
   sourceIntegrityHash?: string;
   sourceValidatedAtUtc?: string;
+  budgetCommitment?: PurchaseOrderBudgetCommitmentDto;
   items: PurchaseOrderItemDto[];
   receipts: PurchaseOrderReceiptDto[];
 }

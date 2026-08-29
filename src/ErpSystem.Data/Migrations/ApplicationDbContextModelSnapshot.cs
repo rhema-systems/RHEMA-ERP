@@ -107176,7 +107176,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasTrigger("TR_ProcurementBudgetCommitments_TenantAndEvidenceGuard");
 
-                            t.HasCheckConstraint("CK_ProcurementBudgetCommitments_Amount", "[ReservedAmount] > 0");
+                            t.HasCheckConstraint("CK_ProcurementBudgetCommitments_Amount", "([Status] = 2 AND [ReservedAmount] >= 0) OR ([Status] IN (1, 3) AND [ReservedAmount] > 0)");
 
                             t.HasCheckConstraint("CK_ProcurementBudgetCommitments_Sequence", "[ReservationSequence] > 0");
 
@@ -124160,8 +124160,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<decimal>("SubTotal")
                         .HasColumnType("decimal(18,2)");

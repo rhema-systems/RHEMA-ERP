@@ -91,9 +91,18 @@ public sealed class ProcurementReviewRegressionTests
         reserveBody.Should().Contain("await EnsureAwardBudgetCapacityAsync(");
         reserveBody.Should().NotContain("await EnsureBudgetCommitmentAsync(",
             "a Draft PO must not create Finance exposure");
-        var issueBody = source[reserveEnd..];
+        var issueEnd = source.IndexOf(
+            "public async Task EnsureBudgetAvailabilityForSubmissionAsync(",
+            reserveEnd,
+            StringComparison.Ordinal);
+        issueEnd.Should().BeGreaterThan(reserveEnd);
+        var issueBody = source[reserveEnd..issueEnd];
         issueBody.Should().Contain("await EnsureBudgetCommitmentAsync(",
             "the controlled final-approval path must establish Finance exposure");
+        issueBody.IndexOf("EvaluateCurrentAsync(", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                issueBody.IndexOf("HasIdempotentPurchaseOrderExposureAsync(", StringComparison.Ordinal),
+                "replays must still validate immutable source, supplier, lines, and integrity hash");
         var commitmentStart = source.IndexOf(
             "private async Task EnsureBudgetCommitmentAsync(",
             StringComparison.Ordinal);
@@ -104,6 +113,11 @@ public sealed class ProcurementReviewRegressionTests
         var commitmentBody = source[commitmentStart..commitmentEnd];
         commitmentBody.Should().Contain("ApprovePermission",
             "the independent approver must not require the maker's PO-create permission to post the final commitment");
+        commitmentBody.Should().Contain("GetBudgetForUpdateAsync(",
+                "the cumulative exposure calculation must be serialized on the authoritative budget row")
+            .And.Contain("ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment")
+            .And.NotContain("item.Status != \"Cancelled\"",
+                "draft and pending purchase orders are not formal budget exposure");
 
         var controller = ReadRepositoryFile(
             "src", "ErpSystem.Api", "Controllers", "Procurement",
@@ -125,10 +139,20 @@ public sealed class ProcurementReviewRegressionTests
             "unexpected approval failures must reach the global exception logger with their real exception and stack trace");
         approvalBody.Should().Contain("workflowResult.Outcome == WorkflowOutcome.Approved");
         approvalBody.Should().Contain("EnsureBudgetCommitmentForIssueAsync(");
-        approvalBody.IndexOf("EnsureBudgetCommitmentForIssueAsync(", StringComparison.Ordinal)
-            .Should().BeLessThan(
-                approvalBody.IndexOf("ApplyApprovalOutcome(", StringComparison.Ordinal),
-                "the commitment must exist before the PO is persisted as Approved");
+        var reserveIndex = approvalBody.IndexOf(
+            "EnsureBudgetCommitmentForIssueAsync(", StringComparison.Ordinal);
+        var formalCommitIndex = approvalBody.IndexOf(
+            "CommitPurchaseOrderAsync(", reserveIndex, StringComparison.Ordinal);
+        var formalSaveIndex = approvalBody.IndexOf(
+            "SaveChangesAsync(", formalCommitIndex, StringComparison.Ordinal);
+        var applyStatusIndex = approvalBody.IndexOf(
+            "ApplyApprovalOutcome(", StringComparison.Ordinal);
+        formalCommitIndex.Should().BeGreaterThan(reserveIndex,
+            "final approval must reserve before creating the immutable formal exposure");
+        formalSaveIndex.Should().BeGreaterThan(formalCommitIndex,
+            "the immutable ledger must be persisted inside the transaction before the PO enters Approved");
+        applyStatusIndex.Should().BeGreaterThan(formalSaveIndex,
+            "the SQL trigger must be able to see the formal ledger before the final PO status is persisted");
         submissionBody.Should().Contain("EnsureBudgetAvailabilityForSubmissionAsync(");
         submissionBody.Should().NotContain("EnsureBudgetCommitmentForIssueAsync(",
             "submission revalidates budget availability but must not post a firm commitment");
@@ -211,8 +235,8 @@ public sealed class ProcurementReviewRegressionTests
             "src", "ErpSystem.Core", "Services", "Procurement",
             "ProcurementRequisitionBudgetControlService.cs");
 
-        activation.Should().Contain("await EvaluateBudgetCommitmentAsync(");
-        activation.Should().Contain("CONTRACT_ACTIVATION_BUDGET_COMMITMENT_MISSING");
+        activation.Should().Contain("await EvaluateBudgetAvailabilityAsync(");
+        activation.Should().Contain("_budgetControl.GetDownstreamReadinessAsync(");
         budget.Should().Contain("await EnsureNoDownstreamExposureAsync(");
         budget.Should().Contain("PR_BUDGET_DOWNSTREAM_EXPOSURE_ACTIVE");
         budget.Should().Contain("item.Status != \"Terminated\"");

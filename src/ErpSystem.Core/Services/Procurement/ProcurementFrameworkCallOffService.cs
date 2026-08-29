@@ -42,6 +42,7 @@ public sealed class ProcurementFrameworkCallOffService :
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
     private readonly IProcurementPurchaseOrderComplianceService _purchaseOrderCompliance;
     private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<ProcurementFrameworkCallOffService> _logger;
 
     public ProcurementFrameworkCallOffService(
@@ -57,6 +58,7 @@ public sealed class ProcurementFrameworkCallOffService :
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
         IProcurementPurchaseOrderComplianceService purchaseOrderCompliance,
         IProcurementPurchaseOrderSodService purchaseOrderSod,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         ILogger<ProcurementFrameworkCallOffService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -71,6 +73,7 @@ public sealed class ProcurementFrameworkCallOffService :
         _purchaseOrderSources = purchaseOrderSources;
         _purchaseOrderCompliance = purchaseOrderCompliance;
         _purchaseOrderSod = purchaseOrderSod;
+        _budgetCommitments = budgetCommitments;
         _logger = logger;
     }
 
@@ -777,6 +780,17 @@ public sealed class ProcurementFrameworkCallOffService :
                     correlation,
                     now,
                     cancellationToken);
+                await _purchaseOrderSources.EnsureBudgetCommitmentForIssueAsync(
+                    callOff.PurchaseOrder,
+                    correlation,
+                    cancellationToken);
+                await _budgetCommitments.CommitPurchaseOrderAsync(
+                    callOff.PurchaseOrder,
+                    correlation,
+                    cancellationToken);
+                // The immutable Finance exposure must be visible before the
+                // governed PO enters Approved and invokes the SQL hard stop.
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 callOff.Status = ProcurementFrameworkCallOffStatus.Approved;
                 callOff.ApprovedById = _currentUser.UserId;
                 callOff.ApprovedByName = ActorName;
@@ -969,6 +983,10 @@ public sealed class ProcurementFrameworkCallOffService :
                 throw Conflict("FRAMEWORK_CALL_OFF_CANCELLATION_NOT_ALLOWED",
                     "Only a Draft, Pending Approval, or not-yet-issued Approved call-off can be cancelled.");
             EnsureRowVersion(callOff.RowVersion, request.RowVersion);
+            if (callOff.Status == ProcurementFrameworkCallOffStatus.Approved)
+                throw Conflict(
+                    "FRAMEWORK_CALL_OFF_COMMITMENT_REVERSAL_REQUIRED",
+                    "An Approved framework call-off cannot be cancelled until a dedicated serializable reversal atomically releases its formal budget exposure and agreement balance.");
             var agreement = callOff.Agreement;
             var now = DateTime.UtcNow;
             if (callOff.Status == ProcurementFrameworkCallOffStatus.PendingApproval)
@@ -980,10 +998,6 @@ public sealed class ProcurementFrameworkCallOffService :
                     throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_CANCEL_FAILED",
                         cancelled.Message ?? "The shared workflow could not be cancelled.");
             }
-            if (callOff.Status == ProcurementFrameworkCallOffStatus.Approved)
-                await ReleaseBalanceAsync(
-                    callOff, correlation, now, cancellationToken);
-
             callOff.Status = ProcurementFrameworkCallOffStatus.Cancelled;
             callOff.CancelledById = _currentUser.UserId;
             callOff.CancelledByName = ActorName;

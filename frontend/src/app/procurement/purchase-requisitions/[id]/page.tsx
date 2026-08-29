@@ -74,7 +74,10 @@ import {
 import { procurementSourcingCaseService } from '@/services/procurement-sourcing-case.service';
 import type { ProcurementSourcingCaseReadiness } from '@/types/procurement-sourcing-case';
 import type { ProcurementMethodType } from '@/types/procurement-policy';
-import { getBudgetControlPresentation } from '@/lib/procurement-requisition-budget';
+import {
+  getBudgetControlPresentation,
+  getPurchaseRequisitionBudgetControlHistory,
+} from '@/lib/procurement-requisition-budget';
 import { getAuthorityControlPresentation } from '@/lib/procurement-requisition-authority';
 import { getSubmissionControlPresentation } from '@/lib/procurement-requisition-submission';
 import { getSourcingReleasePresentation } from '@/lib/procurement-requisition-sourcing';
@@ -368,6 +371,8 @@ export default function PurchaseRequisitionDetailPage() {
     budgetReadiness,
     budgetReadinessLoading
   );
+  const budgetControlHistory =
+    getPurchaseRequisitionBudgetControlHistory(budgetHistory);
   const authorityPresentation = getAuthorityControlPresentation(
     authorityReadiness,
     authorityReadinessLoading
@@ -821,9 +826,10 @@ export default function PurchaseRequisitionDetailPage() {
               Finance budget control
             </CardTitle>
             <CardDescription className="mt-1">
-              The approved budget and current availability are validated here.
-              The Finance commitment is created when an approved PO or contract
-              is issued.
+              The approved budget and current availability are validated here;
+              PR submission and approval do not reserve funds. The Finance
+              commitment is created only at final PO approval or contract
+              activation.
             </CardDescription>
           </div>
           <Badge variant="outline">{budgetPresentation.basisLabel}</Badge>
@@ -833,7 +839,7 @@ export default function PurchaseRequisitionDetailPage() {
             <p className="font-medium">{budgetPresentation.title}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {budgetReadiness?.message ||
-                'Current Finance availability and commitment state are being evaluated.'}
+                'Current Finance budget availability is being evaluated.'}
             </p>
             {budgetReadiness?.decisionCode && (
               <p className="mt-2 font-mono text-xs text-muted-foreground">
@@ -894,25 +900,6 @@ export default function PurchaseRequisitionDetailPage() {
                     budgetReadiness.currency
                   )}
                 </span>
-              </div>
-            </div>
-          )}
-
-          {budgetReadiness?.commitmentReference && (
-            <div className="grid grid-cols-1 gap-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 text-sm md:grid-cols-3">
-              <div>
-                <span className="text-muted-foreground">Commitment:</span>{' '}
-                {budgetReadiness.commitmentReference}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Status:</span>{' '}
-                {budgetReadiness.commitmentStatus}
-              </div>
-              <div>
-                <span className="text-muted-foreground">
-                  Reservation sequence:
-                </span>{' '}
-                {budgetReadiness.reservationSequence}
               </div>
             </div>
           )}
@@ -1639,6 +1626,64 @@ export default function PurchaseRequisitionDetailPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Immutable budget-control history</CardTitle>
+              <CardDescription>
+                PR availability decisions and downstream reservation, reuse,
+                adjustment, or release events remain keyed to this requisition.
+                The formal ledger entry also appears on the approved PO or
+                activated contract.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {budgetControlHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No budget-control decisions have been recorded.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {budgetControlHistory.map((event) => (
+                    <div key={event.id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={
+                              event.result === 'Denied'
+                                ? 'destructive'
+                                : 'default'
+                            }
+                          >
+                            {event.result}
+                          </Badge>
+                          <span className="font-medium">{event.action}</span>
+                          {event.ruleCode && (
+                            <Badge variant="outline">{event.ruleCode}</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {format(
+                            new Date(event.occurredAtUtc),
+                            'MMM dd, yyyy HH:mm'
+                          )}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {event.reason || 'Budget availability evaluated.'}
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Actor: {event.actorName}
+                      </p>
+                      <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
+                        Integrity: {event.integrityHash}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Immutable linkage history</CardTitle>
               <CardDescription>
                 Created, updated, and export events from the shared procurement
@@ -1721,62 +1766,6 @@ export default function PurchaseRequisitionDetailPage() {
                       </div>
                       <p className="mt-2 text-sm text-muted-foreground">
                         {event.reason || 'Submission control evaluated.'}
-                      </p>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Actor: {event.actorName}
-                      </p>
-                      <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
-                        Integrity: {event.integrityHash}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Immutable budget-control history</CardTitle>
-              <CardDescription>
-                Blocked checks, idempotent retries, reservations, overrides, and
-                releases remain in the shared control-event ledger.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {budgetHistory.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No budget-control decisions have been recorded.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {budgetHistory.map((event) => (
-                    <div key={event.id} className="rounded-lg border p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant={
-                              event.result === 'Denied'
-                                ? 'destructive'
-                                : 'default'
-                            }
-                          >
-                            {event.result}
-                          </Badge>
-                          <span className="font-medium">{event.action}</span>
-                          {event.ruleCode && (
-                            <Badge variant="outline">{event.ruleCode}</Badge>
-                          )}
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {format(
-                            new Date(event.occurredAtUtc),
-                            'MMM dd, yyyy HH:mm'
-                          )}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {event.reason || 'Budget control evaluated.'}
                       </p>
                       <p className="mt-2 text-xs text-muted-foreground">
                         Actor: {event.actorName}

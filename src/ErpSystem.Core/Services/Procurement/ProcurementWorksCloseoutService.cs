@@ -39,6 +39,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
     private readonly IProcurementComplianceDecisionService _compliance;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly INotificationTopicPublisher _notifications;
     private readonly ILogger<ProcurementWorksCloseoutService> _logger;
     private readonly IQuantitySurveyConfigurationService? _quantitySurveyConfiguration;
@@ -52,6 +53,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         IProcurementComplianceDecisionService compliance,
         IWorkflowIntegrationService workflow,
         IProcurementControlEventService controlEvents,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         INotificationTopicPublisher notifications,
         ILogger<ProcurementWorksCloseoutService> logger,
         IQuantitySurveyConfigurationService? quantitySurveyConfiguration = null)
@@ -64,6 +66,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         _compliance = compliance;
         _workflow = workflow;
         _controlEvents = controlEvents;
+        _budgetCommitments = budgetCommitments;
         _notifications = notifications;
         _logger = logger;
         _quantitySurveyConfiguration = quantitySurveyConfiguration;
@@ -603,6 +606,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
 
             if (action.ActionType == ProcurementWorksCloseoutActionType.Termination)
             {
+                await _budgetCommitments.ReleaseUnusedContractAsync(
+                    contract.Id, correlation, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 contract.Status = "Terminated";
                 contract.TerminatedAt = action.EffectiveAtUtc ?? now;
                 contract.TerminationReason = action.Reason[..Math.Min(action.Reason.Length, 500)];
@@ -612,6 +618,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             }
             else if (action.ActionType == ProcurementWorksCloseoutActionType.Closeout)
             {
+                await _budgetCommitments.ReleaseUnusedContractAsync(
+                    contract.Id, correlation, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 contract.Status = "Completed";
                 contract.CompletedAt = action.EffectiveAtUtc ?? now;
                 StampContract(contract, now);

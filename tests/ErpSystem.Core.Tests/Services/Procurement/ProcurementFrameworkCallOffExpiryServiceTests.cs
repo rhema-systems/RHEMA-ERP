@@ -84,6 +84,7 @@ public sealed class ProcurementFrameworkCallOffExpiryServiceTests
             new Mock<IProcurementPurchaseOrderSourceService>().Object,
             new Mock<IProcurementPurchaseOrderComplianceService>().Object,
             new Mock<IProcurementPurchaseOrderSodService>().Object,
+            new Mock<IProcurementBudgetCommitmentLifecycleService>().Object,
             NullLogger<ProcurementFrameworkCallOffService>.Instance);
 
         var alerted = await service.ProcessExpiryAlertsAsync();

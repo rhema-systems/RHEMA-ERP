@@ -226,18 +226,22 @@ Expected:
 
 ## UAT-PRC-006: Budget availability and Finance commitment
 
-1. Review the approved PR budget section with the Finance reviewer.
-2. Confirm the budget is still effective and has enough available funds.
-3. Record/reserve the configured commitment at the supported lifecycle point.
-4. Repeat the same action or refresh/retry after the first success.
-5. Create a separate PR whose amount exceeds available funds and attempt to proceed.
+1. Record the approved budget's available balance, then review the PR budget section with the Finance reviewer.
+2. Submit and approve the PR with the configured independent actors.
+3. Confirm PR submission/approval validates the effective budget and current availability without reserving funds or reducing the recorded available balance.
+4. Create a PO from the governed approved source, submit it, and complete final approval as a different assigned approver.
+5. Open the approved PO and verify its Finance commitment reference, active reservation-envelope status, formally committed PO amount and ordered evidence history.
+6. Refresh after the first success and confirm the same commitment evidence. Where an API/concurrency test deliberately repeats the now-invalid approval command, confirm it is rejected without changing any budget or ledger row.
+7. Create another governed PO whose amount would exceed the remaining available funds or cumulative approved exposure and attempt final approval.
 
 Expected:
 
-- The valid PR reserves or records its Finance exposure exactly once.
-- Budget available balance reduces by the correct amount.
+- The PR shows current budget availability only; approval creates no reservation or formal commitment and does not reduce availability.
+- Final PO approval revalidates the approved budget, creates or reuses the requisition's reservation envelope, and atomically appends one immutable formal commitment keyed to the PO ID.
+- The approved PO shows one commitment reference, the active reservation-envelope status and its formally committed PO amount. Ordered history identifies the `BudgetCommitmentReserved` (or reuse) control event followed by the immutable `FormalCommitment` ledger entry; it is not presented as a change to the reservation envelope's status.
+- Budget available balance reduces by the PO amount exactly once. Refreshing returns the same commitment; repeated terminal-state or concurrent approval attempts leave exactly one successful final transition and do not change the budget or ledger again.
 - Debit/credit or commitment register entries balance where a journal is created.
-- Insufficient funds block the governed financial action with a clear message.
+- Insufficient funds or excessive cumulative PO exposure block final PO approval with a clear message and leave the workflow, reservation and commitment unchanged.
 - Optional policy authority guidance is not substituted for the configured PR approval workflow.
 
 ## UAT-PRC-007: Automatic sourcing release and method selection
@@ -461,7 +465,7 @@ Procurement UAT passes only when all of the following are true:
 - A fresh budget and procurement plan complete maker-checker approval.
 - Manual APP export/acknowledgement is traceable without user-entered technical IDs/checksums.
 - A plan item creates a complete PR with automatic budget, cost-centre derivation and GHS default.
-- The PR completes independent approval and valid Finance exposure once.
+- The PR completes independent approval after a read-only Finance availability check; the downstream final PO approval or contract activation creates the Finance commitment exactly once.
 - Automatic sourcing release and policy method rationale are retained.
 - At least one RFQ completes dispatch, bid, evaluation and award.
 - At least one Tender completes publication, bid opening, evaluation and award.
