@@ -15,7 +15,11 @@ public sealed class DocumentsController : ControllerBase
 {
     public static readonly IReadOnlyDictionary<string, string> FinanceDocumentPolicies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        [DocumentTypes.FinanceJournalVoucher] = FinancePermissions.ExportFinanceReports,
+        // A journal voucher is the printable representation of the same tenant-scoped journal
+        // already exposed by JournalEntryController under Finance.Read. Keep print/export aligned
+        // with that read boundary; analytical reports and sensitive payment documents retain their
+        // stronger export/issue permissions below.
+        [DocumentTypes.FinanceJournalVoucher] = FinancePermissions.ViewFinance,
         // AP vouchers contain supplier banking references, approval identities and evidence
         // hashes. Route them through the same explicit Finance export/print permission as other
         // controlled accounting documents instead of relying only on authenticated access.
@@ -27,6 +31,25 @@ public sealed class DocumentsController : ControllerBase
         // Supplier statements disclose counterparty balances and payment/WHT history. Require the
         // explicit Finance export permission for both PDF and native spreadsheet renderings.
         [DocumentTypes.FinanceApSupplierStatement] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApAgingReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApCashRequirements] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApMatchExceptionReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceApProcurementReconciliation] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceArAgingReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceArCustomerStatement] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceCashPositionReport] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxInputRegister] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxOutputRegister] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxVatReconciliation] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxWhtPayable] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceTaxWhtCertificateRegister] = FinancePermissions.ExportFinanceReports,
+        // Each statutory WHT certificate PDF is an issued, retained controlled document rather
+        // than an analytical report. Align original and replacement access with the Finance user
+        // who owns the certificate lifecycle; the builder separately enforces posted source data.
+        [DocumentTypes.FinanceTaxWhtCertificate] = FinancePermissions.ManageTaxConfiguration,
+        [DocumentTypes.FinanceTaxWhtRemittanceRegister] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceBudgetConsolidated] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceBudgetScenarioComparison] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceTrialBalance] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceIncomeStatement] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceBalanceSheet] = FinancePermissions.ExportFinanceReports,
@@ -170,6 +193,59 @@ public sealed class DocumentsController : ControllerBase
         {
             _logger.LogError(ex, "Failed to issue controlled document {DocumentType} for entity {EntityId}", documentType, entityId);
             return StatusCode(500, $"Internal server error: {ex.Message}");
+        }
+    }
+
+    [HttpGet("{documentType}/{entityId:guid}/issues")]
+    public async Task<IActionResult> GetControlledDocumentIssues(
+        string documentType,
+        Guid entityId,
+        [FromServices] IFinanceControlledDocumentIssueService issueService,
+        CancellationToken cancellationToken = default)
+    {
+        if (!FinanceDocumentPolicies.ContainsKey(documentType))
+            return Forbid();
+        var authorizationFailure = await AuthorizeDocumentRenderAsync(documentType, ControlledDocumentCopyTypes.Original);
+        if (authorizationFailure != null)
+            return authorizationFailure;
+
+        try
+        {
+            return Ok(await issueService.GetSummaryAsync(documentType, entityId, cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("controlled-issues/{issueId:guid}")]
+    public async Task<IActionResult> DownloadRetainedControlledDocument(
+        Guid issueId,
+        [FromServices] IFinanceControlledDocumentIssueService issueService,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Authorize from tenant-scoped metadata before private bytes are read. Retrieval then
+            // re-hashes the artifact so a storage mutation cannot silently alter statutory proof.
+            var issue = await issueService.GetIssueAsync(issueId, cancellationToken);
+            if (!FinanceDocumentPolicies.ContainsKey(issue.DocumentType))
+                return Forbid();
+            var authorizationFailure = await AuthorizeDocumentRenderAsync(issue.DocumentType, issue.CopyType);
+            if (authorizationFailure != null)
+                return authorizationFailure;
+
+            var retained = await issueService.GetRetainedAsync(issueId, cancellationToken);
+            return File(retained.Content, retained.ContentType, retained.FileName);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 

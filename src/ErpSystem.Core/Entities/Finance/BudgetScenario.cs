@@ -109,4 +109,27 @@ public class BudgetScenario : TenantEntity
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public virtual ICollection<BudgetReturn> BudgetReturns { get; set; } = new List<BudgetReturn>();
+    public virtual ICollection<BudgetScenarioControlDimension> ControlDimensions { get; set; } = new List<BudgetScenarioControlDimension>();
+}
+
+/// <summary>
+/// Declares one transaction dimension that forms part of every budget cell in a scenario.
+/// The declaration is scenario-owned so later changes to account defaults cannot silently
+/// change the grain of an adopted budget.
+/// </summary>
+public sealed class BudgetScenarioControlDimension : TenantEntity
+{
+    [Required]
+    public Guid BudgetScenarioId { get; set; }
+
+    [Required]
+    public Guid FinanceDimensionDefinitionId { get; set; }
+
+    public int DisplayOrder { get; set; }
+
+    [ForeignKey(nameof(BudgetScenarioId))]
+    public BudgetScenario BudgetScenario { get; set; } = null!;
+
+    [ForeignKey(nameof(FinanceDimensionDefinitionId))]
+    public FinanceDimensionDefinition FinanceDimensionDefinition { get; set; } = null!;
 }

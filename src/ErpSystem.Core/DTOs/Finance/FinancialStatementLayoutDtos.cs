@@ -243,6 +243,7 @@ public sealed class FinancialStatementLayoutPreviewRequestDto
     public List<Guid> AccountIds { get; set; } = new();
 
     public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+    public List<FinanceDimensionFilterDto> DimensionFilters { get; set; } = new();
 }
 
 public sealed class FinancialStatementLayoutExecutionRequestDto
@@ -267,6 +268,7 @@ public sealed class FinancialStatementLayoutExecutionRequestDto
     public List<Guid> AccountIds { get; set; } = new();
 
     public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+    public List<FinanceDimensionFilterDto> DimensionFilters { get; set; } = new();
 }
 
 public sealed class FinancialStatementLayoutExecutionDto

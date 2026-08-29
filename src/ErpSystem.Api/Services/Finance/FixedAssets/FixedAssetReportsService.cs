@@ -55,48 +55,55 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             .ToListAsync();
 
         var glLines = await LoadPostedFixedAssetGlLinesAsync(BuildAsOfQuery(query));
-        var items = assets.Select(a =>
-        {
-            var bookValue = SelectBookValue(a, requestedBook);
-            var cost = RoundMoney(bookValue?.AcquisitionCost ?? a.AcquisitionCost);
-            var accumulatedDepreciation = RoundMoney(bookValue?.AccumulatedDepreciation ?? a.AcquisitionCost - a.NetBookValue);
-            var assetCostGl = RoundMoney(glLines
-                .Where(line => line.AccountId == a.Category.AssetAccountId && IsAssetRelated(line, a))
-                .Sum(line => line.DebitAmount - line.CreditAmount));
-            var accumulatedDepreciationGl = RoundMoney(glLines
-                .Where(line => line.AccountId == a.Category.AccumulatedDepreciationAccountId && IsAssetRelated(line, a))
-                .Sum(line => line.CreditAmount - line.DebitAmount));
-
-            return new FixedAssetRegisterItemDto
+        // This is an accounting-book register, not the operational asset-master catalogue.
+        // A master without a value for the requested book must not contribute plausible but
+        // unposted cost/NBV to Finance reports or reconciliation totals.
+        var items = assets
+            .Select(asset => new { Asset = asset, BookValue = SelectBookValue(asset, requestedBook) })
+            .Where(item => item.BookValue != null)
+            .Select(item =>
             {
-                Id = a.Id,
-                BookValueId = bookValue?.Id,
-                CategoryId = a.FixedAssetCategoryId,
-                AssetCode = a.AssetCode,
-                Name = a.Name,
-                CategoryName = a.Category?.Name ?? "Unknown",
-                AcquisitionDate = a.PurchaseDate,
-                CapitalizationDate = bookValue?.CapitalizationDate ?? a.CapitalizationDate,
-                Cost = cost,
-                AccumulatedDepreciation = accumulatedDepreciation,
-                NetBookValue = RoundMoney(bookValue?.NetBookValue ?? a.NetBookValue),
-                BookClassification = bookValue?.BookClassification ?? requestedBook ?? "IFRS",
-                Status = a.Status,
-                SerialNumber = a.SerialNumber,
-                Location = a.Location,
-                CurrentSegmentString = a.CurrentSegmentString,
-                SourceDocumentType = bookValue?.SourceDocumentType ?? a.SourceDocumentType,
-                SourceDocumentId = bookValue?.SourceDocumentId ?? a.SourceDocumentId,
-                SourceDocumentLineId = bookValue?.SourceDocumentLineId ?? a.SourceDocumentLineId,
-                JournalEntryId = bookValue?.CapitalizationJournalEntryId ?? a.JournalEntryId,
-                PostingEventId = bookValue?.CapitalizationPostingEventId ?? a.PostingEventId,
-                PostedGlCostMovement = assetCostGl,
-                PostedGlAccumulatedDepreciationMovement = accumulatedDepreciationGl,
-                ReconciliationVariance = RoundMoney(assetCostGl - cost),
-                HasPostedGlReference = (bookValue?.CapitalizationJournalEntryId ?? a.JournalEntryId).HasValue
-                    && (bookValue?.CapitalizationPostingEventId ?? a.PostingEventId).HasValue
-            };
-        }).ToList();
+                var a = item.Asset;
+                var bookValue = item.BookValue!;
+                var cost = RoundMoney(bookValue.AcquisitionCost);
+                var accumulatedDepreciation = RoundMoney(bookValue.AccumulatedDepreciation);
+                var assetCostGl = RoundMoney(glLines
+                    .Where(line => line.AccountId == a.Category.AssetAccountId && IsAssetRelated(line, a))
+                    .Sum(line => line.DebitAmount - line.CreditAmount));
+                var accumulatedDepreciationGl = RoundMoney(glLines
+                    .Where(line => line.AccountId == a.Category.AccumulatedDepreciationAccountId && IsAssetRelated(line, a))
+                    .Sum(line => line.CreditAmount - line.DebitAmount));
+
+                return new FixedAssetRegisterItemDto
+                {
+                    Id = a.Id,
+                    BookValueId = bookValue.Id,
+                    CategoryId = a.FixedAssetCategoryId,
+                    AssetCode = a.AssetCode,
+                    Name = a.Name,
+                    CategoryName = a.Category?.Name ?? "Unknown",
+                    AcquisitionDate = a.PurchaseDate,
+                    CapitalizationDate = bookValue.CapitalizationDate ?? a.CapitalizationDate,
+                    Cost = cost,
+                    AccumulatedDepreciation = accumulatedDepreciation,
+                    NetBookValue = RoundMoney(bookValue.NetBookValue),
+                    BookClassification = bookValue.BookClassification,
+                    Status = a.Status,
+                    SerialNumber = a.SerialNumber,
+                    Location = a.Location,
+                    CurrentSegmentString = a.CurrentSegmentString,
+                    SourceDocumentType = bookValue.SourceDocumentType ?? a.SourceDocumentType,
+                    SourceDocumentId = bookValue.SourceDocumentId ?? a.SourceDocumentId,
+                    SourceDocumentLineId = bookValue.SourceDocumentLineId ?? a.SourceDocumentLineId,
+                    JournalEntryId = bookValue.CapitalizationJournalEntryId ?? a.JournalEntryId,
+                    PostingEventId = bookValue.CapitalizationPostingEventId ?? a.PostingEventId,
+                    PostedGlCostMovement = assetCostGl,
+                    PostedGlAccumulatedDepreciationMovement = accumulatedDepreciationGl,
+                    ReconciliationVariance = RoundMoney(assetCostGl - cost),
+                    HasPostedGlReference = (bookValue.CapitalizationJournalEntryId ?? a.JournalEntryId).HasValue
+                        && (bookValue.CapitalizationPostingEventId ?? a.PostingEventId).HasValue
+                };
+            }).ToList();
 
         await RecordReportAuditAsync(
             FinanceAuditEvents.FixedAssetRegisterReportGenerated,

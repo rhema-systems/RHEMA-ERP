@@ -33,19 +33,22 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly ApplicationDbContext _dbContext;
         private readonly IVendorInvoiceMatchExceptionService? _matchExceptionService;
         private readonly IProcurementAcceptedSupplyService? _acceptedSupplyService;
+        private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
 
         public VendorInvoiceController(
             IVendorInvoiceService invoiceService,
             ICurrentUserService currentUserService,
             ApplicationDbContext dbContext,
             IVendorInvoiceMatchExceptionService? matchExceptionService = null,
-            IProcurementAcceptedSupplyService? acceptedSupplyService = null)
+            IProcurementAcceptedSupplyService? acceptedSupplyService = null,
+            IFinanceBudgetCommitmentService? budgetCommitments = null)
         {
             _invoiceService = invoiceService;
             _currentUserService = currentUserService;
             _dbContext = dbContext;
             _matchExceptionService = matchExceptionService;
             _acceptedSupplyService = acceptedSupplyService;
+            _budgetCommitments = budgetCommitments;
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
@@ -158,6 +161,39 @@ namespace ErpSystem.Api.Controllers.Finance
                 .ToListAsync(cancellationToken);
 
             return Ok(suppliers);
+        }
+
+        /// <summary>
+        /// Returns adopted Finance budget cells for one AP expense account and invoice date.
+        /// AP receives selectable evidence only; it never mutates budget setup through this route.
+        /// </summary>
+        [HttpGet("budget-cells")]
+        [ProducesResponseType(typeof(IReadOnlyList<FinanceBudgetCellDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<IReadOnlyList<FinanceBudgetCellDto>>> GetBudgetCells(
+            [FromQuery] DateTime budgetDate,
+            [FromQuery] Guid accountId,
+            CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync(
+                    "Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            if (_budgetCommitments == null)
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Finance budget control unavailable",
+                    detail: "Finance budget commitments are not registered.");
+            try
+            {
+                return Ok(await _budgetCommitments.GetEligibleBudgetCellsAsync(
+                    new FinanceBudgetCellQueryDto
+                    {
+                        BudgetDate = budgetDate,
+                        AccountId = accountId
+                    }, cancellationToken));
+            }
+            catch (FinanceBudgetCommitmentValidationException exception)
+            {
+                return UnprocessableEntity(new { code = exception.Code, message = exception.Message });
+            }
         }
 
         /// <summary>Creates a new vendor invoice in Draft status with the supplied line items.</summary>
@@ -562,6 +598,52 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try { return Ok(await _paymentService.GetPaymentAllocationsAsync(id)); }
             catch (UnauthorizedAccessException) { return Forbid(); }
+        }
+
+        /// <summary>
+        /// Reserves posted supplier debit notes against invoices in this Finance-owned AP
+        /// settlement. The debit note has already posted to AP control, so this endpoint creates
+        /// subledger evidence only and never posts a second journal.
+        /// </summary>
+        [HttpPost("{id}/supplier-debit-note-applications")]
+        [Authorize(Policy = FinancePermissions.ProcessApPayments)]
+        public async Task<ActionResult<SupplierDebitNoteApplicationResultDto>> ApplySupplierDebitNotes(
+            Guid id,
+            [FromBody] List<SupplierDebitNoteApplicationCreateDto> applications)
+        {
+            try { return Ok(await _paymentService.ApplySupplierDebitNotesAsync(id, applications)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Returns original and reversal supplier-credit applications for this payment.</summary>
+        [HttpGet("{id}/supplier-debit-note-applications")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<List<SupplierDebitNoteApplicationDto>>> GetSupplierDebitNoteApplications(Guid id)
+        {
+            try { return Ok(await _paymentService.GetSupplierDebitNoteApplicationsAsync(id)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        }
+
+        /// <summary>Releases an unposted supplier-credit reservation using a compensating row.</summary>
+        [HttpPost("supplier-debit-note-applications/{applicationId}/reverse")]
+        [Authorize(Policy = FinancePermissions.ProcessApPayments)]
+        public async Task<IActionResult> ReverseSupplierDebitNoteApplication(
+            Guid applicationId,
+            [FromBody] string reason)
+        {
+            try
+            {
+                await _paymentService.ReverseSupplierDebitNoteApplicationAsync(applicationId, reason);
+                return Ok();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
         }
 
         /// <summary>Posts an authorized vendor payment to the general ledger through the central finance posting engine.</summary>

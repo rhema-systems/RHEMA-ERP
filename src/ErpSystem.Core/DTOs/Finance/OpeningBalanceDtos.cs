@@ -77,8 +77,9 @@ public sealed class CreateFixedAssetOpeningBalanceBatchDto
 
 /// <summary>
 /// Creates a governed bank opening from a canonical Finance-owned bank master. The caller identifies
-/// the bank and amount only; Finance derives the mapped bank GL, functional currency, and migration-
-/// clearing offset so a free-form request cannot impersonate cash/bank opening evidence.
+/// the bank and native-currency amount only; Finance derives the mapped bank GL, approved historical
+/// exchange-rate snapshot, functional amount, and migration-clearing offset so a free-form request
+/// cannot impersonate cash/bank opening evidence.
 /// </summary>
 public sealed class CreateBankAccountOpeningBalanceDto
 {
@@ -90,7 +91,10 @@ public sealed class CreateBankAccountOpeningBalanceDto
     public string BookClassification { get; set; } = "IFRS";
     public string? IdempotencyKey { get; set; }
     public Guid BankAccountId { get; set; }
+    /// <summary>Opening amount in the bank account's own currency.</summary>
     public decimal Amount { get; set; }
+    /// <summary>Required for a foreign-currency bank and ignored for functional currency.</summary>
+    public Guid? ExchangeRateId { get; set; }
 }
 
 /// <summary>
@@ -197,6 +201,12 @@ public sealed class BankAccountOpeningOptionDto
     public string? GlAccountCode { get; set; }
     public string? GlAccountName { get; set; }
     public string PostingDirection { get; set; } = "Debit";
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRate { get; set; } = 1m;
+    public DateTime? ExchangeRateDate { get; set; }
+    public string? ExchangeRateType { get; set; }
+    public string? ExchangeRateQuoteSide { get; set; }
+    public string? ExchangeRateSource { get; set; }
     public bool IsEligible { get; set; }
     public IReadOnlyList<string> Blockers { get; set; } = Array.Empty<string>();
 }

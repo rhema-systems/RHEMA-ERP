@@ -489,6 +489,36 @@ public sealed class SubledgerSettlementReadModelFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "MultiCurrency")]
+    public async Task ApAgingConsolidatesForeignCurrencyBalancesInFunctionalCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        SeedPostedApInvoice(db, fixture, "AP-AGING-USD", 70_000m, invoice =>
+        {
+            invoice.CurrencyCode = "USD";
+            invoice.ExchangeRate = 12.5m;
+            invoice.BaseCurrencyAmount = 875_000m;
+        }, functionalAmount: 875_000m);
+        await db.SaveChangesAsync();
+
+        var service = CreateApReportsService(db, tenantId);
+        var report = await service.GetDetailedAgingReportAsync(AsOfDate);
+
+        report.CurrencyCode.Should().Be("GHS");
+        report.TotalOutstanding.Should().Be(875_000m);
+        var invoice = report.SupplierDetails.Should().ContainSingle().Which.Invoices.Should().ContainSingle().Subject;
+        invoice.CurrencyCode.Should().Be("GHS");
+        invoice.TotalAmount.Should().Be(875_000m);
+        invoice.BalanceAmount.Should().Be(875_000m);
+        invoice.DocumentCurrencyCode.Should().Be("USD");
+        invoice.DocumentTotalAmount.Should().Be(70_000m);
+        invoice.DocumentBalanceAmount.Should().Be(70_000m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
     [Trait("Category", "AccountsReceivable")]
     public async Task ArAgingUsesSettlementReadModelInsteadOfMutablePaidFields()
     {
@@ -508,6 +538,40 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         report.Customers.Should().ContainSingle();
         report.Diagnostics.Should().Contain(d => d.Code == "OperationalSnapshotVariance");
         audit.EventTypes.Should().Contain(FinanceAuditEvents.ArAgingGeneratedFromSettlementReadModel);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "MultiCurrency")]
+    public async Task ArAgingConsolidatesForeignCurrencyBalancesInFunctionalCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        SeedPostedArInvoice(db, fixture, "AR-AGING-USD", 70_000m, invoice =>
+        {
+            invoice.CurrencyCode = "USD";
+            invoice.ExchangeRate = 12.5m;
+            invoice.BaseCurrencyAmount = 875_000m;
+        }, functionalAmount: 875_000m);
+        await db.SaveChangesAsync();
+
+        var service = CreateArReportsService(db, tenantId);
+        var summary = await service.GetAgingReportAsync(AsOfDate);
+        var detail = await service.GetDetailedAgingReportAsync(AsOfDate);
+
+        summary.CurrencyCode.Should().Be("GHS");
+        summary.Summary.GrandTotal.Should().Be(875_000m);
+        summary.Customers.Should().ContainSingle().Which.TotalOutstanding.Should().Be(875_000m);
+
+        detail.CurrencyCode.Should().Be("GHS");
+        var invoice = detail.Customers.Should().ContainSingle().Which.Invoices.Should().ContainSingle().Subject;
+        invoice.CurrencyCode.Should().Be("GHS");
+        invoice.TotalAmount.Should().Be(875_000m);
+        invoice.BalanceAmount.Should().Be(875_000m);
+        invoice.DocumentCurrencyCode.Should().Be("USD");
+        invoice.DocumentTotalAmount.Should().Be(70_000m);
+        invoice.DocumentBalanceAmount.Should().Be(70_000m);
     }
 
     [Fact]

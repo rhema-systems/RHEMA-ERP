@@ -179,6 +179,109 @@ public sealed class ControlledOpeningBalancePostingTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-GovernedOpeningSources")]
+    [Trait("Category", "MultiCurrency")]
+    public async Task ForeignCurrencyBankOpening_ShouldFreezeApprovedRateAndKeepNativeSnapshotSeparateFromFunctionalGl()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        var bankGl = SeedAccount(db, tenantId, "1015", AccountType.Asset);
+        bankGl.AllowDirectPosting = false;
+        bankGl.IsControlAccount = true;
+        bankGl.CurrencyCode = "USD";
+        var bank = new BankAccount
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "FINDEMO-USD-001",
+            AccountName = "USD Operating Bank", BankName = "TDC Test Bank", Currency = "USD",
+            GLAccountId = bankGl.Id, OpeningBalance = 0m, CurrentBalance = 0m, AvailableBalance = 0m,
+            IsActive = true
+        };
+        // The governed quote stores functional GHS per one USD; 12.5 therefore converts
+        // USD 50,000 to GHS 625,000, while the inverse remains USD 0.08 per GHS.
+        var rate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 12.5m, InverseRate = 0.08m,
+            EffectiveDate = new DateTime(2026, 1, 1),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana opening schedule",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow
+        };
+        db.BankAccounts.Add(bank);
+        db.ExchangeRates.Add(rate);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId, workflow: CreatePendingOpeningWorkflow());
+
+        var options = await service.GetGovernedOptionsAsync(new GovernedOpeningBalanceOptionsRequestDto
+        {
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            BookClassification = "IFRS"
+        });
+        var bankOption = options.BankAccounts.Single(option => option.Id == bank.Id);
+        bankOption.IsEligible.Should().BeTrue();
+        bankOption.ExchangeRateId.Should().Be(rate.Id);
+        bankOption.ExchangeRate.Should().Be(12.5m);
+        bankOption.CurrencyCode.Should().Be("USD");
+
+        var request = new CreateBankAccountOpeningBalanceDto
+        {
+            BatchNumber = "FINDEMO-USD-BANK-OB-001",
+            SourceReference = "FINDEMO-USD-BANK-SCHEDULE-2025",
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            BookClassification = "IFRS",
+            IdempotencyKey = $"usd-bank-opening-{bank.Id:N}",
+            BankAccountId = bank.Id,
+            Amount = 50_000m
+        };
+        await FluentActions.Awaiting(() => service.CreateBankAccountOpeningBatchAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*require the approved exchange rate selected by the dated options contract*");
+
+        request.ExchangeRateId = rate.Id;
+        var created = await service.CreateBankAccountOpeningBatchAsync(request);
+        var primary = created.Lines.Single(line => line.CounterpartyType == "BankAccountOpening");
+        var clearing = created.Lines.Single(line => line.CounterpartyType == "BankOpeningClearing");
+        primary.TransactionCurrencyCode.Should().Be("USD");
+        primary.TransactionDebitAmount.Should().Be(50_000m);
+        primary.DebitAmount.Should().Be(625_000m);
+        primary.ExchangeRateId.Should().Be(rate.Id);
+        primary.ExchangeRateDate.Should().Be(new DateTime(2026, 1, 1));
+        clearing.TransactionCurrencyCode.Should().Be("GHS");
+        clearing.TransactionCreditAmount.Should().Be(625_000m);
+        clearing.CreditAmount.Should().Be(625_000m);
+        clearing.ExchangeRateId.Should().BeNull();
+
+        (await service.SubmitForApprovalAsync(created.Id)).Status.Should().Be("PendingApproval");
+        await ApproveBatchAsync(db, created.Id);
+        var posted = await service.PostAsync(created.Id);
+        var reloadedBank = await db.BankAccounts.SingleAsync(item => item.Id == bank.Id);
+        reloadedBank.CurrentBalance.Should().Be(50_000m);
+        reloadedBank.AvailableBalance.Should().Be(50_000m);
+        var bankPosting = await db.AccountTransactions.SingleAsync(item =>
+            item.JournalEntryId == posted.JournalEntryId && item.AccountId == bankGl.Id);
+        bankPosting.DebitAmount.Should().Be(625_000m);
+        bankPosting.TransactionCurrency.Should().Be("USD");
+        bankPosting.TransactionDebitAmount.Should().Be(50_000m);
+        bankPosting.ExchangeRateId.Should().Be(rate.Id);
+
+        var snapshotDiagnostic = await CreateMigrationSignOffService(db, tenantId)
+            .DiagnoseBankSnapshotsAsync(new BankSnapshotRebuildRequestDto { BankAccountId = bank.Id });
+        var bankDiagnostic = snapshotDiagnostic.Items.Single();
+        bankDiagnostic.Currency.Should().Be("USD");
+        bankDiagnostic.PostedGlBalance.Should().Be(50_000m);
+        bankDiagnostic.Variance.Should().Be(0m);
+        bankDiagnostic.Status.Should().Be("Current");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-GovernedOpeningSources")]
     [Trait("Category", "ApprovalControl")]
     public async Task RejectedGovernedBankOpening_ShouldPreserveHistoryAndChainCorrectedReplacements()
     {
@@ -1981,7 +2084,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var validation = await service.ValidateBatchAsync(batch.Id);
 
         validation.IsValid.Should().BeFalse();
-        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+        validation.Errors.Should().Contain(error => error.Contains("foreign-currency opening balances require a controlled source and approved FX evidence", StringComparison.OrdinalIgnoreCase));
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
     }
 
@@ -2021,7 +2124,7 @@ public sealed class ControlledOpeningBalancePostingTests
         validation.Errors.Should().Contain(error =>
             error.Contains("must match the tenant functional currency 'GHS'", StringComparison.OrdinalIgnoreCase));
         validation.Errors.Should().Contain(error =>
-            error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+            error.Contains("foreign-currency opening balances require a controlled source and approved FX evidence", StringComparison.OrdinalIgnoreCase));
         Func<Task> submit = () => service.SubmitForApprovalAsync(batch.Id);
         await submit.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*tenant functional currency*");

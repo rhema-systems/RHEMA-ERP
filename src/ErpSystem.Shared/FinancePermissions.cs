@@ -28,6 +28,7 @@ public static class FinancePermissions
     public const string ManageFinanceAccessScopes = "Finance.AccessScopes.Manage";
 
     public const string ManageChartOfAccounts = "Finance.ChartOfAccounts.Manage";
+    public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
     public const string ConfigureTaxPolicy = "Finance.Policy.ConfigureTax";
     public const string ConfigureFixedAssetCategoriesPolicy = "Finance.Policy.ConfigureFixedAssetCategories";
@@ -65,6 +66,11 @@ public static class FinancePermissions
     public const string ProcessApPayments = "Finance.AP.Payments.Process";
     public const string ApproveApPayments = "Finance.AP.Payments.Approve";
     public const string ReverseApPayments = "Finance.AP.Payments.Reverse";
+    public const string ManageApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Manage";
+    public const string SubmitApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Submit";
+    public const string ApproveApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Approve";
+    public const string PostApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Post";
+    public const string ReverseApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Reverse";
 
     public const string ManageArInvoices = "Finance.AR.Invoices.Manage";
     public const string CreateArInvoices = "Finance.AR.Invoices.Create";
@@ -164,6 +170,7 @@ public static class FinancePermissions
         new(ManageFinanceAccessScopes, "Manage Finance Access Scopes", "Assign effective-dated tenant and Finance-resource data scopes to users.", CategoryCore),
 
         new(ManageChartOfAccounts, "Manage Chart of Accounts", "Create, update, delete, and configure chart of accounts structures and account combinations.", CategoryGeneralLedger),
+        new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),
         new(EditJournalEntries, "Edit Journal Entries", "Edit draft journal entries.", CategoryGeneralLedger),
         new(DeleteJournalEntries, "Delete Journal Entries", "Delete draft journal entries.", CategoryGeneralLedger),
@@ -196,6 +203,11 @@ public static class FinancePermissions
         new(ProcessApPayments, "Process AP Payments", "Create, allocate, clear, void, and process supplier payments and payment batches.", CategoryAccountsPayable),
         new(ApproveApPayments, "Approve AP Payments", "Approve supplier payments and payment batches.", CategoryAccountsPayable),
         new(ReverseApPayments, "Reverse AP Payments", "Reverse posted supplier payments through controlled compensating journals.", CategoryAccountsPayable),
+        new(ManageApSupplierDebitNotes, "Manage AP Supplier Debit Notes", "Create and amend buyer-side supplier debit notes from evidenced supplier credit notes.", CategoryAccountsPayable),
+        new(SubmitApSupplierDebitNotes, "Submit AP Supplier Debit Notes", "Submit supplier debit notes to their independent Finance approval workflow.", CategoryAccountsPayable),
+        new(ApproveApSupplierDebitNotes, "Approve AP Supplier Debit Notes", "Approve or reject an assigned supplier debit-note workflow step independently of the maker.", CategoryAccountsPayable),
+        new(PostApSupplierDebitNotes, "Post AP Supplier Debit Notes", "Post approved supplier debit notes through the central Finance posting engine.", CategoryAccountsPayable),
+        new(ReverseApSupplierDebitNotes, "Reverse AP Supplier Debit Notes", "Reverse posted, unapplied supplier debit notes using controlled compensating journals.", CategoryAccountsPayable),
 
         new(ManageArInvoices, "Manage AR Invoices", "Manage customer invoice lifecycle.", CategoryAccountsReceivable),
         new(CreateArInvoices, "Create AR Invoices", "Create customer invoices.", CategoryAccountsReceivable),

@@ -16,6 +16,8 @@ import type {
     SaveFinanceCloseTemplateVersion,
     JournalEntry,
     JournalEntryAttachment,
+    FinanceBudgetControlEvaluation,
+    FinanceBudgetOverrideRequest,
     FinanceJournalAuditLog,
     FinanceSettings,
     SegmentStructure,
@@ -67,6 +69,12 @@ import type {
     SubledgerModule,
     TrialBalanceReportDto,
     TrialBalanceRequestDto,
+    FinanceDimensionDefinition,
+    FinanceDimensionValue,
+    FinanceDimensionAccountRule,
+    UpsertFinanceDimensionDefinition,
+    UpsertFinanceDimensionValue,
+    UpsertFinanceDimensionAccountRule,
 } from '@/types/finance';
 import type {
     CreateOpeningStockAdjustmentDto,
@@ -74,6 +82,7 @@ import type {
     OpeningStockOptions,
 } from '@/lib/finance/opening-balance-governance';
 import { appendFinanceSegmentFilters } from '@/lib/finance/report-segment-filters';
+import { appendFinanceDimensionFilters } from '@/lib/finance/report-dimension-filters';
 import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
 import { apiService } from '@/services/api.service';
@@ -145,6 +154,52 @@ class FinanceDataService {
 
     async getAccountById(id: string): Promise<Account> {
         return apiService.get<Account>(`/finance/accounts/${id}`);
+    }
+
+    // ===== CODING DIMENSIONS =====
+
+    async getFinanceDimensions(includeInactive = false): Promise<FinanceDimensionDefinition[]> {
+        const suffix = includeInactive ? '?includeInactive=true' : '';
+        return apiService.get<FinanceDimensionDefinition[]>(`/finance/dimensions${suffix}`);
+    }
+
+    async createFinanceDimension(dto: UpsertFinanceDimensionDefinition): Promise<FinanceDimensionDefinition> {
+        return apiService.post<FinanceDimensionDefinition>('/finance/dimensions', dto);
+    }
+
+    async updateFinanceDimension(id: string, dto: UpsertFinanceDimensionDefinition): Promise<FinanceDimensionDefinition> {
+        return apiService.put<FinanceDimensionDefinition>(`/finance/dimensions/${id}`, dto);
+    }
+
+    async createFinanceDimensionValue(
+        definitionId: string,
+        dto: UpsertFinanceDimensionValue,
+    ): Promise<FinanceDimensionValue> {
+        return apiService.post<FinanceDimensionValue>(`/finance/dimensions/${definitionId}/values`, dto);
+    }
+
+    async updateFinanceDimensionValue(
+        definitionId: string,
+        valueId: string,
+        dto: UpsertFinanceDimensionValue,
+    ): Promise<FinanceDimensionValue> {
+        return apiService.put<FinanceDimensionValue>(`/finance/dimensions/${definitionId}/values/${valueId}`, dto);
+    }
+
+    async getFinanceDimensionRules(accountId?: string): Promise<FinanceDimensionAccountRule[]> {
+        const suffix = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+        return apiService.get<FinanceDimensionAccountRule[]>(`/finance/dimensions/rules${suffix}`);
+    }
+
+    async createFinanceDimensionRule(dto: UpsertFinanceDimensionAccountRule): Promise<FinanceDimensionAccountRule> {
+        return apiService.post<FinanceDimensionAccountRule>('/finance/dimensions/rules', dto);
+    }
+
+    async updateFinanceDimensionRule(
+        id: string,
+        dto: UpsertFinanceDimensionAccountRule,
+    ): Promise<FinanceDimensionAccountRule> {
+        return apiService.put<FinanceDimensionAccountRule>(`/finance/dimensions/rules/${id}`, dto);
     }
 
     async createAccount(dto: CreateAccountDto): Promise<Account> {
@@ -518,6 +573,14 @@ class FinanceDataService {
         return normalizeJournalEntry(raw);
     }
 
+    async getJournalEntryBudgetControl(id: string): Promise<FinanceBudgetControlEvaluation> {
+        return apiService.get<FinanceBudgetControlEvaluation>(`/finance/journal-entries/${id}/budget-control`);
+    }
+
+    async requestJournalEntryBudgetOverride(id: string, reason: string): Promise<FinanceBudgetOverrideRequest> {
+        return apiService.post<FinanceBudgetOverrideRequest>(`/finance/journal-entries/${id}/budget-override`, { reason });
+    }
+
     async withdrawJournalEntryApproval(id: string, reason?: string): Promise<JournalEntry> {
         const raw = await apiService.post<any>(`/finance/journal-entries/${id}/withdraw-approval`, {
             reason: reason || 'Approval request withdrawn.',
@@ -683,6 +746,7 @@ class FinanceDataService {
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<TrialBalanceReportDto>(`/finance/statements/trial-balance?${queryParams}`);
     }
@@ -697,6 +761,7 @@ class FinanceDataService {
         if (params.accountIds && params.accountIds.length > 0) {
             params.accountIds.forEach(accountId => queryParams.append('accountIds', accountId));
         }
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<DetailedLedgerReportDto>(`/finance/statements/detailed-ledger?${queryParams}`);
     }
@@ -710,6 +775,7 @@ class FinanceDataService {
         if (params.layoutId) queryParams.append('layoutId', params.layoutId);
         if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
     }
@@ -722,6 +788,7 @@ class FinanceDataService {
         if (params.layoutId) queryParams.append('layoutId', params.layoutId);
         if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+        appendFinanceDimensionFilters(queryParams, params.dimensionFilters);
 
         return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -59,10 +59,14 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
+import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
+import { useTenant } from '@/contexts/TenantContext';
+import type { ApBudgetCell } from '@/types/ap';
 
 const lineItemSchema = z.object({
     lineItemType: z.enum(['Expense', 'Product', 'Inventory']).default('Expense'),
     glAccountId: z.string().optional(),
+    budgetEntryId: z.string().optional(),
     inventoryItemId: z.string().optional(),
     warehouseId: z.string().optional(),
     purchaseOrderItemId: z.string().optional(),
@@ -85,6 +89,7 @@ const invoiceSchema = z.object({
     paymentTermId: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001).optional().default(1.0),
+    exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
     notes: z.string().optional(),
@@ -105,6 +110,8 @@ export default function CreateVendorInvoicePage() {
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const preselectedPurchaseOrderId = searchParams.get('purchaseOrderId');
     const { toast } = useToast();
+    const { currentTenantCode } = useTenant();
+    const exchangeRateRequestId = useRef(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
 
@@ -119,6 +126,8 @@ export default function CreateVendorInvoicePage() {
     // GL Account combobox state
     const [glAccountOpenIndex, setGlAccountOpenIndex] = useState<number | null>(null);
     const [glAccountSearch, setGlAccountSearch] = useState('');
+    const [budgetCellsByLine, setBudgetCellsByLine] = useState<Record<string, ApBudgetCell[]>>({});
+    const [budgetCellsLoading, setBudgetCellsLoading] = useState<Record<string, boolean>>({});
 
     // Inventory Item combobox state
     const [inventoryItemOpenIndex, setInventoryItemOpenIndex] = useState<number | null>(null);
@@ -172,6 +181,12 @@ export default function CreateVendorInvoicePage() {
     const { data: warehousesData } = useQuery({
         queryKey: ['warehouses'],
         queryFn: () => inventoryManagementService.getWarehouses(),
+    });
+
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings', currentTenantCode, 'ap-invoice-rate-policy'],
+        queryFn: () => financeService.getSettings(),
+        enabled: Boolean(currentTenantCode),
     });
 
     const { data: purchaseOrdersData, isLoading: purchaseOrdersLoading } = useQuery({
@@ -245,6 +260,7 @@ export default function CreateVendorInvoicePage() {
             paymentTermId: '',
             currencyCode: 'GHS',
             exchangeRate: 1.0,
+            exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
             isOpeningBalance: defaultOpeningBalance,
@@ -258,11 +274,19 @@ export default function CreateVendorInvoicePage() {
     });
 
     const watchInvoiceDate = form.watch('invoiceDate');
+    const watchInvoiceDateTime = watchInvoiceDate?.getTime();
     useEffect(() => {
         if (watchInvoiceDate) {
             form.setValue('exchangeRateDate', watchInvoiceDate);
         }
     }, [watchInvoiceDate]);
+
+    useEffect(() => {
+        setBudgetCellsByLine({});
+        form.getValues('lineItems').forEach((_, index) => {
+            form.setValue(`lineItems.${index}.budgetEntryId`, undefined);
+        });
+    }, [form, watchInvoiceDateTime]);
 
     const { fields, append, remove } = useFieldArray({
         control: form.control,
@@ -283,6 +307,92 @@ export default function CreateVendorInvoicePage() {
     const selectedWithholdingTax = withholdingTaxOptions.find(tax => tax.id === watchWithholdingTaxId);
     const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(selectedWithholdingTax?.rate || 0);
     const watchLineItems = form.watch('lineItems') || [];
+
+    const loadBudgetCells = async (lineKey: string, index: number, accountId: string) => {
+        form.setValue(`lineItems.${index}.budgetEntryId`, undefined);
+        setBudgetCellsByLine(current => ({ ...current, [lineKey]: [] }));
+        if (!accountId || !watchInvoiceDate) return;
+        setBudgetCellsLoading(current => ({ ...current, [lineKey]: true }));
+        try {
+            const cells = await accountsPayableService.getInvoiceBudgetCells(
+                format(watchInvoiceDate, 'yyyy-MM-dd'),
+                accountId
+            );
+            setBudgetCellsByLine(current => ({ ...current, [lineKey]: cells }));
+        } catch (error: any) {
+            toast({
+                title: 'Budget cells unavailable',
+                description: error.message || 'Unable to load adopted Finance budget cells for this account.',
+                variant: 'destructive',
+            });
+        } finally {
+            setBudgetCellsLoading(current => ({ ...current, [lineKey]: false }));
+        }
+    };
+
+    const applyInvoiceExchangeRate = async (currencyCode: string) => {
+        const requestId = ++exchangeRateRequestId.current;
+        const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+        const isOpeningBalance = form.getValues('isOpeningBalance');
+
+        if (isOpeningBalance) {
+            // Clear the prior date/currency evidence before the async lookup so Save cannot race
+            // with a stale approved-rate identity while the new historical rate is loading.
+            form.setValue('exchangeRateId', undefined);
+            if (!financeSettings) {
+                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
+            }
+            let snapshot;
+            try {
+                snapshot = await loadApprovedInvoiceRate(
+                    {
+                        module: 'AP',
+                        transactionCurrency: currencyCode,
+                        functionalCurrency,
+                        invoiceDate: form.getValues('invoiceDate'),
+                        settings: financeSettings,
+                    },
+                    (code, query) => financeService.getCurrentExchangeRate(code, query)
+                );
+            } catch (error) {
+                if (requestId !== exchangeRateRequestId.current) return;
+                throw error;
+            }
+            if (requestId !== exchangeRateRequestId.current) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            form.setValue('exchangeRateSource', snapshot.source);
+            return;
+        }
+
+        form.setValue('exchangeRateId', undefined);
+        if (currencyCode === functionalCurrency) {
+            form.setValue('exchangeRate', 1);
+            form.setValue('exchangeRateSource', 'Daily');
+            return;
+        }
+
+        let rateObj;
+        try {
+            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+        } catch (error) {
+            if (requestId !== exchangeRateRequestId.current) return;
+            throw error;
+        }
+        if (requestId !== exchangeRateRequestId.current) return;
+        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
+        form.setValue('exchangeRateId', rateObj.id);
+        form.setValue('exchangeRateSource', 'Daily');
+    };
+
+    useEffect(() => {
+        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
+            console.error('Failed to resolve governed AP opening-invoice rate', error);
+            form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRateSource', 'Unavailable');
+        });
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
 
     useEffect(() => {
         if (!watchIsOpeningBalance) return;
@@ -455,24 +565,17 @@ export default function CreateVendorInvoicePage() {
             }
             if (supplier.currency) {
                 form.setValue('currencyCode', supplier.currency);
-                if (supplier.currency === 'GHS') {
+                try {
+                    await applyInvoiceExchangeRate(supplier.currency);
+                } catch (err) {
+                    console.error("Failed to fetch exchange rate for supplier currency", err);
+                    form.setValue('exchangeRateId', undefined);
                     form.setValue('exchangeRate', 1.0);
-                    form.setValue('exchangeRateSource', 'Daily');
-                } else {
-                    try {
-                        const rateObj = await financeService.getCurrentExchangeRate(supplier.currency);
-                        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                        form.setValue('exchangeRateSource', 'Daily');
-                    } catch (err) {
-                        console.error("Failed to fetch exchange rate for supplier currency", err);
-                        form.setValue('exchangeRate', 1.0);
-                        form.setValue('exchangeRateSource', 'Custom');
-                    }
+                    form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
                 form.setValue('currencyCode', 'GHS');
-                form.setValue('exchangeRate', 1.0);
-                form.setValue('exchangeRateSource', 'Daily');
+                await applyInvoiceExchangeRate('GHS');
             }
         }
     };
@@ -554,12 +657,22 @@ export default function CreateVendorInvoicePage() {
                 });
                 return;
             }
+            const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    variant: 'destructive',
+                });
+                return;
+            }
             await accountsPayableService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
+                exchangeRateId: data.exchangeRateId,
                 // The backend resolves rate/account again from this tax id. Sending the displayed
                 // values keeps the compatibility DTO descriptive but grants them no authority.
                 withholdingTaxId: isOpeningBalance || data.withholdingTaxId === 'none' ? null : data.withholdingTaxId,
@@ -573,6 +686,7 @@ export default function CreateVendorInvoicePage() {
                     return {
                         lineItemType: item.lineItemType,
                         glAccountId: item.glAccountId || null,
+                        budgetEntryId: item.budgetEntryId || null,
                         purchaseOrderItemId: item.purchaseOrderItemId || null,
                         description: item.description,
                         quantity: Number(item.quantity),
@@ -792,19 +906,13 @@ export default function CreateVendorInvoicePage() {
                                         value={field.value} 
                                         onValueChange={async (val) => {
                                             field.onChange(val);
-                                            if (val === 'GHS') {
+                                            try {
+                                                await applyInvoiceExchangeRate(val);
+                                            } catch (err) {
+                                                console.error("Failed to fetch exchange rate for currency", err);
+                                                form.setValue('exchangeRateId', undefined);
                                                 form.setValue('exchangeRate', 1.0);
-                                                form.setValue('exchangeRateSource', 'Daily');
-                                            } else {
-                                                try {
-                                                    const rateObj = await financeService.getCurrentExchangeRate(val);
-                                                    form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-                                                    form.setValue('exchangeRateSource', 'Daily');
-                                                } catch (err) {
-                                                    console.error("Failed to fetch exchange rate for currency", err);
-                                                    form.setValue('exchangeRate', 1.0);
-                                                    form.setValue('exchangeRateSource', 'Custom');
-                                                }
+                                                form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
                                     >
@@ -822,18 +930,25 @@ export default function CreateVendorInvoicePage() {
                             />
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="space-y-2">
                                 <Label className="text-amber-600 font-semibold">Exchange Rate to Base Currency</Label>
                                 <Input 
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
+                                    readOnly={watchIsOpeningBalance}
+                                    aria-readonly={watchIsOpeningBalance}
                                     {...form.register('exchangeRate', {
-                                        onChange: () => form.setValue('exchangeRateSource', 'Custom')
+                                        onChange: () => {
+                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
+                                        }
                                     })} 
                                 />
-                                <span className="text-[11px] text-muted-foreground block mt-1">1 {watchCurrencyCode} = {form.watch('exchangeRate')} GHS</span>
+                                <span className="text-[11px] text-muted-foreground block mt-1">
+                                    1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
+                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                </span>
                             </div>
                         )}
 
@@ -905,7 +1020,7 @@ export default function CreateVendorInvoicePage() {
                             </span>
                         </div>
 
-                        {watchCurrencyCode !== 'GHS' && (
+                        {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 lg:col-span-3 space-y-4">
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -917,7 +1032,7 @@ export default function CreateVendorInvoicePage() {
                                             render={({ field }) => (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
                                                             <CalendarIcon className="mr-2 h-3 w-3" />
                                                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                                                         </Button>
@@ -935,18 +1050,22 @@ export default function CreateVendorInvoicePage() {
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                    <SelectTrigger className="h-10 text-xs">
-                                                        <SelectValue placeholder="Select FX Source" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="Daily">Daily</SelectItem>
-                                                        <SelectItem value="Spot">Spot</SelectItem>
-                                                        <SelectItem value="Official">Official</SelectItem>
-                                                        <SelectItem value="Market">Market</SelectItem>
-                                                        <SelectItem value="Custom">Custom</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                watchIsOpeningBalance ? (
+                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
+                                                ) : (
+                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
+                                                        <SelectTrigger className="h-10 text-xs">
+                                                            <SelectValue placeholder="Select FX Source" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Daily">Daily</SelectItem>
+                                                            <SelectItem value="Spot">Spot</SelectItem>
+                                                            <SelectItem value="Official">Official</SelectItem>
+                                                            <SelectItem value="Market">Market</SelectItem>
+                                                            <SelectItem value="Custom">Custom</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )
                                             )}
                                         />
                                     </div>
@@ -1002,6 +1121,9 @@ export default function CreateVendorInvoicePage() {
                         <div className="space-y-4">
                             {fields.map((field, index) => {
                                 const lineItemType = form.watch(`lineItems.${index}.lineItemType`);
+                                const selectedGlAccount = glAccountsData?.items?.find(
+                                    (account: any) => account.id === form.watch(`lineItems.${index}.glAccountId`)
+                                );
                                 return (
                                     <div key={field.id} className="grid grid-cols-12 gap-4 items-end border-b pb-4">
                                         <div className="col-span-2 space-y-2">
@@ -1029,7 +1151,7 @@ export default function CreateVendorInvoicePage() {
                                                     <Controller
                                                         control={form.control}
                                                         name={`lineItems.${index}.glAccountId`}
-                                                        render={({ field }) => (
+                                                        render={({ field: accountField }) => (
                                                             <Popover
                                                                 open={glAccountOpenIndex === index}
                                                                 onOpenChange={(open) => { setGlAccountOpenIndex(open ? index : null); if (!open) setGlAccountSearch(''); }}
@@ -1037,7 +1159,7 @@ export default function CreateVendorInvoicePage() {
                                                                 <PopoverTrigger asChild>
                                                                     <Button variant="outline" role="combobox" className="w-full justify-between text-left font-medium line-clamp-1 h-10 px-3">
                                                                         <span className="truncate text-sm">
-                                                                            {getAccountDisplay(field.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
+                                                                            {getAccountDisplay(accountField.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
                                                                         </span>
                                                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                                                     </Button>
@@ -1052,7 +1174,8 @@ export default function CreateVendorInvoicePage() {
                                                                                     <div
                                                                                         key={account.id}
                                                                                         onClick={() => {
-                                                                                            field.onChange(account.id);
+                                                                                            accountField.onChange(account.id);
+                                                                                            void loadBudgetCells(field.id, index, account.id);
                                                                                             if (!form.getValues(`lineItems.${index}.description`)) {
                                                                                                 form.setValue(`lineItems.${index}.description`, account.accountName);
                                                                                             }
@@ -1074,6 +1197,41 @@ export default function CreateVendorInvoicePage() {
                                                             </Popover>
                                                         )}
                                                     />
+                                                    {(budgetCellsLoading[field.id]
+                                                        || (budgetCellsByLine[field.id]?.length ?? 0) > 0
+                                                        || selectedGlAccount?.budgetTrackingEnabled) && (
+                                                        <Controller
+                                                            control={form.control}
+                                                            name={`lineItems.${index}.budgetEntryId`}
+                                                            render={({ field: budgetField }) => (
+                                                                <Select
+                                                                    value={budgetField.value}
+                                                                    onValueChange={budgetField.onChange}
+                                                                    disabled={budgetCellsLoading[field.id] || (budgetCellsByLine[field.id]?.length ?? 0) === 0}
+                                                                >
+                                                                    <SelectTrigger className="mt-2 h-auto min-h-10 text-left">
+                                                                        <SelectValue placeholder={budgetCellsLoading[field.id]
+                                                                            ? 'Loading budget cells...'
+                                                                            : (budgetCellsByLine[field.id]?.length ?? 0) === 0
+                                                                                ? 'No adopted budget cell'
+                                                                                : 'Select adopted budget cell'} />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {(budgetCellsByLine[field.id] || []).map(cell => (
+                                                                            <SelectItem key={cell.budgetEntryId} value={cell.budgetEntryId}>
+                                                                                <span className="flex flex-col">
+                                                                                    <span>{cell.dimensionAssignments.map(item => `${item.dimensionCode}: ${item.valueCode}`).join(' · ') || 'Account total'}</span>
+                                                                                    <span className="text-xs text-muted-foreground">
+                                                                                        {cell.fiscalPeriodCode} · {formatCurrency(cell.availableAmount, cell.functionalCurrencyCode)} available
+                                                                                    </span>
+                                                                                </span>
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        />
+                                                    )}
                                                 </div>
                                                 <div className="col-span-2 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>

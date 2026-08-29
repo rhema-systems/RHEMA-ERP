@@ -26,6 +26,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IsOpeningBalance { get; set; }
         public string CurrencyCode { get; set; } = "USD";
         public decimal ExchangeRate { get; set; } = 1.0m;
+        public Guid? ExchangeRateId { get; set; }
         public int PaymentTermsDays { get; set; } = 30; // AR-specific
         public Guid? PaymentTermId { get; set; }
         public decimal EarlyPaymentDiscountPercentage { get; set; }

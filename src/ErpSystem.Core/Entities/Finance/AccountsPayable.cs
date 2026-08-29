@@ -173,6 +173,14 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved tenant exchange-rate record frozen for a governed foreign-currency opening
+    /// invoice. Ordinary legacy invoices may remain null until their FX entry contract is
+    /// migrated independently.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+    public virtual ExchangeRate? ExchangeRateRecord { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal BaseCurrencyAmount { get; set; }
 
@@ -308,6 +316,14 @@ public class VendorInvoice : TenantEntity
 
     public virtual ICollection<VendorInvoiceLineItem> LineItems { get; set; } = new List<VendorInvoiceLineItem>();
     public virtual ICollection<VendorPaymentAllocation> PaymentAllocations { get; set; } = new List<VendorPaymentAllocation>();
+
+    /// <summary>
+    /// Finance-owned supplier debit-note applications that reduce this invoice's AP balance.
+    /// They are separate from cash allocations because the debit note has already posted its
+    /// own AP-control reduction and must not be posted again as part of the payment journal.
+    /// </summary>
+    public virtual ICollection<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
+        = new List<SupplierDebitNoteApplication>();
 }
 
 /// <summary>
@@ -331,6 +347,16 @@ public class VendorInvoiceLineItem : TenantEntity
 
     public Guid? GLAccountId { get; set; }
     public virtual Account? GLAccount { get; set; }
+
+    /// <summary>
+    /// Canonical adopted Finance budget cell selected for this direct expense line. The
+    /// relationship is optional because opening, inventory, fixed-asset and Procurement/GRV
+    /// lines do not create a second AP budget commitment. When the resolved expense account is
+    /// budget-controlled, submission requires this evidence and Finance derives both the
+    /// reservation and the posted dimension set from it.
+    /// </summary>
+    public Guid? BudgetEntryId { get; set; }
+    public virtual BudgetEntry? BudgetEntry { get; set; }
 
     public Guid? FixedAssetId { get; set; }
     public virtual FixedAsset? FixedAsset { get; set; }
@@ -670,6 +696,13 @@ public class VendorPayment : TenantEntity
     // ── Navigation ──────────────────────────────────────────────────────
 
     public virtual ICollection<VendorPaymentAllocation> Allocations { get; set; } = new List<VendorPaymentAllocation>();
+
+    /// <summary>
+    /// Finance AP settlement bridge for supplier credits consumed alongside this payment.
+    /// These rows do not consume payment cash and therefore do not change AllocatedAmount.
+    /// </summary>
+    public virtual ICollection<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
+        = new List<SupplierDebitNoteApplication>();
 }
 
 /// <summary>

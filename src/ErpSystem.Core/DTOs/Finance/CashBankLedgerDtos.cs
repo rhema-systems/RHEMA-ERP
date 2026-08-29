@@ -47,6 +47,8 @@ public class CashBankLedgerAccountDto
     public Guid BankAccountId { get; set; }
     public string BankAccountNumber { get; set; } = string.Empty;
     public string BankAccountName { get; set; } = string.Empty;
+    /// <summary>Currency of the bank statement/read-side snapshot.</summary>
+    public string BankCurrencyCode { get; set; } = "GHS";
     public Guid GlAccountId { get; set; }
     public string GlAccountNumber { get; set; } = string.Empty;
     public string GlAccountName { get; set; } = string.Empty;
@@ -55,7 +57,15 @@ public class CashBankLedgerAccountDto
     public decimal Payments { get; set; }
     public decimal ClosingBalance { get; set; }
     public decimal StoredSnapshotBalance { get; set; }
-    public decimal SnapshotVariance => StoredSnapshotBalance - ClosingBalance;
+    /// <summary>
+    /// Snapshot and GL closing balance are comparable only when the bank currency is the report's
+    /// functional currency. Foreign-bank snapshots remain native amounts and must not be subtracted
+    /// from functional GL values.
+    /// </summary>
+    public bool SnapshotComparisonAvailable { get; set; } = true;
+    public decimal? SnapshotVariance => SnapshotComparisonAvailable
+        ? StoredSnapshotBalance - ClosingBalance
+        : null;
     public List<CashBankLedgerLineDto> Lines { get; set; } = new();
 }
 

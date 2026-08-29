@@ -731,6 +731,7 @@ export interface ReconciliationAdjustment {
 // Summary/Report Interfaces
 
 export interface CashPositionSummary {
+    asOfDate: string;
     totalBalance: number;
     currency: string;
     accountCount: number;

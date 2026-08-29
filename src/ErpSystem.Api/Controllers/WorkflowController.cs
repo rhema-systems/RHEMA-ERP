@@ -2462,6 +2462,30 @@ public class WorkflowController : ControllerBase
                 return NotFound();
             }
 
+            var supplierDebitNoteWorkflow = await _db.WorkflowStepInstances
+                .AsNoTracking()
+                .Where(step => step.Id == approval.StepInstanceId && !step.IsDeleted)
+                .Select(step => new
+                {
+                    step.TenantId,
+                    step.WorkflowInstance.EntityId,
+                    EntityTypeCode = step.WorkflowInstance.EntityType.Code
+                })
+                .FirstOrDefaultAsync(HttpContext.RequestAborted);
+            if (supplierDebitNoteWorkflow != null &&
+                supplierDebitNoteWorkflow.TenantId == approval.TenantId &&
+                string.Equals(supplierDebitNoteWorkflow.EntityTypeCode, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase))
+            {
+                // The shared workflow endpoint may advance steps but cannot update the AP
+                // document, enforce its purpose-specific permission, or post its audit outcome.
+                // Review this Finance-owned document through the canonical domain boundary.
+                return Conflict(new
+                {
+                    code = "FINANCE_DOMAIN_APPROVAL_REQUIRED",
+                    route = $"/api/ap/supplier-debit-notes/{supplierDebitNoteWorkflow.EntityId}/approval"
+                });
+            }
+
             // Enforce that the current user can act on this approval (direct assignment or matching role).
             var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             var isDirect = approval.ApproverId.HasValue && approval.ApproverId.Value == currentUserId.Value;

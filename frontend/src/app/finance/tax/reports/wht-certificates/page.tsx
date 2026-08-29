@@ -11,8 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrencyAmount } from '@/lib/currency';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { ControlledDocumentIssueActions } from '@/components/finance/ControlledDocumentIssueActions';
+import { useAuth } from '@/hooks/use-auth';
 import type { FinancePagedResult, WhtCertificate } from '@/types/tax';
-import { ArrowLeft, Ban, Download, Eye, FileText, Filter, Printer, RotateCcw, Search } from 'lucide-react';
+import { ArrowLeft, Ban, Download, Eye, FileText, Filter, RotateCcw, Search } from 'lucide-react';
 
 const pageSize = 20;
 
@@ -57,6 +61,8 @@ function statusClass(status: string) {
 }
 
 export default function WhtCertificatesPage() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [result, setResult] = useState<FinancePagedResult<WhtCertificate> | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -65,7 +71,6 @@ export default function WhtCertificatesPage() {
     const [status, setStatus] = useState('All');
     const [page, setPage] = useState(1);
     const [generatingId, setGeneratingId] = useState<string | null>(null);
-    const [printingId, setPrintingId] = useState<string | null>(null);
     const [lifecycleId, setLifecycleId] = useState<string | null>(null);
     const [exporting, setExporting] = useState(false);
     const { toast } = useToast();
@@ -137,44 +142,6 @@ export default function WhtCertificatesPage() {
             return null;
         } finally {
             setGeneratingId(null);
-        }
-    };
-
-    const printCertificate = async (certificate: WhtCertificate) => {
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) {
-            toast({
-                title: 'Print window blocked',
-                description: 'Allow popups for this site and try again.',
-                variant: 'destructive',
-            });
-            return;
-        }
-
-        setPrintingId(certificate.vendorPaymentId);
-        try {
-            const printable = certificate.certificateStatus === 'Issued'
-                ? certificate
-                : await generateCertificate(certificate);
-
-            if (!printable) {
-                printWindow.close();
-                return;
-            }
-
-            const html = await taxDataService.getWhtCertificatePrintHtml(printable.vendorPaymentId);
-            printWindow.document.open();
-            printWindow.document.write(html);
-            printWindow.document.close();
-        } catch (error: any) {
-            printWindow.close();
-            toast({
-                title: 'Print failed',
-                description: error?.message || 'Unable to open printable WHT certificate.',
-                variant: 'destructive',
-            });
-        } finally {
-            setPrintingId(null);
         }
     };
 
@@ -251,9 +218,23 @@ export default function WhtCertificatesPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Link href="/finance/tax/reports/wht-remittances"><Button variant="outline">Remittances</Button></Link>
-                    <Button variant="outline" onClick={exportRegister} disabled={exporting}>
-                        <Download className="mr-2 h-4 w-4" /> Export Register
-                    </Button>
+                    {canExport && (
+                        <>
+                            <Button variant="outline" onClick={exportRegister} disabled={exporting}>
+                                <Download className="mr-2 h-4 w-4" /> Export Register
+                            </Button>
+                            <ReportPdfActions
+                                reportName="WHT statutory certificate register"
+                                onDownloadPdf={() => documentOutputService.downloadReportDocument(
+                                    DOCUMENT_TYPES.financeTaxWhtCertificateRegister,
+                                    { fromDate, toDate, status, searchTerm })}
+                                onPrint={() => documentOutputService.printReportDocument(
+                                    DOCUMENT_TYPES.financeTaxWhtCertificateRegister,
+                                    { fromDate, toDate, status, searchTerm })}
+                                disabled={loading || !fromDate || !toDate}
+                            />
+                        </>
+                    )}
                     <Button onClick={() => loadCertificates(1)} disabled={loading}>
                         <Filter className="mr-2 h-4 w-4" /> Apply Filters
                     </Button>
@@ -393,7 +374,7 @@ export default function WhtCertificatesPage() {
                                 </thead>
                                 <tbody>
                                     {rows.map(row => {
-                                        const busy = generatingId === row.vendorPaymentId || printingId === row.vendorPaymentId || lifecycleId === row.vendorPaymentId;
+                                        const busy = generatingId === row.vendorPaymentId || lifecycleId === row.vendorPaymentId;
                                         return (
                                             <tr key={row.vendorPaymentId} className="border-b hover:bg-accent">
                                                 <td className="p-3">
@@ -430,6 +411,20 @@ export default function WhtCertificatesPage() {
                                                     {row.versions.length > 1 && (
                                                         <div className="mt-1 text-xs text-muted-foreground">{row.versions.length} controlled versions retained</div>
                                                     )}
+                                                    {row.versions
+                                                        .filter(version => version.certificateId !== row.certificateId)
+                                                        .map(version => (
+                                                            <div key={version.certificateId} className="mt-1">
+                                                                <ControlledDocumentIssueActions
+                                                                    documentType={DOCUMENT_TYPES.financeTaxWhtCertificate}
+                                                                    entityId={version.certificateId}
+                                                                    documentLabel={`WHT certificate v${version.versionNumber}`}
+                                                                    issuePermission="Finance.Tax.Configuration.Manage"
+                                                                    replacementPermission="Finance.Tax.Configuration.Manage"
+                                                                    readOnly
+                                                                />
+                                                            </div>
+                                                        ))}
                                                 </td>
                                                 <td className="p-3">
                                                     <div className="flex justify-end gap-2">
@@ -459,14 +454,16 @@ export default function WhtCertificatesPage() {
                                                                 <Ban className="h-4 w-4 text-red-600" />
                                                             </Button>
                                                         )}
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() => printCertificate(row)}
-                                                            disabled={busy || row.certificateStatus !== 'Issued'}
-                                                        >
-                                                            <Printer className="mr-2 h-4 w-4" />
-                                                            Print
-                                                        </Button>
+                                                        {row.certificateStatus === 'Issued' && row.certificateId && (
+                                                            <ControlledDocumentIssueActions
+                                                                documentType={DOCUMENT_TYPES.financeTaxWhtCertificate}
+                                                                entityId={row.certificateId}
+                                                                documentLabel="WHT certificate PDF"
+                                                                issuePermission="Finance.Tax.Configuration.Manage"
+                                                                replacementPermission="Finance.Tax.Configuration.Manage"
+                                                                onIssued={() => loadCertificates(page)}
+                                                            />
+                                                        )}
                                                     </div>
                                                 </td>
                                             </tr>

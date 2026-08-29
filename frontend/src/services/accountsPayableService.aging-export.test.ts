@@ -1,10 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from './api.service';
 import { accountsPayableService } from './accountsPayableService';
+import { documentOutputService } from './document-output.service';
 
 vi.mock('./api.service', () => ({
   apiService: {
     postBlob: vi.fn(),
+  },
+}));
+
+vi.mock('./document-output.service', () => ({
+  DOCUMENT_TYPES: {
+    financeApAgingReport: 'Finance.AP.AgingReport',
+    financeApCashRequirements: 'Finance.AP.CashRequirements',
+  },
+  documentOutputService: {
+    downloadReportDocument: vi.fn(),
+    printReportDocument: vi.fn(),
   },
 }));
 
@@ -26,6 +38,22 @@ describe('accounts payable aging export client', () => {
         format: 'Csv',
         asOfDate: '2026-07-31',
       }
+    );
+  });
+
+  it('uses the same dated server-rendered artifact for PDF download and print', async () => {
+    await accountsPayableService.downloadAgingReportPdf('2026-07-31');
+    await accountsPayableService.printAgingReport('2026-07-31');
+
+    expect(documentOutputService.downloadReportDocument).toHaveBeenCalledWith(
+      'Finance.AP.AgingReport',
+      { asOfDate: '2026-07-31' },
+      { format: 'pdf' }
+    );
+    expect(documentOutputService.printReportDocument).toHaveBeenCalledWith(
+      'Finance.AP.AgingReport',
+      { asOfDate: '2026-07-31' },
+      { format: 'pdf' }
     );
   });
 });

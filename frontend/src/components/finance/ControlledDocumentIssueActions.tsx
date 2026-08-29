@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import React from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CopyPlus, FileDown, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { documentOutputService } from '@/services/document-output.service';
@@ -24,6 +25,9 @@ interface ControlledDocumentIssueActionsProps {
   documentLabel: string;
   issuance?: ControlledDocumentIssueSummary;
   onIssued?: () => void | Promise<unknown>;
+  issuePermission?: string;
+  replacementPermission?: string;
+  readOnly?: boolean;
 }
 
 const MINIMUM_REPLACEMENT_REASON_LENGTH = 20;
@@ -39,17 +43,42 @@ export function ControlledDocumentIssueActions({
   documentLabel,
   issuance,
   onIssued,
+  issuePermission = 'Finance.CashBank.Documents.Issue',
+  replacementPermission = 'Finance.CashBank.Documents.Reprint',
+  readOnly = false,
 }: ControlledDocumentIssueActionsProps) {
   const { hasPermission } = useAuth();
   const { toast } = useToast();
-  const canIssue = hasPermission('Finance.CashBank.Documents.Issue');
-  const canReplace = hasPermission('Finance.CashBank.Documents.Reprint');
+  const canIssue = hasPermission(issuePermission);
+  const canReplace = hasPermission(replacementPermission);
   const [replacementDialogOpen, setReplacementDialogOpen] = useState(false);
   const [replacementReason, setReplacementReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const originalIssued = issuance?.originalIssued ?? false;
+  const [summary, setSummary] = useState<ControlledDocumentIssueSummary | undefined>(issuance);
+  const [summaryLoading, setSummaryLoading] = useState(issuance === undefined);
+  const [summaryUnavailable, setSummaryUnavailable] = useState(false);
+  const originalIssued = summary?.originalIssued ?? false;
+
+  const refreshSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    setSummaryUnavailable(false);
+    try {
+      setSummary(await documentOutputService.getControlledDocumentIssues(documentType, entityId));
+    } catch {
+      // Issuance remains fail-closed on the server. A summary failure should not manufacture an
+      // original/replacement state; the subsequent issue request will still recheck sequencing.
+      setSummary(issuance);
+      setSummaryUnavailable(issuance === undefined);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [documentType, entityId, issuance]);
+
+  useEffect(() => { void refreshSummary(); }, [refreshSummary]);
 
   if (!canIssue && !canReplace) return null;
+  if (summaryLoading) return <span className="text-xs text-muted-foreground">Loading controlled issue history...</span>;
+  if (summaryUnavailable) return <span className="text-xs text-destructive">Controlled issue history is unavailable.</span>;
 
   const issue = async (copyType: 'Original' | 'Replacement') => {
     setBusy(true);
@@ -67,6 +96,7 @@ export function ControlledDocumentIssueActions({
       setReplacementDialogOpen(false);
       setReplacementReason('');
       await onIssued?.();
+      await refreshSummary();
     } catch (error: any) {
       toast({
         title: `Unable to issue ${documentLabel.toLowerCase()}`,
@@ -78,26 +108,54 @@ export function ControlledDocumentIssueActions({
     }
   };
 
+  const downloadRetained = async (issueId: string) => {
+    setBusy(true);
+    try {
+      await documentOutputService.downloadRetainedControlledDocument(issueId);
+    } catch (error: any) {
+      toast({
+        title: `Unable to download ${documentLabel.toLowerCase()}`,
+        description: error?.message || 'The retained PDF could not be downloaded.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {!originalIssued && canIssue && (
+        {!readOnly && !originalIssued && canIssue && (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => void issue('Original')}>
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
             Issue Original {documentLabel}
           </Button>
         )}
-        {originalIssued && canReplace && (
+        {!readOnly && originalIssued && canReplace && (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => setReplacementDialogOpen(true)}>
             <CopyPlus className="mr-2 h-4 w-4" /> Replacement Copy
           </Button>
         )}
         {originalIssued && (
           <span className="text-xs text-muted-foreground">
-            Original issued{issuance?.originalIssuedByName ? ` by ${issuance.originalIssuedByName}` : ''}
-            {issuance?.replacementCount ? ` · ${issuance.replacementCount} replacement(s)` : ''}
+            Original issued{summary?.originalIssuedByName ? ` by ${summary.originalIssuedByName}` : ''}
+            {summary?.replacementCount ? ` · ${summary.replacementCount} replacement(s)` : ''}
           </span>
         )}
+        {summary?.issues?.filter(issue => issue.retained).map(issue => (
+          <Button
+            key={issue.id}
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => void downloadRetained(issue.id)}
+            title={`SHA-256 ${issue.contentSha256}`}
+          >
+            <FileDown className="mr-2 h-4 w-4" />
+            {issue.copyType === 'Original' ? 'Retained original' : `Retained replacement #${issue.copyNumber}`}
+          </Button>
+        ))}
       </div>
 
       <Dialog open={replacementDialogOpen} onOpenChange={setReplacementDialogOpen}>
@@ -106,7 +164,7 @@ export function ControlledDocumentIssueActions({
             <DialogTitle>Issue replacement {documentLabel.toLowerCase()}</DialogTitle>
             <DialogDescription>
               The PDF will be visibly watermarked with its copy number. The reason, issuing user,
-              timestamp, and exact PDF hash will be retained in the Finance audit trail.
+              timestamp, exact PDF bytes, retention date, and SHA-256 hash will be retained in the Finance audit trail.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">

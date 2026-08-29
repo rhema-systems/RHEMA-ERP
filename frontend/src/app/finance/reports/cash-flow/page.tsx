@@ -48,7 +48,7 @@ export default function CashFlowStatementPage() {
             setReport(data);
         } catch (err) {
             console.error('Error loading cash flow statement:', err);
-            setError('Could not generate the cash flow statement.');
+            setError(err instanceof Error ? err.message : 'Could not generate the cash flow statement.');
         } finally {
             setLoading(false);
         }
@@ -68,7 +68,7 @@ export default function CashFlowStatementPage() {
             setReport(data);
         } catch (err) {
             console.error('Error loading cash flow statement:', err);
-            setError('Could not generate the cash flow statement.');
+            setError(err instanceof Error ? err.message : 'Could not generate the cash flow statement.');
         } finally {
             setRunning(false);
         }
@@ -194,9 +194,22 @@ export default function CashFlowStatementPage() {
                 </CardContent>
             </Card>
 
+            {report?.presentationWarnings?.length ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Cash-flow presentation review required</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                        {report.presentationWarnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+
             <Card>
                 <CardHeader className="border-b pb-2 text-center">
-                    <CardTitle className="text-xl">Statement of Cash Flows</CardTitle>
+                    <CardTitle className="text-xl">
+                        Statement of Cash Flows — {report?.method || method} Method
+                    </CardTitle>
                     <p className="text-sm text-muted-foreground">
                         For the period {new Date(report?.periodStart || startDate).toLocaleDateString()} to {new Date(report?.periodEnd || endDate).toLocaleDateString()}
                     </p>

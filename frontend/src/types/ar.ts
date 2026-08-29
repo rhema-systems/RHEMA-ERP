@@ -84,6 +84,7 @@ export interface Invoice {
     status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
     currencyCode: string;
     exchangeRate: number;
+    exchangeRateId?: string;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
@@ -106,6 +107,7 @@ export interface InvoiceCreateRequest {
     dueDate?: string;
     currencyCode: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;
@@ -345,9 +347,38 @@ export interface AgingBucket {
 
 export interface AgingReport {
     asOfDate: string;
+    currencyCode: string;
+    usesSettlementReadModel: boolean;
     buckets: AgingBucket[];
-    totalOutstanding: number;
-    customerDetails?: any[]; // Simplified for summary view
+    summary: {
+        totalCurrent: number;
+        totalDays1To30: number;
+        totalDays31To60: number;
+        totalDays61To90: number;
+        totalDays90Plus: number;
+        grandTotal: number;
+        totalCustomers: number;
+        overdueCustomers: number;
+    };
+    customers: Array<{
+        customerId: string;
+        customerCode: string;
+        customerName: string;
+        current: number;
+        days1To30: number;
+        days31To60: number;
+        days61To90: number;
+        days90Plus: number;
+        totalOutstanding: number;
+    }>;
+}
+
+export interface DetailedLedgerCurrencyTotal {
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
 }
 
 export interface CustomerDetailedLedgerReport {
@@ -359,6 +390,7 @@ export interface CustomerDetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals: DetailedLedgerCurrencyTotal[];
     warnings: string[];
     customers: CustomerDetailedLedgerAccount[];
 }
