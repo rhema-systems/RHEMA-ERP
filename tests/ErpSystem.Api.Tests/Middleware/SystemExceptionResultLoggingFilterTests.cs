@@ -18,6 +18,113 @@ namespace ErpSystem.Api.Tests.Middleware;
 public sealed class SystemExceptionResultLoggingFilterTests
 {
     [Fact]
+    public async Task LegacyServerErrorStringIsNormalizedWithoutLeakingControllerText()
+    {
+        var provider = new ServiceCollection().BuildServiceProvider();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            TraceIdentifier = "friendly-error-1"
+        };
+        http.Request.Method = HttpMethods.Post;
+        http.Request.Path = "/api/procurement/marketanalyses";
+        var actionContext = new ActionContext(
+            http, new RouteData(), new ActionDescriptor { DisplayName = "Create market analysis" });
+        var executing = new ResultExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new ObjectResult("An error occurred while saving the database record")
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            },
+            new object());
+        var filter = new SystemExceptionResultLoggingFilter(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SystemExceptionResultLoggingFilter>.Instance);
+
+        await filter.OnResultExecutionAsync(executing, () =>
+            Task.FromResult(new ResultExecutedContext(
+                actionContext,
+                new List<IFilterMetadata>(),
+                executing.Result,
+                new object())));
+
+        var normalized = executing.Result.Should().BeOfType<ObjectResult>().Subject;
+        normalized.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        var problem = normalized.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Title.Should().Be("We couldn't complete your request");
+        problem.Detail.Should().Contain("Reference ID: friendly-error-1");
+        problem.Detail.Should().NotContain("database record");
+        problem.Extensions["code"].Should().Be("UNEXPECTED_ERROR");
+    }
+
+    [Fact]
+    public async Task AnonymousServerFailureIsNormalizedAndPersistedForTenantAudit()
+    {
+        var tenantId = Guid.NewGuid();
+        var repository = new Mock<IGenericRepository<SystemExceptionLog>>();
+        repository.Setup(value => value.AddAsync(It.IsAny<SystemExceptionLog>()))
+            .ReturnsAsync((SystemExceptionLog value) => value);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(value => value.Repository<SystemExceptionLog>())
+            .Returns(repository.Object);
+        unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(value => value.TenantId).Returns(tenantId);
+        var provider = new ServiceCollection()
+            .AddSingleton(unitOfWork.Object)
+            .AddSingleton(currentUser.Object)
+            .BuildServiceProvider();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            TraceIdentifier = "anonymous-server-failure-1"
+        };
+        http.Request.Method = HttpMethods.Post;
+        http.Request.Path = "/api/procurement/rfqs/example/send";
+        var actionContext = new ActionContext(
+            http, new RouteData(), new ActionDescriptor { DisplayName = "Send RFQ" });
+        var executing = new ResultExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new ObjectResult(new
+            {
+                message = "RFQ send failed",
+                details = "provider token=plain-secret"
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            },
+            new object());
+        var filter = new SystemExceptionResultLoggingFilter(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SystemExceptionResultLoggingFilter>.Instance);
+
+        await filter.OnResultExecutionAsync(executing, () =>
+            Task.FromResult(new ResultExecutedContext(
+                actionContext,
+                new List<IFilterMetadata>(),
+                executing.Result,
+                new object())));
+
+        var normalized = executing.Result.Should().BeOfType<ObjectResult>().Subject;
+        var problem = normalized.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Detail.Should().Contain("Reference ID: anonymous-server-failure-1");
+        problem.Detail.Should().NotContain("RFQ send failed");
+        problem.Detail.Should().NotContain("plain-secret");
+        repository.Verify(value => value.AddAsync(It.Is<SystemExceptionLog>(entry =>
+            entry.TenantId == tenantId &&
+            entry.TraceId == "anonymous-server-failure-1" &&
+            entry.Level == "Critical" &&
+            entry.ExceptionType == "HandledApiProblem" &&
+            entry.FullMessage != null &&
+            entry.FullMessage.Contains("Handled response payload") &&
+            entry.FullMessage.Contains("token=[REDACTED]") &&
+            !entry.FullMessage.Contains("plain-secret"))), Times.Once);
+    }
+
+    [Fact]
     public async Task CapturedHandledExceptionIsPersistedWithDiagnosticDetail()
     {
         var tenantId = Guid.NewGuid();

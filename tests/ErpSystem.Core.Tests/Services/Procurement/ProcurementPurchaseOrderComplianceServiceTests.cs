@@ -122,15 +122,127 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
     [Theory]
     [InlineData(ProcurementCategoryClass.Goods, "GOODS")]
     [InlineData(ProcurementCategoryClass.Works, "WORKS")]
-    [InlineData(ProcurementCategoryClass.TechnicalServices, "TECHNICAL_SERVICES")]
-    [InlineData(ProcurementCategoryClass.ConsultancyServices, "CONSULTANCY_SERVICES")]
-    [InlineData(ProcurementCategoryClass.GeneralServices, "GENERAL_SERVICES")]
-    public void SupplierCategoryCodeUsesProcurementClassificationRatherThanInventoryCategory(
+    [InlineData(ProcurementCategoryClass.TechnicalServices, "SERVICES")]
+    [InlineData(ProcurementCategoryClass.ConsultancyServices, "SERVICES")]
+    [InlineData(ProcurementCategoryClass.GeneralServices, "SERVICES")]
+    public void SupplierCategoryCodeUsesTheCanonicalOnboardingClassification(
         ProcurementCategoryClass category,
         string expectedCode)
     {
         ProcurementPurchaseOrderComplianceService.SupplierCategoryCode(category)
             .Should().Be(expectedCode);
+    }
+
+    [Fact]
+    public void ReleaseOnlyRfqAwardIsRecognizedWithoutFabricatedAdvancedLineage()
+    {
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var integrityHash = new string('a', 64);
+        var purchaseOrder = new PurchaseOrder
+        {
+            ProcurementSourceType = ProcurementPurchaseOrderSourceType.RfqAward,
+            SourceRequisitionId = requisitionId,
+            SourcingReleaseId = releaseId,
+            SourcingCaseId = null,
+            AwardReadinessDecisionId = null,
+            BusinessPartnerId = supplierId,
+            SourceIntegrityHash = integrityHash
+        };
+        var source = new ProcurementPurchaseOrderSourceResolution
+        {
+            SourceType = ProcurementPurchaseOrderSourceType.RfqAward,
+            SourceId = Guid.NewGuid(),
+            PurchaseRequisitionId = requisitionId,
+            SourcingReleaseId = releaseId,
+            SourcingCaseId = Guid.Empty,
+            AwardReadinessDecisionId = Guid.Empty,
+            BusinessPartnerId = supplierId,
+            SourceIntegrityHash = integrityHash
+        };
+
+        ProcurementPurchaseOrderComplianceService.IsReleaseOnlyRfqAward(
+                purchaseOrder,
+                source)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DraftPoPassesCommitmentCheckWhenActualExposureIsBudgetAvailable()
+    {
+        await using var fixture = new Fixture();
+        fixture.PurchaseOrder.SourceRequisitionId = Guid.NewGuid();
+        fixture.BudgetControl.Setup(item => item.GetDownstreamReadinessAsync(
+                fixture.PurchaseOrder.SourceRequisitionId.Value,
+                It.IsAny<decimal>(),
+                fixture.PurchaseOrder.Currency,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PurchaseRequisitionBudgetReadinessDto
+            {
+                RequisitionId = fixture.PurchaseOrder.SourceRequisitionId.Value,
+                BudgetId = Guid.NewGuid(),
+                BudgetCode = "PB-TEST-001",
+                BudgetStatus = "Approved",
+                Currency = "GHS",
+                RequestedAmount = fixture.PurchaseOrder.TotalAmount,
+                AvailableAmount = 500m,
+                IsCompliant = true,
+                CanReserve = true,
+                DecisionCode = "PR_BUDGET_AVAILABLE"
+            });
+
+        var action = () => fixture.Service.EnforceAsync(
+            fixture.PurchaseOrder,
+            "Submit",
+            "trace-draft-budget");
+        var exception = await action.Should()
+            .ThrowAsync<ProcurementPurchaseOrderComplianceBlockedException>();
+        var readiness = exception.Which.Readiness;
+
+        var commitment = readiness.Checks.Single(item => item.Key == "commitment");
+        commitment.Passed.Should().BeTrue();
+        commitment.Required.Should().BeFalse();
+        commitment.Message.Should().Contain("final PO approval");
+    }
+
+    [Fact]
+    public async Task ApprovedPoRequiresTheFinalApprovalCommitment()
+    {
+        await using var fixture = new Fixture();
+        fixture.PurchaseOrder.SourceRequisitionId = Guid.NewGuid();
+        fixture.PurchaseOrder.Status = "Approved";
+        fixture.BudgetControl.Setup(item => item.GetDownstreamReadinessAsync(
+                fixture.PurchaseOrder.SourceRequisitionId.Value,
+                It.IsAny<decimal>(),
+                fixture.PurchaseOrder.Currency,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PurchaseRequisitionBudgetReadinessDto
+            {
+                RequisitionId = fixture.PurchaseOrder.SourceRequisitionId.Value,
+                BudgetId = Guid.NewGuid(),
+                BudgetCode = "PB-TEST-001",
+                BudgetStatus = "Approved",
+                Currency = "GHS",
+                RequestedAmount = fixture.PurchaseOrder.TotalAmount,
+                AvailableAmount = 500m,
+                IsCompliant = true,
+                CanReserve = true,
+                DecisionCode = "PR_BUDGET_AVAILABLE"
+            });
+
+        var action = () => fixture.Service.EnforceAsync(
+            fixture.PurchaseOrder,
+            "Approve",
+            "trace-approved-budget");
+        var exception = await action.Should()
+            .ThrowAsync<ProcurementPurchaseOrderComplianceBlockedException>();
+        var readiness = exception.Which.Readiness;
+
+        var commitment = readiness.Checks.Single(item => item.Key == "commitment");
+        commitment.Passed.Should().BeFalse();
+        commitment.Required.Should().BeTrue();
+        commitment.Message.Should().Contain("no active reservation");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -188,7 +300,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
                     "PO_SOURCE_REQUIRED",
                     "Approved source lineage is required."));
 
-            var budget = new Mock<IProcurementRequisitionBudgetControlService>();
+            BudgetControl = new Mock<IProcurementRequisitionBudgetControlService>();
             var suppliers = new Mock<ISupplierValidationService>();
             suppliers.Setup(item => item.EvaluateEligibilityAsync(
                     It.IsAny<SupplierEligibilityEvaluationRequest>(),
@@ -226,7 +338,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
                 current.Object,
                 access.Object,
                 sources.Object,
-                budget.Object,
+                BudgetControl.Object,
                 suppliers.Object,
                 ghaneps.Object,
                 controlEvents.Object,
@@ -237,6 +349,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
         public Guid TenantId { get; }
         public Guid UserId { get; }
         public PurchaseOrder PurchaseOrder { get; }
+        public Mock<IProcurementRequisitionBudgetControlService> BudgetControl { get; }
         public ProcurementPurchaseOrderComplianceService Service { get; }
         public List<ProcurementControlEventWriteRequest> ControlEvents { get; } = [];
         public List<NotificationTopicEvent> Notifications { get; } = [];

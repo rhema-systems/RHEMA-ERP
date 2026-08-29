@@ -55,6 +55,9 @@ import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderS
 import { PurchaseOrderAmendmentWorkspace } from '@/components/procurement/PurchaseOrderAmendmentWorkspace';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
+import { useAuth } from '@/hooks/use-auth';
+import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
 
 const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Freight / Shipping' },
@@ -82,6 +85,7 @@ const POStatuses = [
 
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
+  const { hasPermission } = useAuth();
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
@@ -109,8 +113,9 @@ export default function PurchaseOrderDetailPage() {
       setLandedCostPlan(plan);
     } catch (err: any) {
       console.error('Error fetching purchase order:', err);
-      setError('Failed to load purchase order');
-      toast.error('Failed to load purchase order');
+      const message = err?.message || 'Failed to load purchase order';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -164,6 +169,10 @@ export default function PurchaseOrderDetailPage() {
     ? sodReadiness?.checks.find((check) => check.key === 'receipt')?.message ||
       'The PO creator cannot confirm its goods receipt.'
     : 'Wait for the purchase-order role-separation check to finish.';
+  const actionAccess = resolvePurchaseOrderActionAccess(
+    order?.status,
+    hasPermission
+  );
 
   const workflow = useWorkflowRecord({
     entityType: 'PurchaseOrder',
@@ -172,8 +181,8 @@ export default function PurchaseOrderDetailPage() {
     entityNumber: order?.orderNumber,
     status: order?.status || '',
     currentStepName: order?.currentWorkflowStepName,
-    canSubmit: order?.status === 'Draft',
-    canApproveReject: order?.status === 'Pending Approval',
+    canSubmit: actionAccess.canSubmit,
+    canApproveReject: actionAccess.canApproveReject,
     enabled: Boolean(id && order),
     commands: {
       submit: () => purchasingService.submitPurchaseOrder(id),
@@ -227,7 +236,7 @@ export default function PurchaseOrderDetailPage() {
     );
   }
 
-  const canEdit = order.status === 'Draft';
+  const canEdit = actionAccess.canEdit;
   const canReceive = order.status === 'Approved' || order.status === 'Sent' || 
                      order.status === 'Acknowledged' || order.status === 'Partially Received';
 
@@ -266,6 +275,7 @@ export default function PurchaseOrderDetailPage() {
           
           <WorkflowApprovalActions
             {...workflow.actionProps}
+            submitCopyMode="approval"
             forwardActionsDisabled={forwardActionsBlocked}
             forwardActionsDisabledReason={forwardActionsBlockedReason}
           />
@@ -570,44 +580,49 @@ export default function PurchaseOrderDetailPage() {
             <CardContent>
               <div className="space-y-3">
                 <div className="flex justify-between">
+                  <span className="text-muted-foreground">PO Currency:</span>
+                  <span className="font-medium">{order.currency}</span>
+                </div>
+
+                <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal:</span>
                   <span className="font-medium">
-                    ${order.subTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.subTotal, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Tax:</span>
                   <span className="font-medium">
-                    ${order.taxAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.taxAmount, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Shipping:</span>
                   <span className="font-medium">
-                    ${order.shippingCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.shippingCost, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Miscellaneous:</span>
                   <span className="font-medium">
-                    ${(order.miscellaneousCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.miscellaneousCost || 0, order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Additional Cost:</span>
                   <span className="font-medium">
-                    ${(order.totalAdditionalCost || (order.shippingCost + (order.miscellaneousCost || 0))).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.totalAdditionalCost || (order.shippingCost + (order.miscellaneousCost || 0)), order.currency)}
                   </span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Discount:</span>
                   <span className="font-medium text-green-600">
-                    -${order.discountAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    -{formatProcurementMoney(order.discountAmount, order.currency)}
                   </span>
                 </div>
 
@@ -642,7 +657,7 @@ export default function PurchaseOrderDetailPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Total Amount:</span>
                   <span className="text-2xl font-bold text-primary">
-                    ${order.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatProcurementMoney(order.totalAmount, order.currency)}
                   </span>
                 </div>
               </div>
@@ -658,7 +673,7 @@ export default function PurchaseOrderDetailPage() {
                   Planned Landed Costs (carried to GRN)
                 </CardTitle>
                 <CardDescription>
-                  Total planned ({(landedCostPlan.currency || 'USD').toUpperCase()}):{' '}
+                  Total planned ({(landedCostPlan.currency || order.currency).toUpperCase()}):{' '}
                   {(landedCostPlan.totalPlannedCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </CardDescription>
               </CardHeader>
@@ -697,7 +712,7 @@ export default function PurchaseOrderDetailPage() {
                           <TableCell className="text-right">
                             {i.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
-                          <TableCell>{(i.currency || landedCostPlan.currency || 'USD').toUpperCase()}</TableCell>
+                          <TableCell>{(i.currency || landedCostPlan.currency || order.currency).toUpperCase()}</TableCell>
                           <TableCell className="text-right">
                             {(i.exchangeRate || 1).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                           </TableCell>
@@ -807,10 +822,10 @@ export default function PurchaseOrderDetailPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            ${item.unitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatProcurementMoney(item.unitPrice, order.currency)}
                           </TableCell>
                           <TableCell className="text-right font-medium">
-                            ${item.lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatProcurementMoney(item.lineTotal, order.currency)}
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">

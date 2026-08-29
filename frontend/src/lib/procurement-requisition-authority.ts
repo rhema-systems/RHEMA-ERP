@@ -41,8 +41,8 @@ export function getAuthorityControlPresentation(
   }
 
   return {
-    tone: 'blocked',
-    title: 'Approval authority blocked',
-    basisLabel: 'Hard stop',
+    tone: 'neutral',
+    title: 'Optional policy guidance not configured',
+    basisLabel: 'Advisory',
   };
 }

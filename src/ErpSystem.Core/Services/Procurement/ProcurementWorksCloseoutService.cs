@@ -75,6 +75,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         _unitOfWork.Repository<ProjectHandoverItem>();
     private IGenericRepository<ProjectDefectLiabilityCase> Defects =>
         _unitOfWork.Repository<ProjectDefectLiabilityCase>();
+    private IGenericRepository<ProjectSnagItem> SnagItems =>
+        _unitOfWork.Repository<ProjectSnagItem>();
     private IGenericRepository<ProjectFinalAccount> FinalAccounts =>
         _unitOfWork.Repository<ProjectFinalAccount>();
     private IGenericRepository<ProjectPaymentCertificate> PaymentCertificates =>
@@ -827,6 +829,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         var activeDispute = HasActiveDispute(history);
         var openDefects = state.Defects.Count(item =>
             ProcurementWorksCloseoutRules.IsOpenDefectStatus(item.Status));
+        var openSnags = state.SnagItems.Count(item =>
+            !string.Equals(item.Status, ProjectSnagStatuses.Closed, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(item.Status, ProjectSnagStatuses.Waived, StringComparison.OrdinalIgnoreCase));
         var dlpEnd = ProcurementWorksCloseoutRules.DefectsLiabilityEnd(
             initial?.EffectiveAtUtc ?? initial?.DecidedAtUtc,
             contract.WarrantyPeriodDays);
@@ -915,11 +920,11 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     "The defects-liability period has ended.",
                     "WORKS_DLP_ACTIVE",
                     "Final takeover cannot occur before the defects-liability period ends.");
-                AddNoOpenItems(checks, openDefects, activeDispute);
+                AddNoOpenItems(checks, openDefects, openSnags, activeDispute);
                 break;
 
             case ProcurementWorksCloseoutActionType.WarrantyRelease:
-                AddPostCompletionChecks(checks, hasFinal, dlpEnded, openDefects, activeDispute);
+                AddPostCompletionChecks(checks, hasFinal, dlpEnded, openDefects, openSnags, activeDispute);
                 break;
 
             case ProcurementWorksCloseoutActionType.PerformanceSecurityRelease:
@@ -937,7 +942,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     "The linked performance security is approved.",
                     "WORKS_SECURITY_INVALID",
                     "The performance security must belong to the contract award and be approved.");
-                AddNoOpenItems(checks, openDefects, activeDispute);
+                AddNoOpenItems(checks, openDefects, openSnags, activeDispute);
                 break;
 
             case ProcurementWorksCloseoutActionType.RetentionRelease:
@@ -1049,7 +1054,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     var retentionDlpEnded = retentionDlpEnd.HasValue &&
                                             retentionDlpEnd.Value <= DateTime.UtcNow;
                     AddPostCompletionChecks(checks, hasFinal, retentionDlpEnded,
-                        openDefects, activeDispute);
+                        openDefects, openSnags, activeDispute);
                     if (releaseStage == ProcurementRetentionReleaseStage.FinalRelease)
                     {
                         AddCondition(checks,
@@ -1147,7 +1152,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     "The requested amount must match the approved project final account.");
                 AddCurrencyCheck(checks, request.Currency,
                     state.FinalAccount?.Currency ?? state.Currency);
-                AddNoOpenItems(checks, openDefects, activeDispute);
+                AddNoOpenItems(checks, openDefects, openSnags, activeDispute);
                 break;
 
             case ProcurementWorksCloseoutActionType.Closeout:
@@ -1204,7 +1209,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     "Required warranty release is approved or not applicable.",
                     "WORKS_WARRANTY_RELEASE_REQUIRED",
                     "Approve warranty release before closeout.");
-                AddNoOpenItems(checks, openDefects, activeDispute);
+                AddNoOpenItems(checks, openDefects, openSnags, activeDispute);
                 break;
         }
     }
@@ -1214,6 +1219,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         bool hasFinal,
         bool dlpEnded,
         int openDefects,
+        int openSnags,
         bool activeDispute)
     {
         AddCondition(checks, hasFinal, "final-takeover", "Final takeover",
@@ -1225,17 +1231,21 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             "The defects-liability/warranty period has ended.",
             "WORKS_DLP_ACTIVE",
             "The defects-liability/warranty period has not ended.");
-        AddNoOpenItems(checks, openDefects, activeDispute);
+        AddNoOpenItems(checks, openDefects, openSnags, activeDispute);
     }
 
     private static void AddNoOpenItems(
         ICollection<ProcurementWorksCloseoutCheckDto> checks,
         int openDefects,
+        int openSnags,
         bool activeDispute)
     {
         AddCondition(checks, openDefects == 0, "open-defects", "Open defects",
             "WORKS_DEFECTS_CLEARED", "No unresolved defects remain.",
             "WORKS_DEFECTS_OPEN", $"{openDefects} unresolved defect(s) remain.");
+        AddCondition(checks, openSnags == 0, "open-snags", "Open snag items",
+            "WORKS_SNAGS_CLEARED", "No unresolved snag item remains.",
+            "WORKS_SNAGS_OPEN", $"{openSnags} unresolved snag item(s) remain.");
         AddCondition(checks, !activeDispute, "active-dispute", "Active dispute",
             "WORKS_NO_ACTIVE_DISPUTE", "No unresolved dispute remains.",
             "WORKS_DISPUTE_OPEN", "An unresolved dispute blocks this action.");
@@ -1266,6 +1276,10 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 item.ProjectId == project.Id && !item.IsDeleted)
             .AsNoTracking().ToListAsync(cancellationToken);
         var defects = await Defects.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProjectId == project.Id && !item.IsDeleted)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var snags = await SnagItems.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.ProjectId == project.Id && !item.IsDeleted)
             .AsNoTracking().ToListAsync(cancellationToken);
@@ -1304,6 +1318,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             project,
             handovers,
             defects,
+            snags,
             certificates,
             finalAccount,
             performanceBond,
@@ -1347,6 +1362,11 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         if (unknown is not null)
             throw Validation("WORKS_CLOSEOUT_EVIDENCE_KEY_UNKNOWN",
                 $"Evidence key '{unknown.RequirementKey}' does not apply to {actionType}.");
+        var missing = required.Except(rows.Select(item => item.RequirementKey.Trim()),
+            StringComparer.OrdinalIgnoreCase).ToArray();
+        if (missing.Length > 0)
+            throw Validation("WORKS_CLOSEOUT_EVIDENCE_MISSING",
+                $"Required Works closeout evidence is missing: {string.Join(", ", missing)}.");
 
         var result = new List<ProcurementWorksCloseoutEvidence>();
         foreach (var request in rows)
@@ -1416,7 +1436,10 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     document.CentralDocumentRecord.SourceRecordId != contract.Id ||
                     document.CentralDocumentVersion is null ||
                     document.CentralDocumentVersion.FileUploadRecordId !=
-                    document.FileUploadRecordId)
+                    document.FileUploadRecordId ||
+                    !string.Equals(document.CentralDocumentRecord.VersionStatus, "Published", StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(document.CentralDocumentRecord.CurrentVersion, document.CentralDocumentVersion.VersionNumber, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(document.CentralDocumentVersion.Status, "Published", StringComparison.OrdinalIgnoreCase))
                     throw Conflict("WORKS_CLOSEOUT_DMS_DOCUMENT_UNSAFE",
                         "Contract evidence must be current central-DMS content with a Clean malware scan.");
                 uploadId = document.FileUploadRecordId;
@@ -1496,6 +1519,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     item.CentralDocumentRecordId &&
                 item.CentralDocumentVersion.FileUploadRecordId ==
                     item.FileUploadRecordId &&
+                item.CentralDocumentRecord.VersionStatus == "Published" &&
+                item.CentralDocumentRecord.CurrentVersion == item.CentralDocumentVersion.VersionNumber &&
+                item.CentralDocumentVersion.Status == "Published" &&
                 !item.CentralDocumentVersion.IsDeleted,
                 cancellationToken);
     }
@@ -2339,6 +2365,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         Project Project,
         IReadOnlyList<ProjectHandoverItem> HandoverItems,
         IReadOnlyList<ProjectDefectLiabilityCase> Defects,
+        IReadOnlyList<ProjectSnagItem> SnagItems,
         IReadOnlyList<ProjectPaymentCertificate> Certificates,
         ProjectFinalAccount? FinalAccount,
         PerformanceBondRequest? PerformanceBond,

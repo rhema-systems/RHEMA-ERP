@@ -28,6 +28,7 @@ import { priceListService, ItemPriceListLineDto, getPriceListTypeLabel, getPrice
 import { useInventoryItemLabels } from '@/hooks/useFieldLabels';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 const ItemTypes = [
   { value: 1, label: 'Stock Item' },
@@ -99,6 +100,8 @@ export default function InventoryItemsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [importJson, setImportJson] = useState('[]');
   const [isImporting, setIsImporting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<InventoryItemDto | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // For edit mode - track isActive separately
   const [editIsActive, setEditIsActive] = useState(true);
@@ -351,14 +354,25 @@ export default function InventoryItemsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+  const handleDelete = async (): Promise<boolean> => {
+    if (!deleteTarget) return false;
+
     try {
-      await inventoryManagementService.deleteInventoryItem(id);
-      setItems(prev => prev.filter(i => i.id !== id));
-    } catch (err) {
+      setIsDeleting(true);
+      await inventoryManagementService.deleteInventoryItem(deleteTarget.id);
+      setItems(prev => prev.filter(i => i.id !== deleteTarget.id));
+      toast.success(`Inventory item ${deleteTarget.itemCode} deleted`);
+      setDeleteTarget(null);
+      return true;
+    } catch (err: any) {
       console.error('Error deleting item:', err);
-      toast.error('Failed to delete inventory item');
+      const problem = err?.response?.data;
+      const detail = problem?.detail || problem?.message || 'Failed to delete inventory item';
+      const code = problem?.code || problem?.extensions?.code;
+      toast.error(code ? `${detail} (${code})` : detail);
+      return false;
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1167,7 +1181,15 @@ export default function InventoryItemsPage() {
                         <Button size="sm" variant="outline" onClick={() => openSuppliers(item)}><Users className="h-4 w-4 mr-1" />Suppliers</Button>
                         <Button size="sm" variant="outline" onClick={() => openHistory(item)}><History className="h-4 w-4 mr-1" />History</Button>
                         <Button size="sm" variant="outline" onClick={() => handleEdit(item)}><Edit className="h-4 w-4" /></Button>
-                        <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600"
+                          onClick={() => setDeleteTarget(item)}
+                          aria-label={`Delete ${item.itemCode}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1887,6 +1909,21 @@ export default function InventoryItemsPage() {
           <DialogFooter><Button variant="outline" onClick={() => setIsSupplierDialogOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteTarget(null);
+        }}
+        title="Delete inventory item"
+        description={deleteTarget
+          ? `Delete ${deleteTarget.itemCode} — ${deleteTarget.name}? This action is allowed only when the item has no protected transaction history.`
+          : undefined}
+        confirmText="Delete item"
+        variant="destructive"
+        onConfirm={handleDelete}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

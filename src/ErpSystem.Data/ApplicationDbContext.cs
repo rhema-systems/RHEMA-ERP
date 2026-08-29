@@ -866,6 +866,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ProcurementBudgetAllocation> ProcurementBudgetAllocations { get; set; }
     public DbSet<ProcurementBudgetRevision> ProcurementBudgetRevisions { get; set; }
     public DbSet<ProcurementBudgetCommitment> ProcurementBudgetCommitments { get; set; }
+    public DbSet<ProcurementBudgetCommitmentLedgerEntry> ProcurementBudgetCommitmentLedgerEntries { get; set; }
     public DbSet<ProcurementRequisitionAuthorityRoute> ProcurementRequisitionAuthorityRoutes { get; set; }
     public DbSet<ProcurementRequisitionAuthorityRouteStep> ProcurementRequisitionAuthorityRouteSteps { get; set; }
     public DbSet<ProcurementRequisitionSourcingRelease> ProcurementRequisitionSourcingReleases { get; set; }
@@ -7311,7 +7312,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure PartnerCategory entity
         builder.Entity<PartnerCategory>(entity =>
         {
-            entity.HasIndex(pc => pc.CategoryCode).IsUnique();
+            entity.HasIndex(pc => new { pc.TenantId, pc.CategoryCode }).IsUnique();
             entity.HasIndex(pc => pc.CategoryName);
             entity.HasIndex(pc => pc.CategoryType);
             entity.HasIndex(pc => pc.IsActive);
@@ -9473,6 +9474,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(p => p.PlanningQuarter);
             entity.HasIndex(p => p.Status);
             entity.HasIndex(p => p.PublishedDate);
+            entity.HasIndex(p => p.BudgetId);
 
             entity.HasOne(p => p.Department)
                 .WithMany()
@@ -9483,6 +9485,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(i => i.ProcurementPlan)
                 .HasForeignKey(i => i.ProcurementPlanId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.Budget)
+                .WithMany()
+                .HasForeignKey(p => p.BudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ProcurementPlanItem entity
@@ -9604,6 +9611,41 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<ProcurementBudgetCommitmentLedgerEntry>(entity =>
+        {
+            entity.HasIndex(item => new
+                { item.TenantId, item.EntryType, item.SourceType, item.SourceId })
+                .IsUnique();
+            entity.HasIndex(item => new
+                { item.TenantId, item.ProcurementBudgetCommitmentId, item.OccurredAtUtc });
+            entity.HasIndex(item => new
+                { item.TenantId, item.FormalCommitmentEntryId, item.EntryType });
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_ProcurementBudgetCommitmentLedgerEntries_Immutable");
+                table.HasCheckConstraint(
+                    "CK_ProcurementBudgetCommitmentLedgerEntries_Amount", "[Amount] > 0");
+                table.HasCheckConstraint(
+                    "CK_ProcurementBudgetCommitmentLedgerEntries_EntryType", "[EntryType] IN (1, 2, 3, 4)");
+            });
+            entity.HasOne(item => item.ProcurementBudgetCommitment)
+                .WithMany(item => item.LedgerEntries)
+                .HasForeignKey(item => item.ProcurementBudgetCommitmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ProcurementBudget)
+                .WithMany()
+                .HasForeignKey(item => item.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PurchaseRequisition)
+                .WithMany()
+                .HasForeignKey(item => item.PurchaseRequisitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FormalCommitmentEntry)
+                .WithMany(item => item.UtilizationEntries)
+                .HasForeignKey(item => item.FormalCommitmentEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // ProcurementSchedule entity
         builder.Entity<ProcurementSchedule>(entity =>
         {
@@ -9649,6 +9691,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(p => p.MarketAnalysisId);
             entity.HasIndex(p => p.PriceDate);
+            entity.HasOne(p => p.Supplier)
+                .WithMany()
+                .HasForeignKey(p => p.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // SupplierConsolidation entity
@@ -9967,6 +10013,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<ApplicationUser>().WithMany()
                 .HasForeignKey(item => item.LinkageLastUpdatedById).OnDelete(DeleteBehavior.Restrict);
         });
+
+        builder.Entity<PurchaseRequisitionItem>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.SourcePlanItemId });
+            entity.HasOne(item => item.SourcePlanItem).WithMany()
+                .HasForeignKey(item => item.SourcePlanItemId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     private static void ConfigureInventoryEntities(ModelBuilder builder)
@@ -10263,7 +10316,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[ProcurementSourceType] IS NULL OR [ProcurementSourceType] = 5 OR [ProcurementCategory] IS NOT NULL");
                 table.HasCheckConstraint(
                     "CK_PurchaseOrders_ApprovedSourceLineage",
-                    "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
+                    "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND (([SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL) OR ([SourcingCaseId] IS NULL AND [ProcurementSourceType] = 0 AND [AwardReadinessDecisionId] IS NULL) OR ([SourcingCaseId] IS NULL AND [ProcurementSourceType] IN (1, 2) AND [AwardReadinessDecisionId] IS NOT NULL))))");
             });
             entity.HasIndex(po => po.OrderNumber).IsUnique();
             entity.HasIndex(po => po.Status);
@@ -12301,7 +12354,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasTrigger("TR_ProcurementRequisitionSourcingReleases_TenantGuard");
                 table.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Attempt", "[AttemptNumber] > 0");
                 table.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Hashes", "LEN([ControlFingerprint]) = 64 AND LEN([IntegrityHash]) = 64");
-                table.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Lineage", "[SourcePlanId] <> '00000000-0000-0000-0000-000000000000' AND [SourcePlanItemId] <> '00000000-0000-0000-0000-000000000000' AND [SpecificationTemplateId] <> '00000000-0000-0000-0000-000000000000' AND [BudgetCommitmentId] <> '00000000-0000-0000-0000-000000000000' AND [AuthorityRouteId] <> '00000000-0000-0000-0000-000000000000' AND [WorkflowInstanceId] <> '00000000-0000-0000-0000-000000000000'");
             });
             entity.HasOne(item => item.PurchaseRequisition).WithMany(item => item.SourcingReleases)
                 .HasForeignKey(item => item.PurchaseRequisitionId).OnDelete(DeleteBehavior.Restrict);

@@ -22,6 +22,8 @@ import { QuantitySurveyEstimateVersionsDialog } from '@/components/quantity-surv
 import { QuantitySurveyCostReconciliationDialog } from '@/components/quantity-survey/QuantitySurveyCostReconciliationDialog';
 import { QuantitySurveyMeasurementsDialog } from '@/components/quantity-survey/QuantitySurveyMeasurementsDialog';
 import { QuantitySurveyJointMeasurementsDialog } from '@/components/quantity-survey/QuantitySurveyJointMeasurementsDialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getQuantitySurveyWorkspaceAccess } from '@/lib/quantity-survey-workspace-access';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
 import type { ContractDto } from '@/services/contractService';
 import type {
@@ -178,6 +180,8 @@ export function ProjectPackagesTab({
   onDeleteBoqItem,
   onImportCompleted,
 }: ProjectPackagesTabProps) {
+  const { hasPermission } = useAuth();
+  const { canManageBoq } = getQuantitySurveyWorkspaceAccess(hasPermission);
   const [isAddPackageDialogOpen, setIsAddPackageDialogOpen] = useState(false);
   const [isAddBoqDialogOpen, setIsAddBoqDialogOpen] = useState(false);
   const [expandedPhaseIds, setExpandedPhaseIds] = useState<string[]>([]);
@@ -425,15 +429,17 @@ export function ProjectPackagesTab({
         </AccordionTrigger>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => openAddBoqDialogForPackage(item.id)}
-          >
-            <Plus className="h-4 w-4" />
-            Add BOQ
-          </Button>
+          {canManageBoq ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => openAddBoqDialogForPackage(item.id)}
+            >
+              <Plus className="h-4 w-4" />
+              Add BOQ
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -464,15 +470,17 @@ export function ProjectPackagesTab({
               {item.boqItems.length} line(s) linked to this work component
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => openAddBoqDialogForPackage(item.id)}
-          >
-            <Plus className="h-4 w-4" />
-            Add BOQ Line
-          </Button>
+          {canManageBoq ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => openAddBoqDialogForPackage(item.id)}
+            >
+              <Plus className="h-4 w-4" />
+              Add BOQ Line
+            </Button>
+          ) : null}
         </div>
         {item.boqItems.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-white p-5 text-sm text-muted-foreground">
@@ -567,25 +575,27 @@ export function ProjectPackagesTab({
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => onEditBoqItem(boqItem)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        onClick={() => onDeleteBoqItem(boqItem.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {canManageBoq ? (
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => onEditBoqItem(boqItem)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 w-9 p-0"
+                          onClick={() => onDeleteBoqItem(boqItem.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -618,18 +628,21 @@ export function ProjectPackagesTab({
                 projectId={project.id}
                 projectCode={project.projectCode}
                 onImportCompleted={onImportCompleted}
+                canImport={canManageBoq}
               />
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => {
-                  onCancelBoqItemEdit();
-                  setIsAddBoqDialogOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Add BOQ
-              </Button>
+              {canManageBoq ? (
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => {
+                    onCancelBoqItemEdit();
+                    setIsAddBoqDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add BOQ
+                </Button>
+              ) : null}
               <Button
                 className="gap-2"
                 onClick={() => {

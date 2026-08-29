@@ -8,6 +8,18 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage")] partial class AllowReceiptDocumentDefaultsWithAuditLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster")] partial class AlignRfqCommercialIdentityWithReceiptItemMaster { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260827090000_AlignSupplierOnboardingPartnerCategories")] partial class AlignSupplierOnboardingPartnerCategories { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes")] partial class AlignPurchaseOrderSourceTriggerWithSupportedRoutes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826190000_AlignPurchaseOrderCommitmentWithRequisition")] partial class AlignPurchaseOrderCommitmentWithRequisition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826180000_AllowReleaseOnlyPurchaseOrderSourceLineage")] partial class AllowReleaseOnlyPurchaseOrderSourceLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260826170000_AllowReleaseOnlyRfqAwardTransition")] partial class AllowReleaseOnlyRfqAwardTransition { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825170000_AllowReleaseOnlyProcurementSourceEntry")] partial class AllowReleaseOnlyProcurementSourceEntry { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825143000_HardenProcurementPolicyRoleLineage")] partial class HardenProcurementPolicyRoleLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824183000_SimplifyPurchaseRequisitionControls")] partial class SimplifyPurchaseRequisitionControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260824162000_BackfillPlanLinkedPurchaseRequisitionCostCenters")] partial class BackfillPlanLinkedPurchaseRequisitionCostCenters { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260825120000_SimplifyProcurementSourcingCaseLineage")] partial class SimplifyProcurementSourcingCaseLineage { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813150000_INVREQFU003AllowPostedFullReturnReversal")] partial class INVREQFU003AllowPostedFullReturnReversal { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813171000_INVREQFU004RequireCleanTransferEvidence")] partial class INVREQFU004RequireCleanTransferEvidence { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260813143000_INVREQFU003ReturnReversalAllocationGate")] partial class INVREQFU003ReturnReversalAllocationGate { }

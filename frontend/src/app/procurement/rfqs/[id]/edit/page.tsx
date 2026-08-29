@@ -16,7 +16,7 @@ import { rfqService, type CreatePurchaseOrdersFromRfqResponseDto, type RfqDetail
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { purchasingService, type SuggestedSupplierDto } from '@/services/purchasingService';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, FileText, Loader2, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Loader2, LockKeyhole, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
 
 export default function EditRfqPage() {
   const params = useParams();
@@ -84,7 +84,7 @@ export default function EditRfqPage() {
         // Default award selections (for convenience):
         // - Winner takes all: pick lowest total quote
         // - Split award: pick lowest unit price per line
-        if ((data.quotes || []).length > 0) {
+        if (data.quoteDetailsVisible && (data.quotes || []).length > 0) {
           const sortedByTotal = [...data.quotes].sort((a, b) => (a.totalAmount ?? 0) - (b.totalAmount ?? 0));
           setWinnerQuoteId(sortedByTotal[0]?.id ?? null);
 
@@ -221,11 +221,15 @@ export default function EditRfqPage() {
   };
 
   const openQuote = (quoteId: string) => {
+    if (!rfq?.quoteDetailsVisible) {
+      toast.info('Quotation prices remain sealed until the submission deadline or controlled opening.');
+      return;
+    }
     setSelectedQuoteId(quoteId);
     setQuoteOpen(true);
   };
 
-  const canAward = rfq?.status === 'Sent' && (rfq?.quotes || []).length > 0;
+  const canAward = rfq?.quoteDetailsVisible === true && rfq?.status === 'Sent' && (rfq?.quotes || []).length > 0;
 
   const isSplitComplete = useMemo(() => {
     if (!rfq) return false;
@@ -515,6 +519,17 @@ export default function EditRfqPage() {
               <Separator />
               <div className="space-y-3">
                 <div className="text-sm font-medium">Quotes</div>
+                {!rfq.quoteDetailsVisible && (
+                  <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                    <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <div className="font-medium">Quotation prices are sealed</div>
+                      <div className="mt-1 text-sm">
+                        Supplier submissions are recorded, but commercial values remain hidden until the deadline or controlled opening. Selection and award are disabled until then.
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {rfq.quotes.map((q) => (
                     <Card key={q.id}>
@@ -529,7 +544,9 @@ export default function EditRfqPage() {
                         <div className="flex items-center justify-between">
                           <span>Total</span>
                           <span className="font-medium">
-                            {q.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {rfq.quoteDetailsVisible
+                              ? `${q.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${rfq.currency}`
+                              : 'Sealed until opening'}
                           </span>
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-2">
@@ -548,7 +565,13 @@ export default function EditRfqPage() {
                             <span />
                           )}
 
-                          <Button type="button" variant="outline" size="sm" onClick={() => openQuote(q.id)}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openQuote(q.id)}
+                            disabled={!rfq.quoteDetailsVisible}
+                          >
                             View Quote
                           </Button>
                         </div>
@@ -572,6 +595,8 @@ export default function EditRfqPage() {
                     <div className="text-sm text-muted-foreground">
                       {rfq.status === 'Awarded'
                         ? 'This RFQ has already been awarded.'
+                        : !rfq.quoteDetailsVisible
+                          ? 'Quotation prices are sealed until the deadline or controlled opening.'
                         : rfq.status !== 'Sent'
                           ? 'RFQ must be Sent before you can award it.'
                           : 'No submitted quotes available.'}

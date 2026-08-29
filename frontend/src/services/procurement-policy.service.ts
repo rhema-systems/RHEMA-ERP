@@ -5,6 +5,7 @@ import type {
   ProcurementPolicyLifecycleStatus,
   ProcurementPolicyPagedResult,
   ProcurementPolicyRevision,
+  ProcurementPolicyRoleOption,
   ProcurementPolicyRule,
   ProcurementPolicyRuleKind,
   ProcurementPolicySet,
@@ -20,6 +21,10 @@ export const procurementPolicyService = {
     apiService.get<ProcurementPolicyPagedResult>(root, query),
   get: (id: string) => apiService.get<ProcurementPolicySet>(`${root}/${id}`),
   getEffective: (code: string, atUtc?: string) => apiService.get<ProcurementPolicySet>(`${root}/effective`, { code, atUtc }),
+  getRoleOptions: (workflowDefinitionId?: string) =>
+    apiService.get<ProcurementPolicyRoleOption[]>(`${root}/role-options`, {
+      workflowDefinitionId,
+    }),
   create: (request: CreateProcurementPolicySetRequest) => apiService.post<ProcurementPolicySet>(root, request),
   update: (id: string, request: UpdateProcurementPolicySetRequest) => apiService.put<ProcurementPolicySet>(`${root}/${id}`, request),
   createRule: (id: string, request: SaveProcurementPolicyRuleRequest) => apiService.post<ProcurementPolicyRule>(`${root}/${id}/rules`, request),

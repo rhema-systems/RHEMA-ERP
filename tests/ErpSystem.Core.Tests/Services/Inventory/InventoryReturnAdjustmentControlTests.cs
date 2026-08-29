@@ -356,6 +356,21 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     }
 
     [Fact]
+    public void Return_and_adjustment_evidence_require_a_clean_central_dms_upload()
+    {
+        var root = FindRepositoryRoot();
+        var returnSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryReturnControlService.cs"));
+        var adjustmentSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Inventory",
+            "StockAdjustmentService.cs"));
+
+        returnSource.Should().Contain("x.VirusScanStatus == FileVirusScanStatus.Clean");
+        returnSource.Should().Contain("INV_RETURN_EVIDENCE_NOT_CLEAN");
+        adjustmentSource.Should().Contain("x.VirusScanStatus == FileVirusScanStatus.Clean");
+        adjustmentSource.Should().Contain("successful clean malware scan");
+    }
+
+    [Fact]
     public void Controlled_returns_preserve_distinct_serial_lines_and_validate_their_aggregate_quantity()
     {
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",

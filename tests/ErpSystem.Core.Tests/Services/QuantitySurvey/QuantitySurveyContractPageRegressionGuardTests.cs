@@ -67,6 +67,26 @@ public sealed class QuantitySurveyContractPageRegressionGuardTests
             page.Should().Contain($"projectService.{lookup}().catch(() => [])");
     }
 
+    [Fact]
+    public void E2e_fixture_demonstrates_the_tdc_architecture_workflow_stages_as_test_configuration()
+    {
+        var source = Source("scripts", "quantity-survey", "seed-quantity-survey-e2e.sql");
+
+        source.Should().Contain("\"architectureStages\":\"tdc-16.4-v1\"")
+            .And.Contain("N'Finance and budget validation'")
+            .And.Contain("N'Engineering and project confirmation'")
+            .And.Contain("N'Finance validation'")
+            .And.Contain("N'Engineer source confirmation'")
+            .And.Contain("N'QS valuation'")
+            .And.Contain("N'Procurement contract review'")
+            .And.Contain("N'Finance budget validation'")
+            .And.Contain("N'Final authority approval'")
+            .And.Contain("It is fixture configuration, not a runtime role name")
+            .And.Contain("N'TDC_PROJECT_ENGINEER'")
+            .And.Contain("N'TDC_FINANCE_REVIEWER'")
+            .And.Contain("N'TDC_HEAD_OF_PROCUREMENT'");
+    }
+
     private static string Source(params string[] path) =>
         File.ReadAllText(Path.Combine(FindRepositoryRoot(), Path.Combine(path)));
 

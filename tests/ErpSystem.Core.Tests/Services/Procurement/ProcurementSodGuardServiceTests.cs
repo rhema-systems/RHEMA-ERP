@@ -124,19 +124,27 @@ public sealed class ProcurementSodGuardServiceTests
     }
 
     [Fact]
-    public async Task MissingOrCrossTenantPolicyFailsClosedAndAuditsTheAttempt()
+    public async Task MissingPolicyUsesSharedBaselineAndStillBlocksAndAuditsIdentityConflicts()
     {
         await using var fixture = new GuardFixture();
         await fixture.AddCompletePolicyAsync();
         fixture.SwitchTenant(Guid.NewGuid());
 
-        var result = await fixture.Service.EnforceAsync(
+        var allowed = await fixture.Service.EnforceAsync(
+            Request(ProcurementSodRequiredControlRegistry.Definitions[0].Code, Guid.NewGuid()), "trace-tenant-allowed");
+        allowed.Allowed.Should().BeTrue();
+        allowed.Code.Should().Be("SOD_ALLOWED");
+        allowed.PolicySetId.Should().BeNull();
+        allowed.Message.Should().Contain("shared maker-checker baseline");
+
+        var blocked = await fixture.Service.EnforceAsync(
             Request(ProcurementSodRequiredControlRegistry.Definitions[0].Code, fixture.UserId), "trace-tenant");
 
-        result.Allowed.Should().BeFalse();
-        result.Code.Should().Be("SOD_POLICY_INCOMPLETE");
-        result.PolicySetId.Should().BeNull();
-        result.WasAudited.Should().BeTrue();
+        blocked.Allowed.Should().BeFalse();
+        blocked.Code.Should().Be("SOD_CONFLICT");
+        blocked.PolicySetId.Should().BeNull();
+        blocked.WasAudited.Should().BeTrue();
+        (await fixture.Context.AuditLogs.CountAsync()).Should().Be(1);
     }
 
     [Fact]

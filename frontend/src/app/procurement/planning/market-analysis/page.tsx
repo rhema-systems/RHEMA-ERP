@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,8 @@ export default function MarketAnalysisPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [deleteTarget, setDeleteTarget] = useState<MarketAnalysisDto>();
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { loadAnalyses(); }, [page, statusFilter]);
 
@@ -38,7 +41,9 @@ export default function MarketAnalysisPage() {
       setTotalPages(result.totalPages);
     } catch (error) {
       console.error('Error loading analyses:', error);
-      toast.error('Failed to load market analyses');
+      toast.error('Failed to load market analyses', {
+        description: error instanceof Error ? error.message : undefined,
+      });
     } finally { setLoading(false); }
   };
 
@@ -48,15 +53,23 @@ export default function MarketAnalysisPage() {
   const handleCreateNew = () => router.push('/procurement/planning/market-analysis/new');
   const getAnalysisDate = (analysis: MarketAnalysisDto) => analysis.analysisDate || analysis.preparedDate || analysis.createdAt;
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this analysis?')) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return false;
     try {
-      await marketAnalysisService.deleteAnalysis(id);
+      setDeleting(true);
+      await marketAnalysisService.deleteAnalysis(deleteTarget.id);
       toast.success('Analysis deleted successfully');
-      loadAnalyses();
+      setDeleteTarget(undefined);
+      await loadAnalyses();
+      return true;
     } catch (error) {
       console.error('Error deleting analysis:', error);
-      toast.error('Failed to delete analysis');
+      toast.error('Failed to delete analysis', {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      return false;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -156,7 +169,7 @@ export default function MarketAnalysisPage() {
                       <TableCell>
                         <div className="flex gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleViewDetails(a.id)} title="View"><Eye className="h-4 w-4" /></Button>
-                          {a.status === 'Draft' && (<><Button variant="ghost" size="sm" onClick={() => handleEdit(a.id)} title="Edit"><Edit className="h-4 w-4" /></Button><Button variant="ghost" size="sm" onClick={() => handleDelete(a.id)} title="Delete"><Trash2 className="h-4 w-4" /></Button></>)}
+                          {a.status === 'Draft' && (<><Button variant="ghost" size="sm" onClick={() => handleEdit(a.id)} title="Edit"><Edit className="h-4 w-4" /></Button><Button variant="ghost" size="sm" onClick={() => setDeleteTarget(a)} title="Delete"><Trash2 className="h-4 w-4" /></Button></>)}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -168,6 +181,18 @@ export default function MarketAnalysisPage() {
           {totalPages > 1 && (<div className="flex items-center justify-between mt-4"><div className="text-sm text-gray-500">Page {page} of {totalPages}</div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Previous</Button><Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</Button></div></div>)}
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(undefined); }}
+        title="Delete Market Analysis?"
+        description={deleteTarget ? `Delete ${deleteTarget.analysisCode} - ${deleteTarget.title}? This action cannot be undone.` : ''}
+        confirmText={deleting ? 'Deleting...' : 'Delete'}
+        cancelText="Cancel"
+        onConfirm={handleDelete}
+        isLoading={deleting}
+        variant="destructive"
+      />
     </div>
   );
 }

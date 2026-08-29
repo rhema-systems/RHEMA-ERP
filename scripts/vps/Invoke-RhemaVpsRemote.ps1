@@ -361,6 +361,124 @@ BEGIN
        AND COL_LENGTH(N'dbo.StockAdjustments', N'BookClassification') IS NOT NULL
         INSERT @R VALUES(N'Inventory opening-stock book partial migration state', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260826170000_AllowReleaseOnlyRfqAwardTransition')
+BEGIN
+    IF OBJECT_ID(N'dbo.RequestForQuotations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.RequestForQuotationAwardLines', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcePurchaseRequisitionId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingReleaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingCaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SubmissionDeadline') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'AwardedAt') IS NULL
+        INSERT @R VALUES(N'Release-only RFQ award transition prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes')
+BEGIN
+    DECLARE @purchaseOrderSourceTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrders_ApprovedSourceProtected', N'TR'));
+    IF @purchaseOrderSourceTrigger IS NULL
+       OR CHARINDEX(N'TDC0406_PO_AMENDMENT_ID', @purchaseOrderSourceTrigger) = 0
+       OR CHARINDEX(N'THROW 51202', @purchaseOrderSourceTrigger) = 0
+       OR CHARINDEX(N'THROW 51205', @purchaseOrderSourceTrigger) = 0
+        INSERT @R VALUES(N'Purchase-order source trigger alignment prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260827090000_AlignSupplierOnboardingPartnerCategories')
+BEGIN
+    IF OBJECT_ID(N'dbo.PartnerCategories', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartnerCategories', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartnerRegistrations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartners', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenants', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.PartnerCategories', N'TenantId') IS NULL
+       OR COL_LENGTH(N'dbo.PartnerCategories', N'CategoryCode') IS NULL
+       OR COL_LENGTH(N'dbo.BusinessPartnerRegistrations', N'RegistrationCategory') IS NULL
+       OR COL_LENGTH(N'dbo.BusinessPartnerRegistrations', N'BusinessPartnerId') IS NULL
+       OR NOT EXISTS
+          (
+              SELECT 1
+              FROM sys.indexes
+              WHERE object_id = OBJECT_ID(N'dbo.PartnerCategories')
+                AND name = N'IX_PartnerCategories_CategoryCode'
+          )
+       OR EXISTS
+          (
+              SELECT 1
+              FROM sys.indexes
+              WHERE object_id = OBJECT_ID(N'dbo.PartnerCategories')
+                AND name = N'IX_PartnerCategories_TenantId_CategoryCode'
+          )
+        INSERT @R VALUES(N'Supplier onboarding category alignment prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle')
+BEGIN
+    IF OBJECT_ID(N'dbo.ProcurementBudgetCommitments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Contracts', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.PurchaseOrders', N'U') IS NULL
+        INSERT @R VALUES(N'FR-PR-005 commitment lifecycle table prerequisites', 1);
+    ELSE
+    BEGIN
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 active contract exposure above reservation'', COUNT_BIG(*)
+            FROM (
+                SELECT c.Id
+                FROM dbo.ProcurementBudgetCommitments c
+                JOIN dbo.Tenders tender
+                  ON tender.SourcePurchaseRequisitionId = c.PurchaseRequisitionId
+                 AND tender.TenantId = c.TenantId AND tender.IsDeleted = 0
+                JOIN dbo.Contracts contract
+                  ON contract.TenderId = tender.Id
+                 AND contract.TenantId = c.TenantId AND contract.IsDeleted = 0
+                WHERE c.Status = 1 AND contract.Status = N''Active'' AND contract.ContractValue > 0
+                GROUP BY c.Id, c.ReservedAmount
+                HAVING SUM(contract.ContractValue) > c.ReservedAmount
+            ) violation');
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 child PO exposure above active contract'', COUNT_BIG(*)
+            FROM (
+                SELECT contract.Id
+                FROM dbo.Contracts contract
+                JOIN dbo.PurchaseOrders po
+                  ON po.ContractId = contract.Id
+                 AND po.TenantId = contract.TenantId AND po.IsDeleted = 0 AND po.TotalAmount > 0
+                 AND po.Status IN (N''Approved'', N''Open'', N''Sent'', N''Acknowledged'', N''Partially Received'', N''Received'')
+                WHERE contract.IsDeleted = 0 AND contract.Status = N''Active'' AND contract.ContractValue > 0
+                GROUP BY contract.Id, contract.ContractValue
+                HAVING SUM(po.TotalAmount) > contract.ContractValue
+            ) violation');
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 combined formal exposure above reservation'', COUNT_BIG(*)
+            FROM dbo.ProcurementBudgetCommitments c
+            OUTER APPLY (
+                SELECT COALESCE(SUM(contract.ContractValue), 0) ContractAmount
+                FROM dbo.Tenders tender
+                JOIN dbo.Contracts contract
+                  ON contract.TenderId = tender.Id
+                 AND contract.TenantId = tender.TenantId AND contract.IsDeleted = 0
+                WHERE tender.SourcePurchaseRequisitionId = c.PurchaseRequisitionId
+                  AND tender.TenantId = c.TenantId AND tender.IsDeleted = 0
+                  AND contract.Status = N''Active'' AND contract.ContractValue > 0
+            ) formal
+            OUTER APPLY (
+                SELECT COALESCE(SUM(po.TotalAmount), 0) DirectPurchaseOrderAmount
+                FROM dbo.PurchaseOrders po
+                WHERE po.TenantId = c.TenantId
+                  AND po.SourceRequisitionId = c.PurchaseRequisitionId
+                  AND po.IsDeleted = 0 AND po.TotalAmount > 0 AND po.ContractId IS NULL
+                  AND po.Status IN (N''Approved'', N''Open'', N''Sent'', N''Acknowledged'', N''Partially Received'', N''Received'')
+            ) purchaseOrders
+            WHERE c.Status = 1
+              AND formal.ContractAmount + purchaseOrders.DirectPurchaseOrderAmount > c.ReservedAmount');
+    END;
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -500,6 +618,37 @@ function Invoke-Preflight {
     # trigger bodies without mutating legacy rows. The preflight probe above
     # rejects missing source tables and any partial column apply before startup.
     Write-Output 'GUARD_COVERAGE|20260820100000_AddInventoryOpeningStockBook'
+    # The simplified PR control migration only relaxes existing columns to nullable
+    # and replaces the insert-time tenant/approval-lineage trigger. Its THROW is in
+    # the new trigger body and is not evaluated against stored rows during apply.
+    Write-Output 'GUARD_COVERAGE|20260824183000_SimplifyPurchaseRequisitionControls'
+    # This migration only relaxes advanced sourcing-case lineage columns. Its
+    # Up THROW statements are contained in the replacement lifecycle trigger;
+    # the stored-row guard belongs to Down and is not executed during deploy.
+    Write-Output 'GUARD_COVERAGE|20260825120000_SimplifyProcurementSourcingCaseLineage'
+    # This migration replaces the RFQ and tender lineage triggers. Its THROW
+    # statements protect future writes and do not evaluate stored rows in Up.
+    Write-Output 'GUARD_COVERAGE|20260825170000_AllowReleaseOnlyProcurementSourceEntry'
+    # This migration replaces only the RFQ lifecycle trigger. The read-only
+    # prerequisite probe above verifies the tables and columns used by the new
+    # release-only transition; existing RFQ rows are not updated during Up.
+    Write-Output 'GUARD_COVERAGE|20260826170000_AllowReleaseOnlyRfqAwardTransition'
+    # This migration only replaces the purchase-order commitment trigger. Its
+    # THROW protects future writes and existing rows are not updated in Up.
+    Write-Output 'GUARD_COVERAGE|20260826190000_AlignPurchaseOrderCommitmentWithRequisition'
+    # This migration patches two guarded blocks in the installed PO source
+    # trigger without updating stored rows. The prerequisite probe above checks
+    # the exact baseline markers before startup is allowed to apply it.
+    Write-Output 'GUARD_COVERAGE|20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes'
+    # This migration replaces the global category-code index with a tenant-safe
+    # composite index, provisions canonical supplier categories, and repairs
+    # approved supplier assignments. The probe above rejects missing tables,
+    # columns, and partially applied index state before any data is changed.
+    Write-Output 'GUARD_COVERAGE|20260827090000_AlignSupplierOnboardingPartnerCategories'
+    # FR-PR-005 backfills formal contract and direct-PO exposure into the new
+    # immutable ledger. The probes above mirror every legacy-data THROW in the
+    # migration so over-exposed reservations fail before any schema change.
+    Write-Output 'GUARD_COVERAGE|20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
@@ -693,6 +842,40 @@ function Start-ApiWithControlledMigrations {
     }
 }
 
+function Stop-ManagedService {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('RhemaERPAPI', 'RhemaERPFrontend')]
+        [string]$Name,
+        [int]$GracefulTimeoutSeconds = 45
+    )
+
+    $service = Get-Service $Name
+    if ($service.Status -eq 'Stopped') { return }
+
+    # Submit the graceful stop without allowing a stuck wrapper process to
+    # block the whole release indefinitely.
+    & sc.exe stop $Name | Out-Null
+    $deadline = (Get-Date).AddSeconds($GracefulTimeoutSeconds)
+    do {
+        Start-Sleep -Seconds 2
+        $service.Refresh()
+    } while ($service.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
+
+    if ($service.Status -ne 'Stopped') {
+        $serviceProcess = Get-CimInstance Win32_Service |
+            Where-Object Name -eq $Name
+        if ($null -ne $serviceProcess -and $serviceProcess.ProcessId -gt 0) {
+            Stop-Process -Id $serviceProcess.ProcessId -Force
+        }
+        (Get-Service $Name).WaitForStatus(
+            'Stopped', [TimeSpan]::FromSeconds(30))
+    }
+
+    Assert-True ((Get-Service $Name).Status -eq 'Stopped') `
+        "Service '$Name' did not stop within the controlled deployment window."
+}
+
 function Invoke-Apply {
     Assert-DeploymentId
     foreach ($value in @($ApiPackageName, $FrontendPackageName, $ApiSha256,
@@ -751,9 +934,7 @@ function Invoke-Apply {
     Set-TestServerConfiguration
     $apiStartedAt = Get-Date
     try {
-        Stop-Service RhemaERPAPI -Force
-        (Get-Service RhemaERPAPI).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPAPI
         Invoke-RobocopyChecked @(
             $stageApi, $ApiRoot, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
             '/NJH', '/NJS', '/NP',
@@ -782,9 +963,7 @@ function Invoke-Apply {
     }
 
     try {
-        Stop-Service RhemaERPFrontend -Force
-        (Get-Service RhemaERPFrontend).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPFrontend
         if (Test-Path (Join-Path $FrontendRoot '.next')) {
             Move-Item (Join-Path $FrontendRoot '.next') (Join-Path $retired '.next')
         }
@@ -873,9 +1052,7 @@ function Invoke-ResumeFrontend {
     New-Item -ItemType Directory -Path $rollbackFrontend | Out-Null
     $swapped = $false
     try {
-        Stop-Service RhemaERPFrontend -Force
-        (Get-Service RhemaERPFrontend).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPFrontend
         foreach ($name in @('.next', 'public')) {
             Move-Item (Join-Path $FrontendRoot $name) `
                 (Join-Path $rollbackFrontend $name)

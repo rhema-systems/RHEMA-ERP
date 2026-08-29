@@ -20,12 +20,14 @@ public static class ProcurementPurchaseOrderComplianceRules
 
         if (value.ReleaseRequisitionId != value.RequisitionId ||
             value.CommitmentRequisitionId != value.RequisitionId ||
-            value.ReleaseCommitmentId != value.CommitmentId ||
-            !string.Equals(value.ReleaseCommitmentReference,
-                value.CommitmentReference, StringComparison.Ordinal))
+            (value.ReleaseCommitmentId.HasValue &&
+             value.ReleaseCommitmentId.Value != value.CommitmentId) ||
+            (!string.IsNullOrWhiteSpace(value.ReleaseCommitmentReference) &&
+             !string.Equals(value.ReleaseCommitmentReference,
+                 value.CommitmentReference, StringComparison.Ordinal)))
         {
             return Invalid("PO_BUDGET_COMMITMENT_LINEAGE_MISMATCH",
-                "The sourcing release no longer identifies the requisition's authoritative budget commitment.");
+                "The approved requisition, sourcing release, and authoritative budget commitment do not agree.");
         }
 
         if (!value.RequisitionBudgetId.HasValue ||
@@ -70,9 +72,11 @@ public static class ProcurementPurchaseOrderComplianceRules
         if (value.ReservedAmount <= 0m || value.RequiredExposure <= 0m)
             return Invalid("PO_BUDGET_COMMITMENT_AMOUNT_INVALID",
                 "The approved budget commitment and downstream exposure must be positive.");
-        if (value.BudgetCommittedAmount < value.ReservedAmount)
-            return Invalid("PO_BUDGET_COMMITMENT_LEDGER_MISMATCH",
-                "The budget committed balance is lower than its active requisition commitment.");
+        var outstandingReservation = Math.Max(0m,
+            value.ReservedAmount - value.FormallyCommittedAmount);
+        if (value.BudgetReservedAmount < outstandingReservation)
+            return Invalid("PO_BUDGET_RESERVATION_LEDGER_MISMATCH",
+                "The budget reserved balance is lower than the requisition's outstanding reservation.");
         if (!IsBudgetExposureCovered(value.ReservedAmount, value.RequiredExposure))
             return Invalid("PO_BUDGET_COMMITMENT_INSUFFICIENT",
                 $"The active reservation does not cover cumulative downstream exposure {value.RequiredExposure:N2} of {value.ReservedAmount:N2} {currency}.");
@@ -89,6 +93,14 @@ public static class ProcurementPurchaseOrderComplianceRules
         activeReservedAmount > 0m &&
         activePurchaseOrderExposure >= 0m &&
         activePurchaseOrderExposure <= activeReservedAmount;
+
+    public static bool RequiresActiveBudgetCommitment(string? purchaseOrderStatus) =>
+        !string.IsNullOrWhiteSpace(purchaseOrderStatus) &&
+        !purchaseOrderStatus.Equals("Draft", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Pending Approval", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Rejected", StringComparison.OrdinalIgnoreCase) &&
+        !purchaseOrderStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsContractSignatureComplete(
         DateTime? organizationSignedAt,
@@ -141,8 +153,8 @@ public sealed record ProcurementCommitmentLifecycleSnapshot(
     Guid? RequisitionBudgetId,
     Guid ReleaseTenantId,
     Guid ReleaseRequisitionId,
-    Guid ReleaseCommitmentId,
-    string ReleaseCommitmentReference,
+    Guid? ReleaseCommitmentId,
+    string? ReleaseCommitmentReference,
     Guid CommitmentId,
     Guid CommitmentTenantId,
     Guid CommitmentRequisitionId,
@@ -150,12 +162,14 @@ public sealed record ProcurementCommitmentLifecycleSnapshot(
     string CommitmentReference,
     ProcurementBudgetCommitmentStatus CommitmentStatus,
     decimal ReservedAmount,
+    decimal FormallyCommittedAmount,
     string CommitmentCurrency,
     Guid BudgetId,
     Guid BudgetTenantId,
     string BudgetStatus,
     string BudgetCurrency,
     decimal BudgetCommittedAmount,
+    decimal BudgetReservedAmount,
     Guid? BudgetApprovedById,
     DateTime? BudgetApprovedAtUtc,
     DateTime? BudgetEffectiveFromUtc,

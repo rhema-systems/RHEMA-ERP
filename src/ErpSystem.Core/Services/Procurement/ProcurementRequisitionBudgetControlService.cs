@@ -68,20 +68,153 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
 
-        return await EvaluateAsync(requisition, budget, commitment, cancellationToken);
+        // Once downstream sourcing has replaced the requisition estimate with an
+        // awarded value, the active reservation is the authoritative exposure.
+        // Re-reading readiness against the original PR estimate would incorrectly
+        // reject a valid PO whenever the awarded quote differs from that estimate.
+        var effectiveExposure = commitment?.Status ==
+            ProcurementBudgetCommitmentStatus.Reserved
+                ? commitment.ReservedAmount
+                : requisition.TotalAmount;
+
+        return await EvaluateAsync(
+            requisition,
+            budget,
+            commitment,
+            effectiveExposure,
+            cancellationToken);
     }
 
-    public async Task<PurchaseRequisitionBudgetReadinessDto> ReserveAsync(
+    public async Task<PurchaseRequisitionBudgetReadinessDto> GetDownstreamReadinessAsync(
+        Guid requisitionId,
+        decimal requiredExposure,
+        string currencyCode,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureReader();
+        if (requiredExposure <= 0m)
+            throw new ProcurementRequisitionBudgetValidationException(
+                "PO_BUDGET_EXPOSURE_REQUIRED",
+                "The cumulative purchase-order or contract exposure must be greater than zero.");
+
+        var requisition = await Requisitions.GetQueryable(item =>
+                item.Id == requisitionId &&
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new ProcurementRequisitionBudgetNotFoundException(
+                "PR_NOT_FOUND",
+                "The purchase requisition was not found in the current tenant.");
+        if (!string.Equals(
+                currencyCode?.Trim(),
+                requisition.Currency?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            throw new ProcurementRequisitionBudgetValidationException(
+                "PO_BUDGET_CURRENCY_MISMATCH",
+                "The downstream currency must match the approved requisition and budget currency.");
+
+        var budget = requisition.BudgetId.HasValue
+            ? await Budgets.GetQueryable(item =>
+                    item.Id == requisition.BudgetId.Value &&
+                    item.TenantId == _currentUser.TenantId &&
+                    !item.IsDeleted)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken)
+            : null;
+        var commitment = await Commitments.GetQueryable(item =>
+                item.PurchaseRequisitionId == requisition.Id &&
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return await EvaluateAsync(
+            requisition,
+            budget,
+            commitment,
+            requiredExposure,
+            cancellationToken);
+    }
+
+    public Task<PurchaseRequisitionBudgetReadinessDto> ReserveAsync(
         PurchaseRequisition requisition,
         string correlationId,
         CancellationToken cancellationToken = default)
+        => ReserveCoreAsync(
+            requisition,
+            SubmitPermission,
+            requireDraft: true,
+            requisition.TotalAmount,
+            correlationId,
+            cancellationToken);
+
+    public Task<PurchaseRequisitionBudgetReadinessDto> ReserveForDownstreamAsync(
+        PurchaseRequisition requisition,
+        string requiredPermissionCode,
+        string correlationId,
+        CancellationToken cancellationToken = default)
     {
-        EnsureRequisition(requisition);
-        await EnsureCapabilityAsync(SubmitPermission, requisition.RequisitionNumber, correlationId, cancellationToken);
+        if (!string.Equals(requisition.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_NOT_APPROVED",
+                "Only an approved purchase requisition can create a downstream budget commitment.");
+        return ReserveCoreAsync(
+            requisition,
+            requiredPermissionCode,
+            requireDraft: false,
+            requisition.TotalAmount,
+            correlationId,
+            cancellationToken);
+    }
+
+    public Task<PurchaseRequisitionBudgetReadinessDto> ReserveForDownstreamAsync(
+        PurchaseRequisition requisition,
+        decimal requiredExposure,
+        string currencyCode,
+        string requiredPermissionCode,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.Equals(requisition.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_NOT_APPROVED",
+                "Only an approved purchase requisition can create a downstream budget commitment.");
+        if (requiredExposure <= 0m)
+            throw new ProcurementRequisitionBudgetValidationException(
+                "PO_BUDGET_EXPOSURE_REQUIRED",
+                "The awarded purchase-order or contract exposure must be greater than zero.");
+        if (!string.Equals(
+                currencyCode?.Trim(),
+                requisition.Currency?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            throw new ProcurementRequisitionBudgetValidationException(
+                "PO_BUDGET_CURRENCY_MISMATCH",
+                "The awarded purchase-order or contract currency must match the approved requisition and budget currency.");
+
+        return ReserveCoreAsync(
+            requisition,
+            requiredPermissionCode,
+            requireDraft: false,
+            requiredExposure,
+            correlationId,
+            cancellationToken);
+    }
+
+    private async Task<PurchaseRequisitionBudgetReadinessDto> ReserveCoreAsync(
+        PurchaseRequisition requisition,
+        string requiredPermissionCode,
+        bool requireDraft,
+        decimal requestedAmount,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        EnsureRequisition(requisition, requireDraft);
+        await EnsureCapabilityAsync(requiredPermissionCode, requisition.RequisitionNumber, correlationId, cancellationToken);
         if (!_reservationStore.HasRequiredTransaction)
             throw new ProcurementRequisitionBudgetConflictException(
                 "PR_BUDGET_TRANSACTION_REQUIRED",
-                "Budget reservation must execute inside the purchase-requisition submission transaction.");
+                "Budget commitment must execute inside the downstream purchase-order or contract transaction.");
 
         ProcurementBudget? budget = null;
         if (requisition.BudgetId.HasValue)
@@ -91,7 +224,12 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         var commitment = await Commitments.GetQueryable(item => item.PurchaseRequisitionId == requisition.Id &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .SingleOrDefaultAsync(cancellationToken);
-        var readiness = await EvaluateAsync(requisition, budget, commitment, cancellationToken);
+        var readiness = await EvaluateAsync(
+            requisition,
+            budget,
+            commitment,
+            requestedAmount,
+            cancellationToken);
 
         if (!readiness.CanReserve)
         {
@@ -100,7 +238,8 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             return readiness;
         }
 
-        if (commitment?.Status == ProcurementBudgetCommitmentStatus.Reserved)
+        if (commitment?.Status == ProcurementBudgetCommitmentStatus.Reserved &&
+            commitment.ReservedAmount == requestedAmount)
         {
             var snapshot = Snapshot(commitment);
             await RecordAsync(requisition, readiness, "BudgetReservationReused",
@@ -117,8 +256,18 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
 
         var now = DateTime.UtcNow;
         var beforeCommitted = budget.CommittedAmount;
+        var beforeReserved = budget.ReservedAmount;
         var beforeAvailable = Available(budget);
-        budget.CommittedAmount += requisition.TotalAmount;
+        var previouslyReserved = commitment?.Status ==
+            ProcurementBudgetCommitmentStatus.Reserved
+                ? commitment.ReservedAmount
+                : 0m;
+        var reservationAdjustment = requestedAmount - previouslyReserved;
+        budget.ReservedAmount += reservationAdjustment;
+        if (budget.ReservedAmount < 0m)
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_BUDGET_LEDGER_INVALID",
+                "The procurement budget reserved balance cannot be adjusted below zero.");
         budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = now;
 
@@ -152,13 +301,15 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
 
         commitment.ProcurementBudgetId = budget.Id;
         commitment.Status = ProcurementBudgetCommitmentStatus.Reserved;
-        commitment.ReservedAmount = requisition.TotalAmount;
+        commitment.ReservedAmount = requestedAmount;
         commitment.Currency = budget.Currency;
         commitment.BudgetAllocatedSnapshot = budget.AllocatedAmount;
         commitment.BudgetUtilizedSnapshot = budget.UtilizedAmount;
         commitment.BudgetCommittedBefore = beforeCommitted;
+        commitment.BudgetReservedBefore = beforeReserved;
         commitment.BudgetAvailableBefore = beforeAvailable;
         commitment.BudgetCommittedAfter = budget.CommittedAmount;
+        commitment.BudgetReservedAfter = budget.ReservedAmount;
         commitment.BudgetAvailableAfter = budget.RemainingAmount;
         commitment.IsOverride = readiness.IsOverride;
         commitment.OverrideRuleId = overrideRule?.Id;
@@ -180,14 +331,27 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         commitment.UpdatedBy = _currentUser.Username;
         commitment.LastModifiedById = _currentUser.UserId;
 
-        requisition.BudgetValidated = true;
-        requisition.BudgetAllocated = budget.AllocatedAmount;
-        requisition.BudgetRemaining = budget.RemainingAmount;
-        requisition.UpdatedAt = now;
+        // The requisition's budget fields are an approval-time snapshot and become
+        // immutable after Draft. Downstream PO/contract approval updates the
+        // authoritative Finance budget and commitment only; rewriting an approved
+        // requisition here is rejected by TR_PurchaseRequisitions_LinkageGuard and
+        // would roll back the otherwise valid approval transaction.
+        if (requireDraft)
+        {
+            requisition.BudgetValidated = true;
+            requisition.BudgetAllocated = budget.AllocatedAmount;
+            requisition.BudgetRemaining = budget.RemainingAmount;
+            requisition.UpdatedAt = now;
+        }
 
         await Budgets.UpdateAsync(budget);
         readiness = PopulateCommitment(readiness, commitment, budget);
-        await RecordAsync(requisition, readiness, "BudgetCommitmentReserved",
+        await RecordAsync(
+            requisition,
+            readiness,
+            previouslyReserved == 0m
+                ? "BudgetCommitmentReserved"
+                : "BudgetCommitmentAdjustedForAward",
             ProcurementControlEventResult.Allowed, before, Snapshot(commitment), correlationId, cancellationToken);
         return readiness;
     }
@@ -234,7 +398,9 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
 
         var before = Snapshot(commitment);
         var now = DateTime.UtcNow;
-        budget.CommittedAmount = Math.Max(0, budget.CommittedAmount - commitment.ReservedAmount);
+        var outstandingReservation = Math.Max(0,
+            commitment.ReservedAmount - commitment.FormallyCommittedAmount);
+        budget.ReservedAmount = Math.Max(0, budget.ReservedAmount - outstandingReservation);
         budget.RemainingAmount = Available(budget);
         budget.UpdatedAt = now;
         commitment.Status = ProcurementBudgetCommitmentStatus.Released;
@@ -267,7 +433,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             Released = true,
             CommitmentId = commitment.Id,
             CommitmentReference = commitment.ReservationReference,
-            ReleasedAmount = commitment.ReservedAmount,
+            ReleasedAmount = outstandingReservation,
             AvailableAmount = budget.RemainingAmount,
             Message = "The purchase-requisition budget commitment was released."
         };
@@ -366,9 +532,10 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         PurchaseRequisition requisition,
         ProcurementBudget? budget,
         ProcurementBudgetCommitment? commitment,
+        decimal requestedAmount,
         CancellationToken cancellationToken)
     {
-        var result = BaseReadiness(requisition);
+        var result = BaseReadiness(requisition, requestedAmount);
         if (commitment?.Status == ProcurementBudgetCommitmentStatus.Reserved)
         {
             var latestAmendmentAdjustment = await _unitOfWork
@@ -388,34 +555,40 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
                 .FirstOrDefaultAsync(cancellationToken);
             var expectedReservedAmount =
                 latestAmendmentAdjustment?.CommitmentAmountAfter ??
-                requisition.TotalAmount;
+                requestedAmount;
             if (commitment.ProcurementBudgetId != requisition.BudgetId ||
-                commitment.ReservedAmount != expectedReservedAmount)
+                commitment.ReservedAmount <= 0m ||
+                !string.Equals(
+                    commitment.Currency,
+                    requisition.Currency,
+                    StringComparison.OrdinalIgnoreCase) ||
+                (latestAmendmentAdjustment is not null &&
+                 commitment.ReservedAmount != expectedReservedAmount))
                 return Block(result, "PR_BUDGET_COMMITMENT_MISMATCH",
-                    "The active reservation does not match the approved requisition or latest applied PO-amendment commitment adjustment.",
+                    "The active reservation does not match the linked budget, currency, or latest applied PO-amendment commitment adjustment.",
                     "Reconcile the budget commitment and immutable amendment-adjustment ledger before progressing procurement.");
-            result.IsCompliant = true;
-            result.CanReserve = true;
-            result.DecisionCode = latestAmendmentAdjustment is null
-                ? "PR_BUDGET_COMMITMENT_ACTIVE"
-                : "PR_BUDGET_COMMITMENT_AMENDMENT_ADJUSTED";
-            result.Message = latestAmendmentAdjustment is null
-                ? "An idempotent active budget commitment already protects this requisition."
-                : $"The active budget commitment is reconciled to PO amendment {latestAmendmentAdjustment.Amendment.AmendmentNumber}.";
-            result.Basis = latestAmendmentAdjustment is null
-                ? "ExistingCommitment"
-                : "ApprovedPurchaseOrderAmendment";
-            result.RequestedAmount = commitment.ReservedAmount;
-            return PopulateCommitment(result, commitment, budget);
+            if (latestAmendmentAdjustment is not null ||
+                commitment.ReservedAmount == requestedAmount)
+            {
+                result.IsCompliant = true;
+                result.CanReserve = true;
+                result.DecisionCode = latestAmendmentAdjustment is null
+                    ? "PR_BUDGET_COMMITMENT_ACTIVE"
+                    : "PR_BUDGET_COMMITMENT_AMENDMENT_ADJUSTED";
+                result.Message = latestAmendmentAdjustment is null
+                    ? "An idempotent active budget commitment already protects the awarded downstream exposure."
+                    : $"The active budget commitment is reconciled to PO amendment {latestAmendmentAdjustment.Amendment.AmendmentNumber}.";
+                result.Basis = latestAmendmentAdjustment is null
+                    ? "ExistingCommitment"
+                    : "ApprovedPurchaseOrderAmendment";
+                result.RequestedAmount = commitment.ReservedAmount;
+                return PopulateCommitment(result, commitment, budget);
+            }
         }
 
-        if (!string.Equals(requisition.Status, "Draft", StringComparison.OrdinalIgnoreCase))
-            return Block(result, "PR_BUDGET_RESERVATION_NOT_AVAILABLE",
-                "Budget reservation is available only while the purchase requisition is Draft.",
-                "Return the requisition to its authorized Draft correction path before resubmitting.");
-        if (requisition.TotalAmount <= 0)
-            return Block(result, "PR_AMOUNT_REQUIRED", "The requisition total must be greater than zero.",
-                "Add valid requisition lines with a positive total amount.");
+        if (requestedAmount <= 0)
+            return Block(result, "PR_AMOUNT_REQUIRED", "The required procurement exposure must be greater than zero.",
+                "Add valid requisition or awarded lines with a positive total amount.");
         if (!requisition.BudgetId.HasValue)
             return Block(result, "PR_BUDGET_REQUIRED", "No approved procurement budget is linked.",
                 "Link the Draft to an approved, currently effective procurement budget.");
@@ -441,25 +614,31 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
                 "Complete budget approval with approver and approval timestamp.");
         var now = DateTime.UtcNow;
         if (budget.EffectiveDate.HasValue && budget.EffectiveDate.Value > now)
-            return Block(result, "PR_BUDGET_NOT_EFFECTIVE", "The linked budget is not yet effective.",
-                "Use a currently effective approved budget.");
+            return Block(result, "PR_BUDGET_NOT_EFFECTIVE",
+                $"Budget {budget.BudgetCode} becomes effective on {budget.EffectiveDate.Value:dd MMM yyyy}. This Draft can be prepared now but cannot be submitted or reserve funds before then.",
+                $"Submit on or after {budget.EffectiveDate.Value:dd MMM yyyy}, or link an approved budget revision that is already effective.");
         if (budget.ExpiryDate.HasValue && budget.ExpiryDate.Value < now)
-            return Block(result, "PR_BUDGET_EXPIRED", "The linked budget has expired.",
-                "Use a currently effective approved budget.");
+            return Block(result, "PR_BUDGET_EXPIRED",
+                $"Budget {budget.BudgetCode} expired on {budget.ExpiryDate.Value:dd MMM yyyy}.",
+                "Link an approved budget revision that is currently effective.");
         if (!string.Equals(budget.Currency, requisition.Currency, StringComparison.OrdinalIgnoreCase))
             return Block(result, "PR_BUDGET_CURRENCY_MISMATCH",
                 $"Budget currency {budget.Currency} does not match requisition currency {requisition.Currency}.",
                 "Link a budget in the requisition currency.");
 
-        var available = Available(budget);
+        var reusableCommitment = commitment?.Status ==
+            ProcurementBudgetCommitmentStatus.Reserved
+                ? commitment.ReservedAmount
+                : 0m;
+        var available = Available(budget) + reusableCommitment;
         result.AvailableAmount = available;
-        result.ShortfallAmount = Math.Max(0, requisition.TotalAmount - available);
-        if (available >= requisition.TotalAmount)
+        result.ShortfallAmount = Math.Max(0, requestedAmount - available);
+        if (available >= requestedAmount)
         {
             result.IsCompliant = true;
             result.CanReserve = true;
             result.DecisionCode = "PR_BUDGET_AVAILABLE";
-            result.Message = $"Budget {budget.BudgetCode} has sufficient available funds for an atomic commitment.";
+            result.Message = $"Budget {budget.BudgetCode} can cover the awarded downstream exposure. The commitment will use the actual purchase-order or contract value.";
             result.Basis = "ApprovedBudget";
             return result;
         }
@@ -590,7 +769,9 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         }, cancellationToken);
     }
 
-    private static PurchaseRequisitionBudgetReadinessDto BaseReadiness(PurchaseRequisition requisition) => new()
+    private static PurchaseRequisitionBudgetReadinessDto BaseReadiness(
+        PurchaseRequisition requisition,
+        decimal? requestedAmount = null) => new()
     {
         RequisitionId = requisition.Id,
         RequisitionNumber = requisition.RequisitionNumber,
@@ -598,7 +779,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         BudgetId = requisition.BudgetId,
         BudgetCode = requisition.BudgetCode,
         Currency = requisition.Currency,
-        RequestedAmount = requisition.TotalAmount
+        RequestedAmount = requestedAmount ?? requisition.TotalAmount
     };
 
     private static PurchaseRequisitionBudgetReadinessDto Block(
@@ -624,6 +805,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         result.AllocatedAmount = budget.AllocatedAmount;
         result.UtilizedAmount = budget.UtilizedAmount;
         result.CommittedAmount = budget.CommittedAmount;
+        result.ReservedAmount = budget.ReservedAmount;
         result.AvailableAmount = Available(budget);
     }
 
@@ -661,10 +843,14 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         commitment.ReservationSequence,
         Status = commitment.Status.ToString(),
         commitment.ReservedAmount,
+        commitment.FormallyCommittedAmount,
+        commitment.UtilizedAmount,
         commitment.Currency,
         commitment.BudgetCommittedBefore,
+        commitment.BudgetReservedBefore,
         commitment.BudgetAvailableBefore,
         commitment.BudgetCommittedAfter,
+        commitment.BudgetReservedAfter,
         commitment.BudgetAvailableAfter,
         commitment.IsOverride,
         commitment.OverrideRuleCode,
@@ -723,7 +909,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName)
         ? _currentUser.Username : _currentUser.FullName, 300);
     private static decimal Available(ProcurementBudget budget) =>
-        budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount - budget.ReservedAmount;
     private static string BuildReference(PurchaseRequisition requisition) =>
         Truncate($"BCR-{requisition.RequisitionNumber}", 100);
     private static string NormalizeCorrelation(string correlationId) =>

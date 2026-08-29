@@ -42,8 +42,10 @@ public sealed class ProcurementContractActivationService :
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IProcurementContractActivationStore _store;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly IProcurementRequisitionBudgetControlService _budgetControl;
     private readonly INotificationTopicPublisher _notifications;
     private readonly IContractService _contracts;
+    private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<ProcurementContractActivationService> _logger;
 
     public ProcurementContractActivationService(
@@ -56,8 +58,10 @@ public sealed class ProcurementContractActivationService :
         IWorkflowIntegrationService workflow,
         IProcurementContractActivationStore store,
         IProcurementControlEventService controlEvents,
+        IProcurementRequisitionBudgetControlService budgetControl,
         INotificationTopicPublisher notifications,
         IContractService contracts,
+        IProcurementBudgetCommitmentLifecycleService budgetCommitments,
         ILogger<ProcurementContractActivationService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -69,8 +73,10 @@ public sealed class ProcurementContractActivationService :
         _workflow = workflow;
         _store = store;
         _controlEvents = controlEvents;
+        _budgetControl = budgetControl;
         _notifications = notifications;
         _contracts = contracts;
+        _budgetCommitments = budgetCommitments;
         _logger = logger;
     }
 
@@ -215,6 +221,8 @@ public sealed class ProcurementContractActivationService :
                 throw Conflict("CONTRACT_ACTIVATION_OPEN_REQUEST",
                     "The contract already has an open activation request.");
 
+            await EnsureBudgetCommitmentForActivationAsync(
+                contract, correlation, cancellationToken);
             var evidence = await ValidateEvidenceAsync(
                 contract, request.Evidence, cancellationToken);
             var evaluation = await EvaluateAsync(
@@ -246,18 +254,20 @@ public sealed class ProcurementContractActivationService :
                 ContractId = contract.Id,
                 Sequence = sequence,
                 Status = ProcurementContractActivationStatus.PendingApproval,
-                ConfigurationProfileId = evaluation.Profile.Id,
-                ConfigurationProfileVersion = evaluation.Profile.Version,
-                PolicySetId = evaluation.Authority.Policy!.PolicySetId,
-                PolicyVersion = evaluation.Authority.Policy.Version,
-                AuthorityRuleId = evaluation.Authority.Steps.First().RuleId,
-                AuthorityName = evaluation.Authority.Steps.First().AuthorityName,
-                WorkflowDefinitionId = evaluation.Authority.Workflow!.WorkflowDefinitionId,
+                ConfigurationProfileId = evaluation.Profile?.Id ?? Guid.Empty,
+                ConfigurationProfileVersion = evaluation.Profile?.Version ?? 0,
+                PolicySetId = evaluation.Authority.Policy?.PolicySetId ?? Guid.Empty,
+                PolicyVersion = evaluation.Authority.Policy?.Version ?? 0,
+                AuthorityRuleId = evaluation.Authority.Steps.FirstOrDefault()?.RuleId ?? Guid.Empty,
+                AuthorityName = evaluation.Authority.Steps.FirstOrDefault()?.AuthorityName ??
+                                "Configured contract approval workflow",
+                WorkflowDefinitionId = evaluation.WorkflowDefinitionId,
                 AwardReadinessDecisionId = evaluation.Readiness.Id,
                 AwardReadinessSequence = evaluation.Readiness.DecisionSequence,
                 AwardReadinessIntegrityHash = evaluation.Readiness.IntegrityHash,
                 GhanepsConfigurationDecisionId = evaluation.Ghaneps.ConfigurationDecisionId,
-                GhanepsConfigurationValueHash = evaluation.Ghaneps.ConfigurationValueHash,
+                GhanepsConfigurationValueHash = OptionalHash(
+                    evaluation.Ghaneps.ConfigurationValueHash, "ghaneps-not-configured"),
                 GhanepsRequired = evaluation.Ghaneps.HasApplicableMapping,
                 GhanepsCompliant = evaluation.Ghaneps.IsCompliant,
                 PerformanceSecurityRequired = evaluation.PerformanceRequired,
@@ -523,6 +533,8 @@ public sealed class ProcurementContractActivationService :
                 await ContractRows.UpdateAsync(activation.Contract);
                 await Awards.UpdateAsync(award);
                 await Activations.UpdateAsync(activation);
+                await _budgetCommitments.CommitContractAsync(
+                    activation.Contract, correlation, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await RecordEventAsync(activation, "ContractActivated",
                     ProcurementControlEventResult.Allowed,
@@ -554,16 +566,23 @@ public sealed class ProcurementContractActivationService :
     {
         var checks = new List<ProcurementContractActivationCheckDto>();
         var profile = await _configuration.GetEffectiveProfileAsync(
-            "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken)
-            ?? throw Validation("CONTRACT_ACTIVATION_CONFIGURATION_MISSING",
-                "No effective Published TDC procurement configuration profile exists.");
-        if (profile.Decisions.Count != 14 || profile.Decisions.Any(item => !item.IsComplete))
-            throw Validation("CONTRACT_ACTIVATION_CONFIGURATION_INCOMPLETE",
-                "The effective configuration must contain fourteen complete approved decisions.");
-        checks.Add(Passed("configuration", "Configuration profile",
-            "CONTRACT_ACTIVATION_CONFIGURATION_READY",
-            $"{profile.ProfileCode} v{profile.Version}", profile.Id,
-            $"{profile.ProfileCode}:v{profile.Version}"));
+            "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken);
+        if (profile is null)
+        {
+            checks.Add(NotRequired("configuration", "Optional procurement configuration",
+                "CONTRACT_ACTIVATION_CONFIGURATION_NOT_CONFIGURED",
+                "No optional TDC procurement configuration profile is effective; standard contract controls remain mandatory."));
+        }
+        else
+        {
+            if (profile.Decisions.Any(item => !item.IsComplete))
+                throw Validation("CONTRACT_ACTIVATION_CONFIGURATION_INCOMPLETE",
+                    "Every decision included in the effective procurement configuration must be complete and approved.");
+            checks.Add(Passed("configuration", "Optional procurement configuration",
+                "CONTRACT_ACTIVATION_CONFIGURATION_READY",
+                $"{profile.ProfileCode} v{profile.Version}", profile.Id,
+                $"{profile.ProfileCode}:v{profile.Version}"));
+        }
 
         var award = await Awards.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
@@ -629,29 +648,43 @@ public sealed class ProcurementContractActivationService :
                 SourceType = SourceType,
                 SourceReference = contract.ContractNumber
             }, correlationId, cancellationToken);
-        var authorityReady = authority.IsReady && authority.Policy is not null &&
-                             authority.Workflow is not null &&
+        var authorityReady = authority.IsReady && authority.Workflow is not null &&
                              authority.Steps.Count > 0;
-        checks.Add(authorityReady
-            ? Passed("authority", "Statutory authority and workflow",
+        Guid workflowDefinitionId;
+        if (authorityReady)
+        {
+            workflowDefinitionId = authority.Workflow!.WorkflowDefinitionId;
+            checks.Add(Passed("authority", "Configured policy authority",
                 authority.DecisionCode, authority.Message,
                 authority.Steps.First().RuleId,
-                $"{authority.Steps.First().AuthorityName} / {authority.Workflow!.Name} v{authority.Workflow.Version}")
-            : Failed("authority", "Statutory authority and workflow",
+                $"{authority.Steps.First().AuthorityName} / {authority.Workflow.Name} v{authority.Workflow.Version}"));
+        }
+        else if (AuthorityMetadataIsAbsent(authority.DecisionCode))
+        {
+            var workflow = await ResolveContractWorkflowAsync(cancellationToken);
+            workflowDefinitionId = workflow.Id;
+            checks.Add(NotRequired("authority", "Optional policy authority",
+                authority.DecisionCode,
+                $"{authority.Message} The published '{workflow.Name}' v{workflow.Version} contract workflow remains authoritative."));
+        }
+        else
+        {
+            checks.Add(Failed("authority", "Configured policy authority",
                 authority.DecisionCode, authority.Message));
-        if (!authorityReady)
             throw Validation("CONTRACT_ACTIVATION_AUTHORITY_BLOCKED",
                 authority.Message);
+        }
 
-        var ghaneps = await _ghaneps.GetAwardComplianceAsync(
-            ProcurementGhanepsSourceType.Tender, contract.TenderId,
-            cancellationToken);
-        checks.Add(ghaneps.IsCompliant
-            ? Passed("ghaneps", "GHANEPS award exchange", ghaneps.Code,
-                ghaneps.Message, ghaneps.ConfigurationDecisionId,
-                ghaneps.ConfigurationValueHash)
-            : Failed("ghaneps", "GHANEPS award exchange", ghaneps.Code,
-                ghaneps.Message));
+        var ghaneps = await EvaluateGhanepsAsync(contract.TenderId, cancellationToken);
+        checks.Add(!ghaneps.HasApplicableMapping
+            ? NotRequired("ghaneps", "Optional GHANEPS award exchange",
+                ghaneps.Code, ghaneps.Message)
+            : ghaneps.IsCompliant
+                ? Passed("ghaneps", "Configured GHANEPS award exchange", ghaneps.Code,
+                    ghaneps.Message, ghaneps.ConfigurationDecisionId,
+                    ghaneps.ConfigurationValueHash)
+                : Failed("ghaneps", "Configured GHANEPS award exchange", ghaneps.Code,
+                    ghaneps.Message));
 
         var mandatoryPerformanceFee = await TenderFees.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
@@ -681,9 +714,9 @@ public sealed class ProcurementContractActivationService :
                     "CONTRACT_ACTIVATION_SECURITY_BLOCKED",
                     "Configured performance security must be submitted and approved."));
 
-        var stage = DeserializeDecision<ProcurementAuthorityStageDecisionValueDto>(
+        var stage = TryDeserializeDecision<ProcurementAuthorityStageDecisionValueDto>(
             profile, "DEC-004");
-        var signature = DeserializeDecision<ProcurementSignatureDecisionValueDto>(
+        var signature = TryDeserializeDecision<ProcurementSignatureDecisionValueDto>(
             profile, "DEC-008");
         var requirements = RequiredEvidence(stage, signature, performanceRequired);
         var evidence = candidateEvidence?.ToList() ?? [];
@@ -749,9 +782,61 @@ public sealed class ProcurementContractActivationService :
             contract.UpdatedAt
         });
         return new Evaluation(profile, award, readiness, authority, ghaneps,
-            performanceRequired, performanceBond, stage, signature,
+            workflowDefinitionId, performanceRequired, performanceBond, stage, signature,
             requirements, checks, snapshot);
     }
+
+    private async Task<WorkflowDefinition> ResolveContractWorkflowAsync(
+        CancellationToken cancellationToken)
+    {
+        var definition = await _unitOfWork.Repository<WorkflowDefinition>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.IsActive &&
+                item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                item.EntityType.TenantId == _currentUser.TenantId &&
+                !item.EntityType.IsDeleted && item.EntityType.IsActive &&
+                (item.EntityType.Code == WorkflowEntityType ||
+                 item.EntityType.Name == "Procurement Contract"))
+            .AsNoTracking()
+            .OrderByDescending(item => item.Version)
+            .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        return definition ?? throw Validation(
+            "CONTRACT_ACTIVATION_WORKFLOW_NOT_CONFIGURED",
+            "Publish and activate the Procurement Contract approval workflow before submitting a contract for activation.");
+    }
+
+    private async Task<ProcurementGhanepsComplianceDto> EvaluateGhanepsAsync(
+        Guid tenderId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _ghaneps.GetAwardComplianceAsync(
+                ProcurementGhanepsSourceType.Tender, tenderId, cancellationToken);
+        }
+        catch (ProcurementGhanepsExchangeConflictException exception)
+            when (exception.Code == "GHANEPS_PROFILE_NOT_EFFECTIVE")
+        {
+            return new ProcurementGhanepsComplianceDto
+            {
+                SourceType = ProcurementGhanepsSourceType.Tender,
+                SourceId = tenderId,
+                HasApplicableMapping = false,
+                IsCompliant = true,
+                Code = "CONTRACT_ACTIVATION_GHANEPS_NOT_CONFIGURED",
+                Message =
+                    "No effective GHANEPS profile is configured; award exchange is advisory for this contract."
+            };
+        }
+    }
+
+    internal static bool AuthorityMetadataIsAbsent(string? decisionCode) =>
+        string.Equals(decisionCode, "PR_AUTHORITY_POLICY_NOT_EFFECTIVE",
+            StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(decisionCode, "PR_AUTHORITY_NOT_CONFIGURED",
+            StringComparison.OrdinalIgnoreCase);
 
     private async Task<ProcurementContractActivationCheckDto> EvaluateQuantitySurveyCommercialTermsAsync(
         Contract contract, CancellationToken cancellationToken)
@@ -888,18 +973,25 @@ public sealed class ProcurementContractActivationService :
                 item.PurchaseRequisitionId == tender.SourcePurchaseRequisitionId.Value &&
                 !item.IsDeleted)
             .Include(item => item.PurchaseRequisition)
-            .Include(item => item.BudgetCommitment)
-                .ThenInclude(item => item.ProcurementBudget)
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken);
-        if (release?.BudgetCommitment?.ProcurementBudget is null)
+        var commitment = release is null
+            ? null
+            : await _unitOfWork.Repository<ProcurementBudgetCommitment>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == release.PurchaseRequisitionId &&
+                    !item.IsDeleted)
+                .Include(item => item.ProcurementBudget)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+        if (release is null || commitment?.ProcurementBudget is null)
         {
             return Failed("commitment", "Budget commitment",
                 "CONTRACT_ACTIVATION_BUDGET_COMMITMENT_MISSING",
                 "The contract sourcing release has no authoritative budget commitment.");
         }
 
-        var commitment = release.BudgetCommitment;
         var budget = commitment.ProcurementBudget;
         var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
             new ProcurementCommitmentLifecycleSnapshot(
@@ -919,12 +1011,14 @@ public sealed class ProcurementContractActivationService :
                 commitment.ReservationReference,
                 commitment.Status,
                 commitment.ReservedAmount,
+                commitment.FormallyCommittedAmount,
                 commitment.Currency,
                 budget.Id,
                 budget.TenantId,
                 budget.Status,
                 budget.Currency,
                 budget.CommittedAmount,
+                budget.ReservedAmount,
                 budget.ApprovedById,
                 budget.ApprovedDate,
                 budget.EffectiveDate,
@@ -937,6 +1031,54 @@ public sealed class ProcurementContractActivationService :
                 result.Message, commitment.Id, commitment.ReservationReference)
             : Failed("commitment", "Budget commitment", result.Code,
                 result.Message);
+    }
+
+    private async Task EnsureBudgetCommitmentForActivationAsync(
+        Contract contract,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (!_unitOfWork.HasActiveTransaction)
+            throw Conflict(
+                "CONTRACT_ACTIVATION_BUDGET_TRANSACTION_REQUIRED",
+                "The contract budget commitment must be created inside the activation transaction.");
+
+        var tender = await _unitOfWork.Repository<Tender>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == contract.TenderId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (tender is null || !tender.SourcePurchaseRequisitionId.HasValue ||
+            !tender.SourcingReleaseId.HasValue)
+            throw Validation(
+                "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
+                "The approved contract source must identify its purchase requisition and sourcing release.");
+
+        var release = await _unitOfWork.Repository<ProcurementRequisitionSourcingRelease>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == tender.SourcingReleaseId.Value &&
+                item.PurchaseRequisitionId == tender.SourcePurchaseRequisitionId.Value &&
+                !item.IsDeleted)
+            .Include(item => item.PurchaseRequisition)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Validation(
+                "CONTRACT_ACTIVATION_SOURCING_RELEASE_MISSING",
+                "The contract source has no current requisition sourcing release.");
+
+        var readiness = await _budgetControl.ReserveForDownstreamAsync(
+            release.PurchaseRequisition,
+            contract.ContractValue,
+            contract.Currency,
+            ManagePermission,
+            correlationId,
+            cancellationToken);
+        if (!readiness.IsCompliant || !readiness.CommitmentId.HasValue)
+            throw Validation(readiness.DecisionCode, readiness.Message);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<bool> IsEvidenceCurrentAsync(
@@ -1096,9 +1238,13 @@ public sealed class ProcurementContractActivationService :
 
     private async Task<ProcurementContractActivationCheckDto> EvaluateSignatureAsync(
         ProcurementContractActivation activation,
-        ProcurementSignatureDecisionValueDto signature,
+        ProcurementSignatureDecisionValueDto? signature,
         CancellationToken cancellationToken)
     {
+        if (signature is null)
+            return NotRequired("signature", "Optional configured contract signatures",
+                "CONTRACT_ACTIVATION_SIGNATURE_NOT_CONFIGURED",
+                "No additional DEC-008 signature control is configured; the contract approval workflow and recorded signatories remain mandatory.");
         if (signature.SignatureMode is
             ProcurementSignatureMode.UploadedManualEvidence or
             ProcurementSignatureMode.ElectronicOrManualEvidence)
@@ -1131,23 +1277,28 @@ public sealed class ProcurementContractActivationService :
     }
 
     private static IReadOnlyList<EvidenceRequirement> RequiredEvidence(
-        ProcurementAuthorityStageDecisionValueDto stage,
-        ProcurementSignatureDecisionValueDto signature,
+        ProcurementAuthorityStageDecisionValueDto? stage,
+        ProcurementSignatureDecisionValueDto? signature,
         bool performanceRequired)
     {
-        var result = new List<EvidenceRequirement>
+        var result = new List<EvidenceRequirement>();
+        if (stage is not null)
         {
-            new("legal-review", "Legal review evidence"),
-            new("internal-audit-review", "Internal Audit review evidence"),
-            new("authority-approval", "Statutory authority evidence"),
-            new("signed-contract", "Signed contract document in the central DMS")
-        };
-        result.AddRange(stage.EvidenceRequirements.Select((label, index) =>
-            new EvidenceRequirement($"dec-004-{index + 1:00}-{Slug(label)}",
-                $"DEC-004: {label}")));
-        result.AddRange(signature.EvidenceRequirements.Select((label, index) =>
-            new EvidenceRequirement($"dec-008-{index + 1:00}-{Slug(label)}",
-                $"DEC-008: {label}")));
+            result.AddRange(stage.EvidenceRequirements.Select((label, index) =>
+                new EvidenceRequirement($"dec-004-{index + 1:00}-{Slug(label)}",
+                    $"DEC-004: {label}")));
+        }
+        if (signature is not null)
+        {
+            if (signature.SignatureMode is
+                ProcurementSignatureMode.UploadedManualEvidence or
+                ProcurementSignatureMode.ElectronicOrManualEvidence)
+                result.Add(new EvidenceRequirement("signed-contract",
+                    "Signed contract document in the central DMS"));
+            result.AddRange(signature.EvidenceRequirements.Select((label, index) =>
+                new EvidenceRequirement($"dec-008-{index + 1:00}-{Slug(label)}",
+                    $"DEC-008: {label}")));
+        }
         if (performanceRequired)
             result.Add(new EvidenceRequirement("performance-security",
                 "Approved performance-security document"));
@@ -1375,14 +1526,19 @@ public sealed class ProcurementContractActivationService :
             ProcurementContractActivationCheckStatus.Passed or
             ProcurementContractActivationCheckStatus.NotRequired);
 
-    private static T DeserializeDecision<T>(
-        ProcurementConfigurationProfileDto profile,
+    private static T? TryDeserializeDecision<T>(
+        ProcurementConfigurationProfileDto? profile,
         string decisionKey)
+        where T : class
     {
+        if (profile is null)
+            return null;
         try
         {
-            var decision = profile.Decisions.Single(item =>
+            var decision = profile.Decisions.SingleOrDefault(item =>
                 item.DecisionKey.Equals(decisionKey, StringComparison.OrdinalIgnoreCase));
+            if (decision is null)
+                return null;
             return decision.Value.Deserialize<T>(JsonOptions)
                    ?? throw new JsonException($"{decisionKey} is empty.");
         }
@@ -1457,6 +1613,9 @@ public sealed class ProcurementContractActivationService :
             item.CorrelationId,
             item.ContractSnapshotHash
         }));
+
+    private static string OptionalHash(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? Hash(fallback) : value.Trim();
 
     private static ProcurementContractActivationDto Map(
         ProcurementContractActivation item) => new()
@@ -1600,15 +1759,16 @@ public sealed class ProcurementContractActivationService :
     private sealed record EvidenceRequirement(string Key, string Label);
 
     private sealed record Evaluation(
-        ProcurementConfigurationProfileDto Profile,
+        ProcurementConfigurationProfileDto? Profile,
         TenderAward Award,
         ProcurementAwardReadinessDecision Readiness,
         ProcurementAuthorityRouteDecisionDto Authority,
         ProcurementGhanepsComplianceDto Ghaneps,
+        Guid WorkflowDefinitionId,
         bool PerformanceRequired,
         PerformanceBondRequest? PerformanceBond,
-        ProcurementAuthorityStageDecisionValueDto Stage,
-        ProcurementSignatureDecisionValueDto Signature,
+        ProcurementAuthorityStageDecisionValueDto? Stage,
+        ProcurementSignatureDecisionValueDto? Signature,
         IReadOnlyList<EvidenceRequirement> RequiredEvidence,
         List<ProcurementContractActivationCheckDto> Checks,
         string ContractSnapshot);

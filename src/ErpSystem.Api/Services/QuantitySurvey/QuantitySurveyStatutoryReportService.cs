@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.DTOs.Reports;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.QuantitySurvey;
@@ -72,6 +73,10 @@ public sealed class QuantitySurveyStatutoryReportService(
             QuantitySurveyStatutoryReportCatalogue.FinalAccountCode => await FinalAccountAsync(project, cancellationToken),
             QuantitySurveyStatutoryReportCatalogue.ProjectCostStatusCode => await ProjectCostStatusAsync(project, cancellationToken),
             QuantitySurveyStatutoryReportCatalogue.CertificateRegisterCode => await CertificateRegisterAsync(project, cancellationToken),
+            QuantitySurveyStatutoryReportCatalogue.RetentionRegisterCode => await RetentionRegisterAsync(project, cancellationToken),
+            QuantitySurveyStatutoryReportCatalogue.CostToCompleteCode => await CostToCompleteAsync(project, cancellationToken),
+            QuantitySurveyStatutoryReportCatalogue.ContractBalanceCode => await ContractBalanceAsync(project, cancellationToken),
+            QuantitySurveyStatutoryReportCatalogue.AuditTrailCode => await AuditTrailAsync(project, cancellationToken),
             _ => throw new InvalidOperationException("The Quantity Survey system report is not implemented.")
         };
 
@@ -214,6 +219,97 @@ public sealed class QuantitySurveyStatutoryReportService(
             ("OtherDeductions", value.OtherDeductionsAmount + value.MaterialDeductionAmount), ("Tax", value.TaxAmount),
             ("NetCertified", value.NetCertifiedAmount), ("ApHandoffStatus", value.ApHandoffStatus),
             ("PaymentStatus", value.PaymentStatusSnapshot)))).ToList();
+    }
+
+    private async Task<List<ReportRow>> RetentionRegisterAsync(ProjectDetailDto project, CancellationToken token)
+    {
+        var certificates = await db.ProjectPaymentCertificates.AsNoTracking().Where(value =>
+            value.TenantId == currentUser.TenantId && value.ProjectId == project.Id && !value.IsDeleted)
+            .OrderByDescending(value => value.IssueDate).ToListAsync(token);
+        var contracts = await ContractsAsync(certificates.Where(value => value.ContractId.HasValue).Select(value => value.ContractId!.Value), token);
+        return certificates.Select(value => new ReportRow(value.IssueDate, Row(
+            ("CertificateNumber", value.CertificateNumber), ("ContractNumber", ContractNumber(contracts, value.ContractId)),
+            ("IssueDate", value.IssueDate), ("Status", value.Status), ("Currency", value.Currency),
+            ("RetentionHeld", value.RetentionHeldAmount), ("RetentionReleased", value.RetentionReleasedAmount),
+            ("RetentionBalance", value.RetentionHeldAmount - value.RetentionReleasedAmount),
+            ("PaymentStatus", value.PaymentStatusSnapshot)))).ToList();
+    }
+
+    private async Task<List<ReportRow>> CostToCompleteAsync(ProjectDetailDto project, CancellationToken token)
+    {
+        var budget = await db.ProjectBudgetRevisions.AsNoTracking().Where(value =>
+                value.TenantId == currentUser.TenantId && value.ProjectId == project.Id &&
+                value.Status == "Approved" && !value.IsDeleted)
+            .OrderByDescending(value => value.VersionNumber).FirstOrDefaultAsync(token);
+        var forecast = await db.Set<ProjectForecastVersion>().AsNoTracking().Where(value =>
+                value.TenantId == currentUser.TenantId && value.ProjectId == project.Id && value.IsActive && !value.IsDeleted)
+            .OrderByDescending(value => value.VersionNumber).FirstOrDefaultAsync(token);
+        var approvedBudget = budget?.ApprovedBudget ?? project.ApprovedBudget ?? 0m;
+        var actualCost = project.ActualCost ?? 0m;
+        var committed = budget?.CommittedCost ?? 0m;
+        var projectedFinal = forecast?.EstimateAtCompletion > 0m
+            ? forecast.EstimateAtCompletion
+            : forecast?.ForecastCost > 0m ? forecast.ForecastCost : actualCost + committed;
+        var costToComplete = Math.Max(0m, projectedFinal - actualCost);
+        return
+        [
+            new ReportRow(DateTime.UtcNow, Row(
+                ("ProjectCode", project.ProjectCode), ("Project", project.Title), ("Currency", project.BaseCurrencyCode ?? string.Empty),
+                ("ApprovedBudget", approvedBudget), ("ActualCost", actualCost), ("CommittedCost", committed),
+                ("CostToComplete", costToComplete), ("ProjectedFinalCost", projectedFinal),
+                ("BudgetVariance", approvedBudget - projectedFinal)))
+        ];
+    }
+
+    private async Task<List<ReportRow>> ContractBalanceAsync(ProjectDetailDto project, CancellationToken token)
+    {
+        if (!project.ContractId.HasValue) return [];
+        var contract = await db.Set<Contract>().AsNoTracking()
+            .Include(value => value.BusinessPartner)
+            .FirstOrDefaultAsync(value => value.TenantId == currentUser.TenantId &&
+                value.Id == project.ContractId.Value && !value.IsDeleted, token);
+        if (contract is null) return [];
+        var approvedVariations = await db.ProjectVariationOrders.AsNoTracking().Where(value =>
+                value.TenantId == currentUser.TenantId && value.ProjectId == project.Id &&
+                value.ContractId == contract.Id && value.Status == ProjectVariationOrderStatuses.Approved && !value.IsDeleted)
+            .SumAsync(value => value.ApprovedAmount ?? 0m, token);
+        var certificates = await db.ProjectPaymentCertificates.AsNoTracking().Where(value =>
+                value.TenantId == currentUser.TenantId && value.ProjectId == project.Id &&
+                value.ContractId == contract.Id &&
+                (value.Status == ProjectPaymentCertificateStatuses.Approved ||
+                 value.Status == ProjectPaymentCertificateStatuses.Issued ||
+                 value.Status == ProjectPaymentCertificateStatuses.Paid) &&
+                !value.IsDeleted)
+            .ToListAsync(token);
+        var revised = contract.ContractValue + approvedVariations;
+        var certified = certificates.Sum(value => value.NetCertifiedAmount);
+        var retention = certificates.Sum(value => value.RetentionHeldAmount - value.RetentionReleasedAmount);
+        return
+        [
+            new ReportRow(contract.ActivatedAt ?? contract.StartDate ?? contract.CreatedAt, Row(
+                ("ContractNumber", contract.ContractNumber), ("Supplier", contract.BusinessPartner.PartnerName),
+                ("Currency", contract.Currency), ("OriginalContract", contract.ContractValue),
+                ("ApprovedVariations", approvedVariations), ("RevisedContract", revised),
+                ("CertifiedToDate", certified), ("RetentionBalance", retention),
+                ("ContractBalance", revised - certified)))
+        ];
+    }
+
+    private async Task<List<ReportRow>> AuditTrailAsync(ProjectDetailDto project, CancellationToken token)
+    {
+        var projectToken = project.Id.ToString();
+        var logs = await db.Set<AuditLog>().AsNoTracking().Where(value =>
+                value.TenantId == currentUser.TenantId && !value.IsDeleted &&
+                (value.Resource.StartsWith("QuantitySurvey") || value.Resource.StartsWith("ProjectBoq") ||
+                 value.Resource.StartsWith("ProjectInterimValuation") || value.Resource.StartsWith("ProjectPaymentCertificate") ||
+                 value.Resource.StartsWith("ProjectVariation") || value.Resource.StartsWith("ProjectFinalAccount")) &&
+                ((value.OldValues != null && value.OldValues.Contains(projectToken)) ||
+                 (value.NewValues != null && value.NewValues.Contains(projectToken))))
+            .OrderByDescending(value => value.Timestamp).ToListAsync(token);
+        return logs.Select(value => new ReportRow(value.Timestamp, Row(
+            ("Timestamp", value.Timestamp), ("Username", value.Username), ("Action", value.Action),
+            ("Resource", value.Resource), ("ResourceId", value.ResourceId), ("IpAddress", value.IpAddress),
+            ("Correlation", value.NewValues ?? value.OldValues)))).ToList();
     }
 
     private async Task<Dictionary<Guid, Contract>> ContractsAsync(IEnumerable<Guid> ids, CancellationToken token)

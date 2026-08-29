@@ -14,6 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { Plus, Trash2, Search, Package, AlertCircle, Barcode, Layers } from 'lucide-react';
@@ -25,13 +26,23 @@ import {
 } from '@/services/inventoryManagementService';
 import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import {
+  getInventoryTransferControlCapability,
+  getInventoryTransferProblemMessage,
+} from '@/lib/inventory-transfer-controls';
 import { format } from 'date-fns';
+import {
+  InventoryTrackingExceptionSelect,
+  useAvailableInventoryTrackingExceptions,
+} from '@/components/inventory/InventoryTrackingExceptionSelect';
 
 interface TransferDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   transfer?: InventoryTransferDto | null;
   mode: 'create' | 'edit' | 'view';
+  initialTab?: 'details' | 'items' | 'approvals' | 'controls';
   warehouses: WarehouseDto[];
   onSuccess: () => void;
 }
@@ -67,8 +78,9 @@ const TransferStatuses = [
   { value: 'Cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-800' }
 ];
 
-export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses, onSuccess }: TransferDialogProps) {
+export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab = 'details', warehouses, onSuccess }: TransferDialogProps) {
   const { toast } = useToast();
+  const { user, hasPermission } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -88,7 +100,10 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
   const [selectedDiscrepancyIds, setSelectedDiscrepancyIds] = useState<string[]>([]);
   const [controlEvidence, setControlEvidence] = useState<InventoryTransferEvidenceRequest[]>([]);
   const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
+  const [showResolveConfirmation, setShowResolveConfirmation] = useState(false);
+  const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
   const controlKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const trackingExceptions = useAvailableInventoryTrackingExceptions(open && mode !== 'create' && Boolean(transfer?.id));
   
   const [formData, setFormData] = useState<FormData>({
     sourceWarehouseId: '',
@@ -116,11 +131,12 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
   // Fetch transfer details when editing/viewing
   useEffect(() => {
     if (open && transfer?.id && mode !== 'create') {
+      setActiveTab(initialTab);
       loadTransferDetails();
     } else if (open && mode === 'create') {
       resetForm();
     }
-  }, [open, transfer?.id, mode]);
+  }, [open, transfer?.id, mode, initialTab]);
 
   // Load inventory items when source warehouse changes
   useEffect(() => {
@@ -200,6 +216,8 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
     setControlComment('');
     setControlEvidence([]);
     setSelectedDiscrepancyIds([]);
+    setShowResolveConfirmation(false);
+    setShowCloseConfirmation(false);
     controlKeyRef.current = null;
     setWarehouseInventoryItems([]);
     resetItemForm();
@@ -455,10 +473,10 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
     }
   };
 
-  const resolveDiscrepancies = async () => {
+  const resolveDiscrepancies = async (): Promise<boolean> => {
     if (!transferDetail || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0) {
       toast({ title: 'Resolution evidence required', description: 'Select open discrepancies and provide resolution notes plus current published central-DMS evidence.', variant: 'destructive' });
-      return;
+      return false;
     }
     const payload = { selectedDiscrepancyIds, resolutionCode, controlComment, controlEvidence };
     const idempotencyKey = controlKeyFor('resolve', payload);
@@ -480,17 +498,23 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
       controlKeyRef.current = null;
       await loadTransferDetails();
       onSuccess();
+      return true;
     } catch (error: any) {
-      toast({ title: 'Resolution blocked', description: error.response?.data?.message || error.message || 'The controlled resolution failed.', variant: 'destructive' });
+      toast({
+        title: 'Resolution blocked',
+        description: getInventoryTransferProblemMessage(error, 'The controlled resolution failed.'),
+        variant: 'destructive',
+      });
+      return false;
     } finally {
       setControlBusy(false);
     }
   };
 
-  const closeControlledTransfer = async () => {
+  const closeControlledTransfer = async (): Promise<boolean> => {
     if (!transferDetail || !controlComment.trim()) {
       toast({ title: 'Closure comment required', description: 'Enter the independent closure basis before closing this transfer.', variant: 'destructive' });
-      return;
+      return false;
     }
     const idempotencyKey = controlKeyFor('close', { controlComment });
     try {
@@ -506,8 +530,14 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
       controlKeyRef.current = null;
       await loadTransferDetails();
       onSuccess();
+      return true;
     } catch (error: any) {
-      toast({ title: 'Closure blocked', description: error.response?.data?.message || error.message || 'The controlled closure failed.', variant: 'destructive' });
+      toast({
+        title: 'Closure blocked',
+        description: getInventoryTransferProblemMessage(error, 'The controlled closure failed.'),
+        variant: 'destructive',
+      });
+      return false;
     } finally {
       setControlBusy(false);
     }
@@ -515,8 +545,30 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
 
   const showApprovalsTab = !!transferDetail && mode !== 'create';
   const showControlsTab = !!transferDetail && mode !== 'create';
+  const hasTransferPermission = hasPermission('procurement.inventory.transfer');
+  const resolveCapability = transferDetail
+    ? getInventoryTransferControlCapability({
+        kind: 'resolve',
+        status: transferDetail.status,
+        hasOpenDiscrepancy: transferDetail.hasOpenDiscrepancy,
+        hasTransferPermission,
+        currentUserId: user?.id,
+        actions: transferDetail.actions,
+      })
+    : { allowed: false, reason: 'Transfer details are unavailable.' };
+  const closeCapability = transferDetail
+    ? getInventoryTransferControlCapability({
+        kind: 'close',
+        status: transferDetail.status,
+        hasOpenDiscrepancy: transferDetail.hasOpenDiscrepancy,
+        hasTransferPermission,
+        currentUserId: user?.id,
+        actions: transferDetail.actions,
+      })
+    : { allowed: false, reason: 'Transfer details are unavailable.' };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={`${mode === 'view' ? 'max-w-[90vw] lg:max-w-5xl' : 'max-w-[95vw] lg:max-w-7xl'} max-h-[90vh] overflow-y-auto`}>
         <DialogHeader>
@@ -740,17 +792,25 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
                       </div>
                     ))}
 
-                    {transferDetail.status === 'Received' && transferDetail.hasOpenDiscrepancy && (
+                    {transferDetail.status === 'Received' && transferDetail.hasOpenDiscrepancy && resolveCapability.allowed && (
                       <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/50 p-4">
                         <div className="grid gap-3 md:grid-cols-2"><div className="space-y-1"><Label>Resolution outcome *</Label><Select value={resolutionCode} onValueChange={setResolutionCode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(resolutionCodes).map(([code, label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1"><Label>Current published Central DMS evidence *</Label><Select onValueChange={(value) => void addControlEvidence(value)}><SelectTrigger><SelectValue placeholder="Link protected resolution evidence" /></SelectTrigger><SelectContent>{dmsRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.documentReference} · {record.title}</SelectItem>)}</SelectContent></Select></div></div>
                         <div className="flex flex-wrap gap-2">{controlEvidence.map((evidence) => <Badge key={evidence.centralDocumentVersionId} variant="outline" className="gap-2">{evidence.evidenceReference}<button type="button" aria-label={`Remove ${evidence.evidenceReference}`} onClick={() => setControlEvidence((values) => values.filter((value) => value.centralDocumentVersionId !== evidence.centralDocumentVersionId))}>×</button></Badge>)}</div>
                         <div className="space-y-1"><Label>Resolution notes *</Label><Textarea value={controlComment} onChange={(event) => setControlComment(event.target.value)} placeholder="State the independently verified disposition and supporting basis" /></div>
-                        <Button disabled={controlBusy || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0} onClick={() => void resolveDiscrepancies()}>Resolve selected discrepancies</Button>
+                        <Button disabled={controlBusy || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0} onClick={() => setShowResolveConfirmation(true)}>Resolve selected discrepancies</Button>
                       </div>
                     )}
 
-                    {transferDetail.status === 'Received' && !transferDetail.hasOpenDiscrepancy && (
-                      <div className="space-y-3 rounded-md border border-green-200 bg-green-50/50 p-4"><div><div className="font-medium">Independent transfer closure</div><p className="text-sm text-muted-foreground">Closure is available only after every dispatched quantity is accounted and every discrepancy is resolved.</p></div><Textarea value={controlComment} onChange={(event) => setControlComment(event.target.value)} placeholder="Required closure basis" /><Button disabled={controlBusy || !controlComment.trim()} onClick={() => void closeControlledTransfer()}>Close transfer</Button></div>
+                    {transferDetail.status === 'Received' && transferDetail.hasOpenDiscrepancy && !resolveCapability.allowed && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50/50 p-4 text-sm text-amber-900">{resolveCapability.reason}</div>
+                    )}
+
+                    {transferDetail.status === 'Received' && !transferDetail.hasOpenDiscrepancy && closeCapability.allowed && (
+                      <div className="space-y-3 rounded-md border border-green-200 bg-green-50/50 p-4"><div><div className="font-medium">Independent transfer closure</div><p className="text-sm text-muted-foreground">Closure is available only after every dispatched quantity is accounted and every discrepancy is resolved.</p></div><Textarea value={controlComment} onChange={(event) => setControlComment(event.target.value)} placeholder="Required closure basis" /><Button disabled={controlBusy || !controlComment.trim()} onClick={() => setShowCloseConfirmation(true)}>Close transfer</Button></div>
+                    )}
+
+                    {transferDetail.status === 'Received' && !transferDetail.hasOpenDiscrepancy && !closeCapability.allowed && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50/50 p-4 text-sm text-amber-900">{closeCapability.reason}</div>
                     )}
                   </CardContent>
                 </Card>
@@ -857,6 +917,31 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmationDialog
+      open={showResolveConfirmation}
+      onOpenChange={setShowResolveConfirmation}
+      title="Resolve selected transfer discrepancies"
+      description={`Record ${selectedDiscrepancyIds.length} selected discrepancy resolution(s) as ${resolutionCodes[resolutionCode] || resolutionCode}. This action will retain the notes and linked DMS evidence in the transfer register.`}
+      confirmText="Confirm resolution"
+      cancelText="Review details"
+      onConfirm={resolveDiscrepancies}
+      isLoading={controlBusy}
+      confirmDisabled={!resolveCapability.allowed || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0}
+      maxWidth="560px"
+    />
+    <ConfirmationDialog
+      open={showCloseConfirmation}
+      onOpenChange={setShowCloseConfirmation}
+      title="Close inventory transfer"
+      description="Confirm that every dispatched quantity is accounted for and every discrepancy is resolved. The transfer will be completed and retained in the action register."
+      confirmText="Close transfer"
+      cancelText="Review transfer"
+      onConfirm={closeControlledTransfer}
+      isLoading={controlBusy}
+      confirmDisabled={!closeCapability.allowed || !controlComment.trim()}
+      maxWidth="560px"
+    />
+    </>
   );
 
   function renderItemsTab() {
@@ -990,7 +1075,29 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
                   {selectedItem?.isExpirationTracked && (
                     <div className="space-y-2"><Label>Expiry Date</Label><Input type="date" value={itemFormData.expiryDate} onChange={(e) => setItemFormData({...itemFormData, expiryDate: e.target.value})} /></div>
                   )}
-                  <div className="space-y-2 col-span-2"><Label>Approved Tracking Exception ID</Label><Input value={itemFormData.inventoryTrackingExceptionId} onChange={(e) => setItemFormData({...itemFormData, inventoryTrackingExceptionId: e.target.value})} placeholder="Only when an approved exception is required" /></div>
+                  <div className="space-y-2 col-span-2">
+                    <Label>Approved tracking exception</Label>
+                    <InventoryTrackingExceptionSelect
+                      value={itemFormData.inventoryTrackingExceptionId}
+                      onValueChange={(inventoryTrackingExceptionId) => setItemFormData({
+                        ...itemFormData,
+                        inventoryTrackingExceptionId: inventoryTrackingExceptionId || '',
+                      })}
+                      exceptions={trackingExceptions.exceptions}
+                      loading={trackingExceptions.loading}
+                      error={trackingExceptions.error}
+                      onRetry={trackingExceptions.refresh}
+                      context={{
+                        inventoryItemId: itemFormData.inventoryItemId,
+                        warehouseId: formData.sourceWarehouseId,
+                        locationId: itemFormData.sourceLocationId,
+                        referenceId: transfer?.id,
+                        lotNumber: itemFormData.lotNumber,
+                        batchNumber: itemFormData.batchNumber,
+                        serialNumber: itemFormData.serialNumber,
+                      }}
+                    />
+                  </div>
                 </div>
 
                 {/* Bin/Location Selection */}

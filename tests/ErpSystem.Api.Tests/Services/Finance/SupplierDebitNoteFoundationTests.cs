@@ -144,6 +144,8 @@ public sealed class SupplierDebitNoteFoundationTests
 
         sql.Should().Contain("OBJECT_ID(N'[dbo].[SupplierDebitNotes]', N'U') IS NULL");
         sql.Should().Contain("COL_LENGTH(N'dbo.SupplierDebitNotes', N'RowVersion')");
+        sql.Should().Contain("EXEC(N'CREATE UNIQUE INDEX [UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference]",
+            "SQL Server must compile the filtered index after any legacy SupplierCreditNoteReference column repair");
         sql.Should().Contain("CREATE TABLE [dbo].[SupplierDebitNoteApplications]");
         sql.Should().Contain("CK_SupplierDebitNoteApplications_Amount");
         sql.Should().Contain("UX_SupplierDebitNoteApplication_Tenant_Original_Reversal");

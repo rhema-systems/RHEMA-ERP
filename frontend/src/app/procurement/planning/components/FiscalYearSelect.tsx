@@ -43,6 +43,9 @@ const formatFiscalYearLabel = (fiscalYear: ProcurementPlanningFiscalYearDto) => 
   return code || name || fiscalYear.year.toString();
 };
 
+const formatFiscalYearTriggerLabel = (fiscalYear: ProcurementPlanningFiscalYearDto) =>
+  fiscalYear.fiscalYearCode?.trim() || fiscalYear.year.toString();
+
 export function FiscalYearSelect({
   value,
   onValueChange,
@@ -110,6 +113,11 @@ export function FiscalYearSelect({
 
   const manualValue = value ? `${manualValuePrefix}${value}` : undefined;
   const selectValue = selectedFiscalYear?.id ?? manualValue;
+  const selectedLabel = selectedFiscalYear
+    ? formatFiscalYearTriggerLabel(selectedFiscalYear)
+    : value
+      ? value.toString()
+      : undefined;
   const isDisabled = disabled || loading || (sortedFiscalYears.length === 0 && !manualValue);
   let placeholderText = placeholder;
   if (loading) {
@@ -128,7 +136,7 @@ export function FiscalYearSelect({
   return (
     <Select value={selectValue} onValueChange={handleValueChange} disabled={isDisabled}>
       <SelectTrigger className={triggerClassName}>
-        <SelectValue placeholder={placeholderText} />
+        <SelectValue placeholder={placeholderText}>{selectedLabel}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {manualValue && !selectedFiscalYear ? (

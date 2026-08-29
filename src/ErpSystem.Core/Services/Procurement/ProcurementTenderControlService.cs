@@ -172,6 +172,9 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         var tender = await LoadTenderAsync(tenderId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(ManagePermission, tender.TenderNumber, correlation, cancellationToken);
         var lineage = await RevalidateAsync(tender, correlation, cancellationToken);
+        if (!lineage.Case.AuthorityRouteId.HasValue || string.IsNullOrWhiteSpace(lineage.Case.AuthorityRouteReference))
+            throw Validation("TENDER_ADVANCED_AUTHORITY_ROUTE_REQUIRED",
+                "This statutory tender-control stage requires an advanced authority route. The sourcing case remains valid for the standard approved-PR tender workflow.");
         if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             throw Conflict("TENDER_APPROVAL_REQUIRED", "The tender must complete its document approval workflow before advertisement.");
         if (lineage.Case.SelectedMethod == ProcurementMethodType.QualityAndCostBasedSelection)
@@ -215,7 +218,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             TenderId = tender.Id,
             SourcingCaseId = lineage.Case.Id,
             MethodRuleId = lineage.MethodRule.Id,
-            AuthorityRouteId = lineage.Case.AuthorityRouteId,
+            AuthorityRouteId = lineage.Case.AuthorityRouteId.Value,
             Method = lineage.Case.SelectedMethod,
             MethodRuleCode = lineage.MethodRule.RuleCode,
             AuthorityRouteReference = lineage.Case.AuthorityRouteReference,

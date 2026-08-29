@@ -50,4 +50,12 @@ describe('applyProcurementPlanBudgetSelection', () => {
     expect(result.budgetId).toBeUndefined();
     expect(result.currency).toBe('GHS');
   });
+
+  it('allows a budget to be shared by more than one plan', () => {
+    const linkedBudget = { ...budget, procurementPlanId: 'existing-plan' };
+    const result = applyProcurementPlanBudgetSelection(plan, [linkedBudget], linkedBudget.id);
+
+    expect(result.budgetId).toBe(linkedBudget.id);
+    expect(result.currency).toBe('GHS');
+  });
 });

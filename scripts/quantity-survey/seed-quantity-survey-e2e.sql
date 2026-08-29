@@ -94,8 +94,26 @@ BEGIN TRY
     DECLARE @OfficerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_QUANTITY_SURVEYOR');
     DECLARE @ApproverRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_SUPERVISING_QUANTITY_SURVEYOR');
     DECLARE @AssistantRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_ASSISTANT_QUANTITY_SURVEYOR');
+    DECLARE @FinanceReviewerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_FINANCE_REVIEWER');
+    DECLARE @ProcurementReviewerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_HEAD_OF_PROCUREMENT');
+    DECLARE @ProjectEngineerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_PROJECT_ENGINEER');
     IF @OfficerRoleId IS NULL OR @ApproverRoleId IS NULL OR @AssistantRoleId IS NULL
         THROW 52003, 'Run the existing QuantitySurveyAccessControlSeeder before the QS E2E fixture.', 1;
+    IF @FinanceReviewerRoleId IS NULL OR @ProcurementReviewerRoleId IS NULL
+        THROW 52016, 'Run the existing ProcurementAccessControlSeeder before the QS E2E fixture so Finance and Procurement review roles are available.', 1;
+
+    /* This test-only role demonstrates the architecture's engineering/project
+       confirmation stage. It is fixture configuration, not a runtime role name
+       hard-coded by the Quantity Survey services. */
+    IF @ProjectEngineerRoleId IS NULL
+    BEGIN
+        SET @ProjectEngineerRoleId=NEWID();
+        INSERT dbo.AspNetRoles
+            (Id,Name,NormalizedName,Description,IsSystemRole,CreatedAt,CreatedBy)
+        VALUES
+            (@ProjectEngineerRoleId,N'TDC_PROJECT_ENGINEER',N'TDC_PROJECT_ENGINEER',
+             N'Non-production QS E2E engineering and project confirmation role.',0,@Now,N'QS E2E Seeder');
+    END;
 
     IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @OfficerId AND RoleId = @OfficerRoleId)
         INSERT dbo.UserRoles (UserId, RoleId) VALUES (@OfficerId, @OfficerRoleId);
@@ -103,6 +121,12 @@ BEGIN TRY
         INSERT dbo.UserRoles (UserId, RoleId) VALUES (@ApproverId, @ApproverRoleId);
     IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @AdminId AND RoleId = @ApproverRoleId)
         INSERT dbo.UserRoles (UserId, RoleId) VALUES (@AdminId, @ApproverRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @AdminId AND RoleId = @FinanceReviewerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@AdminId, @FinanceReviewerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @AdminId AND RoleId = @ProcurementReviewerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@AdminId, @ProcurementReviewerRoleId);
+    IF NOT EXISTS (SELECT 1 FROM dbo.UserRoles WHERE UserId = @AdminId AND RoleId = @ProjectEngineerRoleId)
+        INSERT dbo.UserRoles (UserId, RoleId) VALUES (@AdminId, @ProjectEngineerRoleId);
 
     IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @OfficerId AND Role = N'QuantitySurveyor' AND IsDeleted = 0)
         INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
@@ -231,7 +255,9 @@ BEGIN TRY
             UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId
         WHERE Id=@ConsultantAccessId;
 
-    /* Published shared-workflow definitions, one for each QS-owned entity family. */
+    /* Published shared-workflow definitions, one for each QS-owned entity family.
+       The named roles are non-production acceptance configuration. Runtime QS
+       services resolve the selected shared workflow and do not hard-code them. */
     DECLARE @WorkflowCode nvarchar(80), @WorkflowName nvarchar(200), @EntityTypeId uniqueidentifier, @WorkflowId uniqueidentifier;
     DECLARE workflow_cursor CURSOR LOCAL FAST_FORWARD FOR
         SELECT Code, Name, Id FROM dbo.WorkflowEntityTypes
@@ -241,19 +267,45 @@ BEGIN TRY
     FETCH NEXT FROM workflow_cursor INTO @WorkflowCode,@WorkflowName,@EntityTypeId;
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        SET @WorkflowId = (SELECT TOP (1) Id FROM dbo.WorkflowDefinitions WHERE TenantId=@TenantId AND EntityTypeId=@EntityTypeId AND LifecycleStatus=1 AND IsActive=1 AND IsDeleted=0 ORDER BY Version DESC);
+        SET @WorkflowId = (SELECT TOP (1) Id FROM dbo.WorkflowDefinitions WHERE TenantId=@TenantId AND EntityTypeId=@EntityTypeId AND LifecycleStatus=1 AND IsActive=1 AND IsDeleted=0 AND Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY Version DESC);
         IF @WorkflowId IS NULL
         BEGIN
             SET @WorkflowId = NEWID();
             INSERT dbo.WorkflowDefinitions
                 (Id,Name,Description,EntityTypeId,Version,IsActive,Configuration,ChangeSummary,DefinitionKey,LifecycleStatus,PublishedAt,PublishedById,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
             VALUES
-                (@WorkflowId,N'QS E2E '+@WorkflowName+N' Approval',N'Governed two-stage technical review and independent approval for '+@WorkflowName+N'.',@EntityTypeId,1,1,N'{"fixture":"QS-E2E","makerChecker":true}',N'Controlled QS E2E workflow baseline.',NEWID(),1,@Now,@AdminId,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
-            INSERT dbo.WorkflowSteps
-                (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
-            VALUES
-                (NEWID(),@WorkflowId,N'Technical review',N'QS technical review by an assigned quantity surveyor.',2,1,1,0,N'Role',N'{"role":"TDC_QUANTITY_SURVEYOR"}',1,N'TDC_QUANTITY_SURVEYOR',24,N'{"makerChecker":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
-                (NEWID(),@WorkflowId,N'Independent approval',N'Independent approval by the supervising quantity surveyor.',2,2,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+                (@WorkflowId,N'QS E2E '+@WorkflowName+N' Architecture Approval',N'TDC architecture section 16.4 acceptance workflow for '+@WorkflowName+N'.',@EntityTypeId,1,1,N'{"fixture":"QS-E2E","makerChecker":true,"architectureStages":"tdc-16.4-v1"}',N'Controlled TDC architecture workflow acceptance route.',NEWID(),1,@Now,@AdminId,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+
+            IF @WorkflowCode=N'QS_ESTIMATE'
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'Technical review',N'QS technical validation of the estimate, rate build-ups and assumptions.',2,1,1,0,N'Role',N'{"role":"TDC_QUANTITY_SURVEYOR"}',1,N'TDC_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"architectureStage":"technical-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Finance and budget validation',N'Finance validates funding, approved budget and commitment coverage.',2,2,0,0,N'Role',N'{"role":"TDC_FINANCE_REVIEWER"}',1,N'TDC_FINANCE_REVIEWER',24,N'{"architectureStage":"finance-budget-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Independent approval',N'Independent final approval by the supervising quantity surveyor.',2,3,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true,"architectureStage":"final-approval"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+            ELSE IF @WorkflowCode IN (N'QS_VALUATION',N'QS_PAYMENT_CERTIFICATE')
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'QS review',N'Quantity Survey review of measurements, prior certificates, deductions and retention.',2,1,1,0,N'Role',N'{"role":"TDC_QUANTITY_SURVEYOR"}',1,N'TDC_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"architectureStage":"qs-review"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Engineering and project confirmation',N'Engineering or the responsible project officer confirms measured work.',2,2,0,0,N'Role',N'{"role":"TDC_PROJECT_ENGINEER"}',1,N'TDC_PROJECT_ENGINEER',24,N'{"architectureStage":"engineering-project-confirmation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Finance validation',N'Finance validates budget, commitment, tax, retention and AP readiness.',2,3,0,0,N'Role',N'{"role":"TDC_FINANCE_REVIEWER"}',1,N'TDC_FINANCE_REVIEWER',24,N'{"architectureStage":"finance-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Final independent approval',N'An independent supervising quantity surveyor makes the final decision.',2,4,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true,"architectureStage":"final-approval"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+            ELSE IF @WorkflowCode=N'QS_VARIATION'
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'Engineer source confirmation',N'Confirm the Engineer-initiated variation source record and technical reason.',2,1,1,0,N'Role',N'{"role":"TDC_PROJECT_ENGINEER"}',1,N'TDC_PROJECT_ENGINEER',24,N'{"architectureStage":"engineer-initiation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'QS valuation',N'Quantity Survey validates the variation quantities, rates and cost impact.',2,2,0,0,N'Role',N'{"role":"TDC_QUANTITY_SURVEYOR"}',1,N'TDC_QUANTITY_SURVEYOR',24,N'{"architectureStage":"qs-valuation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Procurement contract review',N'Procurement confirms contract scope, clauses and revised contract value.',2,3,0,0,N'Role',N'{"role":"TDC_HEAD_OF_PROCUREMENT"}',1,N'TDC_HEAD_OF_PROCUREMENT',24,N'{"architectureStage":"procurement-contract-review"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Finance budget validation',N'Finance validates budget and commitment coverage for the variation.',2,4,0,0,N'Role',N'{"role":"TDC_FINANCE_REVIEWER"}',1,N'TDC_FINANCE_REVIEWER',24,N'{"architectureStage":"finance-budget-validation"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Final authority approval',N'The configured independent final authority approves or rejects the variation.',2,5,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true,"architectureStage":"final-authority"}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+            ELSE
+                INSERT dbo.WorkflowSteps
+                    (Id,WorkflowDefinitionId,Name,Description,StepType,[Order],IsStartStep,IsEndStep,AssignmentType,AssignmentConfiguration,IsRequired,RequiredRole,EstimatedHours,Configuration,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+                VALUES
+                    (NEWID(),@WorkflowId,N'Technical review',N'QS technical review by an assigned quantity surveyor.',2,1,1,0,N'Role',N'{"role":"TDC_QUANTITY_SURVEYOR"}',1,N'TDC_QUANTITY_SURVEYOR',24,N'{"makerChecker":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId),
+                    (NEWID(),@WorkflowId,N'Independent approval',N'Independent approval by the supervising quantity surveyor.',2,2,0,1,N'Role',N'{"role":"TDC_SUPERVISING_QUANTITY_SURVEYOR"}',1,N'TDC_SUPERVISING_QUANTITY_SURVEYOR',24,N'{"makerChecker":true,"independent":true}',@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
         END;
         FETCH NEXT FROM workflow_cursor INTO @WorkflowCode,@WorkflowName,@EntityTypeId;
     END;
@@ -363,18 +415,18 @@ BEGIN TRY
     /* Publish the existing tenant profile with selector-backed values. */
     DECLARE @ProfileId uniqueidentifier=(SELECT TOP(1) Id FROM dbo.QuantitySurveyConfigurationProfiles WHERE TenantId=@TenantId AND ProfileCode=N'TDC-QUANTITY-SURVEY' AND Version=1 AND IsDeleted=0 ORDER BY CreatedAt);
     IF @ProfileId IS NULL THROW 52007, 'The existing QS configuration profile seeder must run before the E2E fixture.', 1;
-    DECLARE @BoqWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_BOQ' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @EstimateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESTIMATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @EscalationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESCALATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @MeasurementWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MEASUREMENT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @ValuationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VALUATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @CertificateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_PAYMENT_CERTIFICATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @RetentionWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_RETENTION_RELEASE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @MaterialWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MATERIAL_DEDUCTION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @VariationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VARIATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @ClaimWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_CLAIM' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @SubcontractWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_SUBCONTRACT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
-    DECLARE @FinalWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_FINAL_ACCOUNT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 ORDER BY d.Version DESC);
+    DECLARE @BoqWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_BOQ' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @EstimateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESTIMATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @EscalationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_ESCALATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @MeasurementWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MEASUREMENT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @ValuationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VALUATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @CertificateWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_PAYMENT_CERTIFICATE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @RetentionWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_RETENTION_RELEASE' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @MaterialWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_MATERIAL_DEDUCTION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @VariationWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_VARIATION' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @ClaimWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_CLAIM' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @SubcontractWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_SUBCONTRACT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
+    DECLARE @FinalWorkflow uniqueidentifier=(SELECT TOP(1)d.Id FROM dbo.WorkflowDefinitions d JOIN dbo.WorkflowEntityTypes e ON e.Id=d.EntityTypeId WHERE d.TenantId=@TenantId AND e.Code=N'QS_FINAL_ACCOUNT' AND d.LifecycleStatus=1 AND d.IsActive=1 AND d.IsDeleted=0 AND d.Configuration LIKE N'%"architectureStages":"tdc-16.4-v1"%' ORDER BY d.Version DESC);
     DECLARE @MeasurementTemplate uniqueidentifier=(SELECT Id FROM dbo.CentralDocumentMetadataTemplates WHERE TenantId=@TenantId AND TemplateCode=N'QS-MEAS-EVD' AND IsDeleted=0);
     DECLARE @ValuationDmsTemplate uniqueidentifier=(SELECT Id FROM dbo.CentralDocumentMetadataTemplates WHERE TenantId=@TenantId AND TemplateCode=N'QS-VAL-EVD' AND IsDeleted=0);
     DECLARE @CertificateDmsTemplate uniqueidentifier=(SELECT Id FROM dbo.CentralDocumentMetadataTemplates WHERE TenantId=@TenantId AND TemplateCode=N'QS-CERT-EVD' AND IsDeleted=0);

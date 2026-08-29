@@ -98,17 +98,21 @@ public class PurchaseRequisitionsController : ControllerBase
             if (!requisition.RowVersion.SequenceEqual(suppliedVersion))
                 return Conflict(Problem("ROW_VERSION_STALE", "The purchase requisition changed after it was loaded. Refresh and try again.", 409));
 
+            NormalizePlanItemLineage(updateDto);
             var before = _linkageService.Map(requisition);
             var departmentName = await ResolveDepartmentNameAsync(
                 updateDto.DepartmentId,
+                updateDto.Linkage.SourcePlanItemId,
                 requisition.TenantId,
                 cancellationToken);
             await ApplyAuthoritativeInventoryPricingAsync(
                 updateDto.Items,
                 requisition.TenantId,
                 cancellationToken);
-            if (string.IsNullOrWhiteSpace(updateDto.Linkage.CostCenter))
-                updateDto.Linkage.CostCenter = updateDto.CostCenter;
+            requisition.Currency = await ResolveRequisitionCurrencyAsync(
+                updateDto.Currency,
+                requisition.TenantId,
+                cancellationToken);
             await _linkageService.PrepareAsync(requisition, updateDto.Linkage, CorrelationId, cancellationToken);
 
             requisition.RequiredDate = updateDto.RequiredDate;
@@ -445,12 +449,13 @@ public class PurchaseRequisitionsController : ControllerBase
         [FromQuery] string? priority = null,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null,
-        [FromQuery] string? department = null)
+        [FromQuery] string? department = null,
+        [FromQuery] Guid? sourcePlanId = null)
     {
         try
         {
             var requisitions = await _purchaseRequisitionRepository.GetRequisitionsAsync(
-                page, pageSize, search, status, priority, startDate, endDate, department);
+                page, pageSize, search, status, priority, startDate, endDate, department, sourcePlanId);
 
             var requisitionDtos = requisitions.Items.Select(MapSummary).ToList();
 
@@ -548,8 +553,10 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Unauthorized(Problem("AUTHENTICATION_REQUIRED", "An authenticated user is required.", 401));
 
             var tenantId = _tenantContext.GetCurrentTenantId();
+            NormalizePlanItemLineage(createDto);
             var departmentName = await ResolveDepartmentNameAsync(
                 createDto.DepartmentId,
+                createDto.Linkage.SourcePlanItemId,
                 tenantId,
                 cancellationToken);
             await ApplyAuthoritativeInventoryPricingAsync(
@@ -572,11 +579,10 @@ public class PurchaseRequisitionsController : ControllerBase
                 Justification = createDto.Justification,
                 Notes = createDto.Notes,
                 TotalAmount = totalAmount,
+                Currency = await ResolveRequisitionCurrencyAsync(createDto.Currency, tenantId, cancellationToken),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
-            if (string.IsNullOrWhiteSpace(createDto.Linkage.CostCenter))
-                createDto.Linkage.CostCenter = createDto.CostCenter;
             await _linkageService.PrepareAsync(requisition, createDto.Linkage, CorrelationId, cancellationToken);
 
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
@@ -676,7 +682,7 @@ public class PurchaseRequisitionsController : ControllerBase
             {
                 return Conflict(Problem(
                     "PR_WORKFLOW_STATUS_REQUIRES_ACTION",
-                    "Workflow-controlled requisition statuses cannot be assigned directly. Use the submit or approval action so APP/exception, budget-reservation, and workflow controls execute.",
+                    "Workflow-controlled requisition statuses cannot be assigned directly. Use the submit or approval action so required-data, budget-availability, and workflow controls execute.",
                     409));
             }
 
@@ -771,8 +777,7 @@ public class PurchaseRequisitionsController : ControllerBase
             }
 
             if (requisition.Status != "Pending Approval" &&
-                requisition.Status != "Submitted" &&
-                requisition.Status != "Draft")
+                requisition.Status != "Submitted")
             {
                 return BadRequest($"Purchase requisition cannot be approved in current status: {requisition.Status}");
             }
@@ -783,8 +788,14 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Unauthorized("User identifier claim is missing or invalid");
             }
 
-            var authorityApproval = await _authorityRouteService.EnforceApprovalAsync(
-                requisition, CorrelationId, HttpContext.RequestAborted);
+            if (approvalDto.Approved && requisition.RequestedById == userId)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, Problem(
+                    "PR_SELF_APPROVAL_FORBIDDEN",
+                    "The requisition requester cannot approve their own purchase requisition.",
+                    StatusCodes.Status403Forbidden));
+            }
+
             var canApprove = await _workflowIntegrationService.CanUserApproveAsync("PurchaseRequisition", id, userId);
             if (!canApprove)
             {
@@ -882,7 +893,6 @@ public class PurchaseRequisitionsController : ControllerBase
                     status = requisition.Status,
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
                     workflowOutcome = workflowResult.Outcome.ToString(),
-                    authorityControl = authorityApproval,
                     budgetRelease
                 }
             });
@@ -960,69 +970,54 @@ public class PurchaseRequisitionsController : ControllerBase
                 {
                     var retryReadiness = await _budgetControlService.GetReadinessAsync(
                         requisition.Id, HttpContext.RequestAborted);
-                    var retryRoute = await _authorityRouteService.GetLatestRouteAsync(
-                        requisition.Id, HttpContext.RequestAborted);
-                    if (string.Equals(retryReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(retryReadiness.CommitmentStatus, "Reserved", StringComparison.OrdinalIgnoreCase) &&
-                        retryRoute is not null)
+                    return Ok(new
                     {
-                        var authorityReadiness = await _authorityRouteService.GetReadinessAsync(
-                            requisition.Id, HttpContext.RequestAborted);
-                        return Ok(new
-                        {
-                            success = true,
-                            idempotent = true,
-                            message = "The purchase requisition was already submitted and its active budget commitment was reused.",
-                            data = new
-                            {
-                                id = requisition.Id,
-                                status = requisition.Status,
-                                budgetControl = retryReadiness,
-                                authorityControl = authorityReadiness
-                            }
-                        });
-                    }
+                        success = true,
+                        idempotent = true,
+                        message = "The purchase requisition was already submitted to its approval workflow.",
+                        data = new { id = requisition.Id, status = requisition.Status, budgetControl = retryReadiness }
+                    });
                 }
                 return Conflict(Problem("PR_NOT_DRAFT", $"Purchase requisition cannot be submitted in current status: {requisition.Status}.", 409));
             }
 
+            if (requisition.TotalAmount <= 0 || requisition.Items.Any(item =>
+                    item.Quantity <= 0 || item.EstimatedUnitPrice <= 0 || item.LineTotal <= 0))
+            {
+                return UnprocessableEntity(Problem(
+                    "PR_ESTIMATE_REQUIRED",
+                    "Every requisition line requires a governed positive estimated cost before submission.",
+                    422));
+            }
 
             var submissionReadiness = await _submissionControlService.EnforceAsync(
                 requisition, CorrelationId, HttpContext.RequestAborted);
-            var authorityDecision = await _authorityRouteService.EnforceSubmissionAsync(
-                requisition, CorrelationId, HttpContext.RequestAborted);
+
+            var budgetReadiness = await _budgetControlService.GetReadinessAsync(
+                requisition.Id, HttpContext.RequestAborted);
+            if (!budgetReadiness.CanReserve)
+            {
+                var problem = Problem(budgetReadiness.DecisionCode, budgetReadiness.Message, 422);
+                problem.Extensions["budgetReadiness"] = budgetReadiness;
+                return UnprocessableEntity(problem);
+            }
+
+            if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync("PurchaseRequisition"))
+            {
+                return UnprocessableEntity(Problem(
+                    "PR_WORKFLOW_NOT_CONFIGURED",
+                    "A published Purchase Requisition approval workflow must be configured before submission.",
+                    422));
+            }
 
             WorkflowIntegrationResult? workflowResult = null;
-            PurchaseRequisitionBudgetReadinessDto? budgetReadiness = null;
-            ProcurementRequisitionAuthorityRoute? authorityRoute = null;
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
                 await _unitOfWork.BeginTransactionAsync(HttpContext.RequestAborted);
                 try
                 {
-                    budgetReadiness = await _budgetControlService.ReserveAsync(
-                        requisition, CorrelationId, HttpContext.RequestAborted);
-                    if (!budgetReadiness.CanReserve)
-                    {
-                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
-                        return;
-                    }
-                    if (string.Equals(budgetReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase))
-                    {
-                        authorityRoute = await _authorityRouteService.GetLatestRouteAsync(
-                            requisition.Id, HttpContext.RequestAborted);
-                        if (authorityRoute is null)
-                            throw new ProcurementRequisitionAuthorityConflictException(
-                                "PR_AUTHORITY_ROUTE_NOT_CAPTURED",
-                                "An active budget commitment exists without an immutable authority route. Recall or cancel the requisition before resubmitting.");
-                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
-                        return;
-                    }
-
-                    authorityRoute = await _authorityRouteService.CaptureAsync(
-                        requisition, authorityDecision, CorrelationId, HttpContext.RequestAborted);
                     workflowResult = await _workflowIntegrationService.SubmitAsync(
-                        "PurchaseRequisition", id, authorityRoute.WorkflowDefinitionId);
+                        "PurchaseRequisition", id);
                     var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
                     statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, _currentUserProvider.UserId);
                     await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
@@ -1035,36 +1030,8 @@ public class PurchaseRequisitionsController : ControllerBase
                 }
             }, HttpContext.RequestAborted);
 
-            if (budgetReadiness is null)
-                return Conflict(Problem("PR_BUDGET_RESULT_MISSING", "The budget control did not return a result.", 409));
-            if (!budgetReadiness.CanReserve)
-            {
-                var problem = Problem(budgetReadiness.DecisionCode, budgetReadiness.Message, 422);
-                problem.Extensions["budgetReadiness"] = budgetReadiness;
-                return UnprocessableEntity(problem);
-            }
-            if (string.Equals(budgetReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase) &&
-                workflowResult is null)
-            {
-                var authorityReadiness = await _authorityRouteService.GetReadinessAsync(
-                    requisition.Id, HttpContext.RequestAborted);
-                return Ok(new
-                {
-                    success = true,
-                    idempotent = true,
-                    message = "The purchase requisition submission already has an active budget commitment.",
-                    data = new
-                    {
-                        id = requisition.Id,
-                        budgetControl = budgetReadiness,
-                        authorityControl = authorityReadiness
-                    }
-                });
-            }
             if (workflowResult is null)
                 return Conflict(Problem("PR_WORKFLOW_RESULT_MISSING", "The workflow did not return a submission outcome.", 409));
-            var capturedAuthorityReadiness = await _authorityRouteService.GetReadinessAsync(
-                requisition.Id, HttpContext.RequestAborted);
 
             // Publish event for admin-configurable notification topics (best-effort).
             try
@@ -1103,8 +1070,7 @@ public class PurchaseRequisitionsController : ControllerBase
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
                     workflowOutcome = workflowResult.Outcome.ToString(),
                     submissionControl = submissionReadiness,
-                    budgetControl = budgetReadiness,
-                    authorityControl = capturedAuthorityReadiness
+                    budgetControl = budgetReadiness
                 }
             });
         }
@@ -1469,8 +1435,13 @@ public class PurchaseRequisitionsController : ControllerBase
         Priority = requisition.Priority,
         Department = requisition.Department,
         TotalAmount = requisition.TotalAmount,
+        Currency = requisition.Currency,
         ItemCount = requisition.Items?.Count ?? 0,
         SourcePlanNumber = requisition.SourcePlanNumber,
+        SourcePlanItemId = requisition.SourcePlanItemId,
+        SourcePlanItemIds = requisition.Items?
+            .Where(item => !item.IsDeleted && item.SourcePlanItemId.HasValue)
+            .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList() ?? [],
         SourcePlanItemDescription = requisition.SourcePlanItemDescription,
         BudgetCode = requisition.BudgetCode,
         ProcurementCategory = requisition.ProcurementCategory,
@@ -1507,8 +1478,12 @@ public class PurchaseRequisitionsController : ControllerBase
             ApprovedAt = requisition.ApprovedAt,
             RejectionReason = requisition.RejectionReason,
             TotalAmount = requisition.TotalAmount,
+            Currency = requisition.Currency,
             ItemCount = items.Count(),
             SourcePlanNumber = requisition.SourcePlanNumber,
+            SourcePlanItemId = requisition.SourcePlanItemId,
+            SourcePlanItemIds = items.Where(item => item.SourcePlanItemId.HasValue)
+                .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList(),
             SourcePlanItemDescription = requisition.SourcePlanItemDescription,
             BudgetCode = requisition.BudgetCode,
             ProcurementCategory = requisition.ProcurementCategory,
@@ -1523,6 +1498,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 Id = item.Id,
                 RequisitionId = item.RequisitionId,
                 InventoryItemId = item.InventoryItemId,
+                SourcePlanItemId = item.SourcePlanItemId,
                 ItemDescription = item.ItemDescription,
                 Quantity = item.Quantity,
                 UnitOfMeasure = item.UnitOfMeasure,
@@ -1567,16 +1543,41 @@ public class PurchaseRequisitionsController : ControllerBase
         if (request.Items.Any(item => item.Quantity <= 0)) return "Every requisition item quantity must be greater than zero.";
         if (request.Items.Any(item => item.EstimatedUnitPrice < 0)) return "Estimated unit prices cannot be negative.";
         if (string.IsNullOrWhiteSpace(request.Priority)) return "Priority is required.";
-        if (!request.DepartmentId.HasValue || request.DepartmentId.Value == Guid.Empty)
+        if (!string.IsNullOrWhiteSpace(request.Currency) && request.Currency.Trim().Length != 3)
+            return "Currency must be a three-letter Finance currency code.";
+        if ((!request.DepartmentId.HasValue || request.DepartmentId.Value == Guid.Empty) &&
+            (!request.Linkage.SourcePlanItemId.HasValue || request.Linkage.SourcePlanItemId.Value == Guid.Empty))
             return "Select an active HR department.";
         return null;
     }
 
     private async Task<string> ResolveDepartmentNameAsync(
         Guid? departmentId,
+        Guid? sourcePlanItemId,
         Guid tenantId,
         CancellationToken cancellationToken)
     {
+        if (sourcePlanItemId.HasValue && sourcePlanItemId.Value != Guid.Empty)
+        {
+            var sourcePlanItem = await _unitOfWork.Repository<ProcurementPlanItem>()
+                .GetQueryable(item => item.Id == sourcePlanItemId.Value && item.TenantId == tenantId && !item.IsDeleted)
+                .Include(item => item.ProcurementPlan)
+                .ThenInclude(plan => plan.Department)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+            if (sourcePlanItem is null || sourcePlanItem.ProcurementPlan.IsDeleted ||
+                sourcePlanItem.ProcurementPlan.Department.IsDeleted || !sourcePlanItem.ProcurementPlan.Department.IsActive)
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_PLAN_DEPARTMENT_INVALID",
+                    "The selected plan item does not have an active HR department in the current tenant.");
+            if (departmentId.HasValue && departmentId.Value != Guid.Empty &&
+                departmentId.Value != sourcePlanItem.ProcurementPlan.DepartmentId)
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_PLAN_DEPARTMENT_MISMATCH",
+                    "The posted department does not match the selected procurement plan item.");
+            return sourcePlanItem.ProcurementPlan.Department.Name;
+        }
+
         if (!departmentId.HasValue || departmentId.Value == Guid.Empty)
             throw new ProcurementRequisitionLinkageValidationException(
                 "PR_DEPARTMENT_REQUIRED",
@@ -1591,20 +1592,94 @@ public class PurchaseRequisitionsController : ControllerBase
         return department.Name;
     }
 
+    private async Task<string> ResolveRequisitionCurrencyAsync(
+        string? requestedCurrency,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var currencies = _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.Currency>()
+            .GetQueryable(currency =>
+                currency.TenantId == tenantId &&
+                currency.IsActive &&
+                !currency.IsDeleted);
+
+        if (string.IsNullOrWhiteSpace(requestedCurrency))
+        {
+            var baseCurrency = await currencies
+                .AsNoTracking()
+                .Where(currency => currency.IsBaseCurrency)
+                .Select(currency => currency.CurrencyCode)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(baseCurrency))
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PR_BASE_CURRENCY_NOT_CONFIGURED",
+                    "Finance must configure an active tenant base currency before a purchase requisition can be created.");
+            return baseCurrency.Trim().ToUpperInvariant();
+        }
+
+        var normalized = requestedCurrency.Trim().ToUpperInvariant();
+        var activeCurrency = await currencies
+            .AsNoTracking()
+            .Where(currency => currency.CurrencyCode == normalized)
+            .Select(currency => currency.CurrencyCode)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(activeCurrency))
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_CURRENCY_NOT_ACTIVE",
+                $"Currency {normalized} is not active in Finance for this tenant.");
+        return activeCurrency.Trim().ToUpperInvariant();
+    }
+
     /// <summary>
-    /// Inventory-backed demand must be valued from the controlled item master.  The
-    /// requester UI deliberately has no editable price control, and direct API
-    /// callers must not be able to reintroduce one by posting an arbitrary amount.
-    /// Non-inventory demand retains its existing governed linkage valuation path.
+    /// A linked approved-plan estimate is authoritative for its requisition line.
+    /// Otherwise inventory-backed demand is valued from the controlled item master;
+    /// non-inventory demand retains its captured governed estimate. Zero or negative
+    /// estimates are rejected before the requisition can enter approval workflow.
     /// </summary>
     private async Task ApplyAuthoritativeInventoryPricingAsync(
         IEnumerable<CreatePurchaseRequisitionItemDto> items,
         Guid tenantId,
         CancellationToken cancellationToken)
     {
+        var requestItems = items.ToList();
+        var planPricedLines = new HashSet<CreatePurchaseRequisitionItemDto>();
+        var sourcePlanItemIds = requestItems.Where(item => item.SourcePlanItemId.HasValue)
+            .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList();
+        var planItems = sourcePlanItemIds.Count == 0
+            ? new Dictionary<Guid, ProcurementPlanItem>()
+            : await _unitOfWork.Repository<ProcurementPlanItem>()
+                .GetQueryable(item => sourcePlanItemIds.Contains(item.Id) &&
+                    item.TenantId == tenantId && !item.IsDeleted)
+                .AsNoTracking().ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (planItems.Count != sourcePlanItemIds.Count)
+            throw new ProcurementRequisitionLinkageNotFoundException(
+                "PLAN_ITEM_NOT_FOUND", "One or more requisition lines reference an unavailable procurement-plan item.");
+
+        foreach (var line in requestItems.Where(item => item.SourcePlanItemId.HasValue))
+        {
+            var planItem = planItems[line.SourcePlanItemId!.Value];
+            if (planItem.InventoryItemId.HasValue && line.InventoryItemId.HasValue &&
+                planItem.InventoryItemId.Value != line.InventoryItemId.Value)
+                throw new ProcurementRequisitionLinkageValidationException(
+                    "PLAN_ITEM_LINE_MISMATCH",
+                    $"Requisition line {line.ItemDescription} does not match its linked procurement-plan item.");
+            var plannedUnitEstimate = planItem.EstimatedUnitPrice > 0
+                ? planItem.EstimatedUnitPrice
+                : planItem.EstimatedQuantity > 0 && planItem.EstimatedTotalCost > 0
+                    ? planItem.EstimatedTotalCost / planItem.EstimatedQuantity
+                    : 0;
+            if (plannedUnitEstimate > 0)
+            {
+                line.EstimatedUnitPrice = plannedUnitEstimate;
+                planPricedLines.Add(line);
+            }
+        }
+
         var inventoryItems = _unitOfWork.Repository<InventoryItem>();
 
-        foreach (var requestItem in items.Where(item => item.InventoryItemId.HasValue && item.InventoryItemId.Value != Guid.Empty))
+        foreach (var requestItem in requestItems.Where(item =>
+                     !planPricedLines.Contains(item) &&
+                     item.InventoryItemId.HasValue && item.InventoryItemId.Value != Guid.Empty))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var inventoryItem = await inventoryItems.GetByIdAsync(requestItem.InventoryItemId!.Value);
@@ -1620,6 +1695,13 @@ public class PurchaseRequisitionsController : ControllerBase
                 : inventoryItem.StandardCost > 0
                     ? inventoryItem.StandardCost
                     : inventoryItem.AverageCost;
+        }
+
+        if (requestItems.Any(item => item.EstimatedUnitPrice <= 0))
+        {
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_ESTIMATE_REQUIRED",
+                "Every requisition line requires a governed positive estimate from its linked plan item, controlled item master, or captured requisition estimate.");
         }
     }
 
@@ -1650,6 +1732,7 @@ public class PurchaseRequisitionsController : ControllerBase
             TenantId = tenantId,
             RequisitionId = requisitionId,
             InventoryItemId = itemDto.InventoryItemId,
+            SourcePlanItemId = itemDto.SourcePlanItemId,
             ItemDescription = itemDto.ItemDescription.Trim(),
             Quantity = itemDto.Quantity,
             UnitOfMeasure = string.IsNullOrWhiteSpace(itemDto.UnitOfMeasure) ? "EA" : itemDto.UnitOfMeasure.Trim(),
@@ -1663,6 +1746,35 @@ public class PurchaseRequisitionsController : ControllerBase
             CreatedAt = now,
             UpdatedAt = now
         };
+    }
+
+    private static void NormalizePlanItemLineage(CreatePurchaseRequisitionDto request)
+    {
+        var primaryId = request.Linkage.SourcePlanItemId is { } value && value != Guid.Empty
+            ? value
+            : (Guid?)null;
+        var explicitLineIds = request.Items.Where(item => item.SourcePlanItemId.HasValue &&
+                item.SourcePlanItemId.Value != Guid.Empty)
+            .Select(item => item.SourcePlanItemId!.Value).Distinct().ToList();
+
+        if (explicitLineIds.Count == 0 && primaryId.HasValue)
+        {
+            foreach (var item in request.Items)
+                item.SourcePlanItemId = primaryId.Value;
+            explicitLineIds.Add(primaryId.Value);
+        }
+        else if (explicitLineIds.Count > 0 && request.Items.Any(item => !item.SourcePlanItemId.HasValue ||
+                     item.SourcePlanItemId.Value == Guid.Empty))
+        {
+            throw new ProcurementRequisitionLinkageValidationException(
+                "PR_PLAN_LINEAGE_INCOMPLETE",
+                "Every line in a plan-linked requisition must retain its exact procurement-plan item reference.");
+        }
+
+        request.Linkage.SourcePlanItemIds = explicitLineIds;
+        request.Linkage.SourcePlanItemId = primaryId.HasValue && explicitLineIds.Contains(primaryId.Value)
+            ? primaryId.Value
+            : explicitLineIds.Count > 0 ? explicitLineIds[0] : null;
     }
 
     private static string? SpecificationReference(PurchaseRequisition requisition) =>

@@ -35,7 +35,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         readiness.DecisionCode.Should().Be("PR_BUDGET_AVAILABLE");
         readiness.CommitmentStatus.Should().Be("Reserved");
         readiness.AvailableAmount.Should().Be(600m);
-        budget.CommittedAmount.Should().Be(400m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(400m);
         budget.RemainingAmount.Should().Be(600m);
         requisition.BudgetValidated.Should().BeTrue();
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
@@ -44,6 +45,131 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         commitment.CorrelationId.Should().Be("trace-budget-reserve");
         var history = await fixture.Service.GetHistoryAsync(requisition.Id);
         history.Should().ContainSingle(item => item.Action == "BudgetCommitmentReserved" && item.IntegrityHash.Length == 64);
+    }
+
+    [Fact]
+    public async Task ApprovedRequisitionCreatesCommitmentOnlyAtDownstreamBoundary()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(1_000m);
+        var requisition = fixture.NewRequisition(budget, 400m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            "procurement.purchase-order.create",
+            "trace-po-issue");
+
+        readiness.CommitmentStatus.Should().Be("Reserved");
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(400m);
+        (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DownstreamCommitmentUsesActualAwardInsteadOfPrEstimate()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(250_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            3_990m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-actual-award");
+
+        readiness.CommitmentStatus.Should().Be("Reserved");
+        readiness.RequestedAmount.Should().Be(3_990m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(3_990m);
+        requisition.BudgetValidated.Should().BeFalse(
+            "an approved requisition retains its immutable approval-time budget snapshot");
+        requisition.BudgetRemaining.Should().BeNull(
+            "downstream commitment changes belong to the Finance budget ledger, not the approved requisition snapshot");
+        var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
+        commitment.ReservedAmount.Should().Be(3_990m);
+    }
+
+    [Fact]
+    public async Task ReadinessUsesActiveAwardReservationInsteadOfOriginalPrEstimate()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(250_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            3_990m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-actual-award");
+
+        var readiness = await fixture.Service.GetReadinessAsync(requisition.Id);
+
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.DecisionCode.Should().Be("PR_BUDGET_COMMITMENT_ACTIVE");
+        readiness.RequestedAmount.Should().Be(3_990m);
+        readiness.CommitmentStatus.Should().Be("Reserved");
+    }
+
+    [Fact]
+    public async Task DownstreamReadinessUsesPoExposureInsteadOfLargerPrEstimate()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(4_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        requisition.Status = "Approved";
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.GetDownstreamReadinessAsync(
+            requisition.Id,
+            3_990m,
+            "GHS");
+
+        readiness.IsCompliant.Should().BeTrue();
+        readiness.CanReserve.Should().BeTrue();
+        readiness.RequestedAmount.Should().Be(3_990m);
+        readiness.AvailableAmount.Should().Be(4_000m);
+    }
+
+    [Fact]
+    public async Task ExistingEstimateReservationIsAdjustedToActualAwardWithoutDuplicateCommitment()
+    {
+        await using var fixture = new Fixture();
+        var budget = fixture.NewBudget(10_000m);
+        var requisition = fixture.NewRequisition(budget, 4_900m);
+        fixture.Context.AddRange(budget, requisition);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Service.ReserveAsync(requisition, "trace-estimate");
+        requisition.Status = "Approved";
+
+        var readiness = await fixture.Service.ReserveForDownstreamAsync(
+            requisition,
+            3_990m,
+            "GHS",
+            "procurement.purchase-order.create",
+            "trace-adjust-award");
+
+        readiness.RequestedAmount.Should().Be(3_990m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(3_990m);
+        budget.RemainingAmount.Should().Be(6_010m);
+        var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
+        commitment.ReservedAmount.Should().Be(3_990m);
+        commitment.ReservationSequence.Should().Be(2);
+        (await fixture.Service.GetHistoryAsync(requisition.Id)).Should()
+            .Contain(item => item.Action == "BudgetCommitmentAdjustedForAward");
     }
 
     [Fact]
@@ -81,7 +207,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
 
         retry.Basis.Should().Be("ExistingCommitment");
         retry.CommitmentStatus.Should().Be("Reserved");
-        budget.CommittedAmount.Should().Be(200m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(200m);
         (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
         (await fixture.Service.GetHistoryAsync(requisition.Id)).Should()
             .Contain(item => item.Action == "BudgetReservationReused");
@@ -103,7 +230,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         firstResult.CanReserve.Should().BeTrue();
         secondResult.CanReserve.Should().BeFalse();
         secondResult.ShortfallAmount.Should().Be(20m);
-        budget.CommittedAmount.Should().Be(70m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(70m);
         (await fixture.Context.ProcurementBudgetCommitments.CountAsync()).Should().Be(1);
     }
 
@@ -124,7 +252,8 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
         release.Released.Should().BeTrue();
         release.ReleasedAmount.Should().Be(120m);
         reserveAgain.ReservationSequence.Should().Be(2);
-        budget.CommittedAmount.Should().Be(120m);
+        budget.CommittedAmount.Should().Be(0m);
+        budget.ReservedAmount.Should().Be(120m);
         var commitment = await fixture.Context.ProcurementBudgetCommitments.SingleAsync();
         commitment.Status.Should().Be(ProcurementBudgetCommitmentStatus.Reserved);
         commitment.ReleaseReason.Should().BeNull();
@@ -146,6 +275,10 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
 
         readiness.CanReserve.Should().BeFalse();
         readiness.DecisionCode.Should().Be("PR_BUDGET_NOT_EFFECTIVE");
+        readiness.Message.Should().Contain(budget.BudgetCode).And.Contain("becomes effective on");
+        readiness.Message.Should().Contain("Draft can be prepared now");
+        readiness.RequiredActions.Should().ContainSingle()
+            .Which.Should().Contain("Submit on or after");
     }
 
     [Fact]

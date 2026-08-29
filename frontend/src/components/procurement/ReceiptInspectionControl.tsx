@@ -13,6 +13,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { documentManagementService, type CentralDocumentRecord } from '@/services/document-management.service';
+import {
+  inventoryManagementService,
+  type WarehouseLocationDto,
+} from '@/services/inventoryManagementService';
 import {
   purchasingService,
   type ProcurementReceiptInspectionEvidenceKind,
@@ -36,6 +41,7 @@ type EvidenceDraft = {
   evidenceKind: ProcurementReceiptInspectionEvidenceKind;
   evidenceId: string;
   evidenceReference: string;
+  documentRecordId?: string;
 };
 
 type Props = {
@@ -67,13 +73,18 @@ const requestKey = (prefix: string) =>
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'The request could not be completed.';
 
+const friendlyRequirement = (value: string) => value
+  .replace(/[_-]+/g, ' ')
+  .toLowerCase()
+  .replace(/(^|\s)\S/g, (letter) => letter.toUpperCase());
+
 export const buildReceiptInspectionEvidenceRequests = (
   actionKey: string,
   rows: EvidenceDraft[]
 ): ProcurementReceiptInspectionEvidenceRequest[] => rows.map((row) => {
   const id = row.evidenceId.trim();
   if (!id || !row.evidenceReference.trim())
-    throw new Error(`Evidence ID and reference are required for ${row.requirementKey}.`);
+    throw new Error(`Select current published evidence for ${friendlyRequirement(row.requirementKey)}.`);
   return {
     actionKey,
     requirementKey: row.requirementKey,
@@ -104,6 +115,9 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
   const [comment, setComment] = useState('');
   const [reference, setReference] = useState('');
   const [resolutionKind, setResolutionKind] = useState<ProcurementReceiptResolutionKind>(1);
+  const [warehouseLocations, setWarehouseLocations] = useState<WarehouseLocationDto[]>([]);
+  const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
+  const [optionsLoading, setOptionsLoading] = useState(false);
   const [evidenceRows, setEvidenceRows] = useState<EvidenceDraft[]>(() =>
     (initialOverview?.evidenceRequirementKeys?.length
       ? initialOverview.evidenceRequirementKeys
@@ -115,6 +129,70 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
       })));
 
   const current = overview?.current;
+
+  useEffect(() => {
+    if (external || !overview?.warehouseId) {
+      setWarehouseLocations([]);
+      return;
+    }
+    let cancelled = false;
+    void inventoryManagementService.getWarehouseLocations(overview.warehouseId)
+      .then((rows) => {
+        if (!cancelled) setWarehouseLocations(rows.filter((row) => row.isActive));
+      })
+      .catch((loadError) => {
+        if (!cancelled) toast.error(messageOf(loadError));
+      });
+    return () => { cancelled = true; };
+  }, [external, overview?.warehouseId]);
+
+  useEffect(() => {
+    if (!(overview?.canSubmit || overview?.canAcknowledge || overview?.canResolve || overview?.canClose)) {
+      setDmsRecords([]);
+      return;
+    }
+    let cancelled = false;
+    setOptionsLoading(true);
+    void documentManagementService.getRecords('Procurement')
+      .then((records) => {
+        if (!cancelled) setDmsRecords(records.filter((record) =>
+          record.lifecycleStatus === 'Active' &&
+          record.versionStatus === 'Published' &&
+          Boolean(record.currentVersion)));
+      })
+      .catch((loadError) => {
+        if (!cancelled) toast.error(messageOf(loadError));
+      })
+      .finally(() => {
+        if (!cancelled) setOptionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [overview?.canAcknowledge, overview?.canClose, overview?.canResolve, overview?.canSubmit]);
+
+  const selectEvidence = async (index: number, documentRecordId: string) => {
+    try {
+      setOptionsLoading(true);
+      const detail = await documentManagementService.getRecord(documentRecordId);
+      const version = detail?.versions.find((item) =>
+        item.versionNumber === detail.record.currentVersion &&
+        item.status === 'Published' &&
+        Boolean(item.fileUploadRecordId));
+      if (!detail || !version?.fileUploadRecordId)
+        throw new Error('Select a central-DMS record with a current published file version.');
+      const fileUploadRecordId = version.fileUploadRecordId;
+      setEvidenceRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? {
+        ...row,
+        evidenceKind: 1,
+        documentRecordId,
+        evidenceId: fileUploadRecordId,
+        evidenceReference: `${detail.record.documentReference} / ${version.versionNumber}`,
+      } : row));
+    } catch (loadError) {
+      toast.error(messageOf(loadError));
+    } finally {
+      setOptionsLoading(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -264,7 +342,7 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
       </Card>
 
       {!external && <Card>
-        <CardHeader><CardTitle className="text-base">Inspection lines</CardTitle><CardDescription>Accepted quantities are posted only after independent workflow approval. Rejected quantities require a reason and same-warehouse quarantine location ID.</CardDescription></CardHeader>
+        <CardHeader><CardTitle className="text-base">Inspection lines</CardTitle><CardDescription>Accepted quantities are posted only after independent workflow approval. Select a controlled same-warehouse quarantine location for rejected quantities.</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           {lines.map((line, index) => {
             const source = current.lines[index];
@@ -274,7 +352,7 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
                 <div><Label>Accepted</Label><Input type="number" min="0" step="0.0001" disabled={!overview.canEdit || busy} value={line.acceptedQuantity} onChange={(event) => setLines((rows) => rows.map((row, i) => i === index ? { ...row, acceptedQuantity: event.target.value } : row))} /></div>
                 <div><Label>Rejected</Label><Input type="number" min="0" step="0.0001" disabled={!overview.canEdit || busy} value={line.rejectedQuantity} onChange={(event) => setLines((rows) => rows.map((row, i) => i === index ? { ...row, rejectedQuantity: event.target.value } : row))} /></div>
                 <div><Label>Rejection reason</Label><Input disabled={!overview.canEdit || busy} value={line.rejectionReason} onChange={(event) => setLines((rows) => rows.map((row, i) => i === index ? { ...row, rejectionReason: event.target.value } : row))} /></div>
-                <div><Label>Quarantine location ID</Label><Input disabled={!overview.canEdit || busy} value={line.quarantineLocationId} onChange={(event) => setLines((rows) => rows.map((row, i) => i === index ? { ...row, quarantineLocationId: event.target.value } : row))} /></div>
+                <div><Label>Quarantine location</Label><Select disabled={!overview.canEdit || busy} value={line.quarantineLocationId || '__none__'} onValueChange={(value) => setLines((rows) => rows.map((row, i) => i === index ? { ...row, quarantineLocationId: value === '__none__' ? '' : value } : row))}><SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger><SelectContent><SelectItem value="__none__">Not required</SelectItem>{warehouseLocations.map((location) => <SelectItem key={location.id} value={location.id}>{location.locationCode} · {location.name || location.locationType}</SelectItem>)}</SelectContent></Select></div>
                 <div><Label>Inspection notes</Label><Input disabled={!overview.canEdit || busy} value={line.inspectionNotes} onChange={(event) => setLines((rows) => rows.map((row, i) => i === index ? { ...row, inspectionNotes: event.target.value } : row))} /></div>
               </div>
             </div>;
@@ -284,14 +362,13 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
       </Card>}
 
       {(overview.canSubmit || overview.canAcknowledge || overview.canResolve || overview.canClose) && <Card>
-        <CardHeader><CardTitle className="text-base">Controlled evidence</CardTitle><CardDescription>Complete every DEC-013 requirement with an already-retained workflow evidence document or malware-clean central DMS upload.</CardDescription></CardHeader>
+        <CardHeader><CardTitle className="text-base">Controlled evidence</CardTitle><CardDescription>Select the current published central-DMS document for each configured receipt requirement.</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           {evidenceRows.map((row, index) => <div key={row.requirementKey} className="rounded-lg border p-3">
-            <div className="mb-3 flex items-center justify-between gap-2"><Label>{row.requirementKey}</Label><Badge variant="outline">Required by DEC-013</Badge></div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <div><Label>Evidence source</Label><Select value={String(row.evidenceKind)} onValueChange={(value) => setEvidenceRows((rows) => rows.map((item, rowIndex) => rowIndex === index ? { ...item, evidenceKind: Number(value) as ProcurementReceiptInspectionEvidenceKind, evidenceId: '' } : item))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">Central DMS upload</SelectItem><SelectItem value="0">Workflow evidence</SelectItem></SelectContent></Select></div>
-              <div><Label>{row.evidenceKind === 1 ? 'File upload record ID' : 'Workflow evidence ID'}</Label><Input value={row.evidenceId} onChange={(event) => setEvidenceRows((rows) => rows.map((item, rowIndex) => rowIndex === index ? { ...item, evidenceId: event.target.value } : item))} /></div>
-              <div><Label>Evidence reference</Label><Input value={row.evidenceReference} onChange={(event) => setEvidenceRows((rows) => rows.map((item, rowIndex) => rowIndex === index ? { ...item, evidenceReference: event.target.value } : item))} /></div>
+            <div className="mb-3 flex items-center justify-between gap-2"><Label>{friendlyRequirement(row.requirementKey)}</Label><Badge variant="outline">Required evidence</Badge></div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div><Label>Published DMS document</Label><Select disabled={busy || optionsLoading} value={row.documentRecordId || '__none__'} onValueChange={(value) => { if (value !== '__none__') void selectEvidence(index, value); }}><SelectTrigger><SelectValue placeholder="Select evidence" /></SelectTrigger><SelectContent><SelectItem value="__none__">Select current evidence</SelectItem>{dmsRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.documentReference} · {record.title}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Linked evidence</Label><Input readOnly value={row.evidenceReference} placeholder={optionsLoading ? 'Loading controlled documents…' : 'No evidence selected'} /></div>
             </div>
           </div>)}
         </CardContent>

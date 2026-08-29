@@ -493,6 +493,7 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
         var documentId = Guid.NewGuid();
         var documentLineId = Guid.NewGuid();
         var inventoryItemId = Guid.NewGuid();
+        await SeedIssueContextAsync(documentId, inventoryItemId, ItemType.StockItem);
         var resolvedLineType = typeof(InventoryScanningService)
             .GetNestedType("ResolvedLine", BindingFlags.NonPublic)!;
         var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(resolvedLineType))!;
@@ -892,6 +893,11 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     {
         var documentId = Guid.NewGuid();
         var documentLineId = Guid.NewGuid();
+        var inventoryItemId = Guid.NewGuid();
+        if (operation == InventoryScanOperation.RequisitionIssue)
+        {
+            await SeedIssueContextAsync(documentId, inventoryItemId, ItemType.StockItem);
+        }
         if (operation == InventoryScanOperation.RequisitionReturn)
         {
             await _context.AddAsync(new InventoryRequisition
@@ -929,12 +935,12 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
                 },
                 new InventoryIdentifierMatchDto
                 {
-                    InventoryItemId = Guid.NewGuid(), ItemCode = "ITEM-01", ItemName = "Scan item",
+                    InventoryItemId = inventoryItemId, ItemCode = "ITEM-01", ItemName = "Scan item",
                     Identifier = "ITEM-01", IdentifierKind = "PrimaryBarcode", ConversionToBase = 1
                 },
                 new InventoryScanDocumentLineDto
                 {
-                    DocumentLineId = documentLineId, InventoryItemId = Guid.NewGuid(),
+                    DocumentLineId = documentLineId, InventoryItemId = inventoryItemId,
                     ItemCode = "ITEM-01", ItemName = "Scan item", ExpectedQuantity = 2
                 },
                 2m,
@@ -955,6 +961,31 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
             "scan:test-correlation",
             CancellationToken.None
         })!;
+    }
+
+    private async Task SeedIssueContextAsync(Guid requisitionId, Guid inventoryItemId, ItemType itemType)
+    {
+        await _context.AddRangeAsync(
+            new InventoryRequisition
+            {
+                Id = requisitionId,
+                TenantId = _tenantId,
+                RequisitionNumber = $"REQ-{requisitionId:N}"[..20],
+                DepartmentId = Guid.NewGuid(),
+                WarehouseId = Guid.NewGuid(),
+                RequestedById = Guid.NewGuid(),
+                Status = RequisitionStatus.Approved
+            },
+            new InventoryItem
+            {
+                Id = inventoryItemId,
+                TenantId = _tenantId,
+                ItemCode = $"ITEM-{inventoryItemId:N}"[..20],
+                Name = "Scan item",
+                CategoryId = Guid.NewGuid(),
+                ItemType = itemType
+            });
+        await _context.SaveChangesAsync();
     }
 
     private static SaveInventoryLabelProfileRequest Request(string name, bool isDefault) => new()

@@ -135,6 +135,7 @@ public partial class ApplicationDbContext
                 table.HasCheckConstraint("CK_QsEstimateVersions_Approval", "[ApprovalStatus] IN ('Draft','Pending','Approved','Rejected')");
                 table.HasCheckConstraint("CK_QsEstimateVersions_Totals", "[DirectCost] >= 0 AND [MarkupTotal] >= 0 AND [TotalAmount] = [DirectCost] + [MarkupTotal]");
                 table.HasCheckConstraint("CK_QsEstimateVersions_Counts", "[LineCount] > 0 AND [AssumptionCount] >= 0 AND [MarkupCount] >= 0");
+                table.HasCheckConstraint("CK_QsEstimateVersions_SourceSnapshotSchema", "[SourceSnapshotSchemaVersion] IN (0,1)");
                 table.HasCheckConstraint("CK_QsEstimateVersions_EvidencePair", "([CentralDocumentRecordId] IS NULL AND [CentralDocumentVersionId] IS NULL) OR ([CentralDocumentRecordId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL)");
             });
         });

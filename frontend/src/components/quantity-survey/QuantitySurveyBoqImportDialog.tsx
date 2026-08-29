@@ -41,6 +41,7 @@ type QuantitySurveyBoqImportActionsProps = {
   projectId: string;
   projectCode: string;
   onImportCompleted: () => Promise<void> | void;
+  canImport: boolean;
 };
 
 const saveBlob = (blob: Blob, fileName: string) => {
@@ -61,6 +62,7 @@ export function QuantitySurveyBoqImportActions({
   projectId,
   projectCode,
   onImportCompleted,
+  canImport,
 }: QuantitySurveyBoqImportActionsProps) {
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -237,10 +239,16 @@ export function QuantitySurveyBoqImportActions({
         )}
         Export BoQ
       </Button>
-      <Button variant="outline" className="gap-2" onClick={() => setOpen(true)}>
-        <Upload className="h-4 w-4" />
-        Import BoQ
-      </Button>
+      {canImport ? (
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() => setOpen(true)}
+        >
+          <Upload className="h-4 w-4" />
+          Import BoQ
+        </Button>
+      ) : null}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-h-[92vh] max-w-5xl overflow-hidden p-0">

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.QuantitySurvey;
@@ -138,6 +139,15 @@ public partial class ProjectService
                     value.TenantId == _currentUserProvider.TenantId && value.CurrencyCode == currencies[0] && value.IsActive && !value.IsDeleted)
                     ?? throw new InvalidOperationException($"The BoQ currency '{currencies[0]}' is not an active Finance currency for this tenant.");
 
+                var project = await _unitOfWork.Repository<Project>().FirstOrDefaultAsync(value =>
+                    value.TenantId == _currentUserProvider.TenantId && value.Id == projectId && !value.IsDeleted)
+                    ?? throw new InvalidOperationException("The project is not available in the current tenant.");
+                var projectAssets = await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(value =>
+                    value.TenantId == _currentUserProvider.TenantId
+                    && value.ProjectId == projectId
+                    && !value.IsDeleted);
+                var sourceSnapshot = QuantitySurveyEstimateSourceSnapshotBuilder.Capture(project, projectAssets);
+
                 var (profile, policyDecision, policy, markupDecision, markupPolicy) = await RequireEffectiveEstimatePolicyAsync();
                 var normalizedMarkups = ValidateEstimateMarkups(dto.Markups, markupPolicy);
                 CentralDocumentVersion? evidence = null;
@@ -174,6 +184,9 @@ public partial class ProjectService
                     EstimateDate = (dto.EstimateDate ?? now).Date,
                     CurrencyId = currency.Id,
                     CurrencyCodeSnapshot = currency.CurrencyCode,
+                    FundingSourceSnapshot = sourceSnapshot.FundingSource,
+                    PropertyReferenceSnapshot = sourceSnapshot.PropertyReference,
+                    SourceSnapshotSchemaVersion = QuantitySurveyEstimateSourceSnapshotBuilder.CurrentSchemaVersion,
                     Status = QuantitySurveyEstimateStatuses.Draft,
                     ApprovalStatus = QuantitySurveyEstimateStatuses.Draft,
                     ChangeReason = dto.ChangeReason.Trim(),
@@ -545,7 +558,9 @@ public partial class ProjectService
         {
             Id = entity.Id, ProjectId = entity.ProjectId, ProjectBoqVersionId = entity.ProjectBoqVersionId, SourceEstimateVersionId = entity.SourceEstimateVersionId,
             VersionNumber = entity.VersionNumber, EstimateType = entity.EstimateType, Name = entity.Name, EstimateDate = entity.EstimateDate,
-            CurrencyId = entity.CurrencyId, CurrencyCode = entity.CurrencyCodeSnapshot, DirectCost = entity.DirectCost, MarkupTotal = entity.MarkupTotal, TotalAmount = entity.TotalAmount,
+            CurrencyId = entity.CurrencyId, CurrencyCode = entity.CurrencyCodeSnapshot,
+            FundingSource = entity.FundingSourceSnapshot, PropertyReference = entity.PropertyReferenceSnapshot, SourceSnapshotSchemaVersion = entity.SourceSnapshotSchemaVersion,
+            DirectCost = entity.DirectCost, MarkupTotal = entity.MarkupTotal, TotalAmount = entity.TotalAmount,
             Status = entity.Status, ApprovalStatus = entity.ApprovalStatus, WorkflowInstanceId = entity.WorkflowInstanceId, WorkflowDefinitionId = entity.WorkflowDefinitionId,
             SubmittedById = entity.SubmittedById, SubmittedAt = entity.SubmittedAt, ApprovedById = entity.ApprovedById, ApprovedAt = entity.ApprovedAt, RejectionReason = entity.RejectionReason,
             ChangeReason = entity.ChangeReason, SnapshotHash = entity.SnapshotHash, ConfigurationProfileId = entity.ConfigurationProfileId, ConfigurationProfileVersion = entity.ConfigurationProfileVersion,
@@ -571,10 +586,20 @@ public partial class ProjectService
 
     private static string ComputeEstimateHash(QuantitySurveyEstimateVersion entity, IEnumerable<QuantitySurveyEstimateLine> lines, IEnumerable<QuantitySurveyEstimateAssumption> assumptions, IEnumerable<QuantitySurveyEstimateMarkup> markups)
     {
-        var canonical = JsonSerializer.Serialize(new
+        var canonical = entity.SourceSnapshotSchemaVersion == 0
+            ? JsonSerializer.Serialize(new
+            {
+                entity.ProjectId, entity.ProjectBoqVersionId, entity.SourceEstimateVersionId, entity.VersionNumber, entity.EstimateType, entity.Name, entity.EstimateDate,
+                entity.CurrencyId, entity.CurrencyCodeSnapshot, entity.DirectCost, entity.MarkupTotal, entity.TotalAmount, entity.ConfigurationProfileId, entity.ConfigurationDecisionId, entity.ConfigurationProfileVersion,
+                Lines = lines.OrderBy(value => value.Sequence).Select(value => new { value.Sequence, value.ProjectBoqVersionLineId, value.SourceRateId, value.LineNumberSnapshot, value.ItemCodeSnapshot, value.DescriptionSnapshot, value.UnitOfMeasureSnapshot, value.Quantity, value.UnitRate, value.LineAmount, value.SourceRateItemCodeSnapshot, value.SourceRateVersionSnapshot, value.RateSourceSnapshot }),
+                Assumptions = assumptions.OrderBy(value => value.Sequence).Select(value => new { value.Sequence, value.Code, value.Description, value.Value, value.Unit }),
+                Markups = markups.OrderBy(value => value.Sequence).Select(value => new { value.Sequence, value.Component, value.Percentage, value.BasisAmount, value.Amount })
+            })
+            : JsonSerializer.Serialize(new
         {
             entity.ProjectId, entity.ProjectBoqVersionId, entity.SourceEstimateVersionId, entity.VersionNumber, entity.EstimateType, entity.Name, entity.EstimateDate,
-            entity.CurrencyId, entity.CurrencyCodeSnapshot, entity.DirectCost, entity.MarkupTotal, entity.TotalAmount, entity.ConfigurationProfileId, entity.ConfigurationDecisionId, entity.ConfigurationProfileVersion,
+            entity.CurrencyId, entity.CurrencyCodeSnapshot, entity.FundingSourceSnapshot, entity.PropertyReferenceSnapshot, entity.SourceSnapshotSchemaVersion,
+            entity.DirectCost, entity.MarkupTotal, entity.TotalAmount, entity.ConfigurationProfileId, entity.ConfigurationDecisionId, entity.ConfigurationProfileVersion,
             Lines = lines.OrderBy(value => value.Sequence).Select(value => new { value.Sequence, value.ProjectBoqVersionLineId, value.SourceRateId, value.LineNumberSnapshot, value.ItemCodeSnapshot, value.DescriptionSnapshot, value.UnitOfMeasureSnapshot, value.Quantity, value.UnitRate, value.LineAmount, value.SourceRateItemCodeSnapshot, value.SourceRateVersionSnapshot, value.RateSourceSnapshot }),
             Assumptions = assumptions.OrderBy(value => value.Sequence).Select(value => new { value.Sequence, value.Code, value.Description, value.Value, value.Unit }),
             Markups = markups.OrderBy(value => value.Sequence).Select(value => new { value.Sequence, value.Component, value.Percentage, value.BasisAmount, value.Amount })
@@ -582,7 +607,12 @@ public partial class ProjectService
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
-    private static string SerializeEstimate(QuantitySurveyEstimateVersion value) => JsonSerializer.Serialize(new { value.Id, value.VersionNumber, value.EstimateType, value.Name, value.DirectCost, value.MarkupTotal, value.TotalAmount, value.Status, value.ApprovalStatus, value.WorkflowInstanceId, value.SnapshotHash });
+    private static string SerializeEstimate(QuantitySurveyEstimateVersion value) => JsonSerializer.Serialize(new
+    {
+        value.Id, value.VersionNumber, value.EstimateType, value.Name, value.FundingSourceSnapshot,
+        value.PropertyReferenceSnapshot, value.SourceSnapshotSchemaVersion, value.DirectCost, value.MarkupTotal,
+        value.TotalAmount, value.Status, value.ApprovalStatus, value.WorkflowInstanceId, value.SnapshotHash
+    });
     private void SetEstimateAuditContext(QuantitySurveyEstimateVersion entity, string action, string correlationId) { QuantitySurveyAuditEventMap.GetRequired(action); entity.AuditAction = action; entity.CorrelationId = NormalizeEstimateCorrelationId(correlationId); entity.ActorRoles = CurrentEstimateActorRoles(); entity.UpdatedBy = _currentUserProvider.Username; entity.LastModifiedById = _currentUserProvider.UserId; }
     private string CurrentEstimateActorRoles() => string.Join(',', _currentUserProvider.Roles.OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
     private static string NormalizeEstimateCorrelationId(string? value) => string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : value.Trim()[..Math.Min(value.Trim().Length, 100)];

@@ -188,13 +188,7 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
              !hasQualifyingIndependentActor);
 
         ProcurementSodGuardDecisionDto decision;
-        if (!control.IsConfigured || !control.IsEffective || !control.IsHardStop)
-        {
-            decision = Decision(false, "SOD_POLICY_INCOMPLETE",
-                control.ConfigurationIssue ?? $"Required control '{definition.Code}' is not configured as an effective hard stop.",
-                definition, request, coverage, control, correlationId, now);
-        }
-        else if (isIdentityConflict)
+        if (isIdentityConflict)
         {
             decision = Decision(false, "SOD_CONFLICT", definition.Explanation,
                 definition, request, coverage, control, correlationId, now);
@@ -210,7 +204,9 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
         else
         {
             decision = Decision(true, "SOD_ALLOWED",
-                $"The current actor is independent of the recorded {definition.InitiatorRole} participant(s).",
+                control.IsConfigured && control.IsEffective && control.IsHardStop
+                    ? $"The current actor is independent of the recorded {definition.InitiatorRole} participant(s)."
+                    : $"The shared maker-checker baseline confirmed that the current actor is independent of the recorded {definition.InitiatorRole} participant(s). Optional policy-specific SOD metadata is not configured.",
                 definition, request, coverage, control, correlationId, now);
         }
 

@@ -2313,6 +2313,9 @@ export interface QuantitySurveyEstimateVersionDto {
   estimateDate: string;
   currencyId: string;
   currencyCode: string;
+  fundingSource?: string;
+  propertyReference?: string;
+  sourceSnapshotSchemaVersion: number;
   directCost: number;
   markupTotal: number;
   totalAmount: number;

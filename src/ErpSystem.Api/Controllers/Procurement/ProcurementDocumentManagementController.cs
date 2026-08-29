@@ -158,6 +158,18 @@ public sealed class ProcurementDocumentManagementController : ControllerBase
             });
         }
 
+        if (family == ProcurementDocumentFamily.Requisition &&
+            !string.Equals(source.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Purchase requisition documents are locked",
+                Status = StatusCodes.Status409Conflict,
+                Detail = "Supporting documents can be changed only while the purchase requisition is in Draft status.",
+                Extensions = { ["code"] = "PR_DOCUMENTS_DRAFT_ONLY" }
+            });
+        }
+
         var safeFileName = Path.GetFileName(file.FileName);
         var documentTitle = string.IsNullOrWhiteSpace(title) ? safeFileName : title.Trim();
         if (documentTitle.Length > 250)
@@ -275,6 +287,104 @@ public sealed class ProcurementDocumentManagementController : ControllerBase
             created);
     }
 
+    [HttpDelete("records/{documentRecordId:guid}")]
+    public async Task<IActionResult> RemoveRequisitionDocument(
+        Guid documentRecordId,
+        CancellationToken cancellationToken)
+    {
+        var definition = ProcurementDocumentManagementCatalog.Find(ProcurementDocumentFamily.Requisition)!;
+        if (!await HasAnyPermissionAsync(definition.UploadPermissions, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var record = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                    item.Id == documentRecordId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    item.SourceModule == ProcurementDocumentManagementCatalog.SourceModule &&
+                    item.MetadataTemplateCode == definition.TemplateCode &&
+                    !item.IsDeleted,
+                cancellationToken);
+        if (record?.SourceRecordId is not Guid requisitionId)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Purchase requisition document not found",
+                Status = StatusCodes.Status404NotFound,
+                Detail = "The selected supporting document is unavailable in this tenant.",
+                Extensions = { ["code"] = "PR_DOCUMENT_NOT_FOUND" }
+            });
+        }
+
+        var requisition = await _db.PurchaseRequisitions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                    item.Id == requisitionId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    !item.IsDeleted,
+                cancellationToken);
+        if (requisition is null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Purchase requisition not found",
+                Status = StatusCodes.Status404NotFound,
+                Detail = "The source purchase requisition is unavailable in this tenant.",
+                Extensions = { ["code"] = "PR_NOT_FOUND" }
+            });
+        }
+
+        if (!string.Equals(requisition.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Purchase requisition documents are locked",
+                Status = StatusCodes.Status409Conflict,
+                Detail = "Supporting documents can be removed only while the purchase requisition is in Draft status.",
+                Extensions = { ["code"] = "PR_DOCUMENTS_DRAFT_ONLY" }
+            });
+        }
+
+        if (string.Equals(record.RetentionStatus, "Legal hold", StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Purchase requisition document is retained",
+                Status = StatusCodes.Status409Conflict,
+                Detail = "This supporting document is under legal hold and cannot be removed.",
+                Extensions = { ["code"] = "PR_DOCUMENT_LEGAL_HOLD" }
+            });
+        }
+
+        await _centralDocuments.DeleteAsync(
+            _currentUser.TenantId, documentRecordId, _currentUser.UserId, cancellationToken);
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _currentUser.TenantId,
+            UserId = _currentUser.UserId,
+            Username = _currentUser.Username,
+            Action = "PurchaseRequisitionDocumentRemoved",
+            Resource = definition.SourceEntityType,
+            ResourceId = requisition.Id.ToString(),
+            OldValues = JsonSerializer.Serialize(new
+            {
+                documentRecordId,
+                record.DocumentReference,
+                record.Title,
+                requisition.RequisitionNumber
+            }),
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            UserAgent = Request.Headers.UserAgent.ToString(),
+            Timestamp = DateTime.UtcNow
+        });
+        await _db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("records/{documentRecordId:guid}/versions/{documentVersionId:guid}/download")]
     public async Task<IActionResult> Download(
         Guid documentRecordId,
@@ -356,6 +466,20 @@ public sealed class ProcurementDocumentManagementController : ControllerBase
 
         switch (family)
         {
+            case ProcurementDocumentFamily.Requisition:
+                return await _db.PurchaseRequisitions.AsNoTracking()
+                    .Where(item => item.TenantId == tenantId && !item.IsDeleted &&
+                                   (!exactId.HasValue || item.Id == exactId.Value))
+                    .OrderByDescending(item => item.RequisitionDate).Take(take)
+                    .Select(item => new ProcurementDocumentSourceOptionDto
+                    {
+                        Id = item.Id,
+                        Reference = item.RequisitionNumber,
+                        Label = item.RequisitionNumber + " · " + (item.Department ?? "Purchase requisition"),
+                        Status = item.Status
+                    })
+                    .ToListAsync(cancellationToken);
+
             case ProcurementDocumentFamily.Tender:
                 return await _db.Tenders.AsNoTracking()
                     .Where(item => item.TenantId == tenantId && !item.IsDeleted &&

@@ -12,8 +12,8 @@ public sealed class ProcurementSourcingCase : TenantEntity
     public Guid SourcingReleaseId { get; set; }
     [Range(1, int.MaxValue)] public int CaseSequence { get; set; }
     [Required, StringLength(100)] public string CaseNumber { get; set; } = string.Empty;
-    public Guid SourcePlanId { get; set; }
-    public Guid SourcePlanItemId { get; set; }
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public ProcurementCategoryClass Category { get; set; }
     public ProcurementMethodType RecommendedMethod { get; set; }
     public ProcurementMethodType SelectedMethod { get; set; }
@@ -28,8 +28,8 @@ public sealed class ProcurementSourcingCase : TenantEntity
     [Required, StringLength(100)] public string MethodRuleCode { get; set; } = string.Empty;
     public Guid ThresholdRuleId { get; set; }
     [Required, StringLength(100)] public string ThresholdRuleCode { get; set; } = string.Empty;
-    public Guid AuthorityRouteId { get; set; }
-    [Required, StringLength(100)] public string AuthorityRouteReference { get; set; } = string.Empty;
+    public Guid? AuthorityRouteId { get; set; }
+    [StringLength(100)] public string? AuthorityRouteReference { get; set; }
 
     public Guid? ApprovedExceptionRuleId { get; set; }
     public Guid? MethodOverrideWorkflowInstanceId { get; set; }
@@ -58,12 +58,12 @@ public sealed class ProcurementSourcingCase : TenantEntity
 
     public PurchaseRequisition PurchaseRequisition { get; set; } = null!;
     public ProcurementRequisitionSourcingRelease SourcingRelease { get; set; } = null!;
-    public ProcurementPlan SourcePlan { get; set; } = null!;
-    public ProcurementPlanItem SourcePlanItem { get; set; } = null!;
+    public ProcurementPlan? SourcePlan { get; set; }
+    public ProcurementPlanItem? SourcePlanItem { get; set; }
     public ProcurementPolicySet PolicySet { get; set; } = null!;
     public ProcurementPolicyMethodRule MethodRule { get; set; } = null!;
     public ProcurementPolicyThresholdRule ThresholdRule { get; set; } = null!;
-    public ProcurementRequisitionAuthorityRoute AuthorityRoute { get; set; } = null!;
+    public ProcurementRequisitionAuthorityRoute? AuthorityRoute { get; set; }
     public ProcurementPolicyExceptionRule? ApprovedExceptionRule { get; set; }
     public WorkflowInstance? MethodOverrideWorkflowInstance { get; set; }
     public ICollection<ProcurementSourcingCaseLot> Lots { get; set; } = new List<ProcurementSourcingCaseLot>();

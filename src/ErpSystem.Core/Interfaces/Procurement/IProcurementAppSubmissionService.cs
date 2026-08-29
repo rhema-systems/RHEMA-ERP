@@ -8,6 +8,7 @@ public interface IProcurementAppSubmissionService
     Task<IReadOnlyList<ProcurementAppSubmissionPlanOptionDto>> GetPublishedPlanOptionsAsync(CancellationToken cancellationToken = default);
     Task<ProcurementAppSubmissionPageDto> SearchAsync(ProcurementAppSubmissionSearchRequest request, CancellationToken cancellationToken = default);
     Task<ProcurementAppSubmissionDto> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ProcurementAppExportFileDto> GetExportFileAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ProcurementAppSubmissionDto> RecordExportAsync(RecordProcurementAppExportRequest request, string causationId, CancellationToken cancellationToken = default);
     Task<ProcurementAppSubmissionDto> SubmitAsync(Guid id, SubmitProcurementAppRequest request, string causationId, CancellationToken cancellationToken = default);
     Task<ProcurementAppSubmissionDto> AcknowledgeAsync(Guid id, AcknowledgeProcurementAppRequest request, string causationId, CancellationToken cancellationToken = default);

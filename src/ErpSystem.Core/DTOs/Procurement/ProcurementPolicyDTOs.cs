@@ -172,6 +172,7 @@ public sealed class SaveProcurementPolicyMethodRuleValue : SaveProcurementPolicy
     public ProcurementMethodType Method { get; set; }
     public bool IsAllowed { get; set; } = true;
     public bool RequiresCompetition { get; set; } = true;
+    public bool JustificationRequired { get; set; }
     [Range(0, 100)] public int MinimumQuotationCount { get; set; }
     public Guid? WorkflowDefinitionId { get; set; }
     [StringLength(1000)] public string? ApplicabilityConditions { get; set; }
@@ -194,7 +195,8 @@ public sealed class SaveProcurementPolicyThresholdRuleValue : SaveProcurementPol
 public sealed class SaveProcurementPolicyAuthorityRuleValue : SaveProcurementPolicyRuleValueBase
 {
     [Required, StringLength(200)] public string AuthorityName { get; set; } = string.Empty;
-    [Required, StringLength(150)] public string AuthorityRole { get; set; } = string.Empty;
+    public Guid? AuthorityRoleId { get; set; }
+    [StringLength(150)] public string AuthorityRole { get; set; } = string.Empty;
     public ProcurementCategoryClass? Category { get; set; }
     [Required, StringLength(3), RegularExpression("^[A-Z]{3}$")] public string CurrencyCode { get; set; } = "GHS";
     [Range(typeof(decimal), "0", "9999999999999999")] public decimal LowerBound { get; set; }
@@ -204,6 +206,7 @@ public sealed class SaveProcurementPolicyAuthorityRuleValue : SaveProcurementPol
     [Range(1, 100)] public int Sequence { get; set; } = 1;
     [Range(1, 100)] public int Quorum { get; set; } = 1;
     public bool IsObserver { get; set; }
+    public Guid? EscalationAuthorityRoleId { get; set; }
     [StringLength(200)] public string? EscalationAuthority { get; set; }
     public Guid? WorkflowDefinitionId { get; set; }
 }
@@ -230,7 +233,8 @@ public sealed class SaveProcurementPolicyExceptionRuleValue : SaveProcurementPol
     public bool JustificationRequired { get; set; } = true;
     public bool EvidenceRequired { get; set; } = true;
     public bool PostAwardFilingRequired { get; set; }
-    [Required, StringLength(200)] public string ApproverRole { get; set; } = string.Empty;
+    public Guid? ApproverRoleId { get; set; }
+    [StringLength(200)] public string ApproverRole { get; set; } = string.Empty;
     public Guid? WorkflowDefinitionId { get; set; }
     [Range(1, 3650)] public int? MaximumDurationDays { get; set; }
 }
@@ -238,12 +242,23 @@ public sealed class SaveProcurementPolicyExceptionRuleValue : SaveProcurementPol
 public sealed class SaveProcurementPolicySodRuleValue : SaveProcurementPolicyRuleValueBase
 {
     [Required, StringLength(200)] public string Name { get; set; } = string.Empty;
-    [Required, StringLength(150)] public string InitiatorRole { get; set; } = string.Empty;
-    [Required, StringLength(150)] public string ConflictingRole { get; set; } = string.Empty;
+    public Guid? InitiatorRoleId { get; set; }
+    [StringLength(150)] public string InitiatorRole { get; set; } = string.Empty;
+    public Guid? ConflictingRoleId { get; set; }
+    [StringLength(150)] public string ConflictingRole { get; set; } = string.Empty;
     [Required, StringLength(150)] public string EntityType { get; set; } = string.Empty;
     [Required, StringLength(100)] public string Action { get; set; } = string.Empty;
     public ProcurementSodEnforcement Enforcement { get; set; } = ProcurementSodEnforcement.HardStop;
     [StringLength(1000)] public string? Explanation { get; set; }
+}
+
+public sealed class ProcurementPolicyRoleOptionDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsSystemRole { get; set; }
+    public bool IsAssignedToSelectedWorkflow { get; set; }
 }
 
 public sealed class SaveProcurementPolicyRuleRequest

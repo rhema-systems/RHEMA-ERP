@@ -103,6 +103,54 @@ vi.mock('@tanstack/react-query', () => ({
         isFavorite: false,
         tags: ['boq-summary'],
       },
+      {
+        id: '44444444-4444-4444-4444-444444444445',
+        name: 'Retention Register',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['retention-register'],
+      },
+      {
+        id: '44444444-4444-4444-4444-444444444446',
+        name: 'Cost-to-Complete Report',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['cost-to-complete'],
+      },
+      {
+        id: '44444444-4444-4444-4444-444444444447',
+        name: 'Contract Balance Report',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['contract-balance'],
+      },
+      {
+        id: '44444444-4444-4444-4444-444444444448',
+        name: 'Quantity Survey Audit Trail',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['audit-trail'],
+      },
     ] : [],
     isLoading: false,
     isError: false,
@@ -269,5 +317,12 @@ describe('StatutoryReportCataloguePage navigation', () => {
       'href',
       '/reports/quantity-survey',
     );
+    expect(within(navigator).getByRole('link', { name: /Retention Register/ })).toHaveAttribute(
+      'href',
+      '/reports/quantity-survey/retention-register',
+    );
+    expect(within(navigator).getByRole('link', { name: /Cost-to-Complete Report/ })).toBeInTheDocument();
+    expect(within(navigator).getByRole('link', { name: /Contract Balance Report/ })).toBeInTheDocument();
+    expect(within(navigator).getByRole('link', { name: /Quantity Survey Audit Trail/ })).toBeInTheDocument();
   });
 });

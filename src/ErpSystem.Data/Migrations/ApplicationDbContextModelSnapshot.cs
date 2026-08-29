@@ -105087,9 +105087,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CategoryCode")
-                        .IsUnique();
-
                     b.HasIndex("CategoryName");
 
                     b.HasIndex("CategoryType");
@@ -105099,6 +105096,9 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ParentCategoryId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "CategoryCode")
+                        .IsUnique();
 
                     b.ToTable("PartnerCategories");
                 });
@@ -112945,6 +112945,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("BudgetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ApprovedDate")
                         .HasColumnType("datetime2");
 
@@ -113067,6 +113070,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ApprovedById");
+
+                    b.HasIndex("BudgetId");
 
                     b.HasIndex("DepartmentId");
 
@@ -113363,6 +113368,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<Guid?>("AuthorityRoleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("Category")
                         .HasColumnType("int");
 
@@ -113397,6 +113405,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("EscalationAuthority")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("EscalationAuthorityRoleId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -113745,6 +113756,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid?>("ApproverRoleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("Category")
                         .HasColumnType("int");
 
@@ -113911,6 +113925,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("JustificationRequired")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
@@ -114249,6 +114266,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<Guid?>("ConflictingRoleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -114286,6 +114306,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid?>("InitiatorRoleId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -117113,19 +117136,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("AttemptNumber")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("AuthorityRouteId")
+                    b.Property<Guid?>("AuthorityRouteId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AuthorityRouteReference")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<Guid>("BudgetCommitmentId")
+                    b.Property<Guid?>("BudgetCommitmentId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("BudgetCommitmentReference")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -117205,22 +117226,21 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid>("SourcePlanId")
+                    b.Property<Guid?>("SourcePlanId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("SourcePlanItemId")
+                    b.Property<Guid?>("SourcePlanItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SpecificationTemplateCode")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .IsUnicode(false)
                         .HasColumnType("varchar(50)");
 
-                    b.Property<Guid>("SpecificationTemplateId")
+                    b.Property<Guid?>("SpecificationTemplateId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("SpecificationTemplateVersion")
+                    b.Property<int?>("SpecificationTemplateVersion")
                         .HasColumnType("int");
 
                     b.Property<Guid>("TenantId")
@@ -117232,7 +117252,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid>("WorkflowInstanceId")
+                    b.Property<Guid?>("WorkflowInstanceId")
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
@@ -117276,7 +117296,6 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Hashes", "LEN([ControlFingerprint]) = 64 AND LEN([IntegrityHash]) = 64");
 
-                            t.HasCheckConstraint("CK_ProcurementRequisitionSourcingReleases_Lineage", "[SourcePlanId] <> '00000000-0000-0000-0000-000000000000' AND [SourcePlanItemId] <> '00000000-0000-0000-0000-000000000000' AND [SpecificationTemplateId] <> '00000000-0000-0000-0000-000000000000' AND [BudgetCommitmentId] <> '00000000-0000-0000-0000-000000000000' AND [AuthorityRouteId] <> '00000000-0000-0000-0000-000000000000' AND [WorkflowInstanceId] <> '00000000-0000-0000-0000-000000000000'");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -118354,11 +118373,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedExceptionRuleId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("AuthorityRouteId")
+                    b.Property<Guid?>("AuthorityRouteId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AuthorityRouteReference")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -118513,10 +118531,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("char(64)")
                         .IsFixedLength();
 
-                    b.Property<Guid>("SourcePlanId")
+                    b.Property<Guid?>("SourcePlanId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("SourcePlanItemId")
+                    b.Property<Guid?>("SourcePlanItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("SourcingReleaseId")
@@ -124226,7 +124244,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
 
-                            t.HasCheckConstraint("CK_PurchaseOrders_ApprovedSourceLineage", "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
+                            t.HasCheckConstraint("CK_PurchaseOrders_ApprovedSourceLineage", "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND (([SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL) OR ([SourcingCaseId] IS NULL AND [ProcurementSourceType] = 0 AND [AwardReadinessDecisionId] IS NULL) OR ([SourcingCaseId] IS NULL AND [ProcurementSourceType] IN (1, 2) AND [AwardReadinessDecisionId] IS NOT NULL))))");
 
                             t.HasCheckConstraint("CK_PurchaseOrders_GovernedCategoryRequired", "[ProcurementSourceType] IS NULL OR [ProcurementSourceType] = 5 OR [ProcurementCategory] IS NOT NULL");
 
@@ -125173,6 +125191,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("RequisitionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("SourcePlanItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Specifications")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -125206,7 +125227,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("RequisitionId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("SourcePlanItemId");
+
+                    b.HasIndex("TenantId", "SourcePlanItemId");
 
                     b.ToTable("PurchaseRequisitionItems");
                 });
@@ -141202,6 +141225,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("EstimateType")
                         .HasColumnType("int");
 
+                    b.Property<string>("FundingSourceSnapshot")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -141228,6 +141255,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("PropertyReferenceSnapshot")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
@@ -141246,6 +141277,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("SourceEstimateVersionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SourceSnapshotSchemaVersion")
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -141317,9 +141351,11 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_QsEstimateVersions_EvidencePair", "([CentralDocumentRecordId] IS NULL AND [CentralDocumentVersionId] IS NULL) OR ([CentralDocumentRecordId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_QsEstimateVersions_Status", "[Status] IN ('Draft','PendingApproval','Approved','Rejected','Retired')");
+                        t.HasCheckConstraint("CK_QsEstimateVersions_Status", "[Status] IN ('Draft','PendingApproval','Approved','Rejected','Retired')");
 
-                            t.HasCheckConstraint("CK_QsEstimateVersions_Totals", "[DirectCost] >= 0 AND [MarkupTotal] >= 0 AND [TotalAmount] = [DirectCost] + [MarkupTotal]");
+                        t.HasCheckConstraint("CK_QsEstimateVersions_SourceSnapshotSchema", "[SourceSnapshotSchemaVersion] IN (0,1)");
+
+                        t.HasCheckConstraint("CK_QsEstimateVersions_Totals", "[DirectCost] >= 0 AND [MarkupTotal] >= 0 AND [TotalAmount] = [DirectCost] + [MarkupTotal]");
 
                             t.HasCheckConstraint("CK_QsEstimateVersions_Type", "[EstimateType] BETWEEN 0 AND 2");
 
@@ -185890,9 +185926,10 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("MarketAnalysisId")
                         .OnDelete(DeleteBehavior.Cascade);
 
-                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Supplier")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "Supplier")
                         .WithMany()
-                        .HasForeignKey("SupplierId");
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -187634,6 +187671,11 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("ApprovedById");
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementBudget", "Budget")
+                        .WithMany()
+                        .HasForeignKey("BudgetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Department", "Department")
                         .WithMany()
                         .HasForeignKey("DepartmentId")
@@ -187663,6 +187705,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ApprovedBy");
+
+                    b.Navigation("Budget");
 
                     b.Navigation("Department");
 
@@ -189028,8 +189072,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementRequisitionAuthorityRoute", "AuthorityRoute")
                         .WithMany()
                         .HasForeignKey("AuthorityRouteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowInstance", "MethodOverrideWorkflowInstance")
                         .WithMany()
@@ -189057,14 +189100,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPlan", "SourcePlan")
                         .WithMany()
                         .HasForeignKey("SourcePlanId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPlanItem", "SourcePlanItem")
                         .WithMany()
                         .HasForeignKey("SourcePlanItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementRequisitionSourcingRelease", "SourcingRelease")
                         .WithMany("SourcingCases")
@@ -190842,6 +190883,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPlanItem", "SourcePlanItem")
+                        .WithMany()
+                        .HasForeignKey("SourcePlanItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -190855,6 +190901,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("PurchaseOrder");
 
                     b.Navigation("Requisition");
+
+                    b.Navigation("SourcePlanItem");
 
                     b.Navigation("Tenant");
                 });
@@ -202126,6 +202174,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementPlan", b =>
                 {
+                    b.Navigation("Budget");
+
                     b.Navigation("Budgets");
 
                     b.Navigation("Items");

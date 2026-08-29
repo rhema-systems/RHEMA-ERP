@@ -19,7 +19,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementPlanService, type ProcurementPlanDto } from '@/services/procurementPlanningService';
+import { commonService, procurementPlanService, type DepartmentDto, type ProcurementPlanDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -30,12 +30,23 @@ export default function ProcurementPlansPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
+    commonService.getDepartments()
+      .then((data) => setDepartments(data.filter((department) => department.isActive !== false)))
+      .catch((error) => {
+        console.error('Error loading departments:', error);
+        setDepartments([]);
+      });
+  }, []);
+
+  useEffect(() => {
     loadPlans();
-  }, [page, statusFilter]);
+  }, [page, statusFilter, departmentFilter]);
 
   const loadPlans = async () => {
     try {
@@ -45,6 +56,7 @@ export default function ProcurementPlansPage() {
         pageSize: 25,
         search: searchTerm || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
+        departmentId: departmentFilter !== 'all' ? departmentFilter : undefined,
       });
       setPlans(result.items);
       setTotalPages(result.totalPages);
@@ -190,7 +202,7 @@ export default function ProcurementPlansPage() {
               </Button>
             </div>
 
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(1); }}>
               <SelectTrigger>
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -203,6 +215,20 @@ export default function ProcurementPlansPage() {
                 <SelectItem value="Rejected">Rejected</SelectItem>
                 <SelectItem value="Active">Active</SelectItem>
                 <SelectItem value="Completed">Completed</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={departmentFilter} onValueChange={(value) => { setDepartmentFilter(value); setPage(1); }}>
+              <SelectTrigger>
+                <SelectValue placeholder="All Departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map((department) => (
+                  <SelectItem key={department.id} value={department.id}>
+                    {department.code ? `${department.code} - ${department.name}` : department.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 

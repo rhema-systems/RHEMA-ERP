@@ -23,18 +23,14 @@ export function getSubmissionControlPresentation(
   if (readiness.canSubmit) {
     return {
       tone: 'ready',
-      title: 'Ready for controlled submission',
-      basisLabel: readiness.basis === 'ApprovedException' ? 'Approved exception' : 'Acknowledged APP'
+      title: 'Ready for approval workflow',
+      basisLabel: 'Required details complete'
     };
   }
 
   return {
     tone: 'blocked',
-    title: readiness.isCompliant ? 'Submission no longer available' : 'Submission control blocked',
-    basisLabel: readiness.basis === 'ApprovedException'
-      ? 'Approved exception'
-      : readiness.basis === 'AcknowledgedAPP'
-        ? 'Acknowledged APP'
-        : 'No eligible basis'
+    title: readiness.isCompliant ? 'Submission no longer available' : 'Required details incomplete',
+    basisLabel: 'Action required'
   };
 }

@@ -133,6 +133,7 @@ public static class ProcurementAccessControlRegistry
         W("TDC_STOCK_ADJUSTMENT", "TDC Stock Adjustment Approval", "STOCK_ADJUSTMENT", "Stock Adjustment", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
         W("TDC_INVENTORY_TRANSFER", "TDC Inventory Transfer Approval", "INVENTORY_TRANSFER", "Inventory Transfer", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
         W("TDC_SUPPLIER_RETURN", "TDC Supplier Return Approval", "SUPPLIER_RETURN", "Supplier Return", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
+        W("TDC_RECEIPT_INSPECTION", "Procurement Receipt Inspection Approval", "PROCUREMENT_RECEIPT_INSPECTION", "Procurement Receipt Inspection", "TDC_STORES_OFFICER", "TDC_STORES_MANAGER"),
         W("TDC_DISPOSAL", "TDC Inventory Disposal Approval", "INVENTORY_DISPOSAL", "Inventory Disposal", "TDC_STORES_MANAGER", "TDC_DISPOSAL_COMMITTEE_MEMBER"),
         W("TDC_PROCUREMENT_EXCEPTION", "TDC Procurement Exception Approval", "PROCUREMENT_EXCEPTION", "Procurement Exception", "TDC_HEAD_OF_PROCUREMENT", "TDC_MANAGING_DIRECTOR")
     ];

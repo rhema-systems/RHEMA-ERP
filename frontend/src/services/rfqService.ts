@@ -93,14 +93,28 @@ export interface RfqQuoteDto {
   partnerName: string;
   status: string;
   submittedAt?: string;
+  revisionNumber: number;
   notes?: string;
   totalAmount: number;
   items: RfqQuoteItemDto[];
+  history: RfqQuoteHistoryEntryDto[];
+}
+
+export interface RfqQuoteHistoryEntryDto {
+  id: string;
+  revisionNumber: number;
+  action: string;
+  status: string;
+  performedBy: string;
+  timestamp: string;
+  totalAmount: number;
+  description?: string;
 }
 
 export interface RfqDetailDto extends RfqDto {
   description?: string;
   externalRecipientEmails?: string;
+  quoteDetailsVisible: boolean;
   items: RfqItemDto[];
   suppliers: RfqInvitationDto[];
   quotes: RfqQuoteDto[];

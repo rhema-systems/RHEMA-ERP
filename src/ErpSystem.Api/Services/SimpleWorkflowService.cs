@@ -100,6 +100,37 @@ public class SimpleWorkflowService : IWorkflowService
     public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId) =>
         StartApprovalWorkflowAsync(entityType, entityId, null);
 
+    public async Task<bool> HasActiveApprovalWorkflowAsync(string entityType)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            return false;
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return false;
+        }
+
+        var entityTypeRecord = await _entityTypeRepository.GetByNameAsync(entityType, tenantId);
+        if (entityTypeRecord == null)
+        {
+            var activeTypes = await _entityTypeRepository.GetActiveEntityTypesAsync(tenantId);
+            entityTypeRecord = activeTypes.FirstOrDefault(candidate => IsEntityType(candidate, entityType));
+        }
+
+        if (entityTypeRecord == null)
+        {
+            return false;
+        }
+
+        var definitions = await _definitionRepository.GetActiveByEntityTypeAsync(entityTypeRecord.Id);
+        return definitions.Any(definition => definition.IsActive &&
+            definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+            !definition.IsDeleted);
+    }
+
     public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
         string entityType,
         Guid entityId,
@@ -731,7 +762,7 @@ public class SimpleWorkflowService : IWorkflowService
     {
         var definitions = await _definitionRepository.GetActiveByEntityTypeAsync(entityTypeRecord.Id);
         var definition = definitions
-            .Where(d => d.IsActive)
+            .Where(WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible)
             .OrderByDescending(d => d.Version)
             .ThenByDescending(d => d.UpdatedAt ?? d.CreatedAt)
             .FirstOrDefault();

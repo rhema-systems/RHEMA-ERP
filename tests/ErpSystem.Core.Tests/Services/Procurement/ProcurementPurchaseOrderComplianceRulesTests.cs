@@ -9,6 +9,22 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementPurchaseOrderComplianceRulesTests
 {
     [Theory]
+    [InlineData("Draft", false)]
+    [InlineData("Pending Approval", false)]
+    [InlineData("Submitted", false)]
+    [InlineData("Approved", true)]
+    [InlineData("Sent", true)]
+    [InlineData("Partially Received", true)]
+    public void ActiveCommitmentIsRequiredOnlyAfterFinalApproval(
+        string status,
+        bool expected)
+    {
+        ProcurementPurchaseOrderComplianceRules
+            .RequiresActiveBudgetCommitment(status)
+            .Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(100, 100, true)]
     [InlineData(100, 75, true)]
     [InlineData(100, 0, true)]
@@ -170,6 +186,19 @@ public sealed class ProcurementPurchaseOrderComplianceRulesTests
     }
 
     [Fact]
+    public void SimplifiedReleaseUsesTheRequisitionsAuthoritativeCommitment()
+    {
+        var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
+            ValidCommitment() with
+            {
+                ReleaseCommitmentId = null,
+                ReleaseCommitmentReference = null
+            });
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
     public void GovernedCommitmentRejectsMissingRequisitionBudgetLineage()
     {
         var result = ProcurementPurchaseOrderComplianceRules
@@ -225,11 +254,13 @@ public sealed class ProcurementPurchaseOrderComplianceRulesTests
             "BCR-001",
             ProcurementBudgetCommitmentStatus.Reserved,
             1000m,
+            0m,
             "GHS",
             budgetId,
             tenantId,
             "Active",
             "GHS",
+            0m,
             1000m,
             Guid.NewGuid(),
             approvedAt,

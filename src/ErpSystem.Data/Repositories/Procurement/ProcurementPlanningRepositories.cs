@@ -67,6 +67,18 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
             .ToListAsync();
     }
 
+    public async Task<decimal> GetPlannedBudgetExposureAsync(Guid budgetId, Guid? excludePlanId = null)
+    {
+        return await GetTenantFilteredQuery()
+            .Where(plan =>
+                plan.BudgetId == budgetId &&
+                (!excludePlanId.HasValue || plan.Id != excludePlanId.Value) &&
+                plan.Status != "Rejected" &&
+                plan.Status != "Cancelled" &&
+                plan.Status != "Completed")
+            .SumAsync(plan => plan.TotalEstimatedBudget);
+    }
+
     public async Task<ProcurementPlan?> GetWithItemsAsync(Guid id)
     {
         return await GetTenantFilteredQuery()
@@ -88,6 +100,7 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
             .Include(p => p.Items.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                     .ThenInclude(s => s.BusinessPartner)
+            .Include(p => p.Budget)
             .Include(p => p.Budgets.Where(b => !b.IsDeleted))
             .Include(p => p.Schedules.Where(s => !s.IsDeleted))
             .Include(p => p.PreparedBy)
@@ -191,6 +204,20 @@ public class ProcurementPlanItemRepository : GenericRepository<ProcurementPlanIt
                 .ThenInclude(s => s.BusinessPartner)
             .OrderBy(i => i.RequiredDate)
             .ToListAsync();
+    }
+
+    public async Task<decimal> GetPlannedBudgetExposureByAllocationAsync(Guid allocationId, Guid? excludeItemId = null)
+    {
+        return await _dbSet
+            .Where(item =>
+                item.ProcurementBudgetAllocationId == allocationId &&
+                (!excludeItemId.HasValue || item.Id != excludeItemId.Value) &&
+                !item.IsDeleted &&
+                !item.ProcurementPlan.IsDeleted &&
+                item.ProcurementPlan.Status != "Rejected" &&
+                item.ProcurementPlan.Status != "Cancelled" &&
+                item.ProcurementPlan.Status != "Completed")
+            .SumAsync(item => item.ApprovedBudgetAmount ?? item.EstimatedTotalCost);
     }
 
     public async Task<IEnumerable<ProcurementPlanItem>> GetCriticalItemsAsync(Guid planId)
