@@ -143,6 +143,8 @@ DEMO_FEEDBACK = [
 BUILD_CHECKLISTS = {
     "CompanyScheduleController.cs": "Company Schedule",
     "JobAnalysisController.cs": "Job Analysis",
+    "StaffDisciplineSupportController.cs": "Discipline — case file support",
+    "StaffDisciplineSubEntityController.cs": "Discipline — case sub-entities",
     "EmployeeCareerPathController.cs": "Employee career paths",
 }
 
@@ -172,6 +174,35 @@ BLOCKERS = [
      "reading and slice 13 caught it; the picker now reads the job description's own "
      "qualifications and hides itself until there are some.",
      "Was breaking every equipment-tool save — cleared"),
+    ("D-05", "Legal-review referrer was assertable by the request body", "DONE 2026-08-29",
+     "`CreateStaffDisciplineLegalReviewDto.ReferredById` was accepted from the client and copied "
+     "straight onto the entity by the mapper, while the token's employee id went only to "
+     "`CreatedBy`. So any HR user could record a colleague as the person who referred a case to "
+     "legal — a falsifiable audit record on exactly the kind of document a case turns on later. "
+     "The same defect class as D-01, and cleared the same way: the field is gone from the create "
+     "DTO and `ReferAsync` stamps the actor. Nothing had ever sent it (it was in section E's "
+     "\"no form can set\" table), so no caller broke. **Needs a backend rebuild.**",
+     "Was blocking the discipline legal-review build — cleared"),
+    ("D-07", "Action-step complete and skip never stamped the step's actor", "DONE 2026-08-29",
+     "`CompleteStepAsync` and `SkipStepAsync` set only `UpdatedBy` — the string audit column — and "
+     "never `ActionedById`, the Employee FK the DTO exposes and the case screen renders as \"By\". "
+     "So that column was permanently blank for every step closed through the supported route, and "
+     "the ONLY path that ever filled it was the plain update, which takes the id from the request "
+     "body. Found by running the new panel's own payloads, not by reading the code: three "
+     "assertions failed on the first run of slice 9. Both transitions now stamp the actor; skip "
+     "deliberately still sets no completion date. **Needs a backend rebuild.** "
+     "⚠ Residue: `UpdateActionStepDto.ActionedById` is still client-supplied. Left alone rather "
+     "than removed, unlike the legal-review referrer, because correcting a mis-attributed step is "
+     "a legitimate HR act and no screen exposes it — but it is an act-as-anyone vector on paper.",
+     "Was making the panel's \"By\" column permanently empty — cleared"),
+    ("D-06", "Four discipline case-file collections are still displayed but unrecordable", "OPEN",
+     "`StaffDisciplineCaseDetailDto` carries six collections. Action steps and legal reviews were "
+     "built out on 2026-08-29; **witnesses, documents, notes and notifications were not**. The "
+     "first three render as read-only tables with \"None have been recorded\" empty states and no "
+     "add affordance, and notifications are not rendered at all — the same shape the ledger "
+     "already named twice, on the same screen. Not a blocker for anything built so far; recorded "
+     "so the case file is finished deliberately rather than left half-authorable.",
+     "Nothing — but the case file now reads inconsistently until they are done"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "
@@ -230,6 +261,8 @@ w("| 2026-08-28 | Employee career paths are **not** server-write-only and should
 w("| 2026-08-28 | Company Schedule station FKs repointed from `WorkStation` to `Location`. `WorkStation` has an empty table, no repository implementation and no endpoint, so a required station made the meeting-room form unfillable. **Needs a migration.** |")
 w("| 2026-08-29 | Job Analysis: the twelve child collections are now authored from the job-description detail screen. Panels go read-only outside `Draft`/`UnderRevision`, and the delete affordance is hidden below Admin — both mirror what the API does, except the status rule, which the API does **not** enforce (see D-03). |")
 w("| 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |")
+w("| 2026-08-29 | Discipline: the procedure steps, legal reviews and corrective action plan are now authorable from the case screen. The **sanctions stay read-only** — warning, suspension, fine and termination are blocked on FR-HR-080's issuing-authority rule, which is the original and still-valid reason. Investigation and hearing are read-only only because nobody has built their editors. |")
+w("| 2026-08-29 | Legal-review `referredById` is now stamped from the token and removed from the create DTO (D-05). |")
 w("")
 
 w("## B. Blockers — must clear before the dependent build starts")

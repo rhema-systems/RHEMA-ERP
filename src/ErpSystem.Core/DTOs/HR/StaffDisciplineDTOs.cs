@@ -1442,7 +1442,12 @@ public class CreateStaffDisciplineLegalReviewDto : CreateDtoBase
     [Required]
     public DateTime ReferredToLegalDate { get; set; }
 
-    public Guid? ReferredById { get; set; }
+    // ReferredById is deliberately absent. It is stamped from the caller's token in
+    // StaffDisciplineLegalReviewService.ReferAsync, because "who referred this case to legal" is a
+    // statement about the actor and must not be assertable by the request body. It used to be
+    // accepted here and copied straight onto the entity while the token's employee id went only to
+    // CreatedBy — so any HR user could record a colleague as the referrer. No caller ever sent it
+    // (the field is in the closure ledger's "no form can set" table), so removing it breaks nothing.
 
     [Required]
     public DisciplineLegalRiskLevel LegalRiskLevel { get; set; }

@@ -101,6 +101,56 @@ export const CASE_STATUS_OPTIONS: { value: DisciplinaryStatus; label: string }[]
   { value: 'Dismissed', label: 'Dismissed' },
 ];
 
+export const LEGAL_RISK_OPTIONS: { value: DisciplineLegalRiskLevel; label: string }[] = [
+  { value: 'None', label: 'None' },
+  { value: 'Low', label: 'Low' },
+  { value: 'Medium', label: 'Medium' },
+  { value: 'High', label: 'High' },
+  { value: 'Critical', label: 'Critical' },
+];
+
+/**
+ * ⚠ `Skipped` is reachable only through `action-steps/{id}/skip`, which demands a reason, and
+ * `Completed` only through `.../complete`. Both are listed here because the status has to be
+ * RENDERED, but the edit form must not offer either as a plain dropdown choice — setting
+ * `Completed` through the update route bypasses `CompleteStepAsync`, so the step would read as
+ * done while `completedDate` and `actionedById` stayed empty.
+ */
+export const ACTION_STEP_STATUS_OPTIONS: { value: DisciplinaryActionStepStatus; label: string }[] = [
+  { value: 'Pending', label: 'Pending' },
+  { value: 'InProgress', label: 'In progress' },
+  { value: 'Completed', label: 'Completed' },
+  { value: 'Cancelled', label: 'Cancelled' },
+  { value: 'Skipped', label: 'Skipped' },
+];
+
+/** What the action-step edit form may set directly. The other two are transitions, not values. */
+export const ACTION_STEP_EDITABLE_STATUSES: { value: DisciplinaryActionStepStatus; label: string }[] = [
+  { value: 'Pending', label: 'Pending' },
+  { value: 'InProgress', label: 'In progress' },
+  { value: 'Cancelled', label: 'Cancelled' },
+];
+
+export const CORRECTIVE_ACTION_STATUS_OPTIONS: { value: DisciplineCorrectiveActionStatus; label: string }[] = [
+  { value: 'Pending', label: 'Pending' },
+  { value: 'InProgress', label: 'In progress' },
+  { value: 'Completed', label: 'Completed' },
+  { value: 'Overdue', label: 'Overdue' },
+  { value: 'Cancelled', label: 'Cancelled' },
+];
+
+/**
+ * A corrective action plan the API will refuse to edit.
+ *
+ * ⚠ Unlike most of HR this rule IS enforced server-side — `CorrectiveActionService.UpdateAsync`
+ * throws "A completed or cancelled corrective action plan cannot be edited." The screen mirrors it
+ * so the refusal is visible before the user types, rather than arriving as a toast afterwards.
+ */
+export const LOCKED_CORRECTIVE_ACTION_STATUSES: DisciplineCorrectiveActionStatus[] = [
+  'Completed',
+  'Cancelled',
+];
+
 /** Statuses that mean the case is finished; used to grey rows and hide actions. */
 export const TERMINAL_CASE_STATUSES: DisciplinaryStatus[] = ['Closed', 'Dismissed'];
 
@@ -477,7 +527,15 @@ export interface DisciplineCorrectiveActionItem {
   targetDate: string;
   completedDate?: string | null;
   status: DisciplineCorrectiveActionStatus;
+  /** Server-rendered `status.ToString()`. Read-only. */
+  statusName?: string;
   completionNotes?: string | null;
+  /**
+   * Server-computed: past its target date and neither completed nor cancelled. ⚠ Computed against
+   * the SERVER's clock at serialisation time, so do not recompute it in the browser — a client in
+   * another timezone would disagree with the list it is looking at.
+   */
+  isOverdue?: boolean;
 }
 
 export interface DisciplineCorrectiveAction {
@@ -566,6 +624,139 @@ export interface DisciplineNotificationSummary {
   isAcknowledged: boolean;
   acknowledgedDate: string | null;
   isFollowupSent: boolean;
+}
+
+/**
+ * The FULL legal review, as `cases/{id}/legal-reviews` and `legal-reviews/{id}` return it.
+ *
+ * ⚠ **Not what the case detail carries.** `StaffDisciplineCaseDetailDto.LegalReviews` is a
+ * `...SummaryDto` — seven fields, no advice, no counsel, no costs. A panel that renders the case
+ * detail's copy shows a row with nothing in it; the dedicated read is the one with the record.
+ */
+export interface DisciplineLegalReview {
+  id: string;
+  tenantId: string;
+  disciplinaryActionId: string;
+  caseNumber: string;
+  referredToLegalDate: string;
+  /** ⚠ Stamped from the caller's token — the create payload has no such field. */
+  referredById?: string | null;
+  referredByName?: string | null;
+  legalReviewCompleteDate?: string | null;
+  legalRiskLevel: DisciplineLegalRiskLevel;
+  legalRiskLevelName: string;
+  legalAdvice?: string | null;
+  requiresExternalCounsel: boolean;
+  externalCounselId?: string | null;
+  externalCounselName?: string | null;
+  externalCounselFirm?: string | null;
+  externalCounselReviewDate?: string | null;
+  externalCounselOpinion?: string | null;
+  legalCostsIncurred?: number | null;
+  isConfidential: boolean;
+}
+
+/**
+ * ⚠ No `referredById`. "Who referred this case to legal" is a statement about the actor, so it is
+ * stamped from the token in `ReferAsync`. It used to be accepted from the body and copied onto the
+ * entity verbatim — any HR user could record a colleague as the referrer — and was removed when
+ * this screen was built. Sending one now is ignored, not honoured.
+ *
+ * ⚠ No `legalAdvice` either: advice is what comes BACK from the referral, so it only exists on the
+ * update payload. A referral form asking for the advice it is about to request would be nonsense.
+ */
+export interface CreateDisciplineLegalReview {
+  referredToLegalDate: string;
+  legalRiskLevel: DisciplineLegalRiskLevel;
+  requiresExternalCounsel: boolean;
+  externalCounselId?: string | null;
+  externalCounselName?: string | null;
+  externalCounselFirm?: string | null;
+  /** Defaults to TRUE on the DTO — a legal review is confidential unless someone says otherwise. */
+  isConfidential: boolean;
+}
+
+/** ⚠ `id` is required and must match the route — the controller compares them. */
+export interface UpdateDisciplineLegalReview {
+  id: string;
+  legalRiskLevel: DisciplineLegalRiskLevel;
+  legalReviewCompleteDate?: string | null;
+  legalAdvice?: string | null;
+  requiresExternalCounsel: boolean;
+  externalCounselId?: string | null;
+  externalCounselName?: string | null;
+  externalCounselFirm?: string | null;
+  externalCounselReviewDate?: string | null;
+  externalCounselOpinion?: string | null;
+  legalCostsIncurred?: number | null;
+  isConfidential: boolean;
+}
+
+/**
+ * ⚠ The action step's update payload carries **`stepId`, not `id`**.
+ *
+ * `UpdateActionStepDto` is the one update DTO in this area that does NOT inherit `UpdateDtoBase`;
+ * it declares its own `StepId`. The controller **assigns** `dto.StepId = id` from the route rather
+ * than comparing them, so unlike every sibling here it does not 400 on a mismatch — it silently
+ * wins. (`[Required]` on a non-nullable `Guid` does not reject `Guid.Empty` either, so a missing
+ * one would not be caught.) The field is sent anyway and named correctly, because relying on the
+ * route to paper over a wrong body is how the next person gets caught by a DTO that does compare.
+ */
+export interface UpdateDisciplineActionStep {
+  stepId: string;
+  dueDate?: string | null;
+  startedDate?: string | null;
+  completedDate?: string | null;
+  status: DisciplinaryActionStepStatus;
+  /** The step's actor. Stamped by the service from the token on complete/skip. */
+  actionedById?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * ⚠ `employeeId` is NOT derived from the case — `CreateAsync` copies it straight from the body, so
+ * the screen must pass the case's own subject or the plan attaches to the wrong person. It is the
+ * person the plan is FOR, not the actor; the actor comes from the token.
+ */
+export interface CreateDisciplineCorrectiveAction {
+  employeeId: string;
+  supervisorId: string;
+  objective: string;
+  startDate: string;
+  reviewDate: string;
+  notes?: string | null;
+}
+
+/** ⚠ No `employeeId` — the plan's subject is fixed at creation. */
+export interface UpdateDisciplineCorrectiveAction {
+  id: string;
+  supervisorId: string;
+  objective: string;
+  startDate: string;
+  reviewDate: string;
+  completedDate?: string | null;
+  status: DisciplineCorrectiveActionStatus;
+  notes?: string | null;
+}
+
+export interface CreateDisciplineCorrectiveActionItem {
+  description: string;
+  targetDate: string;
+}
+
+/**
+ * ⚠ `completionNotes` is on the update payload but the natural way to set it is
+ * `corrective-action-items/{id}/complete`, which takes the notes as a **bare JSON string body**
+ * and stamps the completion date and actor. Setting `status: 'Completed'` through this payload
+ * instead leaves those unset.
+ */
+export interface UpdateDisciplineCorrectiveActionItem {
+  id: string;
+  description: string;
+  targetDate: string;
+  completedDate?: string | null;
+  status: DisciplineCorrectiveActionStatus;
+  completionNotes?: string | null;
 }
 
 export interface DisciplineLegalReviewSummary {

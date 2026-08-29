@@ -13,10 +13,10 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2148 |
-| Wired to a screen | 1713 |
-| No caller found (instrument 01) | 435 |
-| Confirmed unreachable (01 ∩ 02) | 43 |
-| Write-DTO fields no form can set | 115 across 50 DTOs |
+| Wired to a screen | 1729 |
+| No caller found (instrument 01) | 419 |
+| Confirmed unreachable (01 ∩ 02) | 34 |
+| Write-DTO fields no form can set | 104 across 48 DTOs |
 
 ## A. Decisions taken
 
@@ -28,6 +28,8 @@ yet classified.
 | 2026-08-28 | Company Schedule station FKs repointed from `WorkStation` to `Location`. `WorkStation` has an empty table, no repository implementation and no endpoint, so a required station made the meeting-room form unfillable. **Needs a migration.** |
 | 2026-08-29 | Job Analysis: the twelve child collections are now authored from the job-description detail screen. Panels go read-only outside `Draft`/`UnderRevision`, and the delete affordance is hidden below Admin — both mirror what the API does, except the status rule, which the API does **not** enforce (see D-03). |
 | 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |
+| 2026-08-29 | Discipline: the procedure steps, legal reviews and corrective action plan are now authorable from the case screen. The **sanctions stay read-only** — warning, suspension, fine and termination are blocked on FR-HR-080's issuing-authority rule, which is the original and still-valid reason. Investigation and hearing are read-only only because nobody has built their editors. |
+| 2026-08-29 | Legal-review `referredById` is now stamped from the token and removed from the create DTO (D-05). |
 
 ## B. Blockers — must clear before the dependent build starts
 
@@ -48,6 +50,24 @@ yet classified.
   The field is called `LinkedQualificationId`, the DTO types it `Guid?`, and the obvious reading — the `Qualifications` reference catalogue — is wrong. The constraint is `FK_JobEquipmentTools_JobQualifications_LinkedQualificationId`: it targets one of the SAME job description's qualification rows. A catalogue id fails the FK and the request 500s with the generic handler's message, naming nothing. The equipment panel was built on the wrong reading and slice 13 caught it; the picker now reads the job description's own qualifications and hides itself until there are some.
 
   _Was breaking every equipment-tool save — cleared_
+
+- [x] **D-05 — Legal-review referrer was assertable by the request body** · `DONE 2026-08-29`
+
+  `CreateStaffDisciplineLegalReviewDto.ReferredById` was accepted from the client and copied straight onto the entity by the mapper, while the token's employee id went only to `CreatedBy`. So any HR user could record a colleague as the person who referred a case to legal — a falsifiable audit record on exactly the kind of document a case turns on later. The same defect class as D-01, and cleared the same way: the field is gone from the create DTO and `ReferAsync` stamps the actor. Nothing had ever sent it (it was in section E's "no form can set" table), so no caller broke. **Needs a backend rebuild.**
+
+  _Was blocking the discipline legal-review build — cleared_
+
+- [x] **D-07 — Action-step complete and skip never stamped the step's actor** · `DONE 2026-08-29`
+
+  `CompleteStepAsync` and `SkipStepAsync` set only `UpdatedBy` — the string audit column — and never `ActionedById`, the Employee FK the DTO exposes and the case screen renders as "By". So that column was permanently blank for every step closed through the supported route, and the ONLY path that ever filled it was the plain update, which takes the id from the request body. Found by running the new panel's own payloads, not by reading the code: three assertions failed on the first run of slice 9. Both transitions now stamp the actor; skip deliberately still sets no completion date. **Needs a backend rebuild.** ⚠ Residue: `UpdateActionStepDto.ActionedById` is still client-supplied. Left alone rather than removed, unlike the legal-review referrer, because correcting a mis-attributed step is a legitimate HR act and no screen exposes it — but it is an act-as-anyone vector on paper.
+
+  _Was making the panel's "By" column permanently empty — cleared_
+
+- [ ] **D-06 — Four discipline case-file collections are still displayed but unrecordable** · `OPEN`
+
+  `StaffDisciplineCaseDetailDto` carries six collections. Action steps and legal reviews were built out on 2026-08-29; **witnesses, documents, notes and notifications were not**. The first three render as read-only tables with "None have been recorded" empty states and no add affordance, and notifications are not rendered at all — the same shape the ledger already named twice, on the same screen. Not a blocker for anything built so far; recorded so the case file is finished deliberately rather than left half-authorable.
+
+  _Nothing — but the case file now reads inconsistently until they are done_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -71,17 +91,6 @@ Network facilities, premium records, provider documents, insurance claims.
 - [ ] `POST   api/medical-insurance/provider-documents`
 - [ ] `DELETE api/medical-insurance/provider-documents/{}`
 
-### StaffDisciplineSupport — `BUILD`
-
-Action steps and legal reviews are displayed but can never be recorded.
-
-- [ ] `PUT    api/discipline/action-steps/{}`
-- [ ] `POST   api/discipline/action-steps/{}/skip`
-- [ ] `POST   api/discipline/cases/{}/action-steps/initialise`
-- [ ] `POST   api/discipline/cases/{}/legal-reviews`
-- [ ] `PUT    api/discipline/legal-reviews/{}`
-- [ ] `DELETE api/discipline/legal-reviews/{}`
-
 ### EmployeeBanks — `BUILD`
 
 Banks and branches reference data has no maintenance screen.
@@ -91,15 +100,6 @@ Banks and branches reference data has no maintenance screen.
 - [ ] `PUT    api/hr/banks/{}`
 - [ ] `DELETE api/hr/banks/{}`
 
-### JobVacancy — `BUILD`
-
-Stage assignments — create, edit, skip, delete.
-
-- [ ] `PUT    api/job-vacancies/stage-assignments/{}`
-- [ ] `DELETE api/job-vacancies/stage-assignments/{}`
-- [ ] `PATCH  api/job-vacancies/stage-assignments/{}/skip`
-- [ ] `POST   api/job-vacancies/{}/stage-assignments`
-
 ### ConsultantClientPortalAuth — `BUILD`
 
 Client portal authentication.
@@ -107,6 +107,14 @@ Client portal authentication.
 - [ ] `POST   api/client-portal/auth/complete-setup`
 - [ ] `POST   api/client-portal/auth/resend-verification`
 - [ ] `POST   api/client-portal/auth/verify-email`
+
+### JobVacancy — `BUILD`
+
+Stage assignments — create, edit, skip, delete.
+
+- [ ] `PUT    api/job-vacancies/stage-assignments/{}`
+- [ ] `DELETE api/job-vacancies/stage-assignments/{}`
+- [ ] `POST   api/job-vacancies/{}/stage-assignments`
 
 ### LocationContact — `BUILD`
 
@@ -137,13 +145,6 @@ Candidate portal authentication.
 
 - [ ] `POST   api/portal/auth/resend-verification`
 - [ ] `POST   api/portal/auth/verify-email`
-
-### StaffDisciplineSubEntity — `BUILD`
-
-Corrective action items cannot be edited or removed.
-
-- [ ] `PUT    api/discipline/corrective-action-items/{}`
-- [ ] `DELETE api/discipline/corrective-action-items/{}`
 
 ### EmployeeCompetency — `BUILD`
 
@@ -395,6 +396,139 @@ measures; reads are listed for completeness and are checked the same way.
 - [ ] `GET    api/JobAnalysis/positions/uncovered`
 - [ ] `GET    api/JobAnalysis/responsibilities/{}/kpis`
 
+### Discipline — case file support — 9 of 20 writes wired
+
+**Writes**
+
+- [x] `PUT    api/discipline/action-steps/{}`
+- [x] `POST   api/discipline/action-steps/{}/complete`
+- [x] `POST   api/discipline/action-steps/{}/skip`
+- [x] `POST   api/discipline/cases/{}/action-steps/initialise`
+- [ ] `POST   api/discipline/cases/{}/documents`
+- [ ] `POST   api/discipline/cases/{}/documents/upload`
+- [x] `POST   api/discipline/cases/{}/legal-reviews`
+- [ ] `POST   api/discipline/cases/{}/notes`
+- [ ] `POST   api/discipline/cases/{}/notifications`
+- [ ] `POST   api/discipline/cases/{}/witnesses`
+- [ ] `DELETE api/discipline/documents/{}`
+- [x] `DELETE api/discipline/legal-reviews/{}`
+- [x] `PUT    api/discipline/legal-reviews/{}`
+- [x] `POST   api/discipline/legal-reviews/{}/complete`
+- [ ] `DELETE api/discipline/notes/{}`
+- [ ] `PUT    api/discipline/notes/{}`
+- [x] `POST   api/discipline/notifications/{}/acknowledge`
+- [ ] `POST   api/discipline/notifications/{}/followup`
+- [ ] `DELETE api/discipline/witnesses/{}`
+- [ ] `PUT    api/discipline/witnesses/{}`
+
+**Reads**
+
+- [ ] `GET    api/discipline/action-steps/by-actioned-by/{}`
+- [ ] `GET    api/discipline/action-steps/overdue`
+- [ ] `GET    api/discipline/action-steps/{}/documents`
+- [ ] `GET    api/discipline/action-steps/{}`
+- [ ] `GET    api/discipline/appeals/{}/documents`
+- [ ] `GET    api/discipline/cases/{}/action-steps`
+- [ ] `GET    api/discipline/cases/{}/action-steps/pending`
+- [ ] `GET    api/discipline/cases/{}/documents`
+- [ ] `GET    api/discipline/cases/{}/documents/category/{}`
+- [ ] `GET    api/discipline/cases/{}/documents/scope/{}`
+- [ ] `GET    api/discipline/cases/{}/legal-reviews`
+- [ ] `GET    api/discipline/cases/{}/legal-reviews/total-costs`
+- [ ] `GET    api/discipline/cases/{}/notes`
+- [ ] `GET    api/discipline/cases/{}/notifications`
+- [ ] `GET    api/discipline/cases/{}/notifications/unacknowledged`
+- [ ] `GET    api/discipline/cases/{}/witnesses`
+- [ ] `GET    api/discipline/cases/{}/witnesses/without-statement`
+- [ ] `GET    api/discipline/documents/{}`
+- [ ] `GET    api/discipline/documents/{}/download`
+- [ ] `GET    api/discipline/legal-reviews/open`
+- [ ] `GET    api/discipline/legal-reviews/requiring-external-counsel`
+- [ ] `GET    api/discipline/legal-reviews/risk/{}`
+- [ ] `GET    api/discipline/legal-reviews/{}`
+- [ ] `GET    api/discipline/notes/by-author/{}`
+- [ ] `GET    api/discipline/notes/{}`
+- [ ] `GET    api/discipline/notifications/pending-followup`
+- [ ] `GET    api/discipline/notifications/{}`
+- [ ] `GET    api/discipline/witnesses/employee/{}`
+- [ ] `GET    api/discipline/witnesses/{}`
+
+### Discipline — case sub-entities — 11 of 26 writes wired
+
+**Writes**
+
+- [x] `POST   api/discipline/cases/{}/appeal`
+- [x] `POST   api/discipline/cases/{}/appeal/outcome`
+- [x] `POST   api/discipline/cases/{}/appeal/schedule-hearing`
+- [x] `POST   api/discipline/cases/{}/corrective-action`
+- [ ] `POST   api/discipline/cases/{}/fine`
+- [ ] `POST   api/discipline/cases/{}/fine/payment`
+- [ ] `POST   api/discipline/cases/{}/hearing`
+- [ ] `PUT    api/discipline/cases/{}/hearing/outcome`
+- [ ] `POST   api/discipline/cases/{}/investigation`
+- [ ] `PUT    api/discipline/cases/{}/investigation`
+- [ ] `POST   api/discipline/cases/{}/investigation/complete`
+- [ ] `POST   api/discipline/cases/{}/separation`
+- [ ] `PUT    api/discipline/cases/{}/separation`
+- [ ] `POST   api/discipline/cases/{}/suspension`
+- [ ] `PUT    api/discipline/cases/{}/suspension`
+- [ ] `POST   api/discipline/cases/{}/termination`
+- [ ] `PUT    api/discipline/cases/{}/termination`
+- [ ] `POST   api/discipline/cases/{}/warning`
+- [ ] `PUT    api/discipline/cases/{}/warning`
+- [x] `DELETE api/discipline/corrective-action-items/{}`
+- [x] `PUT    api/discipline/corrective-action-items/{}`
+- [x] `POST   api/discipline/corrective-action-items/{}/complete`
+- [x] `POST   api/discipline/corrective-actions/{}/items`
+- [x] `DELETE api/discipline/corrective-actions/{}`
+- [x] `PUT    api/discipline/corrective-actions/{}`
+- [x] `POST   api/discipline/corrective-actions/{}/complete`
+
+**Reads**
+
+- [ ] `GET    api/discipline/appeals/awaiting-outcome`
+- [ ] `GET    api/discipline/appeals/employee/{}`
+- [ ] `GET    api/discipline/appeals/mine`
+- [ ] `GET    api/discipline/appeals/pending-hearing`
+- [ ] `GET    api/discipline/appeals/status/{}`
+- [ ] `GET    api/discipline/appeals/{}`
+- [ ] `GET    api/discipline/cases/{}/appeal`
+- [ ] `GET    api/discipline/cases/{}/corrective-action`
+- [ ] `GET    api/discipline/cases/{}/fine`
+- [ ] `GET    api/discipline/cases/{}/hearing`
+- [ ] `GET    api/discipline/cases/{}/investigation`
+- [ ] `GET    api/discipline/cases/{}/separation`
+- [ ] `GET    api/discipline/cases/{}/suspension`
+- [ ] `GET    api/discipline/cases/{}/termination`
+- [ ] `GET    api/discipline/cases/{}/warning`
+- [ ] `GET    api/discipline/corrective-actions/due-for-review`
+- [ ] `GET    api/discipline/corrective-actions/employee/{}`
+- [ ] `GET    api/discipline/corrective-actions/overdue`
+- [ ] `GET    api/discipline/corrective-actions/status/{}`
+- [ ] `GET    api/discipline/corrective-actions/supervisor/{}`
+- [ ] `GET    api/discipline/corrective-actions/{}`
+- [ ] `GET    api/discipline/fines/employee/{}`
+- [ ] `GET    api/discipline/fines/employee/{}/outstanding-balance`
+- [ ] `GET    api/discipline/fines/outstanding`
+- [ ] `GET    api/discipline/fines/overdue`
+- [ ] `GET    api/discipline/hearings/awaiting-outcome`
+- [ ] `GET    api/discipline/hearings/by-officer/{}`
+- [ ] `GET    api/discipline/hearings/upcoming`
+- [ ] `GET    api/discipline/investigations/by-investigator/{}`
+- [ ] `GET    api/discipline/investigations/open`
+- [ ] `GET    api/discipline/investigations/overdue`
+- [ ] `GET    api/discipline/separations/incomplete`
+- [ ] `GET    api/discipline/suspensions/active`
+- [ ] `GET    api/discipline/suspensions/employee/{}`
+- [ ] `GET    api/discipline/suspensions/upcoming`
+- [ ] `GET    api/discipline/terminations/eligible-for-rehire`
+- [ ] `GET    api/discipline/terminations/pending-paycheck`
+- [ ] `GET    api/discipline/terminations/type/{}`
+- [ ] `GET    api/discipline/warnings/employee/{}`
+- [ ] `GET    api/discipline/warnings/employee/{}/active`
+- [ ] `GET    api/discipline/warnings/expiring`
+- [ ] `GET    api/discipline/warnings/type/{}`
+
 ### Employee career paths — 0 of 3 writes wired
 
 **Writes**
@@ -425,12 +559,12 @@ move the real ones into section C's disposition map.
 | Employees | 73 | 81 | `FALSE` | Fully wired through the path-builder helper employeeService.sub(id, 'contacts'). Instrument 01 cannot resolve a method call. |
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
 | PerformanceImprovementPlans | 22 | 36 | `REVIEW` | 18 of 22 flags are the api/PerformanceImprovementPlans alias of api/Pip. Real: attachments, review meetings, complete. |
-| StaffDisciplineSubEntity | 21 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
 | StaffDisciplineLookup | 20 | 20 | `BUILD` | Offence catalogue is GET-only in the UI; clients cannot maintain their own offence library. |
 | PerformanceAppraisals | 15 | 29 | `REVIEW` | calculate-score may be server-driven on submit. |
+| StaffDisciplineSubEntity | 15 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
-| StaffDisciplineSupport | 13 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | Assets | 12 | 63 | `REVIEW` |  |
+| StaffDisciplineSupport | 11 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
 | MedicalInsurance | 10 | 23 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
@@ -449,6 +583,7 @@ move the real ones into section C's disposition map.
 | ConsultantClientPortal | 3 | 3 | `BUILD` | Client portal for consultant engagements. |
 | EmployeeCareerPath | 3 | 3 | `BUILD` | Decided 2026-08-28: career paths are NOT server-write-only and should have a UI. |
 | InterviewQuestionPreset | 3 | 6 | `REVIEW` |  |
+| JobVacancy | 3 | 17 | `BUILD` | Stage assignments — create, edit, skip, delete. |
 | PositionCompetency | 3 | 4 | `REVIEW` |  |
 | PositionVacancies | 3 | 5 | `REVIEW` |  |
 | TalentPools | 3 | 9 | `REVIEW` |  |
@@ -460,7 +595,6 @@ move the real ones into section C's disposition map.
 | HrLegacyFileMigration | 2 | 2 | `INTENTIONAL` | One-off ops tool, invoked by script. |
 | JobCandidate | 2 | 25 | `REVIEW` |  |
 | JobOffer | 2 | 19 | `REVIEW` |  |
-| JobVacancy | 2 | 17 | `BUILD` | Stage assignments — create, edit, skip, delete. |
 | Leaves | 2 | 14 | `REVIEW` |  |
 | NHISClaims | 2 | 8 | `REVIEW` |  |
 | PeerNomination | 2 | 4 | `REVIEW` |  |
@@ -509,7 +643,6 @@ missing — the class an endpoint audit cannot see.
 
 | DTO | Unreachable | Fields |
 | --- | ---: | --- |
-| `UpdateStaffDisciplineLegalReviewDto` | 7 of 11 | LegalAdvice, ExternalCounselId, ExternalCounselName, ExternalCounselFirm, ExternalCounselReviewDate, ExternalCounselOpinion, LegalCostsIncurred |
 | `UpdateAppraisalHRReviewDto` | 6 of 8 | ReviewedByHRId, ReviewStartedDate, ReviewCompletedDate, HRNotes, AdjustedOverallScore, AdjustmentReason |
 | `CreateJobShortlistingCriteriaDto` | 6 of 14 | RequiredValue, MatchMode, MatchStrategy, RequiredSkillId, RequiredQualificationId, ComparisonOperator |
 | `UpdateJobShortlistingCriteriaDto` | 6 of 13 | RequiredValue, MatchMode, MatchStrategy, RequiredSkillId, RequiredQualificationId, ComparisonOperator |
@@ -518,7 +651,6 @@ missing — the class an endpoint audit cannot see.
 | `UpdateEmployeeAwardDto` | 4 of 12 | TrophyIssued, PublishToIntranet, PublishToWebsite, PublicationNotes |
 | `CreateMedicalInsurancePlanDto` | 4 of 25 | LifetimeLimit, MaxChildAge, EmployerContributionPercent, EmployeeContributionPercent |
 | `UpdateMedicalInsurancePlanDto` | 4 of 24 | LifetimeLimit, MaxChildAge, EmployerContributionPercent, EmployeeContributionPercent |
-| `CreateStaffDisciplineLegalReviewDto` | 4 of 9 | ReferredById, ExternalCounselId, ExternalCounselName, ExternalCounselFirm |
 | `CreateMedicalInsuranceProviderDto` | 3 of 28 | HasOnlinePortal, ClaimsPortalUrl, PreferredPaymentMethod |
 | `UpdateMedicalInsuranceProviderDto` | 3 of 28 | HasOnlinePortal, ClaimsPortalUrl, PreferredPaymentMethod |
 | `CreateVacancyPipelineStageAssignmentDto` | 3 of 7 | EscalationEnabled, EscalationDaysAfterDue, EscalateToId |

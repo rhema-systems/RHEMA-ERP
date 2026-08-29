@@ -20,6 +20,17 @@ import type {
   StaffOffense,
   StaffOffenseSummary,
   DisciplinaryActionTypeSummary,
+  DisciplineActionStep,
+  UpdateDisciplineActionStep,
+  DisciplineLegalReview,
+  CreateDisciplineLegalReview,
+  UpdateDisciplineLegalReview,
+  DisciplineCorrectiveAction,
+  CreateDisciplineCorrectiveAction,
+  UpdateDisciplineCorrectiveAction,
+  DisciplineCorrectiveActionItem,
+  CreateDisciplineCorrectiveActionItem,
+  UpdateDisciplineCorrectiveActionItem,
 } from '@/types/hr/discipline';
 
 /**
@@ -327,7 +338,205 @@ class DisciplineLookupService {
   }
 }
 
+/**
+ * The procedural ladder a case has to climb: the offence's own steps, instantiated per case.
+ *
+ * ⚠ **The steps do not exist until someone initialises them.** `initialise` copies the offence's
+ * `StaffOffenseProcedure` rows onto the case and stamps the due dates from each step's
+ * `ExpectedCompletionDays`. Until it is called the case has no steps at all, which is what the
+ * detail screen's "the procedure has not been initialised for this case" empty state means — it
+ * had no button behind it before this service existed.
+ *
+ * ⚠ **Complete and skip are transitions, not status values.** Both stamp the actor from the token
+ * and a date; `complete` also takes notes, `skip` demands a reason. Setting `status: 'Completed'`
+ * through `update` instead writes the word and leaves `completedDate` and `actionedById` empty, so
+ * the step reads as done and the audit trail says nobody did it. The screen offers the transitions
+ * and keeps those two values out of the edit form.
+ *
+ * ⚠ **Both take a BARE JSON STRING as the body**, not an object. `[FromBody] string notes` binds
+ * `"text"`, not `{ "notes": "text" }` — the second yields a 400 that names no field.
+ */
+class DisciplineActionStepService {
+  private readonly base = '/discipline';
+
+  getForCase(caseId: string): Promise<DisciplineActionStep[]> {
+    return apiService.get<DisciplineActionStep[]>(`${this.base}/cases/${caseId}/action-steps`);
+  }
+
+  getPendingForCase(caseId: string): Promise<DisciplineActionStep[]> {
+    return apiService.get<DisciplineActionStep[]>(`${this.base}/cases/${caseId}/action-steps/pending`);
+  }
+
+  getOverdue(): Promise<DisciplineActionStep[]> {
+    return apiService.get<DisciplineActionStep[]>(`${this.base}/action-steps/overdue`);
+  }
+
+  /** Instantiates the offence's procedure onto the case. Returns the steps it created. */
+  initialise(caseId: string): Promise<DisciplineActionStep[]> {
+    return apiService.post<DisciplineActionStep[]>(`${this.base}/cases/${caseId}/action-steps/initialise`, {});
+  }
+
+  /** ⚠ The payload field is `stepId`, not `id`. */
+  update(stepId: string, payload: Omit<UpdateDisciplineActionStep, 'stepId'>): Promise<DisciplineActionStep> {
+    return apiService.put<DisciplineActionStep>(`${this.base}/action-steps/${stepId}`, { stepId, ...payload });
+  }
+
+  /** ⚠ Bare string body. Stamps completedDate and the actor from the token. */
+  complete(stepId: string, notes: string) {
+    return apiService.post(`${this.base}/action-steps/${stepId}/complete`, notes);
+  }
+
+  /** ⚠ Bare string body. A skipped step is a departure from procedure — the reason is the record. */
+  skip(stepId: string, reason: string) {
+    return apiService.post(`${this.base}/action-steps/${stepId}/skip`, reason);
+  }
+}
+
+/**
+ * Referrals of a case to legal, and what came back.
+ *
+ * ⚠ **Read these, not the case detail's copy.** `DisciplinaryCaseDetail.legalReviews` is a
+ * seven-field summary with no advice, no counsel and no costs; `getForCase` returns the full
+ * record. A panel built on the detail's copy renders a row of blanks.
+ *
+ * ⚠ **`referredById` is stamped from the token and is not in the create payload.** It used to be
+ * accepted from the body and copied onto the entity verbatim while the token's employee id went
+ * only to `CreatedBy`, so any HR user could record a colleague as the referrer. Removed when this
+ * screen was built; nothing had ever sent it.
+ *
+ * ⚠ **Delete is Admin-tier** (`DisciplineAdminPolicy`) while create, update and complete are Write,
+ * so an HR author can refer a case and record the advice but cannot erase the referral.
+ *
+ * ⚠ **`isConfidential` defaults to TRUE.** A legal review is privileged unless someone says
+ * otherwise, so the form must default it on rather than leaving a switch at its React default.
+ */
+class DisciplineLegalReviewService {
+  private readonly base = '/discipline';
+
+  getForCase(caseId: string): Promise<DisciplineLegalReview[]> {
+    return apiService.get<DisciplineLegalReview[]>(`${this.base}/cases/${caseId}/legal-reviews`);
+  }
+
+  getById(id: string): Promise<DisciplineLegalReview> {
+    return apiService.get<DisciplineLegalReview>(`${this.base}/legal-reviews/${id}`);
+  }
+
+  /** Total legal spend on a case. A plain number, not an object. */
+  getTotalCostsForCase(caseId: string): Promise<number> {
+    return apiService.get<number>(`${this.base}/cases/${caseId}/legal-reviews/total-costs`);
+  }
+
+  getOpen(): Promise<DisciplineLegalReview[]> {
+    return apiService.get<DisciplineLegalReview[]>(`${this.base}/legal-reviews/open`);
+  }
+
+  getRequiringExternalCounsel(): Promise<DisciplineLegalReview[]> {
+    return apiService.get<DisciplineLegalReview[]>(`${this.base}/legal-reviews/requiring-external-counsel`);
+  }
+
+  /** "Refer this case to legal." */
+  refer(caseId: string, payload: CreateDisciplineLegalReview): Promise<DisciplineLegalReview> {
+    return apiService.post<DisciplineLegalReview>(`${this.base}/cases/${caseId}/legal-reviews`, payload);
+  }
+
+  update(id: string, payload: Omit<UpdateDisciplineLegalReview, 'id'>): Promise<DisciplineLegalReview> {
+    return apiService.put<DisciplineLegalReview>(`${this.base}/legal-reviews/${id}`, { id, ...payload });
+  }
+
+  /** Stamps the completion date and the actor. No body. */
+  complete(id: string) {
+    return apiService.post(`${this.base}/legal-reviews/${id}/complete`, {});
+  }
+
+  /** ⚠ Admin-tier. */
+  remove(id: string) {
+    return apiService.delete(`${this.base}/legal-reviews/${id}`);
+  }
+}
+
+/**
+ * The corrective action plan on a case, and the items that make it up.
+ *
+ * ⚠ **A case has AT MOST ONE plan** — `cases/{id}/corrective-action` is singular and returns the
+ * record or null, so this is a form-plus-list, not a collection. Items hang off the plan.
+ *
+ * ⚠ **`employeeId` is not derived from the case.** `CreateAsync` copies it from the body, so the
+ * caller must pass the case's own subject; nothing on the server checks that it matches.
+ *
+ * ⚠ **The API enforces the lock, unusually.** `UpdateAsync` throws on a Completed or Cancelled
+ * plan — one of the few places in HR where a lifecycle rule lives on the server rather than only on
+ * the screen. See `LOCKED_CORRECTIVE_ACTION_STATUSES`, which mirrors it.
+ */
+class DisciplineCorrectiveActionService {
+  private readonly base = '/discipline';
+
+  /** ⚠ Singular, and null when the case has no plan. */
+  getForCase(caseId: string): Promise<DisciplineCorrectiveAction | null> {
+    return apiService.get<DisciplineCorrectiveAction | null>(`${this.base}/cases/${caseId}/corrective-action`);
+  }
+
+  getById(id: string): Promise<DisciplineCorrectiveAction> {
+    return apiService.get<DisciplineCorrectiveAction>(`${this.base}/corrective-actions/${id}`);
+  }
+
+  getOverdue(): Promise<DisciplineCorrectiveAction[]> {
+    return apiService.get<DisciplineCorrectiveAction[]>(`${this.base}/corrective-actions/overdue`);
+  }
+
+  getDueForReview(): Promise<DisciplineCorrectiveAction[]> {
+    return apiService.get<DisciplineCorrectiveAction[]>(`${this.base}/corrective-actions/due-for-review`);
+  }
+
+  create(caseId: string, payload: CreateDisciplineCorrectiveAction): Promise<DisciplineCorrectiveAction> {
+    return apiService.post<DisciplineCorrectiveAction>(`${this.base}/cases/${caseId}/corrective-action`, payload);
+  }
+
+  update(id: string, payload: Omit<UpdateDisciplineCorrectiveAction, 'id'>): Promise<DisciplineCorrectiveAction> {
+    return apiService.put<DisciplineCorrectiveAction>(`${this.base}/corrective-actions/${id}`, { id, ...payload });
+  }
+
+  /** No body. Stamps the completion date and the actor. */
+  complete(id: string) {
+    return apiService.post(`${this.base}/corrective-actions/${id}/complete`, {});
+  }
+
+  /** ⚠ Admin-tier. */
+  remove(id: string) {
+    return apiService.delete(`${this.base}/corrective-actions/${id}`);
+  }
+
+  // ── the plan's items ───────────────────────────────────────────────────────
+
+  addItem(correctiveActionId: string, payload: CreateDisciplineCorrectiveActionItem): Promise<DisciplineCorrectiveActionItem> {
+    return apiService.post<DisciplineCorrectiveActionItem>(
+      `${this.base}/corrective-actions/${correctiveActionId}/items`,
+      payload,
+    );
+  }
+
+  /** ⚠ The route is `corrective-action-items/{id}` — singular "action", and no plan id. */
+  updateItem(itemId: string, payload: Omit<UpdateDisciplineCorrectiveActionItem, 'id'>): Promise<DisciplineCorrectiveActionItem> {
+    return apiService.put<DisciplineCorrectiveActionItem>(
+      `${this.base}/corrective-action-items/${itemId}`,
+      { id: itemId, ...payload },
+    );
+  }
+
+  /** ⚠ Bare string body, like the action-step transitions. Stamps the date and the actor. */
+  completeItem(itemId: string, completionNotes: string) {
+    return apiService.post(`${this.base}/corrective-action-items/${itemId}/complete`, completionNotes);
+  }
+
+  /** ⚠ Admin-tier. */
+  removeItem(itemId: string) {
+    return apiService.delete(`${this.base}/corrective-action-items/${itemId}`);
+  }
+}
+
 export const disciplineService = new DisciplineService();
 export const disciplineAppealService = new DisciplineAppealService();
 export const disciplineProcessService = new DisciplineProcessService();
 export const disciplineLookupService = new DisciplineLookupService();
+export const disciplineActionStepService = new DisciplineActionStepService();
+export const disciplineLegalReviewService = new DisciplineLegalReviewService();
+export const disciplineCorrectiveActionService = new DisciplineCorrectiveActionService();

@@ -28,7 +28,12 @@ import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { ActionStepsPanel } from '@/components/hr/discipline/ActionStepsPanel';
+import { LegalReviewsPanel } from '@/components/hr/discipline/LegalReviewsPanel';
+import { CorrectiveActionPanel } from '@/components/hr/discipline/CorrectiveActionPanel';
 import { disciplineService, disciplineLookupService, disciplineAppealService } from '@/services/hr/discipline.service';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import {
   TERMINAL_CASE_STATUSES, APPEAL_OUTCOME_OPTIONS,
@@ -51,16 +56,44 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 /**
  * A disciplinary case.
  *
- * Slice 1 owns the case header: the whole graph is readable here and the lifecycle transitions run
- * from here, but the sub-entities (investigation, hearing, sanctions, appeal) are READ-ONLY for now.
- * Their editors arrive with their own slices, along with the rules that govern them — an editable
- * sanction with no authority rule behind it (FR-HR-080) would be worse than none.
+ * Slice 1 owned the case header: the whole graph is readable here and the lifecycle transitions run
+ * from here, while the sub-entities stayed READ-ONLY until the rules that govern them existed — an
+ * editable sanction with no authority rule behind it (FR-HR-080) would be worse than none.
+ *
+ * **Three of them are now editable, and the distinction is deliberate.** The procedure steps, the
+ * legal reviews and the corrective action plan are PROCEDURAL: nothing about who may record them
+ * turns on FR-HR-080, because none of them imposes a penalty. The sanctions — warning, suspension,
+ * fine, termination — remain read-only for exactly the original reason, and must stay that way
+ * until the issuing-authority rule is in place.
+ *
+ * ⚠ The investigation and hearing are also still read-only, but for a different and weaker reason:
+ * nobody has built their editors yet. They are not blocked on anything.
  */
 export default function DisciplineCaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  /**
+   * What the signed-in user may do to the case's procedural records.
+   *
+   * Two tiers because the API has two: create, update and the transitions sit on
+   * `HR.Policy.DisciplineWrite`, while **delete sits on `HR.Policy.DisciplineAdmin`** — legal
+   * reviews, corrective action plans and their items can all be recorded by an HR officer and
+   * erased only by an administrator. The panels hide the remove affordance rather than offering an
+   * action the API refuses.
+   *
+   * The role check beside each permission mirrors `HrPermissions.RoleGrants`: permissions resolve
+   * from the database, so on a tenant provisioned before the seeder ran a user holds none, and the
+   * server's own fallback is what keeps them working. Gating on the permission alone would black
+   * out the screen for exactly those tenants.
+   */
+  const canWriteDiscipline =
+    hasAnyPermission(['HR.Discipline.Write', 'HR.Discipline.Admin']) || hasAnyRole(HR_ROLES);
+  const canAdminDiscipline =
+    hasAnyPermission(['HR.Discipline.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const [decisionOpen, setDecisionOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
@@ -460,37 +493,32 @@ export default function DisciplineCaseDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader><CardTitle>Procedure steps</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              {detail.actionSteps.length === 0 ? (
-                <EmptyState title="No steps" description="The offence's procedure has not been initialised for this case." />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Step</TableHead>
-                      <TableHead>Due</TableHead>
-                      <TableHead>Completed</TableHead>
-                      <TableHead>By</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detail.actionSteps.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell>{s.stepName ?? '—'}</TableCell>
-                        <TableCell>{fmtDate(s.dueDate)}</TableCell>
-                        <TableCell>{fmtDate(s.completedDate)}</TableCell>
-                        <TableCell>{s.actionedByName ?? '—'}</TableCell>
-                        <TableCell><StatusBadge status={s.statusName} /></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <ActionStepsPanel
+            caseId={id}
+            canWrite={canWriteDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
+
+          {/*
+            The corrective action plan lives beside the procedure rather than under Sanctions on
+            purpose: it is what the employee agrees to DO, not a penalty imposed on them. Filing it
+            with the warnings and fines would misread the record.
+          */}
+          <CorrectiveActionPanel
+            caseId={id}
+            employeeId={detail.employeeId}
+            employeeName={detail.employeeName}
+            canWrite={canWriteDiscipline}
+            canDelete={canAdminDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
+
+          <LegalReviewsPanel
+            caseId={id}
+            canWrite={canWriteDiscipline}
+            canDelete={canAdminDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
         </TabsContent>
 
         <TabsContent value="sanctions" className="space-y-4 pt-4">

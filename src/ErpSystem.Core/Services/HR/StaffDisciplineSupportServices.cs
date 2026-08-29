@@ -178,6 +178,13 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
         entity.Status        = DisciplinaryActionStepStatus.Completed;
         entity.CompletedDate = DateTime.UtcNow;
         entity.Notes         = notes;
+        // The step's own actor, not merely the audit stamp. UpdatedBy is a string audit column;
+        // ActionedById is the Employee FK the DTO exposes and the case screen renders as "By".
+        // Setting only the former left that column permanently blank for every step closed through
+        // the supported route, while the plain update — which takes ActionedById from the request
+        // body — was the only path that filled it at all. Same defect class as the legal-review
+        // referrer (ledger D-05).
+        entity.ActionedById  = userId;
         entity.UpdatedAt     = DateTime.UtcNow;
         entity.UpdatedBy     = userId.ToString();
 
@@ -196,6 +203,11 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
 
         entity.Status    = DisciplinaryActionStepStatus.Skipped;
         entity.Notes     = reason;
+        // Who skipped it matters more than who completed it: a skip is a departure from the
+        // offence's own procedure, and is exactly what a case turns on when it is challenged.
+        // CompletedDate is deliberately NOT set — a skipped step was not completed, and this
+        // entity has no separate skipped-on column to say otherwise.
+        entity.ActionedById = userId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 

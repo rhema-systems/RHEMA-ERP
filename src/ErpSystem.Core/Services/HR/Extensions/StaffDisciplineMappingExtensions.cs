@@ -1178,7 +1178,8 @@ public static class StaffDisciplineMappingExtensions
             TenantId = tenantId,
             DisciplinaryActionId = dto.DisciplinaryActionId,
             ReferredToLegalDate = dto.ReferredToLegalDate,
-            ReferredById = dto.ReferredById,
+            // The actor, not a claim in the body. See the note on CreateStaffDisciplineLegalReviewDto.
+            ReferredById = userId,
             LegalRiskLevel = dto.LegalRiskLevel,
             RequiresExternalCounsel = dto.RequiresExternalCounsel,
             ExternalCounselId = dto.ExternalCounselId,
