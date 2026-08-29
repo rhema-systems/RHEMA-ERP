@@ -244,6 +244,65 @@ public sealed class JournalEntryLifecycleBatch5Tests
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentId == journal.Id && e.PostingAction == "Reverse")).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalInquiry")]
+    public async Task GetJournalEntriesAsync_ShouldFilterProcurementSource_AndExposeSourceLineage()
+    {
+        var tenantId = Guid.NewGuid();
+        var fiscalPeriodId = Guid.NewGuid();
+        var procurementDocumentId = Guid.NewGuid();
+        var postingDate = new DateTime(2026, 8, 29);
+        await using var db = CreateContext();
+
+        db.JournalEntries.AddRange(
+            new JournalEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryNumber = "PRO-20260829-0001",
+                JournalType = "System Generated",
+                EntryDate = postingDate,
+                Description = "Supplier onboarding token payment TEST-001",
+                SourceModule = "Procurement",
+                OriginModuleCode = "PROC",
+                SourceDocumentId = procurementDocumentId,
+                SourceDocumentType = "SupplierOnboardingTokenPayment",
+                FiscalPeriodId = fiscalPeriodId,
+                PostingStatus = "Posted",
+                CreatedAt = postingDate
+            },
+            new JournalEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryNumber = "AP-20260829-0001",
+                JournalType = "System Generated",
+                EntryDate = postingDate,
+                Description = "Vendor invoice",
+                SourceModule = "AP",
+                FiscalPeriodId = fiscalPeriodId,
+                PostingStatus = "Posted",
+                CreatedAt = postingDate
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateJournalService(db, tenantId);
+        var entries = await service.GetJournalEntriesAsync(
+            status: "posted",
+            startDate: postingDate,
+            endDate: postingDate,
+            fiscalPeriodId: fiscalPeriodId,
+            sourceModule: "PROCUREMENT");
+
+        var entry = entries.Should().ContainSingle().Subject;
+        entry.SourceModule.Should().Be("Procurement");
+        entry.OriginModuleCode.Should().Be("PROC");
+        entry.SourceDocumentType.Should().Be("SupplierOnboardingTokenPayment");
+        entry.SourceDocumentId.Should().Be(procurementDocumentId);
+        entry.FiscalPeriodId.Should().Be(fiscalPeriodId);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

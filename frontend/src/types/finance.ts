@@ -299,6 +299,10 @@ export interface JournalEntry {
     /** Alias kept for backward compat */
     referenceNumber?: string;
     sourceModule?: string;
+    originModuleCode?: string;
+    sourceDocumentId?: string;
+    sourceDocumentType?: string;
+    fiscalPeriodId?: string;
     totalDebit: number;
     totalCredit: number;
     /** Alias kept for backward compat */

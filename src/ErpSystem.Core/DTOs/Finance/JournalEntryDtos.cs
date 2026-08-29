@@ -12,7 +12,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public string JournalType { get; set; } = "General";
         public string? Description { get; set; }
         public string? Reference { get; set; }
+        public string? SourceModule { get; set; }
+        public string? OriginModuleCode { get; set; }
+        public Guid? SourceDocumentId { get; set; }
+        public string? SourceDocumentType { get; set; }
         public string BookClassification { get; set; } = "IFRS";
+        public Guid? FiscalPeriodId { get; set; }
         public decimal TotalDebit { get; set; }
         public decimal TotalCredit { get; set; }
         public string Status { get; set; } = "Draft";

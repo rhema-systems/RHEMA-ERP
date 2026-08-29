@@ -235,18 +235,25 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Retrieves journal entries with optional filtering by status, date range, and fiscal period.
+        /// Retrieves journal entries with optional filtering by status, date range, fiscal period, and source module.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<JournalEntryDto>>> GetJournalEntries(
             [FromQuery] string? status = null,
             [FromQuery] DateTime? startDate = null,
             [FromQuery] DateTime? endDate = null,
-            [FromQuery] Guid? periodId = null)
+            [FromQuery] Guid? periodId = null,
+            [FromQuery] Guid? fiscalPeriodId = null,
+            [FromQuery] string? sourceModule = null)
         {
             try
             {
-                var entries = await _journalEntryService.GetJournalEntriesAsync();
+                var entries = await _journalEntryService.GetJournalEntriesAsync(
+                    status,
+                    startDate,
+                    endDate,
+                    fiscalPeriodId ?? periodId,
+                    sourceModule);
                 return Ok(entries);
             }
             catch (Exception ex)
