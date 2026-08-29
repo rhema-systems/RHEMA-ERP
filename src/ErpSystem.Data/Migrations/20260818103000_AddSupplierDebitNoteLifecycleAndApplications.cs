@@ -241,28 +241,28 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE [name] = N'FK_SupplierDebitN
         FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]);
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'UX_SupplierDebitNotes_Tenant_DebitNoteNumber')
-    CREATE UNIQUE INDEX [UX_SupplierDebitNotes_Tenant_DebitNoteNumber]
-        ON [dbo].[SupplierDebitNotes] ([TenantId], [DebitNoteNumber]);
+    EXEC(N'CREATE UNIQUE INDEX [UX_SupplierDebitNotes_Tenant_DebitNoteNumber]
+        ON [dbo].[SupplierDebitNotes] ([TenantId], [DebitNoteNumber]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference')
-    CREATE UNIQUE INDEX [UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference]
+    EXEC(N'CREATE UNIQUE INDEX [UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference]
         ON [dbo].[SupplierDebitNotes] ([TenantId], [VendorId], [SupplierCreditNoteReference])
-        WHERE [SupplierCreditNoteReference] IS NOT NULL AND [IsDeleted] = 0;
+        WHERE [SupplierCreditNoteReference] IS NOT NULL AND [IsDeleted] = 0;');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_SupplierDebitNotes_Tenant_Status_Date')
-    CREATE INDEX [IX_SupplierDebitNotes_Tenant_Status_Date]
-        ON [dbo].[SupplierDebitNotes] ([TenantId], [Status], [DebitNoteDate]);
+    EXEC(N'CREATE INDEX [IX_SupplierDebitNotes_Tenant_Status_Date]
+        ON [dbo].[SupplierDebitNotes] ([TenantId], [Status], [DebitNoteDate]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_SupplierDebitNoteLineItems_Tenant_Note')
-    CREATE INDEX [IX_SupplierDebitNoteLineItems_Tenant_Note]
-        ON [dbo].[SupplierDebitNoteLineItems] ([TenantId], [SupplierDebitNoteId]);
+    EXEC(N'CREATE INDEX [IX_SupplierDebitNoteLineItems_Tenant_Note]
+        ON [dbo].[SupplierDebitNoteLineItems] ([TenantId], [SupplierDebitNoteId]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_SupplierDebitNoteLineItems_GLAccountId')
-    CREATE INDEX [IX_SupplierDebitNoteLineItems_GLAccountId]
-        ON [dbo].[SupplierDebitNoteLineItems] ([GLAccountId]);
+    EXEC(N'CREATE INDEX [IX_SupplierDebitNoteLineItems_GLAccountId]
+        ON [dbo].[SupplierDebitNoteLineItems] ([GLAccountId]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_SupplierDebitNoteApplications_Tenant_Note_Payment_Invoice')
-    CREATE INDEX [IX_SupplierDebitNoteApplications_Tenant_Note_Payment_Invoice]
-        ON [dbo].[SupplierDebitNoteApplications] ([TenantId], [SupplierDebitNoteId], [VendorPaymentId], [VendorInvoiceId]);
+    EXEC(N'CREATE INDEX [IX_SupplierDebitNoteApplications_Tenant_Note_Payment_Invoice]
+        ON [dbo].[SupplierDebitNoteApplications] ([TenantId], [SupplierDebitNoteId], [VendorPaymentId], [VendorInvoiceId]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'UX_SupplierDebitNoteApplication_Tenant_Original_Reversal')
-    CREATE UNIQUE INDEX [UX_SupplierDebitNoteApplication_Tenant_Original_Reversal]
+    EXEC(N'CREATE UNIQUE INDEX [UX_SupplierDebitNoteApplication_Tenant_Original_Reversal]
         ON [dbo].[SupplierDebitNoteApplications] ([TenantId], [OriginalApplicationId])
-        WHERE [IsReversal] = 1 AND [OriginalApplicationId] IS NOT NULL;
+        WHERE [IsReversal] = 1 AND [OriginalApplicationId] IS NOT NULL;');
 """);
     }
 

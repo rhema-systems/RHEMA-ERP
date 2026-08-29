@@ -130,6 +130,100 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
         (await invalidInsert.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
     }
 
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    [Trait("Batch", "TDC-VPS-MIGRATION-COMPATIBILITY")]
+    public async Task Pending_finance_migration_repairs_the_legacy_supplier_debit_note_schema()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync();
+        await database.ExecuteSqlAsync("""
+            CREATE TABLE [dbo].[BusinessPartners] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_BusinessPartners] PRIMARY KEY);
+            CREATE TABLE [dbo].[Tenants] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_Tenants] PRIMARY KEY);
+            CREATE TABLE [dbo].[VendorInvoice] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_VendorInvoice] PRIMARY KEY);
+            CREATE TABLE [dbo].[JournalEntries] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_JournalEntries] PRIMARY KEY);
+            CREATE TABLE [dbo].[FinancePostingEvents] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_FinancePostingEvents] PRIMARY KEY);
+            CREATE TABLE [dbo].[WorkflowInstances] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_WorkflowInstances] PRIMARY KEY);
+            CREATE TABLE [dbo].[Accounts] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_Accounts] PRIMARY KEY);
+            CREATE TABLE [dbo].[VendorPayment] ([Id] uniqueidentifier NOT NULL CONSTRAINT [PK_VendorPayment] PRIMARY KEY);
+
+            CREATE TABLE [dbo].[SupplierDebitNotes]
+            (
+                [Id] uniqueidentifier NOT NULL CONSTRAINT [PK_SupplierDebitNotes] PRIMARY KEY,
+                [DebitNoteNumber] nvarchar(50) NOT NULL,
+                [VendorId] uniqueidentifier NOT NULL,
+                [SupplierReturnId] uniqueidentifier NULL,
+                [OriginalVendorInvoiceId] uniqueidentifier NULL,
+                [DebitNoteDate] datetime2 NOT NULL,
+                [CurrencyCode] nvarchar(3) NOT NULL,
+                [ExchangeRate] decimal(18,4) NOT NULL,
+                [SubTotal] decimal(18,2) NOT NULL,
+                [TaxAmount] decimal(18,2) NOT NULL,
+                [TotalAmount] decimal(18,2) NOT NULL,
+                [BaseCurrencyAmount] decimal(18,2) NOT NULL,
+                [Status] int NOT NULL,
+                [JournalEntryId] uniqueidentifier NULL,
+                [IsDeleted] bit NOT NULL,
+                [TenantId] uniqueidentifier NOT NULL
+            );
+
+            CREATE TABLE [dbo].[SupplierDebitNoteLineItems]
+            (
+                [Id] uniqueidentifier NOT NULL CONSTRAINT [PK_SupplierDebitNoteLineItems] PRIMARY KEY,
+                [SupplierDebitNoteId] uniqueidentifier NOT NULL,
+                [Description] nvarchar(500) NOT NULL,
+                [Quantity] decimal(18,4) NOT NULL,
+                [UnitPrice] decimal(18,2) NOT NULL,
+                [TaxGroupId] uniqueidentifier NULL,
+                [TaxRate] decimal(18,4) NOT NULL,
+                [TaxAmount] decimal(18,2) NOT NULL,
+                [LineTotal] decimal(18,2) NOT NULL,
+                [IsDeleted] bit NOT NULL,
+                [TenantId] uniqueidentifier NOT NULL
+            );
+            """);
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer(database.ConnectionString)
+            .Options;
+        await using var context = new ApplicationDbContext(options, Guid.NewGuid());
+        var sqlGenerator = context.GetService<IMigrationsSqlGenerator>();
+        var migration = new AddSupplierDebitNoteLifecycleAndApplications();
+        var commands = sqlGenerator.Generate(migration.UpOperations, context.Model);
+
+        foreach (var command in commands)
+            await database.ExecuteSqlAsync(command.CommandText);
+
+        var repairedColumns = await database.QueryNamesAsync(
+            "SELECT [name] FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.SupplierDebitNotes');");
+        repairedColumns.Should().Contain([
+            "SupplierCreditNoteReference", "PostingEventId", "WorkflowInstanceId", "RowVersion"
+        ]);
+
+        var indexes = await database.QueryNamesAsync("""
+            SELECT [name]
+            FROM sys.indexes
+            WHERE object_id IN
+            (
+                OBJECT_ID(N'dbo.SupplierDebitNotes'),
+                OBJECT_ID(N'dbo.SupplierDebitNoteLineItems'),
+                OBJECT_ID(N'dbo.SupplierDebitNoteApplications')
+            )
+              AND [name] IS NOT NULL;
+            """);
+        indexes.Should().Contain([
+            "UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference",
+            "IX_SupplierDebitNoteLineItems_GLAccountId",
+            "UX_SupplierDebitNoteApplication_Tenant_Original_Reversal"
+        ]);
+
+        var exchangeRateScale = await database.QueryNamesAsync("""
+            SELECT CONVERT(nvarchar(10), [scale])
+            FROM sys.columns
+            WHERE object_id=OBJECT_ID(N'dbo.SupplierDebitNotes') AND [name]=N'ExchangeRate';
+            """);
+        exchangeRateScale.Should().Equal("6");
+    }
+
     private sealed class SqlServerFactAttribute : FactAttribute
     {
         public SqlServerFactAttribute()
