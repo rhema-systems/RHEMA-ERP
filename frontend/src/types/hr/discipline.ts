@@ -101,6 +101,41 @@ export const CASE_STATUS_OPTIONS: { value: DisciplinaryStatus; label: string }[]
   { value: 'Dismissed', label: 'Dismissed' },
 ];
 
+export const DOCUMENT_CATEGORY_OPTIONS: { value: DisciplinaryDocumentCategory; label: string }[] = [
+  { value: 'Evidence', label: 'Evidence' },
+  { value: 'NotificationLetter', label: 'Notification letter' },
+  { value: 'Statement', label: 'Statement' },
+  { value: 'Report', label: 'Report' },
+  { value: 'HearingMinutes', label: 'Hearing minutes' },
+  { value: 'DecisionLetter', label: 'Decision letter' },
+  { value: 'AppealDocument', label: 'Appeal document' },
+  { value: 'LegalDocument', label: 'Legal document' },
+  { value: 'Other', label: 'Other' },
+];
+
+/**
+ * ⚠ Scope is not cosmetic — the server validates it. `ValidateDocumentScopeAsync` refuses an
+ * `ActionStep` scope with no step id, and an `Appeal` scope with no appeal id, BEFORE any bytes
+ * are stored. Choosing a scope therefore commits the form to supplying the matching id.
+ */
+export const DOCUMENT_SCOPE_OPTIONS: { value: DisciplinaryDocumentScope; label: string }[] = [
+  { value: 'Case', label: 'The case as a whole' },
+  { value: 'ActionStep', label: 'A procedure step' },
+  { value: 'Appeal', label: 'The appeal' },
+];
+
+export const NOTIFICATION_TYPE_OPTIONS: { value: DisciplinaryNotificationType; label: string }[] = [
+  { value: 'ShowCause', label: 'Show-cause / written query' },
+  { value: 'HearingNotice', label: 'Hearing notice' },
+  { value: 'InvestigationNotice', label: 'Investigation notice' },
+  { value: 'DecisionLetter', label: 'Decision letter' },
+  { value: 'WarningLetter', label: 'Warning letter' },
+  { value: 'SuspensionNotice', label: 'Suspension notice' },
+  { value: 'TerminationLetter', label: 'Termination letter' },
+  { value: 'AppealOutcomeNotice', label: 'Appeal outcome notice' },
+  { value: 'Other', label: 'Other' },
+];
+
 export const LEGAL_RISK_OPTIONS: { value: DisciplineLegalRiskLevel; label: string }[] = [
   { value: 'None', label: 'None' },
   { value: 'Low', label: 'Low' },
@@ -757,6 +792,141 @@ export interface UpdateDisciplineCorrectiveActionItem {
   completedDate?: string | null;
   status: DisciplineCorrectiveActionStatus;
   completionNotes?: string | null;
+}
+
+export interface CreateDisciplineWitness {
+  name: string;
+  /** Drives whether `employeeId` is meaningful; the server stores both as given. */
+  isEmployee: boolean;
+  employeeId?: string | null;
+  /** Ledger section E listed this as unreachable — no form could set it until now. */
+  contactInfo?: string | null;
+  statement?: string | null;
+  statementDate?: string | null;
+}
+
+export interface UpdateDisciplineWitness extends CreateDisciplineWitness {
+  id: string;
+}
+
+/** The full witness record. ⚠ The case detail carries a SUMMARY without `contactInfo`. */
+export interface DisciplineWitness {
+  id: string;
+  tenantId: string;
+  disciplinaryActionId: string;
+  caseNumber: string;
+  name: string;
+  isEmployee: boolean;
+  employeeId?: string | null;
+  employeeName?: string | null;
+  contactInfo?: string | null;
+  statement?: string | null;
+  statementDate?: string | null;
+}
+
+/**
+ * A document on the case.
+ *
+ * ⚠ **`filePath` is not a URL and never was.** Files live outside the web root behind the
+ * controlled upload gate; downloading one is a token-bearing fetch of
+ * `documents/{id}/download`, never an `href`. Rendering `filePath` as a link produces a
+ * dead link that also leaks a storage path.
+ */
+export interface DisciplineDocument {
+  id: string;
+  tenantId: string;
+  disciplinaryActionId: string;
+  caseNumber: string;
+  scope: DisciplinaryDocumentScope;
+  scopeName: string;
+  actionStepId?: string | null;
+  actionStepName?: string | null;
+  appealId?: string | null;
+  fileName: string;
+  filePath: string;
+  category: DisciplinaryDocumentCategory;
+  categoryName: string;
+  description?: string | null;
+  uploadDate: string;
+  uploadedById: string;
+  uploadedByName: string;
+}
+
+/**
+ * What the upload endpoint takes, as multipart form fields beside the file.
+ *
+ * ⚠ There is no create payload for a document without a file. `POST cases/{id}/documents` exists
+ * but rejects every file-location field, so through the API it can only mint a row naming a file
+ * that does not exist. It is left unwired deliberately — see `disciplineDocumentService`.
+ */
+export interface UploadDisciplineDocumentFields {
+  scope: DisciplinaryDocumentScope;
+  category: DisciplinaryDocumentCategory;
+  /** Required when `scope` is `ActionStep`; refused otherwise. */
+  actionStepId?: string | null;
+  /** Required when `scope` is `Appeal`. */
+  appealId?: string | null;
+  description?: string | null;
+}
+
+/** ⚠ No author field — `createdByEmployeeId` is stamped from the token (ledger D-08). */
+export interface CreateDisciplineNote {
+  note: string;
+  isConfidential: boolean;
+  noteDate?: string | null;
+}
+
+/** ⚠ Neither the author nor the date can be changed once written. */
+export interface UpdateDisciplineNote {
+  id: string;
+  note: string;
+  isConfidential: boolean;
+}
+
+export interface DisciplineNote {
+  id: string;
+  tenantId: string;
+  disciplinaryActionId: string;
+  caseNumber: string;
+  createdByEmployeeId: string;
+  createdByEmployeeName: string;
+  note: string;
+  isConfidential: boolean;
+  noteDate: string;
+}
+
+/**
+ * The full notification. ⚠ The case detail's copy is a summary — it carries `content` (added so the
+ * subject can read what they are acknowledging) but not the sender or the follow-up date.
+ */
+export interface DisciplineNotification {
+  id: string;
+  tenantId: string;
+  disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
+  notificationType: DisciplinaryNotificationType;
+  notificationTypeName: string;
+  sentDate: string;
+  content: string;
+  sentById: string;
+  sentByName: string;
+  acknowledgedDate?: string | null;
+  isAcknowledged: boolean;
+  isFollowupSent: boolean;
+  followupDate?: string | null;
+}
+
+/**
+ * ⚠ No `sentById` — server-stamped. The DTO's own remarks say why: a disciplinary notice is a
+ * document whose authorship must not be forgeable. This one was already right before the case
+ * file was built out; the note author and legal-review referrer were not.
+ */
+export interface CreateDisciplineNotification {
+  notificationType: DisciplinaryNotificationType;
+  sentDate: string;
+  content: string;
 }
 
 export interface DisciplineLegalReviewSummary {

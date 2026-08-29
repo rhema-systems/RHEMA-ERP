@@ -162,12 +162,12 @@ public class StaffDisciplineSupportController : ControllerBase
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("cases/{caseId:guid}/witnesses")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessSummaryDto>>> GetWitnesses(Guid caseId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessDto>>> GetWitnesses(Guid caseId)
         => Ok(await _witnessService.GetByCaseIdAsync(caseId));
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("cases/{caseId:guid}/witnesses/without-statement")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessSummaryDto>>> GetWitnessesWithoutStatement(Guid caseId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineWitnessDto>>> GetWitnessesWithoutStatement(Guid caseId)
         => Ok(await _witnessService.GetWithoutStatementAsync(caseId));
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
@@ -225,7 +225,7 @@ public class StaffDisciplineSupportController : ControllerBase
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("cases/{caseId:guid}/documents")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocuments(Guid caseId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentDto>>> GetDocuments(Guid caseId)
         => Ok(await _documentService.GetByCaseIdAsync(caseId));
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
@@ -247,12 +247,12 @@ public class StaffDisciplineSupportController : ControllerBase
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("action-steps/{actionStepId:guid}/documents")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocumentsByActionStep(Guid actionStepId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentDto>>> GetDocumentsByActionStep(Guid actionStepId)
         => Ok(await _documentService.GetByActionStepIdAsync(actionStepId));
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("appeals/{appealId:guid}/documents")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentSummaryDto>>> GetDocumentsByAppeal(Guid appealId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineDocumentDto>>> GetDocumentsByAppeal(Guid appealId)
         => Ok(await _documentService.GetByAppealIdAsync(appealId));
 
     [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
@@ -366,7 +366,8 @@ public class StaffDisciplineSupportController : ControllerBase
                     DocumentVersionId = document.DocumentVersionId,
                     Category = category,
                     Description = description,
-                    UploadedById = employeeId.Value,
+                    // UploadedById is no longer on the DTO — the mapper stamps it from the userId
+                    // argument below, which is this same employeeId.
                     UploadDate = DateTime.UtcNow
                 },
                 tenantId.Value, employeeId.Value, ct);
@@ -438,7 +439,7 @@ public class StaffDisciplineSupportController : ControllerBase
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("cases/{caseId:guid}/notes")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineNoteSummaryDto>>> GetNotes(
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNoteDto>>> GetNotes(
         Guid caseId, [FromQuery] bool includeConfidential = true)
         => Ok(await _noteService.GetByCaseIdAsync(caseId, includeConfidential));
 
@@ -497,12 +498,12 @@ public class StaffDisciplineSupportController : ControllerBase
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("cases/{caseId:guid}/notifications")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationSummaryDto>>> GetNotifications(Guid caseId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationDto>>> GetNotifications(Guid caseId)
         => Ok(await _notificationService.GetByCaseIdAsync(caseId));
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]
     [HttpGet("cases/{caseId:guid}/notifications/unacknowledged")]
-    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationSummaryDto>>> GetUnacknowledgedNotifications(Guid caseId)
+    public async Task<ActionResult<IEnumerable<StaffDisciplineNotificationDto>>> GetUnacknowledgedNotifications(Guid caseId)
         => Ok(await _notificationService.GetUnacknowledgedAsync(caseId));
 
     [Authorize(Policy = HrPermissions.DisciplineReadPolicy)]

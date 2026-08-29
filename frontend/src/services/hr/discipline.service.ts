@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   DisciplinaryCase,
@@ -31,6 +32,16 @@ import type {
   DisciplineCorrectiveActionItem,
   CreateDisciplineCorrectiveActionItem,
   UpdateDisciplineCorrectiveActionItem,
+  DisciplineWitness,
+  CreateDisciplineWitness,
+  UpdateDisciplineWitness,
+  DisciplineDocument,
+  UploadDisciplineDocumentFields,
+  DisciplineNote,
+  CreateDisciplineNote,
+  UpdateDisciplineNote,
+  DisciplineNotification,
+  CreateDisciplineNotification,
 } from '@/types/hr/discipline';
 
 /**
@@ -533,6 +544,193 @@ class DisciplineCorrectiveActionService {
   }
 }
 
+/**
+ * People who saw what happened, and what they said.
+ *
+ * ⚠ **`isEmployee` and `employeeId` are two fields, and the server trusts both as given.** Nothing
+ * clears `employeeId` when `isEmployee` is false, so a row can claim to be external while still
+ * pointing at a staff record. The panel keeps them consistent.
+ *
+ * ⚠ **The case detail's copy is a summary without `contactInfo`** — the one field the closure
+ * ledger listed as unreachable on both the create and update DTOs. Use `getForCase` for the record.
+ */
+class DisciplineWitnessService {
+  private readonly base = '/discipline';
+
+  getForCase(caseId: string): Promise<DisciplineWitness[]> {
+    return apiService.get<DisciplineWitness[]>(`${this.base}/cases/${caseId}/witnesses`);
+  }
+
+  /** Those still owing a statement — the follow-up list. */
+  getWithoutStatement(caseId: string): Promise<DisciplineWitness[]> {
+    return apiService.get<DisciplineWitness[]>(`${this.base}/cases/${caseId}/witnesses/without-statement`);
+  }
+
+  getById(id: string): Promise<DisciplineWitness> {
+    return apiService.get<DisciplineWitness>(`${this.base}/witnesses/${id}`);
+  }
+
+  add(caseId: string, payload: CreateDisciplineWitness): Promise<DisciplineWitness> {
+    return apiService.post<DisciplineWitness>(`${this.base}/cases/${caseId}/witnesses`, payload);
+  }
+
+  update(id: string, payload: Omit<UpdateDisciplineWitness, 'id'>): Promise<DisciplineWitness> {
+    return apiService.put<DisciplineWitness>(`${this.base}/witnesses/${id}`, { id, ...payload });
+  }
+
+  /** ⚠ Admin-tier. */
+  remove(id: string) {
+    return apiService.delete(`${this.base}/witnesses/${id}`);
+  }
+}
+
+/**
+ * The case's documents.
+ *
+ * ⚠ **Files go through the controlled gate, and only through it.** `upload` is multipart; the file
+ * is scanned, registered in the DMS and stored outside the web root. There is a second route,
+ * `POST cases/{id}/documents`, which this service deliberately does NOT expose: it rejects every
+ * file-location field the caller could send, so through the API it can only create a row naming a
+ * file that does not exist. It survives for the legacy migration utility, not for screens.
+ *
+ * ⚠ **`filePath` is not a URL.** Download is a token-bearing fetch of `documents/{id}/download`,
+ * never an `href` — the stored path is a server-side location and rendering it as a link both
+ * fails and leaks.
+ *
+ * ⚠ **The scope is validated before any bytes are stored.** `ActionStep` demands an action-step id
+ * and `Appeal` an appeal id; an incoherent pair is a 400 with a message, not a silent default.
+ */
+class DisciplineDocumentService {
+  private readonly base = '/discipline';
+
+  getForCase(caseId: string): Promise<DisciplineDocument[]> {
+    return apiService.get<DisciplineDocument[]>(`${this.base}/cases/${caseId}/documents`);
+  }
+
+  getForActionStep(actionStepId: string): Promise<DisciplineDocument[]> {
+    return apiService.get<DisciplineDocument[]>(`${this.base}/action-steps/${actionStepId}/documents`);
+  }
+
+  getForAppeal(appealId: string): Promise<DisciplineDocument[]> {
+    return apiService.get<DisciplineDocument[]>(`${this.base}/appeals/${appealId}/documents`);
+  }
+
+  getById(id: string): Promise<DisciplineDocument> {
+    return apiService.get<DisciplineDocument>(`${this.base}/documents/${id}`);
+  }
+
+  /** ⚠ Multipart, 10 MB cap, scanned. The only supported way to attach a file. */
+  upload(caseId: string, file: File, fields: UploadDisciplineDocumentFields): Promise<DisciplineDocument> {
+    return hrDocumentService.upload<DisciplineDocument>(
+      `${this.base}/cases/${caseId}/documents/upload`,
+      file,
+      {
+        scope: fields.scope,
+        category: fields.category,
+        actionStepId: fields.actionStepId ?? undefined,
+        appealId: fields.appealId ?? undefined,
+        description: fields.description ?? undefined,
+      },
+    );
+  }
+
+  /** Streams the file with the bearer token attached and saves it under its own name. */
+  download(id: string, fileName: string): Promise<void> {
+    return hrDocumentService.download(`${this.base}/documents/${id}/download`, fileName);
+  }
+
+  /** ⚠ Admin-tier. */
+  remove(id: string) {
+    return apiService.delete(`${this.base}/documents/${id}`);
+  }
+}
+
+/**
+ * HR's own notes on the case.
+ *
+ * ⚠ **The author is stamped from the token** and the create payload has no field for it. It used
+ * to be accepted from the body and copied verbatim, so a note could be attributed to a colleague —
+ * on a record that is evidence of what HR knew and when. Ledger D-08.
+ *
+ * ⚠ **`isConfidential` is honoured by the reads.** A confidential note is withheld from the case's
+ * subject, so the flag is a disclosure decision rather than a label.
+ */
+class DisciplineNoteService {
+  private readonly base = '/discipline';
+
+  getForCase(caseId: string): Promise<DisciplineNote[]> {
+    return apiService.get<DisciplineNote[]>(`${this.base}/cases/${caseId}/notes`);
+  }
+
+  getById(id: string): Promise<DisciplineNote> {
+    return apiService.get<DisciplineNote>(`${this.base}/notes/${id}`);
+  }
+
+  add(caseId: string, payload: CreateDisciplineNote): Promise<DisciplineNote> {
+    return apiService.post<DisciplineNote>(`${this.base}/cases/${caseId}/notes`, payload);
+  }
+
+  /** ⚠ Only the text and the confidentiality flag — neither author nor date can be rewritten. */
+  update(id: string, payload: Omit<UpdateDisciplineNote, 'id'>): Promise<DisciplineNote> {
+    return apiService.put<DisciplineNote>(`${this.base}/notes/${id}`, { id, ...payload });
+  }
+
+  /** ⚠ Admin-tier. */
+  remove(id: string) {
+    return apiService.delete(`${this.base}/notes/${id}`);
+  }
+}
+
+/**
+ * Formal notices issued to the subject of the case.
+ *
+ * ⚠ **Acknowledgement is the SUBJECT's act and nobody else's.** `AcknowledgeAsync` throws
+ * "Only the employee a notification was issued to can acknowledge it" — so an HR screen must show
+ * the acknowledged state and must NOT offer a button to set it. Offering one would put a control
+ * in front of the only people guaranteed to be refused by it.
+ *
+ * ⚠ **There is no update and no delete.** A notice, once issued, is a fact about what the employee
+ * was told; the follow-up is a second notice rather than an edit to the first.
+ *
+ * ⚠ **`sentById` is server-stamped** and absent from the create payload — this one was already
+ * correct, unlike the note author and the legal-review referrer.
+ */
+class DisciplineNotificationService {
+  private readonly base = '/discipline';
+
+  getForCase(caseId: string): Promise<DisciplineNotification[]> {
+    return apiService.get<DisciplineNotification[]>(`${this.base}/cases/${caseId}/notifications`);
+  }
+
+  getUnacknowledged(caseId: string): Promise<DisciplineNotification[]> {
+    return apiService.get<DisciplineNotification[]>(`${this.base}/cases/${caseId}/notifications/unacknowledged`);
+  }
+
+  getById(id: string): Promise<DisciplineNotification> {
+    return apiService.get<DisciplineNotification>(`${this.base}/notifications/${id}`);
+  }
+
+  send(caseId: string, payload: CreateDisciplineNotification): Promise<DisciplineNotification> {
+    return apiService.post<DisciplineNotification>(`${this.base}/cases/${caseId}/notifications`, payload);
+  }
+
+  /**
+   * ⚠ For the SUBJECT's own surface only — HR is refused. Kept here so a self-service screen has
+   * it, and deliberately not called by the HR case panel.
+   */
+  acknowledge(id: string) {
+    return apiService.post(`${this.base}/notifications/${id}/acknowledge`, { notificationId: id });
+  }
+
+  /** Chases an unacknowledged notice. `followupDate` defaults to now on the server. */
+  sendFollowup(id: string, followupDate?: string) {
+    return apiService.post(`${this.base}/notifications/${id}/followup`, {
+      notificationId: id,
+      ...(followupDate ? { followupDate } : {}),
+    });
+  }
+}
+
 export const disciplineService = new DisciplineService();
 export const disciplineAppealService = new DisciplineAppealService();
 export const disciplineProcessService = new DisciplineProcessService();
@@ -540,3 +738,7 @@ export const disciplineLookupService = new DisciplineLookupService();
 export const disciplineActionStepService = new DisciplineActionStepService();
 export const disciplineLegalReviewService = new DisciplineLegalReviewService();
 export const disciplineCorrectiveActionService = new DisciplineCorrectiveActionService();
+export const disciplineWitnessService = new DisciplineWitnessService();
+export const disciplineDocumentService = new DisciplineDocumentService();
+export const disciplineNoteService = new DisciplineNoteService();
+export const disciplineNotificationService = new DisciplineNotificationService();

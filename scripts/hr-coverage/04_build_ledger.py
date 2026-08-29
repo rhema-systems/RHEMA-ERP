@@ -195,14 +195,34 @@ BLOCKERS = [
      "than removed, unlike the legal-review referrer, because correcting a mis-attributed step is "
      "a legitimate HR act and no screen exposes it — but it is an act-as-anyone vector on paper.",
      "Was making the panel's \"By\" column permanently empty — cleared"),
-    ("D-06", "Four discipline case-file collections are still displayed but unrecordable", "OPEN",
-     "`StaffDisciplineCaseDetailDto` carries six collections. Action steps and legal reviews were "
-     "built out on 2026-08-29; **witnesses, documents, notes and notifications were not**. The "
-     "first three render as read-only tables with \"None have been recorded\" empty states and no "
-     "add affordance, and notifications are not rendered at all — the same shape the ledger "
-     "already named twice, on the same screen. Not a blocker for anything built so far; recorded "
-     "so the case file is finished deliberately rather than left half-authorable.",
-     "Nothing — but the case file now reads inconsistently until they are done"),
+    ("D-06", "Four discipline case-file collections were displayed but unrecordable", "DONE 2026-08-29",
+     "`StaffDisciplineCaseDetailDto` carries six collections; only two were built out in the first "
+     "pass. Witnesses, documents, notes and notifications are now authorable too, so the case file "
+     "is complete. Documents go through the controlled upload gate only — the metadata-only route "
+     "is left unwired because it rejects every file-location field and can therefore only mint a "
+     "row naming a file that does not exist.",
+     "Was leaving the case file half-authorable — cleared"),
+    ("D-09", "Four per-case reads returned summaries a panel could not edit from", "DONE 2026-08-29",
+     "`cases/{id}/witnesses`, `/notes`, `/documents` and `/notifications` returned `...SummaryDto` "
+     "projections. The witness summary has no `ContactInfo`; the note summary carries a "
+     "**100-character excerpt** instead of the note; documents drop `Description` and "
+     "`ActionStepName`; notifications drop `SentByName` and `FollowupDate`. Every panel built on "
+     "them rendered permanently blank columns, and the witness edit form would have wiped "
+     "`ContactInfo` on every save. Legal reviews already returned the full DTO from their per-case "
+     "read — the pattern existed and four collections had not followed it. The eight per-case "
+     "reads now return the record; the cross-case reads (by-author, pending-followup, by-scope, "
+     "by-category, by-employee) stay on summaries because they feed lists and the reminder sweep. "
+     "The rule: **a per-case read feeds a panel that must edit; a cross-case read feeds a list.** "
+     "**Needs a backend rebuild.**",
+     "Was making four new panels render blank columns — cleared"),
+    ("D-08", "Note author and document uploader were assertable by the request body", "DONE 2026-08-29",
+     "Third and fourth instances of the D-05 shape, found by checking every create mapper in the "
+     "family rather than waiting for a probe to fail. `StaffDisciplineNote.CreatedByEmployeeId` "
+     "and `StaffDisciplineDocument.UploadedById` were copied from the DTO while the token's "
+     "employee id went only to `CreatedBy`. Notifications were **already correct** — `SentById` is "
+     "server-stamped and the DTO says why — which is what showed the other two were not. Both "
+     "fields are now stamped from the token and removed from their create DTOs.",
+     "Was letting a case note be attributed to a colleague — cleared"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "
@@ -263,6 +283,10 @@ w("| 2026-08-29 | Job Analysis: the twelve child collections are now authored fr
 w("| 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |")
 w("| 2026-08-29 | Discipline: the procedure steps, legal reviews and corrective action plan are now authorable from the case screen. The **sanctions stay read-only** — warning, suspension, fine and termination are blocked on FR-HR-080's issuing-authority rule, which is the original and still-valid reason. Investigation and hearing are read-only only because nobody has built their editors. |")
 w("| 2026-08-29 | Legal-review `referredById` is now stamped from the token and removed from the create DTO (D-05). |")
+w("| 2026-08-29 | The discipline case file is complete: witnesses, documents, notes and notices are authorable alongside the procedure steps, legal reviews and corrective action plan. Documents go through the controlled upload gate only. |")
+w("| 2026-08-29 | **A per-case read returns the record; a cross-case read returns a summary.** Four per-case reads were returning projections that dropped the very fields their panels had to edit — the note one truncated at 100 characters. Eight reads converted (D-09). |")
+w("| 2026-08-29 | Notices are issue-and-chase only, and carry **no acknowledge control on the HR screen**: the API refuses anyone but the employee the notice was issued to. |")
+w("| 2026-08-29 | Two Discipline boxes stay unticked **by explanation, not omission**. `POST cases/{}/documents` is deliberately unwired — it rejects every file-location field, so through the API it can only mint a row naming a file that does not exist; it survives for the legacy migration utility. `POST cases/{}/documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — instrument 01 cannot resolve a path passed to a helper, the same artefact that makes EmployeesController read 73/81. |")
 w("")
 
 w("## B. Blockers — must clear before the dependent build starts")

@@ -791,7 +791,10 @@ public static class StaffDisciplineMappingExtensions
             Category = dto.Category,
             Description = dto.Description,
             UploadDate = dto.UploadDate,
-            UploadedById = dto.UploadedById,
+            // The actor, not a claim in the body. The upload endpoint already passed its own
+            // token-derived id here, so this changes nothing for it — but the metadata-only route
+            // took whatever the caller named. See the note on the DTO.
+            UploadedById = userId,
             CreatedBy = userId.ToString(),
         };
     }
@@ -845,7 +848,9 @@ public static class StaffDisciplineMappingExtensions
         {
             TenantId = tenantId,
             DisciplinaryActionId = dto.DisciplinaryActionId,
-            CreatedByEmployeeId = dto.CreatedByEmployeeId,
+            // The author, not a claim in the body. A case note is evidence of what HR knew and
+            // when; its authorship must not be assertable by whoever posts it.
+            CreatedByEmployeeId = userId,
             Note = dto.Note,
             IsConfidential = dto.IsConfidential,
             NoteDate = dto.NoteDate,

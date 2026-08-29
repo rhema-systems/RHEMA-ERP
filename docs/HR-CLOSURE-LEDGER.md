@@ -13,10 +13,10 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2148 |
-| Wired to a screen | 1729 |
-| No caller found (instrument 01) | 419 |
+| Wired to a screen | 1738 |
+| No caller found (instrument 01) | 410 |
 | Confirmed unreachable (01 ∩ 02) | 34 |
-| Write-DTO fields no form can set | 104 across 48 DTOs |
+| Write-DTO fields no form can set | 101 across 45 DTOs |
 
 ## A. Decisions taken
 
@@ -30,6 +30,10 @@ yet classified.
 | 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |
 | 2026-08-29 | Discipline: the procedure steps, legal reviews and corrective action plan are now authorable from the case screen. The **sanctions stay read-only** — warning, suspension, fine and termination are blocked on FR-HR-080's issuing-authority rule, which is the original and still-valid reason. Investigation and hearing are read-only only because nobody has built their editors. |
 | 2026-08-29 | Legal-review `referredById` is now stamped from the token and removed from the create DTO (D-05). |
+| 2026-08-29 | The discipline case file is complete: witnesses, documents, notes and notices are authorable alongside the procedure steps, legal reviews and corrective action plan. Documents go through the controlled upload gate only. |
+| 2026-08-29 | **A per-case read returns the record; a cross-case read returns a summary.** Four per-case reads were returning projections that dropped the very fields their panels had to edit — the note one truncated at 100 characters. Eight reads converted (D-09). |
+| 2026-08-29 | Notices are issue-and-chase only, and carry **no acknowledge control on the HR screen**: the API refuses anyone but the employee the notice was issued to. |
+| 2026-08-29 | Two Discipline boxes stay unticked **by explanation, not omission**. `POST cases/{}/documents` is deliberately unwired — it rejects every file-location field, so through the API it can only mint a row naming a file that does not exist; it survives for the legacy migration utility. `POST cases/{}/documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — instrument 01 cannot resolve a path passed to a helper, the same artefact that makes EmployeesController read 73/81. |
 
 ## B. Blockers — must clear before the dependent build starts
 
@@ -63,11 +67,23 @@ yet classified.
 
   _Was making the panel's "By" column permanently empty — cleared_
 
-- [ ] **D-06 — Four discipline case-file collections are still displayed but unrecordable** · `OPEN`
+- [x] **D-06 — Four discipline case-file collections were displayed but unrecordable** · `DONE 2026-08-29`
 
-  `StaffDisciplineCaseDetailDto` carries six collections. Action steps and legal reviews were built out on 2026-08-29; **witnesses, documents, notes and notifications were not**. The first three render as read-only tables with "None have been recorded" empty states and no add affordance, and notifications are not rendered at all — the same shape the ledger already named twice, on the same screen. Not a blocker for anything built so far; recorded so the case file is finished deliberately rather than left half-authorable.
+  `StaffDisciplineCaseDetailDto` carries six collections; only two were built out in the first pass. Witnesses, documents, notes and notifications are now authorable too, so the case file is complete. Documents go through the controlled upload gate only — the metadata-only route is left unwired because it rejects every file-location field and can therefore only mint a row naming a file that does not exist.
 
-  _Nothing — but the case file now reads inconsistently until they are done_
+  _Was leaving the case file half-authorable — cleared_
+
+- [x] **D-09 — Four per-case reads returned summaries a panel could not edit from** · `DONE 2026-08-29`
+
+  `cases/{id}/witnesses`, `/notes`, `/documents` and `/notifications` returned `...SummaryDto` projections. The witness summary has no `ContactInfo`; the note summary carries a **100-character excerpt** instead of the note; documents drop `Description` and `ActionStepName`; notifications drop `SentByName` and `FollowupDate`. Every panel built on them rendered permanently blank columns, and the witness edit form would have wiped `ContactInfo` on every save. Legal reviews already returned the full DTO from their per-case read — the pattern existed and four collections had not followed it. The eight per-case reads now return the record; the cross-case reads (by-author, pending-followup, by-scope, by-category, by-employee) stay on summaries because they feed lists and the reminder sweep. The rule: **a per-case read feeds a panel that must edit; a cross-case read feeds a list.** **Needs a backend rebuild.**
+
+  _Was making four new panels render blank columns — cleared_
+
+- [x] **D-08 — Note author and document uploader were assertable by the request body** · `DONE 2026-08-29`
+
+  Third and fourth instances of the D-05 shape, found by checking every create mapper in the family rather than waiting for a probe to fail. `StaffDisciplineNote.CreatedByEmployeeId` and `StaffDisciplineDocument.UploadedById` were copied from the DTO while the token's employee id went only to `CreatedBy`. Notifications were **already correct** — `SentById` is server-stamped and the DTO says why — which is what showed the other two were not. Both fields are now stamped from the token and removed from their create DTOs.
+
+  _Was letting a case note be attributed to a colleague — cleared_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -396,7 +412,7 @@ measures; reads are listed for completeness and are checked the same way.
 - [ ] `GET    api/JobAnalysis/positions/uncovered`
 - [ ] `GET    api/JobAnalysis/responsibilities/{}/kpis`
 
-### Discipline — case file support — 9 of 20 writes wired
+### Discipline — case file support — 18 of 20 writes wired
 
 **Writes**
 
@@ -407,19 +423,19 @@ measures; reads are listed for completeness and are checked the same way.
 - [ ] `POST   api/discipline/cases/{}/documents`
 - [ ] `POST   api/discipline/cases/{}/documents/upload`
 - [x] `POST   api/discipline/cases/{}/legal-reviews`
-- [ ] `POST   api/discipline/cases/{}/notes`
-- [ ] `POST   api/discipline/cases/{}/notifications`
-- [ ] `POST   api/discipline/cases/{}/witnesses`
-- [ ] `DELETE api/discipline/documents/{}`
+- [x] `POST   api/discipline/cases/{}/notes`
+- [x] `POST   api/discipline/cases/{}/notifications`
+- [x] `POST   api/discipline/cases/{}/witnesses`
+- [x] `DELETE api/discipline/documents/{}`
 - [x] `DELETE api/discipline/legal-reviews/{}`
 - [x] `PUT    api/discipline/legal-reviews/{}`
 - [x] `POST   api/discipline/legal-reviews/{}/complete`
-- [ ] `DELETE api/discipline/notes/{}`
-- [ ] `PUT    api/discipline/notes/{}`
+- [x] `DELETE api/discipline/notes/{}`
+- [x] `PUT    api/discipline/notes/{}`
 - [x] `POST   api/discipline/notifications/{}/acknowledge`
-- [ ] `POST   api/discipline/notifications/{}/followup`
-- [ ] `DELETE api/discipline/witnesses/{}`
-- [ ] `PUT    api/discipline/witnesses/{}`
+- [x] `POST   api/discipline/notifications/{}/followup`
+- [x] `DELETE api/discipline/witnesses/{}`
+- [x] `PUT    api/discipline/witnesses/{}`
 
 **Reads**
 
@@ -564,7 +580,6 @@ move the real ones into section C's disposition map.
 | StaffDisciplineSubEntity | 15 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
 | Assets | 12 | 63 | `REVIEW` |  |
-| StaffDisciplineSupport | 11 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
 | MedicalInsurance | 10 | 23 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
@@ -602,6 +617,7 @@ move the real ones into section C's disposition map.
 | PublicRecruitment | 2 | 3 | `BUILD` | Public job board / anonymous apply. |
 | Separations | 2 | 31 | `BUILD` | Clearance — refresh assets. |
 | StaffDemotions | 2 | 4 | `REVIEW` |  |
+| StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `REVIEW` | summaries/by-ids looks like an internal batch read. |
 | StaffTravelPolicies | 2 | 10 | `REVIEW` |  |
 | AppraisalNotifications | 1 | 3 | `REVIEW` |  |
@@ -687,9 +703,6 @@ missing — the class an endpoint audit cannot see.
 | `UpdateStaffActingAppointmentDto` | 1 of 6 | AllowanceCalculation |
 | `CreateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
 | `UpdateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
-| `CreateStaffDisciplineWitnessDto` | 1 of 7 | ContactInfo |
-| `UpdateStaffDisciplineWitnessDto` | 1 of 6 | ContactInfo |
-| `CreateStaffDisciplineNoteDto` | 1 of 5 | CreatedByEmployeeId |
 | `CreateSuccessionActionDto` | 1 of 9 | DependsOnActionId |
 
 ## F. Demo-feedback backlog

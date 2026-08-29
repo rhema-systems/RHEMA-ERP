@@ -32,6 +32,10 @@ import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate'
 import { ActionStepsPanel } from '@/components/hr/discipline/ActionStepsPanel';
 import { LegalReviewsPanel } from '@/components/hr/discipline/LegalReviewsPanel';
 import { CorrectiveActionPanel } from '@/components/hr/discipline/CorrectiveActionPanel';
+import { WitnessesPanel } from '@/components/hr/discipline/WitnessesPanel';
+import { CaseDocumentsPanel } from '@/components/hr/discipline/CaseDocumentsPanel';
+import { CaseNotesPanel } from '@/components/hr/discipline/CaseNotesPanel';
+import { NotificationsPanel } from '@/components/hr/discipline/NotificationsPanel';
 import { disciplineService, disciplineLookupService, disciplineAppealService } from '@/services/hr/discipline.service';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
@@ -656,121 +660,37 @@ export default function DisciplineCaseDetailPage() {
         </TabsContent>
 
         <TabsContent value="record" className="space-y-4 pt-4">
-          <Card>
-            <CardHeader><CardTitle>Witnesses</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              {detail.witnesses.length === 0 ? (
-                <EmptyState title="No witnesses" description="None have been recorded." />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Employee</TableHead>
-                      <TableHead>Statement</TableHead>
-                      <TableHead>Dated</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detail.witnesses.map((w) => (
-                      <TableRow key={w.id}>
-                        <TableCell>{w.name}</TableCell>
-                        <TableCell>{w.isEmployee ? 'Employee' : 'External'}</TableCell>
-                        <TableCell>{w.hasStatement ? 'On file' : 'Outstanding'}</TableCell>
-                        <TableCell>{fmtDate(w.statementDate)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          {/*
+            The case file, in the order an investigator builds one: who was asked, what was put to
+            them formally, what was collected, and what HR thought about it.
+          */}
+          <WitnessesPanel
+            caseId={id}
+            canWrite={canWriteDiscipline}
+            canDelete={canAdminDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
 
-          <Card>
-            <CardHeader><CardTitle>Documents</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              {detail.documents.length === 0 ? (
-                <EmptyState title="No documents" description="Nothing has been attached to this case." />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Document</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Uploaded</TableHead>
-                      <TableHead>By</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detail.documents.map((d) => (
-                      <TableRow key={d.id}>
-                        <TableCell>{d.fileName}</TableCell>
-                        <TableCell>{d.categoryName}</TableCell>
-                        <TableCell>{fmtDate(d.uploadDate)}</TableCell>
-                        <TableCell>{d.uploadedByName || '—'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <NotificationsPanel
+            caseId={id}
+            canWrite={canWriteDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
 
-          <Card>
-            <CardHeader><CardTitle>Notices issued</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              {detail.notifications.length === 0 ? (
-                <EmptyState title="No notices" description="Nothing has been issued to the employee on this case." />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Sent</TableHead>
-                      <TableHead>Acknowledged</TableHead>
-                      <TableHead>Follow-up</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detail.notifications.map((n) => (
-                      <TableRow key={n.id}>
-                        <TableCell>{n.notificationTypeName}</TableCell>
-                        <TableCell>{fmtDate(n.sentDate)}</TableCell>
-                        <TableCell>
-                          {n.isAcknowledged
-                            ? 'Acknowledged'
-                            : <span className="text-muted-foreground">Not yet</span>}
-                        </TableCell>
-                        <TableCell>{n.isFollowupSent ? 'Follow-up sent' : '—'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <CaseDocumentsPanel
+            caseId={id}
+            appealId={detail.appeal?.id ?? null}
+            canWrite={canWriteDiscipline}
+            canDelete={canAdminDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
 
-          <Card>
-            <CardHeader><CardTitle>Case notes</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {detail.notes.length === 0 ? (
-                <EmptyState title="No notes" description="Nothing has been recorded against this case." />
-              ) : (
-                detail.notes.map((n) => (
-                  <div key={n.id} className="rounded-md border p-3">
-                    <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>{n.createdByEmployeeName || 'Unknown'}</span>
-                      <span>·</span>
-                      <span>{fmtDate(n.noteDate)}</span>
-                      {n.isConfidential && <StatusBadge status="Confidential" />}
-                    </div>
-                    {/* An excerpt, not the whole note — the case-file read returns summaries. */}
-                    <p className="whitespace-pre-wrap text-sm">{n.noteExcerpt}</p>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
+          <CaseNotesPanel
+            caseId={id}
+            canWrite={canWriteDiscipline}
+            canDelete={canAdminDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
         </TabsContent>
 
         <TabsContent value="appeal" className="space-y-4 pt-4">

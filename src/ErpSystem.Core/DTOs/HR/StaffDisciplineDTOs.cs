@@ -1025,8 +1025,10 @@ public class CreateStaffDisciplineDocumentDto : CreateDtoBase
     [MaxLength(500)]
     public string? Description { get; set; }
 
-    [Required]
-    public Guid UploadedById { get; set; }
+    // UploadedById is deliberately absent — stamped from the caller's token in the mapper. The
+    // upload endpoint had always passed its own token-derived id, but the metadata-only route
+    // accepted whatever the body named, so a document could be attributed to someone who never
+    // touched it. Same defect class as the legal-review referrer (ledger D-05).
 
     public DateTime UploadDate { get; set; } = DateTime.UtcNow;
 }
@@ -1065,8 +1067,10 @@ public class CreateStaffDisciplineNoteDto : CreateDtoBase
     [Required]
     public Guid DisciplinaryActionId { get; set; }
 
-    [Required]
-    public Guid CreatedByEmployeeId { get; set; }
+    // CreatedByEmployeeId is deliberately absent — stamped from the caller's token in the mapper.
+    // It was accepted here and copied onto the entity verbatim while the token's employee id went
+    // only to CreatedBy, so a case note could be attributed to a colleague. No caller ever sent it
+    // (section E of the closure ledger listed it as unreachable). Ledger D-08.
 
     [Required]
     [MaxLength(4000)]

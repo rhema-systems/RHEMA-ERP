@@ -141,6 +141,9 @@ public class StaffDisciplineDocumentRepository : GenericRepository<StaffDiscipli
         _dbSet
             .Where(d => d.TenantId == tenantId && !d.IsDeleted)
             .Include(d => d.UploadedBy)
+            // ActionStepName resolves through the step to its offence procedure. Without this the
+            // full DTO's step name is silently null and the case screen shows a blank column.
+            .Include(d => d.ActionStep).ThenInclude(s => s!.OffenseProcedure)
             .Include(d => d.DisciplinaryAction).ThenInclude(a => a.Employee);
 
     public async Task<IEnumerable<StaffDisciplineDocument>> GetByCaseIdAsync(Guid tenantId, Guid caseId)

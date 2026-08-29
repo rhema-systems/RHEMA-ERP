@@ -43,9 +43,9 @@ public interface IStaffDisciplineActionStepService
 public interface IStaffDisciplineWitnessService
 {
     Task<StaffDisciplineWitnessDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineWitnessDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetByEmployeeWitnessAsync(Guid employeeId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetWithoutStatementAsync(Guid caseId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineWitnessDto>> GetWithoutStatementAsync(Guid caseId, CancellationToken cancellationToken = default);
 
     Task<StaffDisciplineWitnessDto> AddAsync(CreateStaffDisciplineWitnessDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<StaffDisciplineWitnessDto> UpdateAsync(UpdateStaffDisciplineWitnessDto dto, Guid userId, CancellationToken cancellationToken = default);
@@ -63,10 +63,10 @@ public interface IStaffDisciplineWitnessService
 public interface IStaffDisciplineDocumentService
 {
     Task<StaffDisciplineDocumentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineDocumentDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByScopeAsync(Guid caseId, DisciplinaryDocumentScope scope, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByActionStepIdAsync(Guid actionStepId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByAppealIdAsync(Guid appealId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineDocumentDto>> GetByActionStepIdAsync(Guid actionStepId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineDocumentDto>> GetByAppealIdAsync(Guid appealId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByCategoryAsync(Guid caseId, DisciplinaryDocumentCategory category, CancellationToken cancellationToken = default);
 
     Task<StaffDisciplineDocumentDto> AddAsync(CreateStaffDisciplineDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
@@ -108,7 +108,7 @@ public interface IStaffDisciplineNoteService
     /// <param name="includeConfidential">
     /// Set to <c>false</c> for non-HR roles that must not see confidential notes.
     /// </param>
-    Task<IEnumerable<StaffDisciplineNoteSummaryDto>> GetByCaseIdAsync(Guid caseId, bool includeConfidential = true, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineNoteDto>> GetByCaseIdAsync(Guid caseId, bool includeConfidential = true, CancellationToken cancellationToken = default);
 
     Task<IEnumerable<StaffDisciplineNoteSummaryDto>> GetByAuthorAsync(Guid employeeId, CancellationToken cancellationToken = default);
 
@@ -128,8 +128,8 @@ public interface IStaffDisciplineNoteService
 public interface IStaffDisciplineNotificationService
 {
     Task<StaffDisciplineNotificationDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetUnacknowledgedAsync(Guid caseId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineNotificationDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffDisciplineNotificationDto>> GetUnacknowledgedAsync(Guid caseId, CancellationToken cancellationToken = default);
 
     /// <summary>Returns notifications pending a follow-up (sent &gt; <paramref name="daysOld"/> days ago, unacknowledged, no follow-up sent).</summary>
     Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetPendingFollowupAsync(int daysOld = 3, CancellationToken cancellationToken = default);
