@@ -609,6 +609,13 @@ public class SuccessionDocumentRepository : GenericRepository<SuccessionDocument
 {
     public SuccessionDocumentRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<SuccessionDocument?> GetByIdWithUploaderAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(d => d.UploadedBy)
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted);
+    }
+
     public async Task<IEnumerable<SuccessionDocument>> GetByPlanIdAsync(Guid planId)
     {
         return await _dbSet

@@ -724,7 +724,12 @@ public class SuccessionPlanService : ISuccessionPlanService
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the uploader resolved. Mapping `entity` directly returns a row whose
+        // uploadedByName is blank, because a just-added entity has no navigation loaded — the
+        // create response would disagree with the list read that follows it.
+        var saved = await _documentRepository.GetByIdWithUploaderAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -1881,7 +1886,12 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the uploader resolved. Mapping `entity` directly returns a row whose
+        // uploadedByName is blank, because a just-added entity has no navigation loaded — the
+        // create response would disagree with the list read that follows it.
+        var saved = await _documentRepository.GetByIdWithUploaderAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default)
@@ -2596,7 +2606,12 @@ public class TalentPoolService : ITalentPoolService
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the uploader resolved. Mapping `entity` directly returns a row whose
+        // uploadedByName is blank, because a just-added entity has no navigation loaded — the
+        // create response would disagree with the list read that follows it.
+        var saved = await _documentRepository.GetByIdWithUploaderAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForMemberAsync(Guid memberId, CancellationToken cancellationToken = default)

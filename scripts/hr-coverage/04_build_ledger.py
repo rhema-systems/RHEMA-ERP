@@ -891,7 +891,16 @@ BLOCKERS = [
      "rather than a filter and a blind download would hand back through one door what the other "
      "withholds; and the NHIS upload checks the claim's tenant before storing bytes, because "
      "`AddClaimDocumentAsync` checks the tenant but never the claim, so the FK alone was "
-     "deciding. **Needs a backend rebuild and a database update.**",
+     "deciding.\n\n"
+     "  **Verified against the running API, 2026-08-29** — `hr-succession/run-slice13.mjs` (36 "
+     "assertions) and `hr-medical/run-slice5-actors-and-nhis-documents.mjs` (34), both green. The "
+     "run earned its keep: **`uploadedByName` came back empty on the create response** while every "
+     "per-parent read resolved it. All three writers mapped a freshly-added entity whose "
+     "`UploadedBy` navigation had never been loaded — the stale-nav-on-a-write-response shape — so "
+     "a panel binding \"Uploaded by\" would have shown blank on the row it had just created and "
+     "correct after a refetch. Reading the code did not find it; the assertion did. Fixed with "
+     "`ISuccessionDocumentRepository.GetByIdWithUploaderAsync`, re-read in all three writers "
+     "before mapping.",
      "Was blocking 8 of the queue's BUILD endpoints — cleared"),
     ("D-15", "Succession document uploader was assertable by the request body", "DONE 2026-08-29",
      "The fifth instance of the D-05 shape, and it travels with D-14. "
@@ -930,9 +939,28 @@ BLOCKERS = [
      "⚠ Residue: `CancelPolicyAsync`, `UpdateInsuranceClaimStatusAsync` and NHIS "
      "`UpdateClaimStatusAsync` have the identical defect — same file, different families, all "
      "three wired and shipped. Left alone rather than widening a scoped slice; three lines when "
-     "someone wants them. **Needs a backend rebuild.**",
+     "someone wants them.\n\n"
+     "  **Verified against the running API, 2026-08-29** by "
+     "`hr-medical/run-slice5-actors-and-nhis-documents.mjs`. ⚠ Note how the actor is pinned, "
+     "because \"UpdatedBy is non-blank\" would also pass on a hardcoded constant: each transition "
+     "is compared against the `CreatedBy` of a record the SAME actor created, and then a SECOND "
+     "actor moves the row and `UpdatedBy` is asserted to have changed to theirs. Non-blank proves "
+     "the line runs; changing with the caller proves it is the caller.",
      "Was blocking the MedicalClinical edit/delete build, and was already wrong on three shipped "
      "actions — cleared"),
+    ("D-17", "`POST api/talent-pools` 500s when ownerId is omitted", "OPEN",
+     "`CreateTalentPoolDto.OwnerId` is `[Required]` but typed as a non-nullable `Guid`, and "
+     "`[Required]` does not reject `Guid.Empty` — so an omitted owner passes model validation "
+     "intact and dies at the database on `FK_TalentPools_Employees_OwnerId` with error 547, "
+     "surfacing as the generic handler's 500 that names neither the field nor the constraint. "
+     "The same shape as D-04, where a wrong-catalogue qualification id 500'd naming nothing. Found "
+     "by slice 13 tripping over it while building a talent-pool fixture, not by looking for it. "
+     "The fix is a validation guard that rejects `Guid.Empty` with a message naming the field; "
+     "sending the id is the workaround, not the fix. Worth a sweep rather than a one-line patch — "
+     "`[Required]` on a non-nullable `Guid` is inert everywhere it appears, and this DTO family "
+     "uses it heavily.",
+     "Blocks nothing built so far. Recorded because a 500 that names nothing costs someone an hour "
+     "the next time"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "
@@ -1001,6 +1029,7 @@ w("| 2026-08-29 | Medical insurance: network facilities, provider documents and 
 w("| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |")
 w("| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |")
 w("| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |")
+w("| 2026-08-29 | **The D-14/D-15/D-16 slice is harness-verified, not merely built.** `hr-succession/run-slice13.mjs` (36 assertions) and `hr-medical/run-slice5-actors-and-nhis-documents.mjs` (34) are both green. The run found one defect a code read had missed — a blank `uploadedByName` on the create response — which is the reason the harness runs before the hand-over rather than after it. |")
 w("| 2026-08-29 | **The succession, talent-pool and NHIS document families now go through the controlled upload gate** (D-14). The succession half is served by one new controller, `api/succession-documents`, rather than three copies of the same transport: one table and one DTO serve the plan, the candidate and the pool member, so the upload takes the owner as a parameter — the same shape `api/succession-development` already uses for development activities. All four metadata routes survive for the legacy migration utility and refuse every file-location field. |")
 w("| 2026-08-29 | **Succession document uploaders are stamped from the token** (D-15). `UploadedById` is an explicit service parameter, not a DTO field, so it cannot be asserted by a caller. Fifth instance of the D-05 shape. |")
 w("| 2026-08-29 | **Medical clinical transitions stamp an actor** (D-16). Eight helpers now set `UpdatedAt`/`UpdatedBy`. Not just a blocker — cancel, check-in and check-out were wired and shipped, so the defect was live. Neither the appointment nor the referral carries a domain actor FK, so the audit column is the only place an actor can go without a schema change. |")

@@ -236,6 +236,17 @@ public interface ISuccessionPlanHistoryRepository : IGenericRepository<Successio
 
 public interface ISuccessionDocumentRepository : IGenericRepository<SuccessionDocument>
 {
+    /// <summary>
+    /// One document with its uploader resolved.
+    /// </summary>
+    /// <remarks>
+    /// Exists for the write paths. Every collection read here includes <c>UploadedBy</c>, but a
+    /// just-added entity has no navigation loaded, so mapping it straight after
+    /// <c>SaveChangesAsync</c> produced a create response whose <c>uploadedByName</c> was blank
+    /// while the list beside it showed the name. Slice 13 caught it.
+    /// </remarks>
+    Task<SuccessionDocument?> GetByIdWithUploaderAsync(Guid id);
+
     /// <summary>Returns all documents attached to a succession plan.</summary>
     Task<IEnumerable<SuccessionDocument>> GetByPlanIdAsync(Guid planId);
 
