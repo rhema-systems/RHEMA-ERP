@@ -22,6 +22,7 @@ import {
     getPostingTargetBooks,
     isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
+import { getJournalAuditActorLine } from '@/lib/finance/journal-entry-audit';
 
 export default function JournalEntryDetailPage() {
     const router = useRouter();
@@ -117,29 +118,6 @@ export default function JournalEntryDetailPage() {
         return action
             .replace(/^Finance\.JournalEntry\./, '')
             .replace(/([a-z])([A-Z])/g, '$1 $2');
-    };
-
-    const getAuditLocationLabel = (ipAddress?: string | null) => {
-        if (!ipAddress) return '';
-
-        const normalizedIp = ipAddress.trim().toLowerCase();
-        if (
-            normalizedIp === '::1' ||
-            normalizedIp === '127.0.0.1' ||
-            normalizedIp === 'localhost' ||
-            normalizedIp.startsWith('::ffff:127.0.0.1')
-        ) {
-            return 'local device';
-        }
-
-        return ipAddress;
-    };
-
-    const getAuditActorLine = (event: FinanceJournalAuditLog) => {
-        const username = event.username || 'Unknown user';
-        const location = getAuditLocationLabel(event.ipAddress);
-
-        return location ? `${username} from ${location}` : username;
     };
 
     const getPendingApproverLabel = (approver: WorkflowPendingApproverDto) => {
@@ -436,7 +414,6 @@ export default function JournalEntryDetailPage() {
     const canApproveWorkflow = !hasActiveWorkflowAssignment || workflowSummary?.canCurrentUserApprove === true;
     const canApproveNow = canApprovePermission && !isCreator && canApproveWorkflow;
     const canWithdrawApproval = !isBatchOwned && entry.postingStatus === 'Pending Approval' && (isCreator || canSubmitForApproval || canEdit || canDelete);
-    const requiresApprovalBeforePost = entry.requiresApproval || entry.postingStatus === 'Pending Approval';
     const pendingApproverText = workflowSummary ? formatPendingApprovers(workflowSummary.pendingApprovers || []) : '';
     const isAllActiveBooks = isAllActiveBooksCode(entry.bookClassification);
     const selectedBookName = getAccountingBookName(accountingBooks, entry.bookClassification);
@@ -920,7 +897,7 @@ export default function JournalEntryDetailPage() {
                                                 </span>
                                             </div>
                                             <p className="text-xs text-muted-foreground">
-                                                {getAuditActorLine(event)}
+                                                {getJournalAuditActorLine(event)}
                                             </p>
                                         </div>
                                     ))}
@@ -933,8 +910,8 @@ export default function JournalEntryDetailPage() {
                     {/* ACTIONS CARD - Context-sensitive by posting status */}
                     {/* ================================================================== */}
 
-                    {/* Draft Actions: Edit, Submit for Approval, Post, Delete */}
-                    {entry.postingStatus === 'Draft' && (canEdit || canSubmitForApproval || canPost || canDelete) && (
+                    {/* Draft Actions: Edit, Submit for Approval, Delete */}
+                    {entry.postingStatus === 'Draft' && (canEdit || canSubmitForApproval || canDelete) && (
                         <Card>
                             <CardHeader>
                                 <CardTitle>Actions</CardTitle>
@@ -955,12 +932,6 @@ export default function JournalEntryDetailPage() {
                                     >
                                         {actionLoading === 'request-approval' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SendHorizontal className="mr-2 h-4 w-4" />}
                                         Submit for Approval
-                                    </Button>
-                                )}
-                                {canPost && (
-                                    <Button className="w-full" onClick={handlePost} disabled={actionLoading === 'post' || requiresApprovalBeforePost}>
-                                        {actionLoading === 'post' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
-                                        Post Entry
                                     </Button>
                                 )}
                                 {canDelete && (
