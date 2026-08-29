@@ -224,6 +224,77 @@ public sealed class FinanceBudgetControlServiceTests
     }
 
     [Fact]
+    public async Task Posted_journal_uses_immutable_budget_evidence_and_retains_approved_override()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedJournal(db, budgetTrackingEnabled: true);
+        var budget = SeedAdoptedBudget(db, fixture, 1_000m);
+        var clearingAccountId = fixture.Journal.Transactions.Single(x => x.CreditAmount > 0).AccountId;
+        var priorJournal = new JournalEntry
+        {
+            TenantId = TenantId,
+            JournalEntryNumber = "JE-2026-PRIOR",
+            EntryDate = fixture.Journal.EntryDate.AddDays(-1),
+            FiscalPeriodId = fixture.Period.Id,
+            JournalType = "General",
+            Description = "Prior controlled expense",
+            PostingStatus = "Posted",
+            BookClassification = "IFRS",
+            TotalDebitAmount = 500m,
+            TotalCreditAmount = 500m,
+            IsBalanced = true,
+            Transactions = new List<AccountTransaction>
+            {
+                new() { TenantId = TenantId, AccountId = fixture.Expense.Id, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), DebitAmount = 500m, LineNumber = 1 },
+                new() { TenantId = TenantId, AccountId = clearingAccountId, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), CreditAmount = 500m, LineNumber = 2 }
+            }
+        };
+        db.JournalEntries.Add(priorJournal);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+
+        var beforePosting = await service.EvaluateManualJournalAsync(fixture.Journal.Id);
+        beforePosting.TotalShortfallAmount.Should().Be(100m);
+        db.FinanceBudgetOverrideRequests.Add(new FinanceBudgetOverrideRequest
+        {
+            TenantId = TenantId,
+            SourceDocumentType = FinanceBudgetControlService.ManualJournalSource,
+            SourceDocumentId = fixture.Journal.Id,
+            CurrencyCode = "GHS",
+            EvaluationHash = beforePosting.EvaluationHash,
+            Reason = "Approved exceptional expenditure",
+            RequestedAmount = beforePosting.TotalRequestedAmount,
+            ShortfallAmount = beforePosting.TotalShortfallAmount,
+            Status = "Approved",
+            RequestedByUserId = UserId,
+            RequestedAt = DateTime.UtcNow.AddMinutes(-5),
+            ApprovedByUserId = Guid.NewGuid(),
+            ApprovedAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        await db.SaveChangesAsync();
+        var reservationIds = await service.ReserveManualJournalAsync(fixture.Journal.Id);
+        var postingEventId = Guid.NewGuid();
+        await service.ConsumeReservationsAsync(TenantId, fixture.Journal.Id, reservationIds, fixture.Journal.Id, postingEventId);
+        fixture.Journal.PostingStatus = "Posted";
+        await db.SaveChangesAsync();
+
+        // Later actuals must not rewrite the historical decision evidence.
+        priorJournal.Transactions.Single(x => x.DebitAmount > 0).DebitAmount = 900m;
+        await db.SaveChangesAsync();
+        var posted = await service.EvaluateManualJournalAsync(fixture.Journal.Id);
+
+        posted.IsPostingSnapshot.Should().BeTrue();
+        posted.EvaluationHash.Should().Be(beforePosting.EvaluationHash);
+        posted.HasApprovedOverride.Should().BeTrue();
+        posted.IsAllowed.Should().BeTrue();
+        posted.TotalRequestedAmount.Should().Be(600m);
+        posted.TotalShortfallAmount.Should().Be(100m);
+        posted.Lines.Single().BudgetAmount.Should().Be(budget.Entry.AmountBase);
+        posted.Lines.Single().PostedActualAmount.Should().Be(500m);
+        posted.Lines.Single().AvailableAmount.Should().Be(500m);
+    }
+
+    [Fact]
     public async Task Override_approval_requires_completed_shared_workflow_evidence()
     {
         await using var db = CreateContext();

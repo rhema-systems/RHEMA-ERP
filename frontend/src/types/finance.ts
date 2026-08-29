@@ -527,6 +527,7 @@ export interface FinanceBudgetControlEvaluation {
     currencyCode: string;
     evaluationHash: string;
     hasTrackedExpenseLines: boolean;
+    isPostingSnapshot: boolean;
     isAllowed: boolean;
     requiresOverride: boolean;
     hasApprovedOverride: boolean;
