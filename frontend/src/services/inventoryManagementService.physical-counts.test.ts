@@ -42,4 +42,26 @@ describe('inventoryManagementService controlled physical counts', () => {
     expect(mockedAxios.post.mock.calls[1][0]).toMatch(/\/count-1\/controlled-post$/);
     expect(mockedAxios.post.mock.calls[1][1]).toEqual(expect.objectContaining({ rowVersion: 'AQID', idempotencyKey: 'count-key' }));
   });
+
+  it('loads and uploads current stock-taking evidence through the scoped multipart endpoints', async () => {
+    const evidence = [{ centralDocumentVersionId: 'version-1' }];
+    mockedAxios.get.mockResolvedValueOnce({ data: evidence });
+    mockedAxios.post.mockResolvedValueOnce({ data: evidence[0] });
+    const file = new File(['signed count'], 'signed-count.pdf', { type: 'application/pdf' });
+
+    await expect(inventoryManagementService.getPhysicalCountEvidence('count-1')).resolves.toEqual(evidence);
+    await expect(inventoryManagementService.uploadPhysicalCountEvidence('count-1', file, ' Signed count sheet '))
+      .resolves.toEqual(evidence[0]);
+
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      expect.stringMatching(/\/physical-counts\/count-1\/evidence$/),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer tenant-token' }) }),
+    );
+    const [url, body, options] = mockedAxios.post.mock.calls[0];
+    expect(url).toMatch(/\/physical-counts\/count-1\/evidence$/);
+    expect(body).toBeInstanceOf(FormData);
+    expect((body as FormData).get('file')).toBe(file);
+    expect((body as FormData).get('title')).toBe('Signed count sheet');
+    expect(options?.headers).toEqual({ Authorization: 'Bearer tenant-token' });
+  });
 });

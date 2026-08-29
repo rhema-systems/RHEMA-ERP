@@ -1062,6 +1062,7 @@ export interface ProcurementReceiptInspectionDto {
 
 export interface ProcurementReceiptInspectionOverviewDto {
   purchaseOrderReceiptId: string;
+  warehouseId?: string;
   receiptNumber: string;
   purchaseOrderNumber: string;
   supplierName: string;

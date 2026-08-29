@@ -1378,6 +1378,12 @@ public class StockAdjustmentService : IStockAdjustmentService
                     x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus &&
                     x.PublishedAt.HasValue && x.FileUploadRecordId.HasValue)
                 ?? throw new InvalidOperationException("Evidence must reference the current published version in central DMS.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(x => x.Id == version.FileUploadRecordId!.Value &&
+                    x.TenantId == adjustment.TenantId && !x.IsDeleted &&
+                    x.VirusScanStatus == FileVirusScanStatus.Clean);
+            if (!cleanUpload)
+                throw new InvalidOperationException("Evidence must have a successful clean malware scan.");
             var evidence = new StockAdjustmentEvidence
             {
                 TenantId = adjustment.TenantId,
@@ -1405,6 +1411,12 @@ public class StockAdjustmentService : IStockAdjustmentService
                     x.DocumentRecord.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
                     x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && x.PublishedAt.HasValue);
             if (!current) throw new InvalidOperationException("Linked central-DMS evidence is no longer current and published.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(x => x.Id == evidence.FileUploadRecordId &&
+                    x.TenantId == adjustment.TenantId && !x.IsDeleted &&
+                    x.VirusScanStatus == FileVirusScanStatus.Clean);
+            if (!cleanUpload)
+                throw new InvalidOperationException("Linked central-DMS evidence no longer has a successful clean malware scan.");
         }
     }
 

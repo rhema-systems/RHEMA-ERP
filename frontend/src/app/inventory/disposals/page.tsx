@@ -21,6 +21,8 @@ import { inventoryManagementService, type InventoryItemDto, type WarehouseDto,
   type WarehouseLocationDto } from '@/services/inventoryManagementService';
 import { userService } from '@/services/user';
 import type { User } from '@/types';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import type { Account } from '@/types/finance';
 
 const status: Record<number, string> = { 1: 'Identified', 2: 'Audit verified', 3: 'Committee scheduled',
   4: 'Committee recommended', 5: 'Pending authority approval', 6: 'Approved',
@@ -31,10 +33,12 @@ const action: Record<number, string> = { 1: 'Identified', 2: 'Audit verified', 3
   8: 'Submitted', 9: 'Approved', 10: 'Rejected', 11: 'Adjustment staged', 12: 'Completed', 13: 'Cancelled' };
 const money = (value: number) => new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS', maximumFractionDigits: 2 }).format(value || 0);
 const number = (value: number) => new Intl.NumberFormat('en-GH', { maximumFractionDigits: 4 }).format(value || 0);
-type Problem = { detail?: string; message?: string; title?: string };
+type Problem = { detail?: string; message?: string; title?: string; code?: string; extensions?: { code?: string } };
 const errorMessage = (error: unknown, fallback: string) => {
   const value = (error as AxiosError<Problem>)?.response?.data;
-  return value?.detail || value?.message || value?.title || (error instanceof Error ? error.message : fallback);
+  const detail = value?.detail || value?.message || value?.title || (error instanceof Error ? error.message : fallback);
+  const code = value?.code || value?.extensions?.code;
+  return code ? `${detail} (${code})` : detail;
 };
 type DraftLine = { inventoryItemId: string; locationId: string; quantity: number; lotNumber?: string;
   batchNumber?: string; serialNumber?: string; conditionNotes?: string };
@@ -47,6 +51,7 @@ export default function InventoryDisposalsPage() {
   const [items, setItems] = useState<InventoryItemDto[]>([]);
   const [documents, setDocuments] = useState<CentralDocumentRecord[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [financeAccounts, setFinanceAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('all');
@@ -76,12 +81,17 @@ export default function InventoryDisposalsPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [register, warehouseRows, itemRows, documentRows, userRows] = await Promise.all([
+      const [register, warehouseRows, itemRows, documentRows, userRows, accountRows] = await Promise.all([
         inventoryDisposalService.getAll({ take: 500 }), inventoryManagementService.getWarehouses(true),
         inventoryManagementService.getInventoryItems({ isActive: true }), documentManagementService.getRecords(),
         userService.searchUsers('').catch(() => []),
+        financeDataService.getAccounts({ status: 'Active', pageSize: 1000 }).catch(error => {
+          toast.error(errorMessage(error, 'Unable to load active Finance accounts.'));
+          return [] as Account[];
+        }),
       ]);
       setRows(register); setWarehouses(warehouseRows); setItems(itemRows); setUsers(userRows);
+      setFinanceAccounts(accountRows);
       setDocuments(documentRows.filter(value => value.lifecycleStatus === 'Active' && value.versionStatus === 'Published' && !!value.currentVersion));
       if (selected) setSelected(await inventoryDisposalService.getById(selected.id));
     } catch (error) { toast.error(errorMessage(error, 'Unable to load inventory disposal controls.')); }
@@ -140,6 +150,16 @@ export default function InventoryDisposalsPage() {
     value.id !== selected?.requestedById && value.id !== selected?.auditVerifiedById &&
     value.roles.some(role => role.toUpperCase().replaceAll(' ', '_') === 'TDC_DISPOSAL_COMMITTEE_MEMBER')),
   [selected?.auditVerifiedById, selected?.requestedById, users]);
+  const proceedsAccounts = useMemo(() => financeAccounts.filter(account => account.status === 'Active' &&
+    account.allowDirectPosting && account.isPostingAllowed !== false), [financeAccounts]);
+  const proceedsAccountRequired = selected?.method === 1 || selected?.method === 2;
+
+  useEffect(() => {
+    setExecutionReference('');
+    setBuyer('');
+    setProceeds(0);
+    setProceedsAccountId('');
+  }, [selected?.id]);
 
   return <div className="space-y-6 p-6">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold">Inventory Disposal Control</h1>
@@ -179,7 +199,7 @@ export default function InventoryDisposalsPage() {
       {selected.status === 3 && <div className="flex flex-wrap gap-2"><Button onClick={() => mutate(value => inventoryDisposalService.vote(value, true, false, comment), 'Committee recommendation recorded.')} disabled={saving}><Gavel className="mr-2 h-4 w-4" />Recommend approval</Button><Button variant="outline" onClick={() => mutate(value => inventoryDisposalService.vote(value, false, false, comment), 'Committee rejection vote recorded.')} disabled={saving}>Recommend rejection</Button><Button variant="secondary" onClick={() => mutate(value => inventoryDisposalService.vote(value, false, true, comment), 'Conflict declared; no vote counted.')} disabled={saving}>Declare conflict</Button></div>}
       {selected.status === 4 && <Button onClick={() => mutate(value => inventoryDisposalService.submit(value, comment), 'Disposal case submitted to configured authority workflow.')} disabled={saving}><FileCheck2 className="mr-2 h-4 w-4" />Submit authority route</Button>}
       {selected.status === 5 && <div className="flex gap-2"><Button onClick={() => mutate(value => inventoryDisposalService.decide(value, true, comment), 'Workflow approval step processed.')} disabled={saving}><CheckCircle2 className="mr-2 h-4 w-4" />Approve assigned step</Button><Button variant="destructive" onClick={() => mutate(value => inventoryDisposalService.decide(value, false, comment), 'Disposal rejected.')} disabled={saving || !comment.trim()}>Reject</Button></div>}
-      {selected.status === 6 && <div className="space-y-3 rounded-md border p-4"><h3 className="font-medium">Stage governed stock/Finance execution</h3><div className="grid gap-3 md:grid-cols-4"><div><Label>Execution reference</Label><Input value={executionReference} onChange={event => setExecutionReference(event.target.value)} /></div><div><Label>Buyer / recipient</Label><Input value={buyer} onChange={event => setBuyer(event.target.value)} /></div><div><Label>Proceeds</Label><Input type="number" min={0} value={proceeds} onChange={event => setProceeds(Number(event.target.value))} /></div><div><Label>Finance proceeds account ID</Label><Input value={proceedsAccountId} onChange={event => setProceedsAccountId(event.target.value)} placeholder="Required for auction/sale" /></div></div><Button onClick={() => mutate(async value => inventoryDisposalService.stageExecution(value, { proceedsAmount: proceeds, proceedsAccountId: proceedsAccountId || undefined, buyerOrRecipient: buyer || undefined, executionReference, evidence: await controlledEvidence(), comment }), 'Controlled stock adjustment staged and submitted.')} disabled={saving || !executionReference.trim() || !documentId}><Gavel className="mr-2 h-4 w-4" />Stage execution</Button></div>}
+      {selected.status === 6 && <div className="space-y-3 rounded-md border p-4"><h3 className="font-medium">Stage governed stock/Finance execution</h3><div className="grid gap-3 md:grid-cols-4"><div><Label>Execution reference</Label><Input value={executionReference} onChange={event => setExecutionReference(event.target.value)} /></div><div><Label>Buyer / recipient</Label><Input value={buyer} onChange={event => setBuyer(event.target.value)} /></div><div><Label>Proceeds</Label><Input type="number" min={0} value={proceeds} onChange={event => setProceeds(Number(event.target.value))} /></div><div><Label>Finance proceeds account</Label><Select value={proceedsAccountId || '__none__'} onValueChange={value => setProceedsAccountId(value === '__none__' ? '' : value)} disabled={!proceedsAccountRequired}><SelectTrigger><SelectValue placeholder={proceedsAccountRequired ? 'Select active posting account' : 'Not required for this method'} /></SelectTrigger><SelectContent><SelectItem value="__none__">Select an account</SelectItem>{proceedsAccounts.map(account => <SelectItem key={account.id} value={account.id}>{account.accountCode || account.accountNumber} · {account.accountName}</SelectItem>)}</SelectContent></Select></div></div>{proceedsAccountRequired && proceedsAccounts.length === 0 && <p className="text-sm text-destructive">No active direct-posting Finance account is available. Ask Finance to activate the appropriate proceeds account.</p>}<Button onClick={() => mutate(async value => inventoryDisposalService.stageExecution(value, { proceedsAmount: proceeds, proceedsAccountId: proceedsAccountId || undefined, buyerOrRecipient: buyer || undefined, executionReference, evidence: await controlledEvidence(), comment }), 'Controlled stock adjustment staged and submitted.')} disabled={saving || !executionReference.trim() || !documentId || (proceedsAccountRequired && !proceedsAccountId)}><Gavel className="mr-2 h-4 w-4" />Stage execution</Button></div>}
       {selected.status === 7 && <div className="flex flex-wrap items-center gap-3"><Button onClick={() => mutate(value => inventoryDisposalService.complete(value, comment), 'Controlled stock write-off and Finance completion processed.')} disabled={saving}><CheckCircle2 className="mr-2 h-4 w-4" />Approve/post linked adjustment and complete</Button><Button asChild variant="outline"><Link href="/inventory/adjustments">Open Stock Adjustments</Link></Button></div>}
 
       <div><h3 className="mb-2 font-medium"><History className="mr-2 inline h-4 w-4" />Immutable action history</h3><div className="space-y-2">{selected.actions.map(value => <div key={value.sequence} className="rounded-md border p-3 text-sm"><div className="flex justify-between"><span className="font-medium">#{value.sequence} {action[value.actionType]}</span><span className="text-xs text-muted-foreground">{new Date(value.occurredAtUtc).toLocaleString()}</span></div><p className="text-xs text-muted-foreground">{value.actorName || value.actorUserId}</p>{value.comment && <p className="mt-1">{value.comment}</p>}</div>)}</div></div>

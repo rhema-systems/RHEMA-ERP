@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +30,32 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { PhysicalCountControlPanel } from '@/components/inventory/PhysicalCountControlPanel';
+import { currencyService } from '@/services/financeCommonService';
+import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
+
+type ProblemDetails = {
+  detail?: string;
+  message?: string;
+  title?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
+const problemMessage = (error: unknown, fallback: string) => {
+  const problem = axios.isAxiosError<ProblemDetails>(error) ? error.response?.data : undefined;
+  const message = problem?.detail || problem?.message || problem?.title ||
+    (error instanceof Error ? error.message : fallback);
+  const code = problem?.code || problem?.extensions?.code;
+  return code ? `${message} (${code})` : message;
+};
+
+const loadPhysicalCountDetail = async (countId: string) => {
+  const [detail, evidence] = await Promise.all([
+    inventoryManagementService.getPhysicalCountById(countId),
+    inventoryManagementService.getPhysicalCountEvidence(countId),
+  ]);
+  return { ...detail, evidence };
+};
 
 // Status configurations
 const CountStatuses = [
@@ -64,6 +91,10 @@ export default function PhysicalCountsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [currencyCode, setCurrencyCode] = useState('GHS');
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [evidenceTitle, setEvidenceTitle] = useState('');
+  const [evidenceUploading, setEvidenceUploading] = useState(false);
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -123,6 +154,22 @@ export default function PhysicalCountsPage() {
   const [editingItems, setEditingItems] = useState<Map<string, number>>(new Map());
   const [recountNotes, setRecountNotes] = useState<Map<string, string>>(new Map());
 
+  useEffect(() => {
+    let cancelled = false;
+
+    currencyService.getBaseCurrency()
+      .then((currency) => {
+        if (!cancelled) setCurrencyCode(normalizeInventoryCurrency(currency?.code));
+      })
+      .catch(() => {
+        if (!cancelled) setCurrencyCode(normalizeInventoryCurrency());
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
@@ -180,12 +227,12 @@ export default function PhysicalCountsPage() {
 
   const handleViewDetails = async (count: PhysicalCountDto) => {
     try {
-      const details = await inventoryManagementService.getPhysicalCountById(count.id);
+      const details = await loadPhysicalCountDetail(count.id);
       setSelectedCount(details);
       setDetailDialogOpen(true);
     } catch (err) {
       console.error('Error fetching count details:', err);
-      toast.error('Failed to load count details');
+      toast.error(problemMessage(err, 'Failed to load count details'));
     }
   };
 
@@ -286,7 +333,7 @@ export default function PhysicalCountsPage() {
         if (line) items.push({ physicalCountItemId: itemId, countedQuantity: qty, rowVersion: line.rowVersion, idempotencyKey: crypto.randomUUID() });
       });
       for (const item of items) await inventoryManagementService.recordCountItem(selectedCount.id, item);
-      const updatedDetails = await inventoryManagementService.getPhysicalCountById(selectedCount.id);
+      const updatedDetails = await loadPhysicalCountDetail(selectedCount.id);
       setSelectedCount(updatedDetails);
       setEditingItems(new Map());
     } catch (err) {
@@ -299,9 +346,31 @@ export default function PhysicalCountsPage() {
 
   const refreshSelected = async () => {
     if (!selectedCount) return;
-    const current = await inventoryManagementService.getPhysicalCountById(selectedCount.id);
+    const current = await loadPhysicalCountDetail(selectedCount.id);
     setSelectedCount(current);
     await fetchData();
+  };
+
+  const uploadCountEvidence = async () => {
+    if (!selectedCount || !evidenceFile) {
+      toast.error('Select a signed count sheet or reconciliation evidence file.');
+      return;
+    }
+    setEvidenceUploading(true);
+    try {
+      const uploaded = await inventoryManagementService.uploadPhysicalCountEvidence(selectedCount.id, evidenceFile, evidenceTitle);
+      setSelectedCount(current => current?.id === selectedCount.id
+        ? { ...current, evidence: [uploaded, ...current.evidence.filter(item => item.centralDocumentVersionId !== uploaded.centralDocumentVersionId)] }
+        : current);
+      setEvidenceFile(null);
+      setEvidenceTitle('');
+      await fetchData();
+      toast.success('Stock-taking evidence scanned and published in Central DMS.');
+    } catch (error) {
+      toast.error(problemMessage(error, 'The evidence upload failed.'));
+    } finally {
+      setEvidenceUploading(false);
+    }
   };
 
   const handleRecount = async (item: PhysicalCountItemDto) => {
@@ -662,6 +731,11 @@ export default function PhysicalCountsPage() {
                   <div><Label className="text-muted-foreground">With Variance</Label><div className="font-medium text-orange-600">{selectedCount.itemsWithVariance}</div></div>
                 </div>
                 {selectedCount.notes && <div><Label className="text-muted-foreground">Notes</Label><div>{selectedCount.notes}</div></div>}
+                <div className="space-y-3 rounded-md border p-4">
+                  <div><Label>Stock-taking evidence</Label><p className="text-sm text-muted-foreground">Signed count sheets and reconciliation evidence are scanned and linked to this count in Central DMS. No document IDs are entered manually.</p></div>
+                  {(selectedCount.evidence ?? []).length > 0 ? <div className="space-y-2">{selectedCount.evidence.map(item => <div key={item.centralDocumentVersionId} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-3 text-sm"><div><div className="font-medium">{item.documentReference} · {item.title || item.fileName}</div><div className="text-xs text-muted-foreground">{item.versionNumber} · {item.scanStatus} · {new Date(item.uploadedAtUtc).toLocaleString()}</div></div><Badge variant="outline">Published</Badge></div>)}</div> : <p className="text-sm text-amber-700">Attach at least one evidence file before completing the count.</p>}
+                  {['InProgress', 'RecountRequired'].includes(selectedCount.status) && <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"><Input value={evidenceTitle} onChange={event => setEvidenceTitle(event.target.value)} placeholder="Evidence title (optional)" /><Input key={evidenceFile?.name ?? 'empty-evidence'} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png" onChange={event => setEvidenceFile(event.target.files?.[0] ?? null)} /><Button type="button" onClick={() => void uploadCountEvidence()} disabled={!evidenceFile || evidenceUploading}>{evidenceUploading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}{evidenceUploading ? 'Uploading' : 'Upload evidence'}</Button></div>}
+                </div>
               </TabsContent>
               <TabsContent value="items">
                 <ScrollArea className="h-[400px]">
@@ -721,7 +795,7 @@ export default function PhysicalCountsPage() {
                   {!selectedCount.systemQuantityVisible && <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">System quantities, first-count values, and variance results remain hidden until the blind count and required recount are complete.</div>}
                   <div className="grid grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
                     <div><Label className="text-muted-foreground">Items with Variance</Label><div className="text-2xl font-bold text-orange-600">{selectedCount.itemsWithVariance}</div></div>
-                    <div><Label className="text-muted-foreground">Total Variance Value</Label><div className="text-2xl font-bold">${selectedCount.totalVarianceValue?.toFixed(2) || '0.00'}</div></div>
+                    <div><Label className="text-muted-foreground">Total Variance Value</Label><div className="text-2xl font-bold">{formatInventoryMoney(selectedCount.totalVarianceValue || 0, currencyCode)}</div></div>
                     <div><Label className="text-muted-foreground">Counted Progress</Label><div className="text-2xl font-bold">{selectedCount.totalItems > 0 ? Math.round((selectedCount.countedItems / selectedCount.totalItems) * 100) : 0}%</div></div>
                   </div>
                   <ScrollArea className="h-[300px]">
@@ -735,7 +809,7 @@ export default function PhysicalCountsPage() {
                           <Badge className={item.varianceQuantity > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
                             {item.varianceQuantity > 0 ? '+' : ''}{item.varianceQuantity} ({item.variancePercent?.toFixed(1)}%)
                           </Badge>
-                          <div className="text-sm text-muted-foreground">${Math.abs(item.varianceValue || 0).toFixed(2)}</div>
+                          <div className="text-sm text-muted-foreground">{formatInventoryMoney(Math.abs(item.varianceValue || 0), currencyCode)}</div>
                         </div>
                       </div>
                     ))}
@@ -750,7 +824,7 @@ export default function PhysicalCountsPage() {
           <DialogFooter className="flex justify-between">
             <div className="flex gap-2">
               {selectedCount?.status === 'InProgress' && (
-                <Button variant="outline" onClick={() => handleComplete(selectedCount.id)} disabled={actionLoading}>
+                <Button variant="outline" onClick={() => handleComplete(selectedCount.id)} disabled={actionLoading || (selectedCount.evidence ?? []).length === 0} title={(selectedCount.evidence ?? []).length === 0 ? 'Attach stock-taking evidence first.' : undefined}>
                   <Send className="h-4 w-4 mr-2" />Complete Count
                 </Button>
               )}
@@ -818,7 +892,7 @@ export default function PhysicalCountsPage() {
               <div className="grid grid-cols-4 gap-4 p-4 bg-muted rounded-lg">
                 <div><Label className="text-muted-foreground">Total Items</Label><div className="text-xl font-bold">{varianceReport.totalItems}</div></div>
                 <div><Label className="text-muted-foreground">Items with Variance</Label><div className="text-xl font-bold text-orange-600">{varianceReport.itemsWithVariance}</div></div>
-                <div><Label className="text-muted-foreground">Total Variance Value</Label><div className="text-xl font-bold text-red-600">${varianceReport.totalVarianceValue.toFixed(2)}</div></div>
+                <div><Label className="text-muted-foreground">Total Variance Value</Label><div className="text-xl font-bold text-red-600">{formatInventoryMoney(varianceReport.totalVarianceValue, currencyCode)}</div></div>
                 <div><Label className="text-muted-foreground">Variance %</Label><div className="text-xl font-bold">{varianceReport.variancePercentage.toFixed(2)}%</div></div>
               </div>
               <ScrollArea className="h-[400px]">
@@ -847,8 +921,8 @@ export default function PhysicalCountsPage() {
                             {item.varianceQuantity > 0 ? '+' : ''}{item.varianceQuantity}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right">${item.unitCost.toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-medium">${item.varianceValue.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{formatInventoryMoney(item.unitCost, currencyCode)}</TableCell>
+                        <TableCell className="text-right font-medium">{formatInventoryMoney(item.varianceValue, currencyCode)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

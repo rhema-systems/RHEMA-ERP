@@ -270,6 +270,7 @@ public partial class PhysicalCountService : IPhysicalCountService
 
         if (count.Status == "PendingStoresApproval" && count.CountedById == userId)
         {
+            await RevalidateRecordedCountEvidenceAsync(count);
             await EnsureStockAdjustmentSubmittedAsync(count.Id, userId, $"complete:{count.Id:N}",
                 "Retry controlled count submission.");
             return true;
@@ -281,6 +282,7 @@ public partial class PhysicalCountService : IPhysicalCountService
         var uncounted = count.Items.Count(i => !i.IsCounted);
         if (uncounted > 0)
             throw new InvalidOperationException($"{uncounted} items have not been counted yet");
+        var evidence = await ResolveSubmissionEvidenceAsync(count);
 
         var schedule = count.CycleCountScheduleId.HasValue
             ? await _unitOfWork.Repository<InventoryCycleCountSchedule>().GetByIdAsync(count.CycleCountScheduleId.Value)
@@ -307,7 +309,20 @@ public partial class PhysicalCountService : IPhysicalCountService
             count.Status == "RecountRequired" ? PhysicalCountActionType.RecountRequired : PhysicalCountActionType.Submitted,
             userId, $"complete:{count.Id:N}:{count.CompletedDate:O}",
             count.Status == "RecountRequired" ? "Variance thresholds require an independently investigated recount." : "Count submitted for Stores approval.",
-            new { count.VarianceItems, count.TotalVarianceValue }, "Counter");
+            new
+            {
+                count.VarianceItems,
+                count.TotalVarianceValue,
+                Evidence = evidence.Select(value => new
+                {
+                    value.CentralDocumentRecordId,
+                    value.CentralDocumentVersionId,
+                    value.FileUploadRecordId,
+                    value.DocumentReference,
+                    value.VersionNumber,
+                    value.EvidenceReference
+                })
+            }, "Counter");
         await _unitOfWork.SaveChangesAsync();
         if (count.Status == "PendingStoresApproval")
             await EnsureStockAdjustmentSubmittedAsync(count.Id, userId, $"complete:{count.Id:N}",
@@ -811,6 +826,21 @@ public partial class PhysicalCountService : IPhysicalCountService
             AuditAttestedById = count.AuditAttestedById,
             AuditAttestedAtUtc = count.AuditAttestedAtUtc,
             InvestigationSummary = count.InvestigationSummary,
+            Evidence = count.Actions
+                .Where(item => item.ActionType is PhysicalCountActionType.Submitted or PhysicalCountActionType.RecountRequired)
+                .OrderByDescending(item => item.Sequence)
+                .SelectMany(item => ReadEvidence(item.SnapshotJson))
+                .GroupBy(item => item.CentralDocumentVersionId)
+                .Select(group => group.First())
+                .Select(item => new PhysicalCountEvidenceDto
+                {
+                    CentralDocumentRecordId = item.CentralDocumentRecordId,
+                    CentralDocumentVersionId = item.CentralDocumentVersionId,
+                    FileUploadRecordId = item.FileUploadRecordId,
+                    DocumentReference = item.DocumentReference,
+                    VersionNumber = item.VersionNumber,
+                    EvidenceReference = item.EvidenceReference
+                }).ToList(),
             Items = count.Items.Select(item => MapItemToDto(item, revealSystemQuantity)).ToList(),
             Actions = count.Actions.OrderBy(item => item.Sequence).Select(item => new PhysicalCountActionDto
             {

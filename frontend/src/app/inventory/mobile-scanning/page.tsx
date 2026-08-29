@@ -15,8 +15,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Code128Barcode } from '@/components/inventory/Code128Barcode';
 import { InventoryCameraScanner } from '@/components/inventory/InventoryCameraScanner';
+import {
+  InventoryTrackingExceptionSelect,
+  useAvailableInventoryTrackingExceptions,
+} from '@/components/inventory/InventoryTrackingExceptionSelect';
 import { useTenant } from '@/contexts/TenantContext';
 import { useAuth } from '@/hooks/use-auth';
 import { authService } from '@/services/auth';
@@ -30,6 +35,10 @@ import {
   InventoryScanBatch, InventoryScanDocumentContext, InventoryScanDocumentSummary, InventoryScanInput,
   InventoryScanOperation, inventoryScanningService, SaveInventoryLabelProfile, SynchronizeInventoryScanBatch,
 } from '@/services/inventoryScanningService';
+import {
+  inventoryManagementService,
+  type WarehouseLocationDto,
+} from '@/services/inventoryManagementService';
 
 const OPERATIONS = [
   [InventoryScanOperation.GoodsReceipt, 'Goods receipt'],
@@ -46,8 +55,13 @@ const emptyProfile = (): SaveInventoryLabelProfile => ({
   includeExpiry: false, isDefault: false, isActive: true,
 });
 
-type Problem = { detail?: string; title?: string; code?: string };
-const errorMessage = (error: unknown, fallback: string) => (error as AxiosError<Problem>)?.response?.data?.detail || (error instanceof Error ? error.message : fallback);
+type Problem = { detail?: string; title?: string; code?: string; extensions?: { code?: string } };
+const errorMessage = (error: unknown, fallback: string) => {
+  const problem = (error as AxiosError<Problem>)?.response?.data;
+  const detail = problem?.detail || problem?.title || (error instanceof Error ? error.message : fallback);
+  const code = problem?.code || problem?.extensions?.code;
+  return code ? `${detail} (${code})` : detail;
+};
 
 export default function InventoryMobileScanningPage() {
   const { user: queriedUser } = useAuth();
@@ -70,6 +84,8 @@ export default function InventoryMobileScanningPage() {
   const [manufactureDate, setManufactureDate] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [trackingExceptionId, setTrackingExceptionId] = useState('');
+  const [warehouseLocations, setWarehouseLocations] = useState<WarehouseLocationDto[]>([]);
+  const [loadingLocations, setLoadingLocations] = useState(false);
   const [lines, setLines] = useState<InventoryScanInput[]>([]);
   const [applyTransaction, setApplyTransaction] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -87,8 +103,16 @@ export default function InventoryMobileScanningPage() {
   const [printerName, setPrinterName] = useState('Browser print');
   const [prints, setPrints] = useState<InventoryLabelPrint[]>([]);
   const [labelBusy, setLabelBusy] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<QueuedInventoryScanBatch>();
+  const [discarding, setDiscarding] = useState(false);
   const labelRef = useRef<HTMLDivElement>(null);
   const flushInFlight = useRef(false);
+  const trackingExceptions = useAvailableInventoryTrackingExceptions(Boolean(context));
+  const selectedDocumentLine = useMemo(() => !context
+    ? undefined
+    : documentLineId === 'auto'
+      ? context.lines.length === 1 ? context.lines[0] : undefined
+      : context.lines.find(line => line.documentLineId === documentLineId), [context, documentLineId]);
   const queueScope = useMemo(() => {
     const tenantId = currentTenant?.id || user?.currentTenantId || user?.tenantId;
     return user?.id && tenantId ? { actorUserId: user.id, tenantId } : undefined;
@@ -111,13 +135,23 @@ export default function InventoryMobileScanningPage() {
     setPrints(loadedPrints);
   }, []);
 
-  const discardQueuedBatch = useCallback(async (batch: QueuedInventoryScanBatch) => {
-    if (!queueScope) return;
-    if (!window.confirm('Discard this failed scan batch permanently? Its captured lines cannot be recovered.')) return;
-    await removeQueuedInventoryScanBatch(queueScope, batch.idempotencyKey);
-    await refreshPending();
-    toast.success('The failed scan batch was discarded. Later queued work can now synchronize.');
-  }, [queueScope, refreshPending]);
+  const confirmDiscardQueuedBatch = useCallback(async () => {
+    if (!queueScope || !discardTarget) return false;
+    setDiscarding(true);
+    try {
+      await removeQueuedInventoryScanBatch(queueScope, discardTarget.idempotencyKey);
+      await refreshPending();
+      toast.success('The failed scan batch was discarded. Later queued work can now synchronize.');
+      setDiscardTarget(undefined);
+      return true;
+    } catch (error) {
+      console.error('Failed to discard queued inventory scan batch:', error);
+      toast.error(errorMessage(error, 'The failed scan batch could not be discarded.'));
+      return false;
+    } finally {
+      setDiscarding(false);
+    }
+  }, [discardTarget, queueScope, refreshPending]);
 
   const flushQueue = useCallback(async () => {
     if (!navigator.onLine || flushInFlight.current || !queueScope) return;
@@ -166,8 +200,34 @@ export default function InventoryMobileScanningPage() {
     inventoryScanningService.getDocumentContext(operation, documentId).then(value => {
       setContext(value);
       setLines([]);
+      setDocumentLineId('auto');
+      setLocationId('');
+      setLocationIdentifier('');
+      setTrackingExceptionId('');
     }).catch(error => toast.error(errorMessage(error, 'Unable to load transaction lines.')));
   }, [documentId, online, operation]);
+
+  useEffect(() => {
+    if (!context?.warehouseId || !online) {
+      setWarehouseLocations([]);
+      setLoadingLocations(false);
+      return;
+    }
+    let active = true;
+    setLoadingLocations(true);
+    inventoryManagementService.getWarehouseLocations(context.warehouseId)
+      .then(values => {
+        if (active) setWarehouseLocations(values.filter(location => location.isActive));
+      })
+      .catch(error => {
+        if (active) {
+          setWarehouseLocations([]);
+          toast.error(errorMessage(error, 'Unable to load the transaction warehouse locations.'));
+        }
+      })
+      .finally(() => { if (active) setLoadingLocations(false); });
+    return () => { active = false; };
+  }, [context?.warehouseId, online]);
 
   useEffect(() => {
     if (!online) return;
@@ -191,9 +251,6 @@ export default function InventoryMobileScanningPage() {
       return;
     }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return toast.error('Quantity must be greater than zero.');
-    const selectedDocumentLine = documentLineId === 'auto'
-      ? context.lines.length === 1 ? context.lines[0] : undefined
-      : context.lines.find(line => line.documentLineId === documentLineId);
     if (operation === InventoryScanOperation.PhysicalCount && !selectedDocumentLine?.rowVersion)
       return toast.error('Select the physical-count document line so its concurrency version is retained for offline synchronization.');
     setLines(current => [...current, {
@@ -208,7 +265,7 @@ export default function InventoryMobileScanningPage() {
     setIdentifier('');
     setSerialNumber('');
     if (captured) toast.success(`Captured ${value}.`);
-  }, [batchNumber, context, documentLineId, expiryDate, identifier, locationId, locationIdentifier, lotNumber, manufactureDate, operation, quantity, scanTarget, serialNumber, trackingExceptionId]);
+  }, [batchNumber, context, expiryDate, identifier, locationId, locationIdentifier, lotNumber, manufactureDate, operation, quantity, scanTarget, selectedDocumentLine, serialNumber, trackingExceptionId]);
 
   const sync = async () => {
     if (!context || lines.length === 0) return;
@@ -312,14 +369,14 @@ export default function InventoryMobileScanningPage() {
                 <div className="space-y-2 sm:col-span-2"><Label>Manual / handheld input</Label><div className="flex gap-2"><Input value={identifier} onChange={event => setIdentifier(event.target.value)} onKeyDown={event => event.key === 'Enter' && addScan()} placeholder="Scan or enter barcode / QR" /><Button onClick={() => addScan()}><Plus className="h-4 w-4" /></Button></div></div>
                 <div className="space-y-2"><Label>Document line</Label><Select value={documentLineId} onValueChange={setDocumentLineId}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="auto">Resolve automatically</SelectItem>{context?.lines.map(line => <SelectItem key={line.documentLineId} value={line.documentLineId}>{line.itemCode} · {line.itemName}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-2"><Label>Scanned quantity</Label><Input type="number" min="0.00000001" step="any" value={quantity} onChange={event => setQuantity(event.target.value)} /></div>
-                <div className="space-y-2"><Label>Location ID</Label><Input value={locationId} onChange={event => setLocationId(event.target.value)} placeholder="Optional GUID" /></div>
+                <div className="space-y-2"><Label>Warehouse location</Label><Select value={locationId || '__none__'} onValueChange={value => setLocationId(value === '__none__' ? '' : value)} disabled={!context || loadingLocations}><SelectTrigger><SelectValue placeholder={loadingLocations ? 'Loading locations…' : 'Select a location'} /></SelectTrigger><SelectContent><SelectItem value="__none__">Resolve from scanned location code</SelectItem>{warehouseLocations.map(location => <SelectItem key={location.id} value={location.id}>{location.locationCode} · {location.name || location.locationType}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-2"><Label>Location barcode / code</Label><Input value={locationIdentifier} onChange={event => setLocationIdentifier(event.target.value)} placeholder="Scan bin label" /></div>
                 <div className="space-y-2"><Label>Lot</Label><Input value={lotNumber} onChange={event => setLotNumber(event.target.value)} /></div>
                 <div className="space-y-2"><Label>Batch</Label><Input value={batchNumber} onChange={event => setBatchNumber(event.target.value)} /></div>
                 <div className="space-y-2"><Label>Serial</Label><Input value={serialNumber} onChange={event => setSerialNumber(event.target.value)} /></div>
                 <div className="space-y-2"><Label>Manufacture date</Label><Input type="date" value={manufactureDate} onChange={event => setManufactureDate(event.target.value)} /></div>
                 <div className="space-y-2"><Label>Expiry date</Label><Input type="date" value={expiryDate} onChange={event => setExpiryDate(event.target.value)} /></div>
-                <div className="space-y-2 sm:col-span-2"><Label>Approved exception ID</Label><Input value={trackingExceptionId} onChange={event => setTrackingExceptionId(event.target.value)} placeholder="Required only for an approved exception" /></div>
+                <div className="space-y-2 sm:col-span-2"><Label>Approved tracking exception</Label><InventoryTrackingExceptionSelect value={trackingExceptionId} onValueChange={value => setTrackingExceptionId(value || '')} exceptions={trackingExceptions.exceptions} loading={trackingExceptions.loading} error={trackingExceptions.error} onRetry={trackingExceptions.refresh} context={{ inventoryItemId: selectedDocumentLine?.inventoryItemId, warehouseId: context?.warehouseId, locationId: locationId || selectedDocumentLine?.locationId, referenceId: context?.documentId, lotNumber, batchNumber, serialNumber }} /></div>
               </div>
             </CardContent></Card>
 
@@ -329,7 +386,7 @@ export default function InventoryMobileScanningPage() {
               <Button className="w-full" onClick={() => void sync()} disabled={!context || lines.length === 0 || synchronizing}>{synchronizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : online ? <CheckCircle2 className="mr-2 h-4 w-4" /> : <CloudOff className="mr-2 h-4 w-4" />}{online ? 'Synchronize batch' : 'Save batch offline'}</Button>
             </CardContent></Card>
           </div>
-          {queuedBatches.length > 0 && <Card><CardHeader><CardTitle>Offline synchronization queue</CardTitle><CardDescription>Queued batches retain their original device and idempotency keys. A failed head can be retried or explicitly discarded so later work is not permanently blocked.</CardDescription></CardHeader><CardContent><div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Queued</TableHead><TableHead>Operation / document</TableHead><TableHead>Lines</TableHead><TableHead>Attempts / last result</TableHead><TableHead className="text-right">Recovery</TableHead></TableRow></TableHeader><TableBody>{queuedBatches.map((batch, index) => <TableRow key={batch.idempotencyKey}><TableCell className="text-xs">{new Date(batch.queuedAtUtc).toLocaleString()}<div className="font-mono text-muted-foreground">{batch.deviceId}</div></TableCell><TableCell>{OPERATIONS.find(([value]) => value === batch.operation)?.[1]}<div className="font-mono text-xs text-muted-foreground">{batch.documentId}</div></TableCell><TableCell>{batch.lines.length}</TableCell><TableCell>{batch.attempts}<div className="max-w-xl text-xs text-destructive">{batch.lastError || 'Waiting for connectivity'}</div></TableCell><TableCell className="text-right">{index === 0 && batch.lastError ? <Button size="sm" variant="destructive" onClick={() => void discardQueuedBatch(batch)}><Trash2 className="mr-2 h-4 w-4" />Discard failed batch</Button> : <span className="text-xs text-muted-foreground">{index === 0 ? 'Retry from Sync queue' : 'Waiting behind earlier work'}</span>}</TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card>}
+          {queuedBatches.length > 0 && <Card><CardHeader><CardTitle>Offline synchronization queue</CardTitle><CardDescription>Queued batches retain their original device and idempotency keys. A failed head can be retried or explicitly discarded so later work is not permanently blocked.</CardDescription></CardHeader><CardContent><div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Queued</TableHead><TableHead>Operation / document</TableHead><TableHead>Lines</TableHead><TableHead>Attempts / last result</TableHead><TableHead className="text-right">Recovery</TableHead></TableRow></TableHeader><TableBody>{queuedBatches.map((batch, index) => <TableRow key={batch.idempotencyKey}><TableCell className="text-xs">{new Date(batch.queuedAtUtc).toLocaleString()}<div className="font-mono text-muted-foreground">{batch.deviceId}</div></TableCell><TableCell>{OPERATIONS.find(([value]) => value === batch.operation)?.[1]}<div className="font-mono text-xs text-muted-foreground">{batch.documentId}</div></TableCell><TableCell>{batch.lines.length}</TableCell><TableCell>{batch.attempts}<div className="max-w-xl text-xs text-destructive">{batch.lastError || 'Waiting for connectivity'}</div></TableCell><TableCell className="text-right">{index === 0 && batch.lastError ? <Button size="sm" variant="destructive" onClick={() => setDiscardTarget(batch)}><Trash2 className="mr-2 h-4 w-4" />Discard failed batch</Button> : <span className="text-xs text-muted-foreground">{index === 0 ? 'Retry from Sync queue' : 'Waiting behind earlier work'}</span>}</TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card>}
         </TabsContent>
 
         <TabsContent value="labels" className="space-y-4">
@@ -359,6 +416,16 @@ export default function InventoryMobileScanningPage() {
           <Card><CardHeader><CardTitle>Label print audit</CardTitle></CardHeader><CardContent><div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Printed</TableHead><TableHead>Item</TableHead><TableHead>Identifier</TableHead><TableHead>Copies / printer</TableHead></TableRow></TableHeader><TableBody>{prints.length === 0 ? <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No label prints recorded.</TableCell></TableRow> : prints.map(print => <TableRow key={print.id}><TableCell className="text-xs">{new Date(print.printedAtUtc).toLocaleString()}</TableCell><TableCell>{print.itemCode}<div className="text-xs text-muted-foreground">{print.itemName}</div></TableCell><TableCell className="font-mono text-xs">{print.identifier}<div>{print.identifierKind}</div></TableCell><TableCell>{print.labelCount}<div className="text-xs text-muted-foreground">{print.printerName || 'Browser print'}</div></TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card>
         </TabsContent>
       </Tabs>
+      <ConfirmationDialog
+        open={discardTarget !== undefined}
+        onOpenChange={(open) => { if (!open && !discarding) setDiscardTarget(undefined); }}
+        title="Discard failed scan batch?"
+        description="This permanently removes the queued batch and its captured lines from this device. This action cannot be undone."
+        confirmText="Discard batch"
+        variant="destructive"
+        onConfirm={confirmDiscardQueuedBatch}
+        isLoading={discarding}
+      />
     </div>
   );
 }

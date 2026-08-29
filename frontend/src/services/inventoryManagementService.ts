@@ -535,13 +535,11 @@ export interface WarehouseItemDto {
 export interface BulkAssignItemsDto {
   inventoryItemIds: string[];
   warehouseIds: string[];
-  initialQuantity: number;
   reorderLevel: number;
   maxStock: number;
 }
 
 export interface UpdateWarehouseItemDto {
-  currentStock: number;
   reorderLevel: number;
   maxStock: number;
   notes?: string;
@@ -972,8 +970,24 @@ export interface PhysicalCountDetailDto extends PhysicalCountDto {
   auditAttestedById?: string;
   auditAttestedAtUtc?: string;
   investigationSummary?: string;
+  evidence: PhysicalCountEvidenceDto[];
   items: PhysicalCountItemDto[];
   actions: PhysicalCountActionDto[];
+}
+
+export interface PhysicalCountEvidenceDto {
+  centralDocumentRecordId: string;
+  centralDocumentVersionId: string;
+  fileUploadRecordId: string;
+  documentReference: string;
+  versionNumber: string;
+  evidenceReference: string;
+  title: string;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  scanStatus: string;
+  uploadedAtUtc: string;
 }
 
 export interface PhysicalCountItemDto {
@@ -1300,6 +1314,13 @@ class InventoryManagementService {
     const token = localStorage.getItem('token') || localStorage.getItem('authToken');
     return {
       'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : ''
+    };
+  }
+
+  private getMultipartAuthHeaders() {
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+    return {
       'Authorization': token ? `Bearer ${token}` : ''
     };
   }
@@ -2057,6 +2078,25 @@ class InventoryManagementService {
   async getItemsWithVariance(countId: string): Promise<PhysicalCountItemDto[]> {
     const response = await axios.get(`${API_URL}/inventory/physical-counts/${countId}/items-with-variance`, {
       headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async getPhysicalCountEvidence(countId: string): Promise<PhysicalCountEvidenceDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/physical-counts/${countId}/evidence`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async uploadPhysicalCountEvidence(countId: string, file: File, title?: string): Promise<PhysicalCountEvidenceDto> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (title?.trim()) formData.append('title', title.trim());
+    const response = await axios.post(`${API_URL}/inventory/physical-counts/${countId}/evidence`, formData, {
+      // Let the browser supply the multipart boundary. Explicit application/json or
+      // multipart/form-data headers prevent ASP.NET from reliably binding IFormFile.
+      headers: this.getMultipartAuthHeaders()
     });
     return response.data;
   }

@@ -16,10 +16,15 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
     {
         var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
 
-        var apiDirectory = FindApiDirectory(Directory.GetCurrentDirectory());
+        var apiDirectory = FindApiDirectory(new[]
+        {
+            Directory.GetCurrentDirectory(),
+            AppContext.BaseDirectory,
+            Path.GetDirectoryName(typeof(DesignTimeDbContextFactory).Assembly.Location)
+        });
         var config = new ConfigurationBuilder()
             .SetBasePath(apiDirectory)
-            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile("appsettings.json", optional: true)
             .AddJsonFile("appsettings.Development.json", optional: true)
             .AddUserSecrets(
                 typeof(DesignTimeDbContextFactory).Assembly,
@@ -46,26 +51,33 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
         return new ApplicationDbContext(optionsBuilder.Options);
     }
 
-    private static string FindApiDirectory(string startDirectory)
+    private static string FindApiDirectory(IEnumerable<string?> startDirectories)
     {
-        for (var directory = new DirectoryInfo(startDirectory);
-             directory != null;
-             directory = directory.Parent)
+        foreach (var startDirectory in startDirectories
+                     .Where(value => !string.IsNullOrWhiteSpace(value))
+                     .Select(value => Path.GetFullPath(value!))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var candidates = new[]
+            for (var directory = new DirectoryInfo(startDirectory);
+                 directory != null;
+                 directory = directory.Parent)
             {
-                Path.Combine(directory.FullName, "src", "ErpSystem.Api"),
-                Path.Combine(directory.FullName, "ErpSystem.Api")
-            };
+                var candidates = new[]
+                {
+                    Path.Combine(directory.FullName, "src", "ErpSystem.Api"),
+                    Path.Combine(directory.FullName, "ErpSystem.Api")
+                };
 
-            foreach (var candidate in candidates)
-            {
-                if (File.Exists(Path.Combine(candidate, "appsettings.json")))
-                    return candidate;
+                foreach (var candidate in candidates)
+                {
+                    if (Directory.Exists(candidate) &&
+                        File.Exists(Path.Combine(candidate, "ErpSystem.Api.csproj")))
+                        return candidate;
+                }
             }
         }
 
         throw new InvalidOperationException(
-            "Unable to locate src/ErpSystem.Api/appsettings.json for design-time database configuration.");
+            "Unable to locate the ErpSystem.Api project for design-time database configuration.");
     }
 }

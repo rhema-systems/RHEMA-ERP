@@ -106,6 +106,7 @@
     <Compile Include="Controllers\Inventory\InventoryMobileScanningControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryDisposalsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemsProfileControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Inventory\WarehouseItemsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemIdentifiersControllerAuthorizationTests.cs" />
     <Compile Include="Controllers\Inventory\StockAdjustmentsOpeningStockControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />

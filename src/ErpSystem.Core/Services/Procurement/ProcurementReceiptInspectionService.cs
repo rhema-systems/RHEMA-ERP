@@ -125,10 +125,10 @@ public sealed class ProcurementReceiptInspectionService :
         var receiptSodAllowed = false;
         var decisionSodAllowed = false;
         var workflowDecisionAllowed = false;
+        var warehouseId = await ResolveWarehouseIdAsync(
+            receipt, cancellationToken);
         if (!externalLinked)
         {
-            var warehouseId = await ResolveWarehouseIdAsync(
-                receipt, cancellationToken);
             manageAllowed = IsAdministrator() ||
                             await CanUseCapabilityAsync(
                                 ManagePermission, receipt, warehouseId,
@@ -154,6 +154,7 @@ public sealed class ProcurementReceiptInspectionService :
         return new ProcurementReceiptInspectionOverviewDto
         {
             PurchaseOrderReceiptId = receipt.Id,
+            WarehouseId = warehouseId,
             ReceiptNumber = receipt.ReceiptNumber,
             PurchaseOrderNumber = receipt.PurchaseOrder.OrderNumber,
             SupplierName = receipt.PurchaseOrder.BusinessPartner?.PartnerName ?? string.Empty,

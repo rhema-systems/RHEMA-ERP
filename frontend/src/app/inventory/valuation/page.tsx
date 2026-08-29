@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,10 +14,11 @@ import {
   DollarSign, TrendingUp, TrendingDown, Package, BarChart3, 
   PieChart, Calculator, RefreshCw, Download
 } from 'lucide-react';
-import { 
+import {
   inventoryManagementService, 
   InventoryItemDto, WarehouseDto, WarehouseItemDto
 } from '@/services/inventoryManagementService';
+import { INVENTORY_VALUATION_REPORT_PATH } from '@/lib/inventory-report-navigation';
 
 export default function InventoryValuationPage() {
   const [items, setItems] = useState<InventoryItemDto[]>([]);
@@ -237,7 +239,11 @@ export default function InventoryValuationPage() {
         </div>
         <div className="flex items-center space-x-2">
           <Button variant="outline" onClick={fetchData}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
-          <Button variant="outline"><Download className="h-4 w-4 mr-2" />Export</Button>
+          <Button variant="outline" asChild>
+            <Link href={INVENTORY_VALUATION_REPORT_PATH}>
+              <Download className="h-4 w-4 mr-2" />Open report export
+            </Link>
+          </Button>
         </div>
       </div>
 
