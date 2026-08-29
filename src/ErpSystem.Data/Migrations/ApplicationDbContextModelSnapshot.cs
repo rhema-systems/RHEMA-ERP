@@ -139661,6 +139661,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("EstimateType")
                         .HasColumnType("int");
 
+                    b.Property<string>("FundingSourceSnapshot")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -139687,6 +139691,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("PropertyReferenceSnapshot")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
@@ -139705,6 +139713,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("SourceEstimateVersionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SourceSnapshotSchemaVersion")
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -139776,9 +139787,11 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_QsEstimateVersions_EvidencePair", "([CentralDocumentRecordId] IS NULL AND [CentralDocumentVersionId] IS NULL) OR ([CentralDocumentRecordId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_QsEstimateVersions_Status", "[Status] IN ('Draft','PendingApproval','Approved','Rejected','Retired')");
+                        t.HasCheckConstraint("CK_QsEstimateVersions_Status", "[Status] IN ('Draft','PendingApproval','Approved','Rejected','Retired')");
 
-                            t.HasCheckConstraint("CK_QsEstimateVersions_Totals", "[DirectCost] >= 0 AND [MarkupTotal] >= 0 AND [TotalAmount] = [DirectCost] + [MarkupTotal]");
+                        t.HasCheckConstraint("CK_QsEstimateVersions_SourceSnapshotSchema", "[SourceSnapshotSchemaVersion] IN (0,1)");
+
+                        t.HasCheckConstraint("CK_QsEstimateVersions_Totals", "[DirectCost] >= 0 AND [MarkupTotal] >= 0 AND [TotalAmount] = [DirectCost] + [MarkupTotal]");
 
                             t.HasCheckConstraint("CK_QsEstimateVersions_Type", "[EstimateType] BETWEEN 0 AND 2");
 

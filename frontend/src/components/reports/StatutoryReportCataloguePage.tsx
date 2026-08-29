@@ -347,6 +347,30 @@ export const quantitySurveyCatalogue: CatalogueItem[] = [
     icon: ClipboardCheck,
   },
   {
+    code: 'retention-register',
+    title: 'Retention Register',
+    description:
+      'Reconcile retention held, released and outstanding by certificate and Works contract.',
+    group: 'Valuations and certificates',
+    icon: Scale,
+  },
+  {
+    code: 'cost-to-complete',
+    title: 'Cost-to-Complete Report',
+    description:
+      'Compare budget, actual cost, commitments, forecast and the projected final position.',
+    group: 'Cost plans and BoQs',
+    icon: BarChart3,
+  },
+  {
+    code: 'contract-balance',
+    title: 'Contract Balance Report',
+    description:
+      'Reconcile the original and revised contract against variations, certificates and retention.',
+    group: 'Changes and closeout',
+    icon: FileSpreadsheet,
+  },
+  {
     code: 'variation-log',
     title: 'Variation Log',
     description:
@@ -361,6 +385,14 @@ export const quantitySurveyCatalogue: CatalogueItem[] = [
       'Reconcile final accounts to contract, BoQ, variations, claims, retention and payments.',
     group: 'Changes and closeout',
     icon: FileCheck2,
+  },
+  {
+    code: 'audit-trail',
+    title: 'Quantity Survey Audit Trail',
+    description:
+      'Review project-scoped creation, change, workflow, approval, posting and reversal history.',
+    group: 'Controls and audit',
+    icon: History,
   },
 ];
 

@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { getQuantitySurveyWorkspaceAccess } from '@/lib/quantity-survey-workspace-access';
 import {
   quantitySurveyPaymentCertificateService as service,
   type PaymentCertificateLookups,
@@ -77,7 +78,8 @@ const download = (blob: Blob, fileName: string) => {
 export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
   const { hasPermission } = useAuth();
   const canRead = hasPermission('quantity-survey.workspace.read');
-  const canManage = hasPermission('quantity-survey.valuations.manage');
+  const canManage =
+    getQuantitySurveyWorkspaceAccess(hasPermission).canManageCertificates;
   const canApprove = hasPermission('quantity-survey.transactions.approve');
   const canAudit = hasPermission('quantity-survey.audit.read');
   const requests = useRef<Record<string, { fingerprint: string; id: string }>>(

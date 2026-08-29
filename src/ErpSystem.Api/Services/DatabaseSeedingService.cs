@@ -47,6 +47,7 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
@@ -121,6 +122,7 @@ namespace ErpSystem.Web.Services
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
+            QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
             ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null)
         {
             _context = context;
@@ -133,6 +135,7 @@ namespace ErpSystem.Web.Services
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
             _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
@@ -226,6 +229,12 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC audit and compliance report catalogue is seeded...");
                     await _auditComplianceReportSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey statutory report catalogue is seeded...");
+                    await _quantitySurveyStatutoryReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
