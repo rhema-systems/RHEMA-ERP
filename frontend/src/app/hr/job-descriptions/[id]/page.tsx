@@ -7,9 +7,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
-  FileText,
   GitBranch,
   Loader2,
+  Lock,
   Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,19 +17,25 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { EmptyState } from '@/components/hr/common/EmptyState';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { DutyItemsPanel } from '@/components/hr/job-analysis/DutyItemsPanel';
+import { EquipmentToolsPanel } from '@/components/hr/job-analysis/EquipmentToolsPanel';
+import { JobCompetenciesPanel } from '@/components/hr/job-analysis/JobCompetenciesPanel';
+import { MedicalRequirementsPanel } from '@/components/hr/job-analysis/MedicalRequirementsPanel';
+import { PhysicalDemandsPanel } from '@/components/hr/job-analysis/PhysicalDemandsPanel';
+import { PpeRequirementsPanel } from '@/components/hr/job-analysis/PpeRequirementsPanel';
+import { QualificationsPanel } from '@/components/hr/job-analysis/QualificationsPanel';
+import { ReportingRelationshipsPanel } from '@/components/hr/job-analysis/ReportingRelationshipsPanel';
+import { ResponsibilitiesPanel } from '@/components/hr/job-analysis/ResponsibilitiesPanel';
+import { WorkingConditionsPanel } from '@/components/hr/job-analysis/WorkingConditionsPanel';
+import { useAuth } from '@/hooks/use-auth';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { workflowApiService } from '@/services/workflow-api.service';
-import type { JobDescriptionStatus } from '@/types/hr/job-architecture';
+import {
+  AUTHORABLE_JOB_DESCRIPTION_STATUSES,
+  type JobDescriptionStatus,
+} from '@/types/hr/job-architecture';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtMoney = (v?: number | null) =>
@@ -49,6 +55,7 @@ export default function JobDescriptionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
 
   const { data: jd, isLoading } = useQuery({
@@ -102,6 +109,43 @@ export default function JobDescriptionDetailPage() {
   const status = (jd.statusName ?? jd.status) as JobDescriptionStatus;
   const hasWorkflow = workflow?.hasActiveInstance === true;
   const canApproveOnWorkflow = workflow?.canCurrentUserApprove === true;
+
+  /**
+   * Whether the twelve child collections may be authored.
+   *
+   * Two independent conditions, and they fail for different reasons:
+   *
+   * **Status.** Once a job description is approved it is the document in force for its position,
+   * and the API will still let its duties be rewritten — not one child-collection write checks
+   * status, they all check tenancy and stop. So this is the only thing standing between an
+   * in-force document and a silent edit with no version and no trail. "New version" in the header
+   * is the supported route, which is why the notice points at it.
+   *
+   * **Permission.** POST and PUT are `HR.JobArchitecture.Write`, which HR holds. Every one of the
+   * twelve DELETEs is `HR.JobArchitecture.Admin`, which HR does NOT hold — see `HrStaffGrants`.
+   * So an HR author adds and edits, and only an administrator removes. The delete affordance is
+   * hidden rather than offered and refused.
+   *
+   * ⚠ The role check beside each permission is not belt-and-braces, it mirrors the API. Permissions
+   * resolve from the database, so on a tenant provisioned before the seeder ran a user holds none
+   * at all — which is exactly why `HrPermissions.RoleGrants` exists on the server. Gating on the
+   * permission alone would black out the screen for the very tenants that fallback keeps working.
+   * The two sides must grant the same thing: HR gets Write, the admin roles get Admin.
+   */
+  const authorableStatus = AUTHORABLE_JOB_DESCRIPTION_STATUSES.includes(status);
+  const canWrite =
+    hasAnyPermission(['HR.JobArchitecture.Write', 'HR.JobArchitecture.Admin']) || hasAnyRole(HR_ROLES);
+  const canAuthor = authorableStatus && canWrite;
+  const canDelete =
+    authorableStatus &&
+    (hasAnyPermission(['HR.JobArchitecture.Admin']) || hasAnyRole(HR_ADMIN_ROLES));
+
+  const childProps = {
+    jobDescriptionId: id,
+    canAuthor,
+    canDelete,
+    invalidateKeys: [['job-description', id], ['job-descriptions']] as unknown[][],
+  };
 
   return (
     <div className="space-y-6">
@@ -231,183 +275,99 @@ export default function JobDescriptionDetailPage() {
         </Card>
       </div>
 
+      {!authorableStatus && (
+        <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">This job description is no longer being drafted.</p>
+            <p>
+              Its content is shown as recorded. To change what the job says, create a new version —
+              the one in force stays intact and is retired when the new version is approved.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {authorableStatus && !canWrite && (
+        <div className="flex items-start gap-3 rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>You can read this job description but not change it.</p>
+        </div>
+      )}
+
       <Tabs defaultValue="responsibilities">
         <TabsList className="flex-wrap">
           <TabsTrigger value="responsibilities">
             Responsibilities ({jd.responsibilities?.length ?? 0})
           </TabsTrigger>
+          <TabsTrigger value="duties">Duties ({jd.dutyItems?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="qualifications">
             Qualifications ({jd.qualifications?.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="competencies">Competencies ({jd.competencies?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="demands">
+            Physical demands ({jd.physicalDemands?.length ?? 0})
+          </TabsTrigger>
           <TabsTrigger value="conditions">
             {/* ⚠ `workingConditions` on the DTO; the entity navigation is JobWorkingConditions. */}
-            Conditions ({(jd.physicalDemands?.length ?? 0) + (jd.workingConditions?.length ?? 0)})
+            Working conditions ({jd.workingConditions?.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="equipment">Equipment ({jd.equipmentTools?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="relationships">
             Relationships ({jd.reportingRelationships?.length ?? 0})
           </TabsTrigger>
-          <TabsTrigger value="duties">Duties ({jd.dutyItems?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="safety">
-            Safety &amp; medical ({(jd.ppeRequirements?.length ?? 0) + (jd.medicalRequirements?.length ?? 0)})
+          <TabsTrigger value="ppe">PPE ({jd.ppeRequirements?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="medical">
+            Medical ({jd.medicalRequirements?.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="valuation">Valuation</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="responsibilities">
-          <Panel empty={!jd.responsibilities?.length} emptyText="No responsibilities recorded yet.">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Responsibility</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="text-right">% of time</TableHead>
-                  <TableHead>KPIs</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {jd.responsibilities.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="max-w-md">{r.responsibilityDescription}</TableCell>
-                    <TableCell>{r.type}</TableCell>
-                    <TableCell className="text-right">{r.percentageOfTime ?? '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {(r.kpis ?? []).length === 0
-                        ? '—'
-                        : (r.kpis ?? []).map((k) => k.kpiStatement).join('; ')}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Panel>
+        {/*
+          Each panel reads its own collection rather than slicing the `details` payload, because
+          authoring needs a list it can refetch after a write. The counts on the triggers above
+          still come from `details`, so every panel invalidates it — otherwise a tab would say
+          "Duties (3)" over a table showing four.
+        */}
+
+        <TabsContent value="responsibilities" className="pt-4">
+          <ResponsibilitiesPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="qualifications">
-          <Panel empty={!jd.qualifications?.length} emptyText="No qualifications recorded yet.">
-            <SimpleTable
-              head={['Qualification', 'Type', 'Required']}
-              rows={(jd.qualifications ?? []).map((q) => [q.title, q.type, q.isRequired ? 'Yes' : 'Desirable'])}
-            />
-          </Panel>
+        <TabsContent value="duties" className="pt-4">
+          <DutyItemsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="competencies">
-          <Panel empty={!jd.competencies?.length} emptyText="No competencies recorded yet.">
-            <SimpleTable
-              head={['Competency', 'Type', 'Required level', 'Critical']}
-              rows={(jd.competencies ?? []).map((c) => [
-                c.competencyName,
-                c.type,
-                c.requiredLevel,
-                c.isCritical ? 'Yes' : '—',
-              ])}
-            />
-          </Panel>
+        <TabsContent value="qualifications" className="pt-4">
+          <QualificationsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="conditions">
-          <Panel
-            empty={!jd.physicalDemands?.length && !jd.workingConditions?.length}
-            emptyText="No physical demands or working conditions recorded yet."
-          >
-            <div className="space-y-6">
-              {!!jd.physicalDemands?.length && (
-                <SimpleTable
-                  caption="Physical demands"
-                  head={['Demand', 'Frequency', 'Essential']}
-                  rows={jd.physicalDemands.map((d) => [
-                    d.demandDescription,
-                    d.frequency,
-                    d.isEssential ? 'Yes' : '—',
-                  ])}
-                />
-              )}
-              {!!jd.workingConditions?.length && (
-                <SimpleTable
-                  caption="Working conditions"
-                  head={['Environment', 'Exposure', 'PPE', 'Travel %']}
-                  rows={jd.workingConditions.map((w) => [
-                    w.description,
-                    w.exposureLevel,
-                    w.requiresPPE ? 'Required' : '—',
-                    w.travelPercentage == null ? '—' : String(w.travelPercentage),
-                  ])}
-                />
-              )}
-            </div>
-          </Panel>
+        <TabsContent value="competencies" className="pt-4">
+          <JobCompetenciesPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="equipment">
-          <Panel empty={!jd.equipmentTools?.length} emptyText="No equipment or tools recorded yet.">
-            <SimpleTable
-              head={['Item', 'Type', 'Proficiency', 'Training']}
-              rows={(jd.equipmentTools ?? []).map((e) => [
-                e.itemName,
-                e.type,
-                e.requiredProficiency,
-                (e.trainingRequirements ?? []).map((t) => t.requirementText).join('; ') || '—',
-              ])}
-            />
-          </Panel>
+        <TabsContent value="demands" className="pt-4">
+          <PhysicalDemandsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="relationships">
-          <Panel empty={!jd.reportingRelationships?.length} emptyText="No reporting relationships recorded yet.">
-            <SimpleTable
-              head={['Role', 'Relationship', 'Description']}
-              rows={(jd.reportingRelationships ?? []).map((r) => [
-                r.titleOrRole,
-                r.relationshipType,
-                r.description,
-              ])}
-            />
-          </Panel>
+        <TabsContent value="conditions" className="pt-4">
+          <WorkingConditionsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="duties">
-          <Panel empty={!jd.dutyItems?.length} emptyText="No duty statements recorded yet.">
-            <SimpleTable
-              head={['#', 'Duty']}
-              rows={(jd.dutyItems ?? [])
-                .slice()
-                .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
-                .map((d) => [String(d.sequenceNumber), d.dutyStatement])}
-            />
-          </Panel>
+        <TabsContent value="equipment" className="pt-4">
+          <EquipmentToolsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="safety">
-          <Panel
-            empty={!jd.ppeRequirements?.length && !jd.medicalRequirements?.length}
-            emptyText="No PPE or medical requirements recorded yet."
-          >
-            <div className="space-y-6">
-              {!!jd.ppeRequirements?.length && (
-                <SimpleTable
-                  caption="PPE"
-                  head={['Item', 'Mandatory']}
-                  rows={jd.ppeRequirements.map((p) => [
-                    p.customPpeName ?? 'Standard issue',
-                    p.isMandatory ? 'Yes' : 'Optional',
-                  ])}
-                />
-              )}
-              {!!jd.medicalRequirements?.length && (
-                <SimpleTable
-                  caption="Medical"
-                  head={['Requirement', 'Category', 'Mandatory']}
-                  rows={jd.medicalRequirements.map((m) => [
-                    m.requirementDescription,
-                    m.category,
-                    m.isMandatory ? 'Yes' : 'Optional',
-                  ])}
-                />
-              )}
-            </div>
-          </Panel>
+        <TabsContent value="relationships" className="pt-4">
+          <ReportingRelationshipsPanel {...childProps} />
+        </TabsContent>
+
+        <TabsContent value="ppe" className="pt-4">
+          <PpeRequirementsPanel {...childProps} />
+        </TabsContent>
+
+        <TabsContent value="medical" className="pt-4">
+          <MedicalRequirementsPanel {...childProps} />
         </TabsContent>
 
         <TabsContent value="valuation">
@@ -449,58 +409,6 @@ function Field({ label, value, sub }: { label: string; value?: React.ReactNode; 
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="text-sm font-medium">{value || '—'}</dd>
       {sub && <dd className="text-xs text-muted-foreground">{sub}</dd>}
-    </div>
-  );
-}
-
-function Panel({
-  empty,
-  emptyText,
-  children,
-}: {
-  empty: boolean;
-  emptyText: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        {empty ? <EmptyState icon={FileText} title="Nothing recorded" description={emptyText} /> : children}
-      </CardContent>
-    </Card>
-  );
-}
-
-function SimpleTable({
-  head,
-  rows,
-  caption,
-}: {
-  head: string[];
-  rows: React.ReactNode[][];
-  caption?: string;
-}) {
-  return (
-    <div className="space-y-2">
-      {caption && <h4 className="text-sm font-medium">{caption}</h4>}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {head.map((h) => (
-              <TableHead key={h}>{h}</TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((r, i) => (
-            <TableRow key={i}>
-              {r.map((c, j) => (
-                <TableCell key={j}>{c}</TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
     </div>
   );
 }

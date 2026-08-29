@@ -142,6 +142,7 @@ DEMO_FEEDBACK = [
 # be complete to be checkable.
 BUILD_CHECKLISTS = {
     "CompanyScheduleController.cs": "Company Schedule",
+    "JobAnalysisController.cs": "Job Analysis",
     "EmployeeCareerPathController.cs": "Employee career paths",
 }
 
@@ -153,6 +154,24 @@ BLOCKERS = [
      "HrControllerBase.TryGetEmployeeWriteContext and no longer accept it from the client. "
      "Safe to change signatures because no caller existed. **Needs a backend rebuild.**",
      "Was blocking the Company Schedule build — cleared"),
+    ("D-03", "A child write on an approved job description is accepted by the API", "OPEN",
+     "None of the twelve child-collection writes checks status. `AddPhysicalDemandAsync` and its "
+     "eleven siblings call `GetOwnedJobDescriptionAsync`, which verifies the tenant and stops — so "
+     "the duties of an approved, in-force job description can be rewritten with no new version and "
+     "no trace. Proven against the running API by slice 13, which records it as a passing "
+     "assertion so the day it starts failing is the day the server grew a gate. The authoring "
+     "panels refuse it client-side (`AUTHORABLE_JOB_DESCRIPTION_STATUSES`) and that is the only "
+     "thing stopping it. A server-side guard belongs on the service, not the screen.",
+     "Nothing — the UI compensates. Raised so the compensation is not mistaken for a rule."),
+    ("D-04", "`JobEquipmentTool.LinkedQualificationId` points at a JobQualification, not the catalogue", "DONE 2026-08-29",
+     "The field is called `LinkedQualificationId`, the DTO types it `Guid?`, and the obvious "
+     "reading — the `Qualifications` reference catalogue — is wrong. The constraint is "
+     "`FK_JobEquipmentTools_JobQualifications_LinkedQualificationId`: it targets one of the SAME "
+     "job description's qualification rows. A catalogue id fails the FK and the request 500s with "
+     "the generic handler's message, naming nothing. The equipment panel was built on the wrong "
+     "reading and slice 13 caught it; the picker now reads the job description's own "
+     "qualifications and hides itself until there are some.",
+     "Was breaking every equipment-tool save — cleared"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "
@@ -209,6 +228,8 @@ w("| 2026-08-28 | Build the Company Schedule UI in full. |")
 w("| 2026-08-28 | Salary grades, levels and notches are read-only **by intent** — payroll owns the grade master. Closed; do not re-raise. |")
 w("| 2026-08-28 | Employee career paths are **not** server-write-only and should get a UI. |")
 w("| 2026-08-28 | Company Schedule station FKs repointed from `WorkStation` to `Location`. `WorkStation` has an empty table, no repository implementation and no endpoint, so a required station made the meeting-room form unfillable. **Needs a migration.** |")
+w("| 2026-08-29 | Job Analysis: the twelve child collections are now authored from the job-description detail screen. Panels go read-only outside `Draft`/`UnderRevision`, and the delete affordance is hidden below Admin — both mirror what the API does, except the status rule, which the API does **not** enforce (see D-03). |")
+w("| 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |")
 w("")
 
 w("## B. Blockers — must clear before the dependent build starts")

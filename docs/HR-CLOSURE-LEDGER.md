@@ -13,9 +13,9 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2148 |
-| Wired to a screen | 1677 |
-| No caller found (instrument 01) | 471 |
-| Confirmed unreachable (01 ∩ 02) | 63 |
+| Wired to a screen | 1713 |
+| No caller found (instrument 01) | 435 |
+| Confirmed unreachable (01 ∩ 02) | 43 |
 | Write-DTO fields no form can set | 115 across 50 DTOs |
 
 ## A. Decisions taken
@@ -26,6 +26,8 @@ yet classified.
 | 2026-08-28 | Salary grades, levels and notches are read-only **by intent** — payroll owns the grade master. Closed; do not re-raise. |
 | 2026-08-28 | Employee career paths are **not** server-write-only and should get a UI. |
 | 2026-08-28 | Company Schedule station FKs repointed from `WorkStation` to `Location`. `WorkStation` has an empty table, no repository implementation and no endpoint, so a required station made the meeting-room form unfillable. **Needs a migration.** |
+| 2026-08-29 | Job Analysis: the twelve child collections are now authored from the job-description detail screen. Panels go read-only outside `Draft`/`UnderRevision`, and the delete affordance is hidden below Admin — both mirror what the API does, except the status rule, which the API does **not** enforce (see D-03). |
+| 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |
 
 ## B. Blockers — must clear before the dependent build starts
 
@@ -34,6 +36,18 @@ yet classified.
   organizerId, approvedById, markedById, bookedById and announcedById arrived as query parameters. Opening a UI over them unchanged would have shipped an act-as-anyone surface — the controller's own W3 remarks said so. All six now derive the actor from the token via HrControllerBase.TryGetEmployeeWriteContext and no longer accept it from the client. Safe to change signatures because no caller existed. **Needs a backend rebuild.**
 
   _Was blocking the Company Schedule build — cleared_
+
+- [ ] **D-03 — A child write on an approved job description is accepted by the API** · `OPEN`
+
+  None of the twelve child-collection writes checks status. `AddPhysicalDemandAsync` and its eleven siblings call `GetOwnedJobDescriptionAsync`, which verifies the tenant and stops — so the duties of an approved, in-force job description can be rewritten with no new version and no trace. Proven against the running API by slice 13, which records it as a passing assertion so the day it starts failing is the day the server grew a gate. The authoring panels refuse it client-side (`AUTHORABLE_JOB_DESCRIPTION_STATUSES`) and that is the only thing stopping it. A server-side guard belongs on the service, not the screen.
+
+  _Nothing — the UI compensates. Raised so the compensation is not mistaken for a rule._
+
+- [x] **D-04 — `JobEquipmentTool.LinkedQualificationId` points at a JobQualification, not the catalogue** · `DONE 2026-08-29`
+
+  The field is called `LinkedQualificationId`, the DTO types it `Guid?`, and the obvious reading — the `Qualifications` reference catalogue — is wrong. The constraint is `FK_JobEquipmentTools_JobQualifications_LinkedQualificationId`: it targets one of the SAME job description's qualification rows. A catalogue id fails the FK and the request 500s with the generic handler's message, naming nothing. The equipment panel was built on the wrong reading and slice 13 caught it; the picker now reads the job description's own qualifications and hides itself until there are some.
+
+  _Was breaking every equipment-tool save — cleared_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -44,31 +58,6 @@ yet classified.
 ## C. Confirmed unreachable endpoints (01 ∩ 02)
 
 Both instruments agree, and each was hand-verified in source. This is the trustworthy list.
-
-### JobAnalysis — `BUILD`
-
-The reference case. Eleven child collections with full CRUD and a read-only UI.
-
-- [ ] `POST   api/JobAnalysis/descriptions/{}/duty-items`
-- [ ] `POST   api/JobAnalysis/descriptions/{}/equipment-tools`
-- [ ] `POST   api/JobAnalysis/descriptions/{}/medical-requirements`
-- [ ] `POST   api/JobAnalysis/descriptions/{}/physical-demands`
-- [ ] `POST   api/JobAnalysis/descriptions/{}/reporting-relationships`
-- [ ] `POST   api/JobAnalysis/descriptions/{}/working-conditions`
-- [ ] `PUT    api/JobAnalysis/duty-items/{}`
-- [ ] `DELETE api/JobAnalysis/duty-items/{}`
-- [ ] `PUT    api/JobAnalysis/equipment-tools/{}`
-- [ ] `DELETE api/JobAnalysis/equipment-tools/{}`
-- [ ] `PUT    api/JobAnalysis/equipment-training/{}`
-- [ ] `DELETE api/JobAnalysis/equipment-training/{}`
-- [ ] `PUT    api/JobAnalysis/medical-requirements/{}`
-- [ ] `DELETE api/JobAnalysis/medical-requirements/{}`
-- [ ] `PUT    api/JobAnalysis/physical-demands/{}`
-- [ ] `DELETE api/JobAnalysis/physical-demands/{}`
-- [ ] `PUT    api/JobAnalysis/reporting-relationships/{}`
-- [ ] `DELETE api/JobAnalysis/reporting-relationships/{}`
-- [ ] `PUT    api/JobAnalysis/working-conditions/{}`
-- [ ] `DELETE api/JobAnalysis/working-conditions/{}`
 
 ### MedicalInsurance — `BUILD`
 
@@ -302,6 +291,110 @@ measures; reads are listed for completeness and are checked the same way.
 - [ ] `GET    api/CompanySchedule/rooms/paged`
 - [ ] `GET    api/CompanySchedule/rooms/{}`
 
+### Job Analysis — 55 of 59 writes wired
+
+**Writes**
+
+- [x] `POST   api/JobAnalysis/budgets`
+- [x] `POST   api/JobAnalysis/budgets/{}/lines`
+- [ ] `DELETE api/JobAnalysis/budgets/{}`
+- [ ] `PUT    api/JobAnalysis/budgets/{}`
+- [x] `POST   api/JobAnalysis/budgets/{}/approve`
+- [x] `POST   api/JobAnalysis/budgets/{}/reject`
+- [x] `POST   api/JobAnalysis/budgets/{}/submit`
+- [x] `POST   api/JobAnalysis/budgets/{}/workflow/approve`
+- [x] `POST   api/JobAnalysis/budgets/{}/workflow/reject`
+- [x] `DELETE api/JobAnalysis/competencies/{}`
+- [x] `PUT    api/JobAnalysis/competencies/{}`
+- [x] `POST   api/JobAnalysis/descriptions`
+- [x] `DELETE api/JobAnalysis/descriptions/{}`
+- [x] `PUT    api/JobAnalysis/descriptions/{}`
+- [x] `POST   api/JobAnalysis/descriptions/{}/approve`
+- [x] `POST   api/JobAnalysis/descriptions/{}/clone`
+- [x] `POST   api/JobAnalysis/descriptions/{}/review`
+- [x] `POST   api/JobAnalysis/descriptions/{}/submit`
+- [x] `POST   api/JobAnalysis/descriptions/{}/version`
+- [x] `POST   api/JobAnalysis/descriptions/{}/workflow/approve`
+- [x] `POST   api/JobAnalysis/descriptions/{}/workflow/reject`
+- [x] `POST   api/JobAnalysis/descriptions/{}/competencies`
+- [x] `POST   api/JobAnalysis/descriptions/{}/duty-items`
+- [x] `POST   api/JobAnalysis/descriptions/{}/equipment-tools`
+- [x] `POST   api/JobAnalysis/descriptions/{}/medical-requirements`
+- [x] `POST   api/JobAnalysis/descriptions/{}/physical-demands`
+- [x] `POST   api/JobAnalysis/descriptions/{}/ppe-requirements`
+- [x] `POST   api/JobAnalysis/descriptions/{}/qualifications`
+- [x] `POST   api/JobAnalysis/descriptions/{}/reporting-relationships`
+- [x] `POST   api/JobAnalysis/descriptions/{}/responsibilities`
+- [x] `POST   api/JobAnalysis/descriptions/{}/working-conditions`
+- [x] `DELETE api/JobAnalysis/duty-items/{}`
+- [x] `PUT    api/JobAnalysis/duty-items/{}`
+- [x] `POST   api/JobAnalysis/equipment-tools/{}/training`
+- [x] `DELETE api/JobAnalysis/equipment-tools/{}`
+- [x] `PUT    api/JobAnalysis/equipment-tools/{}`
+- [x] `DELETE api/JobAnalysis/equipment-training/{}`
+- [x] `PUT    api/JobAnalysis/equipment-training/{}`
+- [x] `DELETE api/JobAnalysis/establishment/position/{}`
+- [x] `PUT    api/JobAnalysis/establishment/position/{}`
+- [x] `DELETE api/JobAnalysis/kpis/{}`
+- [x] `PUT    api/JobAnalysis/kpis/{}`
+- [ ] `DELETE api/JobAnalysis/lines/{}`
+- [ ] `PUT    api/JobAnalysis/lines/{}`
+- [x] `DELETE api/JobAnalysis/medical-requirements/{}`
+- [x] `PUT    api/JobAnalysis/medical-requirements/{}`
+- [x] `DELETE api/JobAnalysis/physical-demands/{}`
+- [x] `PUT    api/JobAnalysis/physical-demands/{}`
+- [x] `DELETE api/JobAnalysis/ppe-requirements/{}`
+- [x] `PUT    api/JobAnalysis/ppe-requirements/{}`
+- [x] `DELETE api/JobAnalysis/qualifications/{}`
+- [x] `PUT    api/JobAnalysis/qualifications/{}`
+- [x] `DELETE api/JobAnalysis/reporting-relationships/{}`
+- [x] `PUT    api/JobAnalysis/reporting-relationships/{}`
+- [x] `DELETE api/JobAnalysis/responsibilities/{}`
+- [x] `PUT    api/JobAnalysis/responsibilities/{}`
+- [x] `POST   api/JobAnalysis/responsibilities/{}/kpis`
+- [x] `DELETE api/JobAnalysis/working-conditions/{}`
+- [x] `PUT    api/JobAnalysis/working-conditions/{}`
+
+**Reads**
+
+- [ ] `GET    api/JobAnalysis/analytics`
+- [ ] `GET    api/JobAnalysis/budgets`
+- [ ] `GET    api/JobAnalysis/budgets/organization-level/{}`
+- [ ] `GET    api/JobAnalysis/budgets/organization-unit/{}`
+- [ ] `GET    api/JobAnalysis/budgets/organization-unit/{}/current`
+- [ ] `GET    api/JobAnalysis/budgets/paged`
+- [ ] `GET    api/JobAnalysis/budgets/pending-approvals`
+- [ ] `GET    api/JobAnalysis/budgets/status/{}`
+- [ ] `GET    api/JobAnalysis/budgets/year/{}`
+- [ ] `GET    api/JobAnalysis/budgets/{}/critical-positions`
+- [ ] `GET    api/JobAnalysis/budgets/{}/lines`
+- [ ] `GET    api/JobAnalysis/budgets/{}`
+- [ ] `GET    api/JobAnalysis/budgets/{}/details`
+- [ ] `GET    api/JobAnalysis/descriptions`
+- [ ] `GET    api/JobAnalysis/descriptions/due-review`
+- [ ] `GET    api/JobAnalysis/descriptions/paged`
+- [ ] `GET    api/JobAnalysis/descriptions/position/{}`
+- [ ] `GET    api/JobAnalysis/descriptions/position/{}/current`
+- [ ] `GET    api/JobAnalysis/descriptions/position/{}/history`
+- [ ] `GET    api/JobAnalysis/descriptions/status/{}`
+- [ ] `GET    api/JobAnalysis/descriptions/{}`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/details`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/competencies`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/duty-items`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/equipment-tools`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/medical-requirements`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/physical-demands`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/ppe-requirements`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/qualifications`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/reporting-relationships`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/responsibilities`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/valuation`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/working-conditions`
+- [ ] `GET    api/JobAnalysis/equipment-tools/{}/training`
+- [ ] `GET    api/JobAnalysis/establishment/position/{}`
+- [ ] `GET    api/JobAnalysis/positions/uncovered`
+- [ ] `GET    api/JobAnalysis/responsibilities/{}/kpis`
+
 ### Employee career paths — 0 of 3 writes wired
 
 **Writes**
@@ -333,7 +426,6 @@ move the real ones into section C's disposition map.
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
 | PerformanceImprovementPlans | 22 | 36 | `REVIEW` | 18 of 22 flags are the api/PerformanceImprovementPlans alias of api/Pip. Real: attachments, review meetings, complete. |
 | StaffDisciplineSubEntity | 21 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
-| JobAnalysis | 20 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
 | StaffDisciplineLookup | 20 | 20 | `BUILD` | Offence catalogue is GET-only in the UI; clients cannot maintain their own offence library. |
 | PerformanceAppraisals | 15 | 29 | `REVIEW` | calculate-score may be server-driven on submit. |
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
@@ -350,6 +442,7 @@ move the real ones into section C's disposition map.
 | SuccessionCandidates | 5 | 17 | `REVIEW` |  |
 | CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
 | ConsultantClientPortalAuth | 4 | 7 | `BUILD` | Client portal authentication. |
+| JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
 | SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | AppraisalCycleTarget | 3 | 6 | `REVIEW` |  |

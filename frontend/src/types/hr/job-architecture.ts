@@ -28,28 +28,85 @@ export type QualificationType =
   | 'Experience'
   | 'Certification'
   | 'License'
+  | 'TechnicalSkills'
+  | 'Language'
   | 'Membership'
   | 'Other';
 
-export type CompetencyType = 'Technical' | 'Behavioral' | 'Leadership' | 'Core' | 'Functional';
+/**
+ * ⚠ **Not the same enum as `CompetencyCategory`.** This one classifies a competency *on a job
+ * description* and has FOUR values; the master competency catalogue is categorised by
+ * `CompetencyCategory`, which has six and includes `Functional`. This union carried `Functional`
+ * until the authoring forms were built — a value the API's converter rejects outright, so the
+ * dropdown it would have produced could never have saved.
+ */
+export type CompetencyType = 'Technical' | 'Behavioral' | 'Leadership' | 'Core';
 
 export type ProficiencyLevel = 'Basic' | 'WorkingKnowledge' | 'Proficient' | 'Advanced' | 'Expert';
 
+/** ⚠ The last value is `Continuously`, not `Constantly` — `ExposureLevel` is the one ending in Constant. */
 export type PhysicalDemandFrequency =
   | 'Never'
   | 'Rarely'
   | 'Occasionally'
   | 'Frequently'
-  | 'Constantly';
+  | 'Continuously';
 
+/** The 27 recognised demands. `Other` is the catch-all; the description carries the detail. */
+export type PhysicalDemandType =
+  | 'Sitting'
+  | 'Standing'
+  | 'Walking'
+  | 'Running'
+  | 'Climbing'
+  | 'Balancing'
+  | 'Stooping'
+  | 'Kneeling'
+  | 'Crouching'
+  | 'Crawling'
+  | 'Reaching'
+  | 'Handling'
+  | 'Fingering'
+  | 'Feeling'
+  | 'Talking'
+  | 'Hearing'
+  | 'SeeingNear'
+  | 'SeeingFar'
+  | 'SeeingPeripheral'
+  | 'SeeingColor'
+  | 'SeeingDepth'
+  | 'TastingSmelling'
+  | 'LiftingCarrying'
+  | 'PushingPulling'
+  | 'KeyboardingTyping'
+  | 'RepetitiveMotion'
+  | 'Other';
+
+/** ⚠ `Warehouse` and `Site` are NOT members — both were invented by the first draft of this file. */
 export type WorkEnvironmentType =
   | 'Office'
   | 'Outdoor'
   | 'Industrial'
   | 'Laboratory'
-  | 'Warehouse'
-  | 'Site'
-  | 'Remote';
+  | 'Remote'
+  | 'Hybrid'
+  | 'FieldBased'
+  | 'Other';
+
+export type EquipmentType =
+  | 'SoftwareApplication'
+  | 'ComputerHardware'
+  | 'MobileDevice'
+  | 'OfficeEquipment'
+  | 'HandTool'
+  | 'PowerTool'
+  | 'HeavyMachinery'
+  | 'Vehicle'
+  | 'SpecializedInstrument'
+  | 'SafetyEquipment'
+  | 'Other';
+
+export type MedicalRequirementCategory = 'Medical' | 'Mental' | 'Health' | 'Sensory' | 'Other';
 
 export type ExposureLevel = 'None' | 'Rare' | 'Occasional' | 'Frequent' | 'Constant';
 
@@ -92,6 +149,157 @@ export type BudgetEnforcementMode = 'Off' | 'Warn' | 'Block';
 
 /** ⚠ Null when the competency has never been assessed — distinct from a gap. */
 export type GapStatus = 'Met' | 'Exceeded' | 'Gap';
+
+// ── option lists for the authoring forms ─────────────────────────────────
+
+/**
+ * Every list below is `{ value, label }` because the API takes the **member name** while a form
+ * has to show something a person would say. `SeeingNear` and `KeyboardingTyping` are not labels.
+ *
+ * ⚠ The values are the contract. `JsonStringEnumConverter` matches the C# member name and rejects
+ * anything else with a 400, so a prettier value is a broken save.
+ */
+export interface EnumOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+export const RESPONSIBILITY_TYPES: EnumOption<ResponsibilityType>[] = [
+  { value: 'Core', label: 'Core responsibility' },
+  { value: 'Secondary', label: 'Secondary responsibility' },
+  { value: 'Occasional', label: 'Occasional responsibility' },
+];
+
+export const QUALIFICATION_TYPES: EnumOption<QualificationType>[] = [
+  { value: 'Education', label: 'Education' },
+  { value: 'Experience', label: 'Work experience' },
+  { value: 'Certification', label: 'Certification' },
+  { value: 'License', label: 'License' },
+  { value: 'TechnicalSkills', label: 'Technical skills' },
+  { value: 'Language', label: 'Language' },
+  { value: 'Membership', label: 'Professional membership' },
+  { value: 'Other', label: 'Other' },
+];
+
+export const JOB_COMPETENCY_TYPES: EnumOption<CompetencyType>[] = [
+  { value: 'Technical', label: 'Technical' },
+  { value: 'Behavioral', label: 'Behavioural' },
+  { value: 'Leadership', label: 'Leadership' },
+  { value: 'Core', label: 'Core competency' },
+];
+
+export const PROFICIENCY_LEVELS: EnumOption<ProficiencyLevel>[] = [
+  { value: 'Basic', label: 'Basic / awareness' },
+  { value: 'WorkingKnowledge', label: 'Working knowledge' },
+  { value: 'Proficient', label: 'Proficient' },
+  { value: 'Advanced', label: 'Advanced' },
+  { value: 'Expert', label: 'Expert' },
+];
+
+/** Ordered as an assessor walks a body: posture, movement, manipulation, senses, then load. */
+export const PHYSICAL_DEMAND_TYPES: EnumOption<PhysicalDemandType>[] = [
+  { value: 'Sitting', label: 'Sitting' },
+  { value: 'Standing', label: 'Standing' },
+  { value: 'Walking', label: 'Walking' },
+  { value: 'Running', label: 'Running' },
+  { value: 'Climbing', label: 'Climbing' },
+  { value: 'Balancing', label: 'Balancing' },
+  { value: 'Stooping', label: 'Stooping (bending at the waist)' },
+  { value: 'Kneeling', label: 'Kneeling' },
+  { value: 'Crouching', label: 'Crouching' },
+  { value: 'Crawling', label: 'Crawling' },
+  { value: 'Reaching', label: 'Reaching' },
+  { value: 'Handling', label: 'Handling (grasping, turning)' },
+  { value: 'Fingering', label: 'Fingering (fine finger work)' },
+  { value: 'Feeling', label: 'Feeling (perceiving by touch)' },
+  { value: 'Talking', label: 'Talking' },
+  { value: 'Hearing', label: 'Hearing' },
+  { value: 'SeeingNear', label: 'Seeing — near acuity' },
+  { value: 'SeeingFar', label: 'Seeing — distance acuity' },
+  { value: 'SeeingPeripheral', label: 'Seeing — peripheral vision' },
+  { value: 'SeeingColor', label: 'Seeing — colour vision' },
+  { value: 'SeeingDepth', label: 'Seeing — depth perception' },
+  { value: 'TastingSmelling', label: 'Tasting or smelling' },
+  { value: 'LiftingCarrying', label: 'Lifting or carrying' },
+  { value: 'PushingPulling', label: 'Pushing or pulling' },
+  { value: 'KeyboardingTyping', label: 'Keyboarding or typing' },
+  { value: 'RepetitiveMotion', label: 'Repetitive motion' },
+  { value: 'Other', label: 'Other' },
+];
+
+/** The labels carry the percentage bands — the enum names alone do not say what they mean. */
+export const PHYSICAL_DEMAND_FREQUENCIES: EnumOption<PhysicalDemandFrequency>[] = [
+  { value: 'Never', label: 'Never' },
+  { value: 'Rarely', label: 'Rarely (up to 5%)' },
+  { value: 'Occasionally', label: 'Occasionally (6–33%)' },
+  { value: 'Frequently', label: 'Frequently (34–66%)' },
+  { value: 'Continuously', label: 'Continuously (67–100%)' },
+];
+
+export const WORK_ENVIRONMENT_TYPES: EnumOption<WorkEnvironmentType>[] = [
+  { value: 'Office', label: 'Office' },
+  { value: 'Outdoor', label: 'Outdoor' },
+  { value: 'Industrial', label: 'Industrial' },
+  { value: 'Laboratory', label: 'Laboratory' },
+  { value: 'Remote', label: 'Remote' },
+  { value: 'Hybrid', label: 'Hybrid' },
+  { value: 'FieldBased', label: 'Field-based' },
+  { value: 'Other', label: 'Other' },
+];
+
+export const EXPOSURE_LEVELS: EnumOption<ExposureLevel>[] = [
+  { value: 'None', label: 'None' },
+  { value: 'Rare', label: 'Rare (under 1%)' },
+  { value: 'Occasional', label: 'Occasional (6–33%)' },
+  { value: 'Frequent', label: 'Frequent (34–66%)' },
+  { value: 'Constant', label: 'Constant (67–100%)' },
+];
+
+export const EQUIPMENT_TYPES: EnumOption<EquipmentType>[] = [
+  { value: 'SoftwareApplication', label: 'Software application' },
+  { value: 'ComputerHardware', label: 'Computer hardware' },
+  { value: 'MobileDevice', label: 'Mobile device' },
+  { value: 'OfficeEquipment', label: 'Office equipment' },
+  { value: 'HandTool', label: 'Hand tool' },
+  { value: 'PowerTool', label: 'Power tool' },
+  { value: 'HeavyMachinery', label: 'Heavy machinery' },
+  { value: 'Vehicle', label: 'Vehicle' },
+  { value: 'SpecializedInstrument', label: 'Specialised instrument' },
+  { value: 'SafetyEquipment', label: 'Safety equipment' },
+  { value: 'Other', label: 'Other' },
+];
+
+/**
+ * ⚠ There is deliberately no "reports to" or "supervises" here — the C# enum's own remarks say
+ * the supervisory line lives on the position, not on the job description. Do not add one.
+ */
+export const REPORTING_RELATIONSHIP_TYPES: EnumOption<ReportingRelationshipType>[] = [
+  { value: 'CollaboratesWith', label: 'Collaborates with' },
+  { value: 'InternalCustomers', label: 'Internal customers' },
+  { value: 'ExternalCustomers', label: 'External customers' },
+  { value: 'Vendors', label: 'Vendors' },
+  { value: 'RegulatoryBodies', label: 'Regulatory bodies' },
+  { value: 'MatrixReport', label: 'Matrix report' },
+];
+
+export const MEDICAL_REQUIREMENT_CATEGORIES: EnumOption<MedicalRequirementCategory>[] = [
+  { value: 'Medical', label: 'Medical' },
+  { value: 'Mental', label: 'Mental' },
+  { value: 'Health', label: 'General health' },
+  { value: 'Sensory', label: 'Sensory' },
+  { value: 'Other', label: 'Other' },
+];
+
+/**
+ * The statuses a job description may still be authored in.
+ *
+ * ⚠ **The API does not enforce this — the screen does.** Not one child-collection write checks
+ * status; `AddPhysicalDemandAsync` and its eleven siblings call `GetOwnedJobDescriptionAsync`,
+ * which verifies the tenant and nothing else. So the API will rewrite the duties of an approved,
+ * in-force job description with no new version and no trace. The register offers "New version" for
+ * exactly that, and the authoring panels go read-only outside these two.
+ */
+export const AUTHORABLE_JOB_DESCRIPTION_STATUSES: JobDescriptionStatus[] = ['Draft', 'UnderRevision'];
 
 // ── job description ──────────────────────────────────────────────────────────
 
@@ -171,6 +379,8 @@ export interface JobResponsibility {
   jobDescriptionId: string;
   responsibilityDescription: string;
   type: ResponsibilityType;
+  /** Server-rendered `type.ToString()`. Read-only — the write DTOs take `type`. */
+  typeName?: string;
   percentageOfTime?: number | null;
   importanceWeight?: number | null;
   qualifications?: JobQualification[];
@@ -193,7 +403,10 @@ export interface JobQualification {
   jobDescriptionId: string;
   jobResponsibilityId?: string | null;
   type: QualificationType;
+  typeName?: string;
   qualificationId?: string | null;
+  /** Resolved from the qualification catalogue; null when `qualificationId` is unset. */
+  qualificationName?: string | null;
   title: string;
   description: string;
   isRequired: boolean;
@@ -206,11 +419,21 @@ export interface JobCompetency {
   jobDescriptionId: string;
   jobResponsibilityId?: string | null;
   skillId?: string | null;
+  /** Resolved from the skill catalogue. */
+  skillName?: string | null;
   competencyId?: string | null;
+  /**
+   * ⚠ Resolved from the competency FRAMEWORK, and not the same field as `competencyName`.
+   * `competencyName` is the free text typed on this row; this is what the linked master record
+   * is called. They can disagree, and when they do the free text is what the document prints.
+   */
+  masterCompetencyName?: string | null;
   competencyName: string;
   description?: string | null;
   type: CompetencyType;
+  typeName?: string;
   requiredLevel: ProficiencyLevel;
+  requiredLevelName?: string;
   isCritical: boolean;
   monetaryValue?: number | null;
 }
@@ -218,9 +441,11 @@ export interface JobCompetency {
 export interface JobPhysicalDemand {
   id: string;
   jobDescriptionId: string;
-  demandType: string;
+  demandType: PhysicalDemandType;
+  demandTypeName?: string;
   demandDescription: string;
   frequency: PhysicalDemandFrequency;
+  frequencyName?: string;
   weightOrForceKg?: number | null;
   distanceOrDuration?: string | null;
   isEssential: boolean;
@@ -234,8 +459,10 @@ export interface JobWorkingCondition {
   id: string;
   jobDescriptionId: string;
   environmentType: WorkEnvironmentType;
+  environmentTypeName?: string;
   description: string;
   exposureLevel: ExposureLevel;
+  exposureLevelName?: string;
   requiresPPE: boolean;
   ppeRequirements?: string | null;
   travelPercentage?: number | null;
@@ -246,9 +473,11 @@ export interface JobEquipmentTool {
   id: string;
   jobDescriptionId: string;
   itemName: string;
-  type: string;
+  type: EquipmentType;
+  typeName?: string;
   descriptionOrSpecification: string;
   requiredProficiency: ProficiencyLevel;
+  requiredProficiencyName?: string;
   isEssential: boolean;
   trainingRequired?: string | null;
   linkedQualificationId?: string | null;
@@ -259,6 +488,8 @@ export interface JobEquipmentTraining {
   id: string;
   jobEquipmentToolId: string;
   trainingProgramId?: string | null;
+  /** Resolved from the training catalogue; null when not linked to a program. */
+  trainingProgramName?: string | null;
   requirementText: string;
   isMandatory: boolean;
 }
@@ -267,8 +498,16 @@ export interface JobReportingRelationship {
   id: string;
   jobDescriptionId: string;
   relationshipType: ReportingRelationshipType;
+  relationshipTypeName?: string;
   titleOrRole: string;
+  /** ⚠ An `EmployeePosition` id, despite the name — the FK targets the position table. */
   employeeOrPositionId?: string | null;
+  /**
+   * Resolved position title. ⚠ Comes back **null on a create or update response**: neither
+   * service method re-includes the navigation, only the list read does. Refetch after a write
+   * rather than reading this off the response.
+   */
+  relatedPositionTitle?: string | null;
   description: string;
   numberOfDirectReports?: number | null;
   isPrimarySupervisor: boolean;
@@ -286,7 +525,11 @@ export interface JobPpeRequirement {
   id: string;
   jobDescriptionId: string;
   ppeTypeId?: string | null;
+  /** Resolved from the safety module's PPE catalogue. */
+  ppeTypeName?: string | null;
   customPpeName?: string | null;
+  /** Server-computed: the catalogue name if there is one, else the custom name, else ''. */
+  displayName?: string;
   isMandatory: boolean;
   notes?: string | null;
 }
@@ -294,7 +537,8 @@ export interface JobPpeRequirement {
 export interface JobMedicalRequirement {
   id: string;
   jobDescriptionId: string;
-  category: string;
+  category: MedicalRequirementCategory;
+  categoryName?: string;
   requirementDescription: string;
   rationale?: string | null;
   contraindications?: string | null;
@@ -316,6 +560,196 @@ export interface JobDescriptionDetail extends JobDescription {
   equipmentTools: JobEquipmentTool[];
   reportingRelationships: JobReportingRelationship[];
   medicalRequirements: JobMedicalRequirement[];
+}
+
+// ── child-collection writes ──────────────────────────────────────────────────
+
+/**
+ * The twelve collections that hang off a job description, as their C# create/update DTOs declare
+ * them — **not** as the read DTO looks.
+ *
+ * Three rules the whole family follows, each learned from a DTO that breaks the guess:
+ *
+ * 1. **The parent id is never in the body.** Every `POST` carries it in the route and the
+ *    controller assigns `dto.JobDescriptionId = jobDescriptionId` itself. Sending it changes
+ *    nothing; omitting it is correct.
+ * 2. **`id` IS in the update body.** It comes from `UpdateDtoBase`, so the C# class declaration
+ *    shows no id at all, while every controller does `if (id != dto.Id) return BadRequest`. An
+ *    update without it 400s on a field you cannot see by reading the DTO.
+ * 3. **Update is not create-minus-the-parent.** `UpdateJobQualificationDto` drops
+ *    `jobResponsibilityId` and `UpdateJobCompetencyDto` drops it too, so a row's link to a
+ *    responsibility is fixed at creation. `UpdateJobEquipmentTrainingDto` likewise cannot be
+ *    repointed at another tool.
+ */
+
+export interface CreateJobDutyItem {
+  /** 0 asks the server for the next number in sequence. */
+  sequenceNumber: number;
+  dutyStatement: string;
+  notes?: string | null;
+}
+
+export interface UpdateJobDutyItem extends CreateJobDutyItem {
+  id: string;
+}
+
+export interface CreateJobResponsibility {
+  responsibilityDescription: string;
+  type: ResponsibilityType;
+  percentageOfTime?: number | null;
+  importanceWeight?: number | null;
+}
+
+export interface UpdateJobResponsibility extends CreateJobResponsibility {
+  id: string;
+}
+
+export interface CreateJobResponsibilityKpi {
+  kpiStatement: string;
+  targetOrStandard?: string | null;
+  unitOfMeasure?: string | null;
+  weight?: number | null;
+  sequenceNumber: number;
+}
+
+export interface UpdateJobResponsibilityKpi extends CreateJobResponsibilityKpi {
+  id: string;
+}
+
+export interface CreateJobQualification {
+  /** Optional: pins the qualification to one responsibility rather than the whole job. */
+  jobResponsibilityId?: string | null;
+  type: QualificationType;
+  /** Optional link to the qualification catalogue; `title` still carries the wording. */
+  qualificationId?: string | null;
+  title: string;
+  description: string;
+  isRequired: boolean;
+  jobSpecificRequirements?: string | null;
+  monetaryValue?: number | null;
+}
+
+/** ⚠ `jobResponsibilityId` is absent — the link is fixed at creation. */
+export interface UpdateJobQualification extends Omit<CreateJobQualification, 'jobResponsibilityId'> {
+  id: string;
+}
+
+export interface CreateJobCompetency {
+  jobResponsibilityId?: string | null;
+  skillId?: string | null;
+  competencyId?: string | null;
+  competencyName: string;
+  description?: string | null;
+  type: CompetencyType;
+  requiredLevel: ProficiencyLevel;
+  isCritical: boolean;
+  monetaryValue?: number | null;
+}
+
+/** ⚠ `jobResponsibilityId` is absent — the link is fixed at creation. */
+export interface UpdateJobCompetency extends Omit<CreateJobCompetency, 'jobResponsibilityId'> {
+  id: string;
+}
+
+export interface CreateJobPhysicalDemand {
+  demandType: PhysicalDemandType;
+  demandDescription: string;
+  frequency: PhysicalDemandFrequency;
+  weightOrForceKg?: number | null;
+  distanceOrDuration?: string | null;
+  isEssential: boolean;
+  notesOrExamples?: string | null;
+  /**
+   * Marks the row as an inherent attribute of the person rather than an action of the job
+   * ("normal colour vision"). Both `attributeRequirement` and `justification` belong to it —
+   * a requirement about a person's body needs a stated reason.
+   */
+  isPhysicalAttribute: boolean;
+  attributeRequirement?: string | null;
+  justification?: string | null;
+}
+
+export interface UpdateJobPhysicalDemand extends CreateJobPhysicalDemand {
+  id: string;
+}
+
+export interface CreateJobWorkingCondition {
+  environmentType: WorkEnvironmentType;
+  description: string;
+  exposureLevel: ExposureLevel;
+  /** ⚠ Capital PPE on both of these — `requiresPPE`, `ppeRequirements`. */
+  requiresPPE: boolean;
+  ppeRequirements?: string | null;
+  travelPercentage?: number | null;
+  travelRequirements?: string | null;
+}
+
+export interface UpdateJobWorkingCondition extends CreateJobWorkingCondition {
+  id: string;
+}
+
+export interface CreateJobEquipmentTool {
+  itemName: string;
+  type: EquipmentType;
+  descriptionOrSpecification: string;
+  requiredProficiency: ProficiencyLevel;
+  isEssential: boolean;
+  /** Free-text summary. The itemised requirements are the equipment-training collection. */
+  trainingRequired?: string | null;
+  linkedQualificationId?: string | null;
+}
+
+export interface UpdateJobEquipmentTool extends CreateJobEquipmentTool {
+  id: string;
+}
+
+export interface CreateJobEquipmentTraining {
+  trainingProgramId?: string | null;
+  requirementText: string;
+  isMandatory: boolean;
+}
+
+/** ⚠ No tool id — a training row cannot be moved to a different tool. */
+export interface UpdateJobEquipmentTraining extends CreateJobEquipmentTraining {
+  id: string;
+}
+
+export interface CreateJobReportingRelationship {
+  relationshipType: ReportingRelationshipType;
+  titleOrRole: string;
+  /** An `EmployeePosition` id, despite the name. */
+  employeeOrPositionId?: string | null;
+  description: string;
+  numberOfDirectReports?: number | null;
+  isPrimarySupervisor: boolean;
+}
+
+export interface UpdateJobReportingRelationship extends CreateJobReportingRelationship {
+  id: string;
+}
+
+export interface CreateJobPpeRequirement {
+  /** Either this or `customPpeName` — the catalogue link wins for display. */
+  ppeTypeId?: string | null;
+  customPpeName?: string | null;
+  isMandatory: boolean;
+  notes?: string | null;
+}
+
+export interface UpdateJobPpeRequirement extends CreateJobPpeRequirement {
+  id: string;
+}
+
+export interface CreateJobMedicalRequirement {
+  category: MedicalRequirementCategory;
+  requirementDescription: string;
+  rationale?: string | null;
+  contraindications?: string | null;
+  isMandatory: boolean;
+}
+
+export interface UpdateJobMedicalRequirement extends CreateJobMedicalRequirement {
+  id: string;
 }
 
 /**

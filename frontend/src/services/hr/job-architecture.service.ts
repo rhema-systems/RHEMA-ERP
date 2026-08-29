@@ -3,25 +3,61 @@ import type { PagedResult } from '@/types/hr/common';
 import type {
   Competency,
   CompetencySkillIndicator,
+  CreateJobCompetency,
   CreateJobDescription,
+  CreateJobDutyItem,
+  CreateJobEquipmentTool,
+  CreateJobEquipmentTraining,
+  CreateJobMedicalRequirement,
+  CreateJobPhysicalDemand,
+  CreateJobPpeRequirement,
+  CreateJobQualification,
+  CreateJobReportingRelationship,
+  CreateJobResponsibility,
+  CreateJobResponsibilityKpi,
+  CreateJobWorkingCondition,
   EmployeeCompetency,
   EmployeeCompetencyProfile,
   EmployeePositionCompetencyGapSummary,
   JobAnalytics,
+  JobCompetency,
   JobDescription,
   JobDescriptionDetail,
   JobDescriptionStatus,
   JobDescriptionSummary,
+  JobDutyItem,
+  JobEquipmentTool,
+  JobEquipmentTraining,
   JobFamily,
   JobLevel,
+  JobMedicalRequirement,
+  JobPhysicalDemand,
+  JobPpeRequirement,
+  JobQualification,
+  JobReportingRelationship,
+  JobResponsibility,
+  JobResponsibilityKpi,
   JobSubFamily,
+  JobWorkingCondition,
   ManpowerBudget,
   ManpowerBudgetLine,
   OrganisationCompetencyGap,
   PositionCompetency,
   PositionEstablishment,
   UncoveredPosition,
+  UpdateJobCompetency,
   UpdateJobDescription,
+  UpdateJobDutyItem,
+  UpdateJobEquipmentTool,
+  UpdateJobEquipmentTraining,
+  UpdateJobMedicalRequirement,
+  UpdateJobPhysicalDemand,
+  UpdateJobPpeRequirement,
+  UpdateJobQualification,
+  UpdateJobReportingRelationship,
+  UpdateJobResponsibility,
+  UpdateJobResponsibilityKpi,
+  UpdateJobWorkingCondition,
 } from '@/types/hr/job-architecture';
 
 /**
@@ -143,6 +179,296 @@ class JobArchitectureService {
 
   deleteJobDescription(id: string) {
     return apiService.delete(`${this.jobs}/descriptions/${id}`);
+  }
+
+  // ── the twelve child collections ───────────────────────────────────────────
+
+  /*
+   * Every collection below follows one shape, and three things about it are not guessable from
+   * the route:
+   *
+   * 1. **The parent id goes in the URL only.** `AddDutyItem` and its siblings all begin
+   *    `dto.JobDescriptionId = jobDescriptionId;` — the controller overwrites whatever the body
+   *    carried, so putting it in the payload is noise.
+   * 2. **The update body must repeat the id.** It is inherited from `UpdateDtoBase`, so it does
+   *    not appear in the C# class at all, and every controller opens with
+   *    `if (id != dto.Id) return BadRequest("ID mismatch")`. Each `update*` below folds the id in
+   *    for the caller, because a caller reading the DTO would never know to send it.
+   * 3. **The verbs are not on one tier.** POST and PUT sit on `JobArchitectureWritePolicy`, which
+   *    the HR role holds; **every DELETE sits on `JobArchitectureAdminPolicy`, which it does not**.
+   *    An HR author can add a duty and edit it but cannot remove it — see `canDeleteChildRows` in
+   *    the authoring panels, which hides the affordance rather than offering a 403.
+   *
+   * The nested pair are addressed differently on purpose: equipment training hangs off an
+   * equipment TOOL and KPIs hang off a RESPONSIBILITY, so neither takes a job-description id.
+   */
+
+  // duty items
+
+  getDutyItems(jobDescriptionId: string) {
+    return apiService.get<JobDutyItem[]>(`${this.jobs}/descriptions/${jobDescriptionId}/duty-items`);
+  }
+
+  /** ⚠ `sequenceNumber: 0` asks the server for the next number; any other value is honoured. */
+  addDutyItem(jobDescriptionId: string, payload: CreateJobDutyItem) {
+    return apiService.post<JobDutyItem>(`${this.jobs}/descriptions/${jobDescriptionId}/duty-items`, payload);
+  }
+
+  updateDutyItem(id: string, payload: Omit<UpdateJobDutyItem, 'id'>) {
+    return apiService.put<JobDutyItem>(`${this.jobs}/duty-items/${id}`, { id, ...payload });
+  }
+
+  /** ⚠ Admin-tier, like every other delete in this family. */
+  deleteDutyItem(id: string) {
+    return apiService.delete(`${this.jobs}/duty-items/${id}`);
+  }
+
+  // responsibilities
+
+  getResponsibilities(jobDescriptionId: string) {
+    return apiService.get<JobResponsibility[]>(`${this.jobs}/descriptions/${jobDescriptionId}/responsibilities`);
+  }
+
+  /**
+   * ⚠ The create DTO also accepts nested `qualifications` and `competencies` arrays. This method
+   * deliberately does not expose them: those rows are authored in their own panels, where they can
+   * be edited and removed afterwards, and a row created through the nested arrays is
+   * indistinguishable from one created directly.
+   */
+  addResponsibility(jobDescriptionId: string, payload: CreateJobResponsibility) {
+    return apiService.post<JobResponsibility>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/responsibilities`,
+      payload,
+    );
+  }
+
+  updateResponsibility(id: string, payload: Omit<UpdateJobResponsibility, 'id'>) {
+    return apiService.put<JobResponsibility>(`${this.jobs}/responsibilities/${id}`, { id, ...payload });
+  }
+
+  deleteResponsibility(id: string) {
+    return apiService.delete(`${this.jobs}/responsibilities/${id}`);
+  }
+
+  // KPIs — nested under a responsibility, NOT under the job description
+
+  getResponsibilityKpis(responsibilityId: string) {
+    return apiService.get<JobResponsibilityKpi[]>(`${this.jobs}/responsibilities/${responsibilityId}/kpis`);
+  }
+
+  addResponsibilityKpi(responsibilityId: string, payload: CreateJobResponsibilityKpi) {
+    return apiService.post<JobResponsibilityKpi>(
+      `${this.jobs}/responsibilities/${responsibilityId}/kpis`,
+      payload,
+    );
+  }
+
+  /** ⚠ The route is `kpis/{id}` — it does not repeat the responsibility. */
+  updateResponsibilityKpi(id: string, payload: Omit<UpdateJobResponsibilityKpi, 'id'>) {
+    return apiService.put<JobResponsibilityKpi>(`${this.jobs}/kpis/${id}`, { id, ...payload });
+  }
+
+  deleteResponsibilityKpi(id: string) {
+    return apiService.delete(`${this.jobs}/kpis/${id}`);
+  }
+
+  // qualifications
+
+  getQualifications(jobDescriptionId: string) {
+    return apiService.get<JobQualification[]>(`${this.jobs}/descriptions/${jobDescriptionId}/qualifications`);
+  }
+
+  addQualification(jobDescriptionId: string, payload: CreateJobQualification) {
+    return apiService.post<JobQualification>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/qualifications`,
+      payload,
+    );
+  }
+
+  /** ⚠ No `jobResponsibilityId` — the update DTO has no such field, so the link is create-only. */
+  updateQualification(id: string, payload: Omit<UpdateJobQualification, 'id'>) {
+    return apiService.put<JobQualification>(`${this.jobs}/qualifications/${id}`, { id, ...payload });
+  }
+
+  deleteQualification(id: string) {
+    return apiService.delete(`${this.jobs}/qualifications/${id}`);
+  }
+
+  // competencies required by the job
+
+  getJobCompetencies(jobDescriptionId: string) {
+    return apiService.get<JobCompetency[]>(`${this.jobs}/descriptions/${jobDescriptionId}/competencies`);
+  }
+
+  addJobCompetency(jobDescriptionId: string, payload: CreateJobCompetency) {
+    return apiService.post<JobCompetency>(`${this.jobs}/descriptions/${jobDescriptionId}/competencies`, payload);
+  }
+
+  /** ⚠ No `jobResponsibilityId`, same as qualifications. */
+  updateJobCompetency(id: string, payload: Omit<UpdateJobCompetency, 'id'>) {
+    return apiService.put<JobCompetency>(`${this.jobs}/competencies/${id}`, { id, ...payload });
+  }
+
+  deleteJobCompetency(id: string) {
+    return apiService.delete(`${this.jobs}/competencies/${id}`);
+  }
+
+  // physical demands
+
+  getPhysicalDemands(jobDescriptionId: string) {
+    return apiService.get<JobPhysicalDemand[]>(`${this.jobs}/descriptions/${jobDescriptionId}/physical-demands`);
+  }
+
+  addPhysicalDemand(jobDescriptionId: string, payload: CreateJobPhysicalDemand) {
+    return apiService.post<JobPhysicalDemand>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/physical-demands`,
+      payload,
+    );
+  }
+
+  updatePhysicalDemand(id: string, payload: Omit<UpdateJobPhysicalDemand, 'id'>) {
+    return apiService.put<JobPhysicalDemand>(`${this.jobs}/physical-demands/${id}`, { id, ...payload });
+  }
+
+  deletePhysicalDemand(id: string) {
+    return apiService.delete(`${this.jobs}/physical-demands/${id}`);
+  }
+
+  // working conditions
+
+  getWorkingConditions(jobDescriptionId: string) {
+    return apiService.get<JobWorkingCondition[]>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/working-conditions`,
+    );
+  }
+
+  addWorkingCondition(jobDescriptionId: string, payload: CreateJobWorkingCondition) {
+    return apiService.post<JobWorkingCondition>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/working-conditions`,
+      payload,
+    );
+  }
+
+  updateWorkingCondition(id: string, payload: Omit<UpdateJobWorkingCondition, 'id'>) {
+    return apiService.put<JobWorkingCondition>(`${this.jobs}/working-conditions/${id}`, { id, ...payload });
+  }
+
+  deleteWorkingCondition(id: string) {
+    return apiService.delete(`${this.jobs}/working-conditions/${id}`);
+  }
+
+  // equipment and tools
+
+  getEquipmentTools(jobDescriptionId: string) {
+    return apiService.get<JobEquipmentTool[]>(`${this.jobs}/descriptions/${jobDescriptionId}/equipment-tools`);
+  }
+
+  addEquipmentTool(jobDescriptionId: string, payload: CreateJobEquipmentTool) {
+    return apiService.post<JobEquipmentTool>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/equipment-tools`,
+      payload,
+    );
+  }
+
+  updateEquipmentTool(id: string, payload: Omit<UpdateJobEquipmentTool, 'id'>) {
+    return apiService.put<JobEquipmentTool>(`${this.jobs}/equipment-tools/${id}`, { id, ...payload });
+  }
+
+  /** ⚠ Cascades to the tool's training requirements — they hang off it, not off the description. */
+  deleteEquipmentTool(id: string) {
+    return apiService.delete(`${this.jobs}/equipment-tools/${id}`);
+  }
+
+  // equipment training — nested under a TOOL
+
+  getEquipmentTrainings(equipmentToolId: string) {
+    return apiService.get<JobEquipmentTraining[]>(`${this.jobs}/equipment-tools/${equipmentToolId}/training`);
+  }
+
+  addEquipmentTraining(equipmentToolId: string, payload: CreateJobEquipmentTraining) {
+    return apiService.post<JobEquipmentTraining>(
+      `${this.jobs}/equipment-tools/${equipmentToolId}/training`,
+      payload,
+    );
+  }
+
+  /** ⚠ The write routes are `equipment-training` (singular); the read is `.../training`. */
+  updateEquipmentTraining(id: string, payload: Omit<UpdateJobEquipmentTraining, 'id'>) {
+    return apiService.put<JobEquipmentTraining>(`${this.jobs}/equipment-training/${id}`, { id, ...payload });
+  }
+
+  deleteEquipmentTraining(id: string) {
+    return apiService.delete(`${this.jobs}/equipment-training/${id}`);
+  }
+
+  // reporting relationships
+
+  getReportingRelationships(jobDescriptionId: string) {
+    return apiService.get<JobReportingRelationship[]>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/reporting-relationships`,
+    );
+  }
+
+  addReportingRelationship(jobDescriptionId: string, payload: CreateJobReportingRelationship) {
+    return apiService.post<JobReportingRelationship>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/reporting-relationships`,
+      payload,
+    );
+  }
+
+  updateReportingRelationship(id: string, payload: Omit<UpdateJobReportingRelationship, 'id'>) {
+    return apiService.put<JobReportingRelationship>(`${this.jobs}/reporting-relationships/${id}`, {
+      id,
+      ...payload,
+    });
+  }
+
+  deleteReportingRelationship(id: string) {
+    return apiService.delete(`${this.jobs}/reporting-relationships/${id}`);
+  }
+
+  // PPE requirements
+
+  getPpeRequirements(jobDescriptionId: string) {
+    return apiService.get<JobPpeRequirement[]>(`${this.jobs}/descriptions/${jobDescriptionId}/ppe-requirements`);
+  }
+
+  addPpeRequirement(jobDescriptionId: string, payload: CreateJobPpeRequirement) {
+    return apiService.post<JobPpeRequirement>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/ppe-requirements`,
+      payload,
+    );
+  }
+
+  updatePpeRequirement(id: string, payload: Omit<UpdateJobPpeRequirement, 'id'>) {
+    return apiService.put<JobPpeRequirement>(`${this.jobs}/ppe-requirements/${id}`, { id, ...payload });
+  }
+
+  deletePpeRequirement(id: string) {
+    return apiService.delete(`${this.jobs}/ppe-requirements/${id}`);
+  }
+
+  // medical requirements
+
+  getMedicalRequirements(jobDescriptionId: string) {
+    return apiService.get<JobMedicalRequirement[]>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/medical-requirements`,
+    );
+  }
+
+  addMedicalRequirement(jobDescriptionId: string, payload: CreateJobMedicalRequirement) {
+    return apiService.post<JobMedicalRequirement>(
+      `${this.jobs}/descriptions/${jobDescriptionId}/medical-requirements`,
+      payload,
+    );
+  }
+
+  updateMedicalRequirement(id: string, payload: Omit<UpdateJobMedicalRequirement, 'id'>) {
+    return apiService.put<JobMedicalRequirement>(`${this.jobs}/medical-requirements/${id}`, { id, ...payload });
+  }
+
+  deleteMedicalRequirement(id: string) {
+    return apiService.delete(`${this.jobs}/medical-requirements/${id}`);
   }
 
   // ── coverage & analytics ───────────────────────────────────────────────────
