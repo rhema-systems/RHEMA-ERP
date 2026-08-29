@@ -22,6 +22,7 @@ import {
     getPostingTargetBooks,
     isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
+import { getJournalAuditActorLine } from '@/lib/finance/journal-entry-audit';
 
 export default function JournalEntryDetailPage() {
     const router = useRouter();
@@ -117,29 +118,6 @@ export default function JournalEntryDetailPage() {
         return action
             .replace(/^Finance\.JournalEntry\./, '')
             .replace(/([a-z])([A-Z])/g, '$1 $2');
-    };
-
-    const getAuditLocationLabel = (ipAddress?: string | null) => {
-        if (!ipAddress) return '';
-
-        const normalizedIp = ipAddress.trim().toLowerCase();
-        if (
-            normalizedIp === '::1' ||
-            normalizedIp === '127.0.0.1' ||
-            normalizedIp === 'localhost' ||
-            normalizedIp.startsWith('::ffff:127.0.0.1')
-        ) {
-            return 'local device';
-        }
-
-        return ipAddress;
-    };
-
-    const getAuditActorLine = (event: FinanceJournalAuditLog) => {
-        const username = event.username || 'Unknown user';
-        const location = getAuditLocationLabel(event.ipAddress);
-
-        return location ? `${username} from ${location}` : username;
     };
 
     const getPendingApproverLabel = (approver: WorkflowPendingApproverDto) => {
@@ -919,7 +897,7 @@ export default function JournalEntryDetailPage() {
                                                 </span>
                                             </div>
                                             <p className="text-xs text-muted-foreground">
-                                                {getAuditActorLine(event)}
+                                                {getJournalAuditActorLine(event)}
                                             </p>
                                         </div>
                                     ))}
