@@ -268,7 +268,15 @@ namespace ErpSystem.Tests.Services.Finance
                 => Task.CompletedTask;
 
             // Unused methods for this test
-            public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+            public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+                CancellationToken cancellationToken = default) => throw new NotImplementedException();
+            public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+                string? status,
+                DateTime? startDate,
+                DateTime? endDate,
+                Guid? fiscalPeriodId,
+                string? sourceModule,
+                CancellationToken cancellationToken = default) => throw new NotImplementedException();
             public Task<JournalEntryDto?> GetJournalEntryByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
             public Task<JournalEntryDto?> GetJournalEntryByNumberAsync(string journalNumber, CancellationToken cancellationToken = default) => throw new NotImplementedException();
             public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default) => throw new NotImplementedException();

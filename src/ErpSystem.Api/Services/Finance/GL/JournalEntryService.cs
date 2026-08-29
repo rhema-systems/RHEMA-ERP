@@ -61,10 +61,51 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
-        public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+            CancellationToken cancellationToken = default) =>
+            GetJournalEntriesAsync(null, null, null, null, null, cancellationToken);
+
+        public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+            string? status,
+            DateTime? startDate,
+            DateTime? endDate,
+            Guid? fiscalPeriodId,
+            string? sourceModule,
+            CancellationToken cancellationToken = default)
         {
             var tenantId = TenantId;
-            var entries = await _context.JournalEntries
+            var query = _context.JournalEntries
+                .Where(j => j.TenantId == tenantId && !j.IsDeleted);
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var normalizedStatus = status.Trim().ToUpper();
+                query = query.Where(j => j.PostingStatus.ToUpper() == normalizedStatus);
+            }
+
+            if (startDate.HasValue)
+            {
+                var from = startDate.Value.Date;
+                query = query.Where(j => j.EntryDate >= from);
+            }
+
+            if (endDate.HasValue)
+            {
+                var untilExclusive = endDate.Value.Date.AddDays(1);
+                query = query.Where(j => j.EntryDate < untilExclusive);
+            }
+
+            if (fiscalPeriodId.HasValue)
+                query = query.Where(j => j.FiscalPeriodId == fiscalPeriodId.Value);
+
+            if (!string.IsNullOrWhiteSpace(sourceModule))
+            {
+                var normalizedSourceModule = sourceModule.Trim().ToUpper();
+                query = query.Where(j => j.SourceModule != null &&
+                    j.SourceModule.ToUpper() == normalizedSourceModule);
+            }
+
+            var entries = await query
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Transactions)
@@ -73,7 +114,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
-                .Where(j => j.TenantId == tenantId && !j.IsDeleted)
                 .OrderByDescending(j => j.EntryDate)
                 .ToListAsync(cancellationToken);
 
@@ -1455,7 +1495,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 JournalType = entry.JournalType,
                 Description = entry.Description,
                 Reference = entry.ReferenceNumber,
+                SourceModule = entry.SourceModule,
+                OriginModuleCode = entry.OriginModuleCode,
+                SourceDocumentId = entry.SourceDocumentId,
+                SourceDocumentType = entry.SourceDocumentType,
                 BookClassification = entry.BookClassification,
+                FiscalPeriodId = entry.FiscalPeriodId,
                 TotalDebit = entry.TotalDebitAmount,
                 TotalCredit = entry.TotalCreditAmount,
                 Status = entry.PostingStatus,
