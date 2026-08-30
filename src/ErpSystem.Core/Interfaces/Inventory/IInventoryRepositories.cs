@@ -116,7 +116,7 @@ public interface IStockAdjustmentRepository : IGenericRepository<StockAdjustment
     Task<StockAdjustment?> GetByAdjustmentNumberAsync(string adjustmentNumber);
     Task<StockAdjustment?> GetWithItemsAsync(Guid adjustmentId);
     Task<IEnumerable<StockAdjustment>> GetByReasonCodeAsync(string reasonCode);
-    Task<string> GenerateAdjustmentNumberAsync();
+    Task<string> GenerateAdjustmentNumberAsync(Guid tenantId);
     Task<IEnumerable<StockAdjustment>> GetAdjustmentsRequiringApprovalAsync();
 }
 
