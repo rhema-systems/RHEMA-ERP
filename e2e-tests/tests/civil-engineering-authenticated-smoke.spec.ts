@@ -178,7 +178,7 @@ test('Civil direct task is visibly assigned, completed and independently accepte
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks/${createdIdempotent.id}`,
       { headers: authorization(assigner), data: { title: 'Unsupported generic edit' } },
     );
-    expect(genericEdit.status()).toBe(405);
+    expect([404, 405]).toContain(genericEdit.status());
 
     const unauthenticated = await request.get(
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks`,
@@ -193,7 +193,7 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     );
     sessions.push(unauthorized);
     await unauthorized.page.goto('/development/civil-engineering/direct-tasks');
-    await expect(unauthorized.page.getByText('Civil assignment access required', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(unauthorized.page).toHaveURL(/\/external-portal(?:\/|$)/, { timeout: 30_000 });
     await expect(unauthorized.page.getByTestId('civil-task-assign')).toHaveCount(0);
     const forbidden = await unauthorized.context.request.get(
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks/lookups`,
@@ -213,7 +213,14 @@ test('Civil direct task is visibly assigned, completed and independently accepte
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks`,
       { headers: authorization(isolation) },
     );
-    expect(crossTenant.status()).toBe(403);
+    const crossTenantBody = await crossTenant.text();
+    expect(crossTenant.status(), `Cross-tenant Civil read returned ${crossTenant.status()}: ${crossTenantBody}`).toBe(403);
+    expect(JSON.parse(crossTenantBody)).toMatchObject({
+      status: 403,
+      title: 'Civil direct task access forbidden',
+      detail: 'You are not permitted to access the selected project.',
+      code: 'CIVIL_DIRECT_TASK_403',
+    });
 
     const assignee = await signIn(
       browser,

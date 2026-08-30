@@ -572,9 +572,10 @@ public sealed class CivilEngineeringDirectTaskService(
 
     private async Task RequireProjectAsync(Guid projectId, CancellationToken token)
     {
-        if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null)
+        if (projectId == Guid.Empty
+            || !await db.Projects.AsNoTracking().AnyAsync(value => value.TenantId == TenantId && value.Id == projectId && !value.IsDeleted, token))
             throw new UnauthorizedAccessException("You are not permitted to access the selected project.");
-        if (!await db.Projects.AsNoTracking().AnyAsync(value => value.TenantId == TenantId && value.Id == projectId && !value.IsDeleted, token))
+        if (await projectService.GetProjectByIdAsync(projectId) is null)
             throw new UnauthorizedAccessException("You are not permitted to access the selected project.");
     }
 
