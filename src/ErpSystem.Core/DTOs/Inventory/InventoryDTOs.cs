@@ -1197,7 +1197,7 @@ public class CreateStockAdjustmentDto
     /// <summary>
     /// External reference number (e.g., Physical Count #123)
     /// </summary>
-    [MaxLength(100)]
+    [MaxLength(50)]
     public string? Reference { get; set; }
 
     public DateTime? AdjustmentDate { get; set; }

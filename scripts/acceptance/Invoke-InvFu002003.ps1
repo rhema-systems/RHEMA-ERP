@@ -71,11 +71,16 @@ function Invoke-JsonApi {
         $parameters.Body = $Body | ConvertTo-Json -Depth 20 -Compress
     }
     $response = Invoke-WebRequest @parameters
-    if ($response.StatusCode -notin $ExpectedStatus) {
-        throw "$Method $Path returned $($response.StatusCode): $($response.Content)"
+    $content = if ($response.Content -is [byte[]]) {
+        [Text.Encoding]::UTF8.GetString([byte[]]$response.Content)
+    } else {
+        [string]$response.Content
     }
-    if ([string]::IsNullOrWhiteSpace($response.Content)) { return $null }
-    try { return $response.Content | ConvertFrom-Json } catch { return $response.Content }
+    if ($response.StatusCode -notin $ExpectedStatus) {
+        throw "$Method $Path returned $($response.StatusCode): $content"
+    }
+    if ([string]::IsNullOrWhiteSpace($content)) { return $null }
+    try { return $content | ConvertFrom-Json } catch { return $content }
 }
 
 function Login-Actor {
@@ -131,14 +136,20 @@ ORDER BY d.Version DESC, d.PublishedAt DESC;
     return $id
 }
 
-$secretRows = dotnet user-secrets list --project $apiProject --json | ConvertFrom-Json
-$secretObject = $secretRows | Where-Object {
-    $_ -and $_.PSObject.Properties.Name -contains 'ConnectionStrings:DefaultConnection'
-} | Select-Object -First 1
-if (-not $secretObject) { throw 'The configured API database connection was not found in user secrets.' }
+$secretRaw = (& dotnet user-secrets list --project $apiProject --json | Out-String)
+$secretStart = $secretRaw.IndexOf('{')
+$secretEnd = $secretRaw.LastIndexOf('}')
+if ($secretStart -lt 0 -or $secretEnd -le $secretStart) {
+    throw 'The configured API database connection was not found in user secrets.'
+}
+$secretObject = $secretRaw.Substring($secretStart, $secretEnd - $secretStart + 1) | ConvertFrom-Json
+$databaseConnection = [string]$secretObject.'ConnectionStrings:DefaultConnection'
+if ([string]::IsNullOrWhiteSpace($databaseConnection)) {
+    throw 'The configured API database connection was not found in user secrets.'
+}
 
 Add-Type -AssemblyName System.Data
-$connection = [System.Data.SqlClient.SqlConnection]::new([string]$secretObject.'ConnectionStrings:DefaultConnection')
+$connection = [System.Data.SqlClient.SqlConnection]::new($databaseConnection)
 $connection.Open()
 
 $identityAssembly = Get-ChildItem 'C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App' -Recurse -Filter Microsoft.Extensions.Identity.Core.dll |
@@ -153,20 +164,27 @@ $temporaryHash = $passwordHasher.HashPassword([object]::new(), $temporaryPasswor
 $passwordBackups = @{}
 $addedRoleLinks = [System.Collections.Generic.List[object]]::new()
 $addedAssignmentIds = [System.Collections.Generic.List[Guid]]::new()
+$financeSettingsBackup = $null
 $frontendProcess = $null
 $frontendOut = Join-Path ([IO.Path]::GetTempPath()) "inv-fu-002003-next-$([Guid]::NewGuid().ToString('N')).out.log"
 $frontendErr = Join-Path ([IO.Path]::GetTempPath()) "inv-fu-002003-next-$([Guid]::NewGuid().ToString('N')).err.log"
 
 try {
     $actors = @{}
+    $actorEmployeeIds = @{}
     foreach ($name in $actorNames) {
         $row = Invoke-DbTable $connection @'
-SELECT TOP (1) Id,UserName,PasswordHash,AccessFailedCount,LockoutEnd,TenantId,EmployeeId
-FROM Users WHERE TenantId=@tenantId AND UserName=@name AND IsActive=1 AND IsDeleted=0;
+SELECT TOP (1) u.Id,u.UserName,u.PasswordHash,u.AccessFailedCount,u.LockoutEnd,u.TenantId,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM Employees e
+        WHERE e.Id=u.EmployeeId AND e.TenantId=u.TenantId AND e.IsDeleted=0 AND e.IsActive=1
+    ) THEN u.EmployeeId END EmployeeId
+FROM Users u WHERE u.TenantId=@tenantId AND u.UserName=@name AND u.IsActive=1;
 '@ @{ tenantId=$tenantId; name=$name }
         if ($row.Rows.Count -ne 1) { throw "Acceptance actor $name is not available in the DEFAULT tenant." }
         $actorId = [Guid]$row.Rows[0].Id
         $actors[$name] = $actorId
+        if (-not $row.Rows[0].IsNull('EmployeeId')) { $actorEmployeeIds[$name] = [Guid]$row.Rows[0].EmployeeId }
         $passwordBackups[$actorId] = @{
             PasswordHash = if ($row.Rows[0].IsNull('PasswordHash')) { $null } else { [string]$row.Rows[0].PasswordHash }
             AccessFailedCount = [int]$row.Rows[0].AccessFailedCount
@@ -176,10 +194,16 @@ FROM Users WHERE TenantId=@tenantId AND UserName=@name AND IsActive=1 AND IsDele
 UPDATE Users SET PasswordHash=@hash,AccessFailedCount=0,LockoutEnd=NULL WHERE Id=@id;
 '@ @{ id=$actorId; hash=$temporaryHash }
     }
+    $receiverName = @('finance.clerk','ap.officer','manager') |
+        Where-Object { $actorEmployeeIds.ContainsKey($_) } | Select-Object -First 1
+    if (-not $receiverName) { throw 'Fresh INV-FU-003 requires a non-requester acceptance actor linked to an active employee.' }
+    $returnApproverName = @('manager','ap.officer') | Where-Object { $_ -ne $receiverName } | Select-Object -First 1
+    $returnReverserName = @('finance.clerk','manager','ap.officer') |
+        Where-Object { $_ -ne $receiverName -and $_ -ne $returnApproverName } | Select-Object -First 1
 
     $roles = @{}
     foreach ($roleName in @('TDC_STORES_OFFICER','TDC_STORES_MANAGER')) {
-        $roleId = Invoke-DbScalar $connection 'SELECT TOP (1) Id FROM Roles WHERE NormalizedName=@name AND IsDeleted=0;' @{ name=$roleName }
+        $roleId = Invoke-DbScalar $connection 'SELECT TOP (1) Id FROM AspNetRoles WHERE NormalizedName=@name;' @{ name=$roleName }
         if ($null -eq $roleId -or $roleId -is [DBNull]) { throw "Required acceptance role $roleName is not seeded." }
         $roles[$roleName] = [Guid]$roleId
     }
@@ -187,8 +211,8 @@ UPDATE Users SET PasswordHash=@hash,AccessFailedCount=0,LockoutEnd=NULL WHERE Id
     $rolePlan = @{
         'employee' = @('TDC_STORES_OFFICER')
         'manager' = @('TDC_STORES_MANAGER')
-        'admin' = @('TDC_STORES_OFFICER')
-        'finance.clerk' = @('TDC_STORES_OFFICER')
+        'admin' = @('TDC_STORES_OFFICER','TDC_STORES_MANAGER')
+        'finance.clerk' = @('TDC_STORES_OFFICER','TDC_STORES_MANAGER')
         'ap.officer' = @('TDC_STORES_MANAGER')
     }
     foreach ($entry in $rolePlan.GetEnumerator()) {
@@ -220,12 +244,109 @@ VALUES(@id,@userId,@roleId,@roleName,1,1,SYSUTCDATETIME(),NULL,1,
         }
     }
 
+    $financeFixture = Invoke-DbTable $connection @'
+SELECT TOP (1) fs.Id,fs.WriteOffExpenseAccountId,fs.WriteOffRecoveryAccountId,
+    COALESCE(fs.WriteOffExpenseAccountId,
+        (SELECT TOP (1) a.Id FROM Accounts a
+         WHERE a.TenantId=fs.TenantId AND a.IsDeleted=0 AND a.Status=1 AND a.AllowDirectPosting=1 AND a.AccountType=5
+         ORDER BY a.AccountNumber,a.Id)) EffectiveExpenseAccountId,
+    COALESCE(fs.WriteOffRecoveryAccountId,
+        (SELECT TOP (1) a.Id FROM Accounts a
+         WHERE a.TenantId=fs.TenantId AND a.IsDeleted=0 AND a.Status=1 AND a.AllowDirectPosting=1 AND a.AccountType=4
+         ORDER BY a.AccountNumber,a.Id)) EffectiveRecoveryAccountId
+FROM FinanceSettings fs
+WHERE fs.TenantId=@tenantId AND fs.IsDeleted=0;
+'@ @{ tenantId=$tenantId }
+    if ($financeFixture.Rows.Count -ne 1 -or $financeFixture.Rows[0].IsNull('EffectiveExpenseAccountId') -or
+        $financeFixture.Rows[0].IsNull('EffectiveRecoveryAccountId')) {
+        throw 'Fresh INV-FU-003 Finance adjustment-account prerequisites are incomplete.'
+    }
+    $financeSettingsBackup = @{
+        Id=[Guid]$financeFixture.Rows[0].Id
+        Expense=if ($financeFixture.Rows[0].IsNull('WriteOffExpenseAccountId')) { $null } else { [Guid]$financeFixture.Rows[0].WriteOffExpenseAccountId }
+        Recovery=if ($financeFixture.Rows[0].IsNull('WriteOffRecoveryAccountId')) { $null } else { [Guid]$financeFixture.Rows[0].WriteOffRecoveryAccountId }
+    }
+    $null = Invoke-DbNonQuery $connection @'
+UPDATE FinanceSettings
+SET WriteOffExpenseAccountId=@expense,WriteOffRecoveryAccountId=@recovery
+WHERE Id=@id;
+'@ @{
+        id=$financeSettingsBackup.Id
+        expense=[Guid]$financeFixture.Rows[0].EffectiveExpenseAccountId
+        recovery=[Guid]$financeFixture.Rows[0].EffectiveRecoveryAccountId
+    }
+
     $tokens = @{}
     foreach ($name in $actorNames) { $tokens[$name] = Login-Actor $name $temporaryPassword }
     $null = Invoke-JsonApi -Method GET -Path '/api/inventory/requisitions' -Token '' -Body $null -ExpectedStatus @(401)
 
+    # Remove only incomplete records left by an interrupted acceptance run, using the
+    # public lifecycle API rather than mutating inventory lifecycle tables directly.
+    $staleAdjustments = Invoke-DbTable $connection @'
+SELECT Id FROM StockAdjustments
+WHERE TenantId=@tenantId AND IsDeleted=0 AND Status='Draft'
+  AND Description='Fresh serialized fixed-asset stock entry for INV-FU-003 acceptance.';
+'@ @{ tenantId=$tenantId }
+    foreach ($row in $staleAdjustments.Rows) {
+        $null = Invoke-JsonApi -Method DELETE -Path "/api/inventory/adjustments/$($row.Id)" -Token $tokens['employee'] -Body $null
+    }
+    $stalePendingAdjustments = Invoke-DbTable $connection @'
+SELECT Id FROM StockAdjustments
+WHERE TenantId=@tenantId AND IsDeleted=0 AND Status='PendingApproval'
+  AND Description='Fresh serialized fixed-asset stock entry for INV-FU-003 acceptance.';
+'@ @{ tenantId=$tenantId }
+    foreach ($row in $stalePendingAdjustments.Rows) {
+        $pending = Invoke-JsonApi -Method GET -Path "/api/inventory/adjustments/$($row.Id)" -Token $tokens['manager'] -Body $null
+        $null = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($row.Id)/decision" -Token $tokens['manager'] -Body @{
+            rowVersion=$pending.rowVersion
+            idempotencyKey="invfu003-cleanup-$([Guid]::NewGuid().ToString('N'))"
+            comment='Acceptance run interrupted; close the pending fixture through its governed workflow.'
+            approved=$false
+        }
+    }
+    $staleApprovedAdjustments = Invoke-DbTable $connection @'
+SELECT Id FROM StockAdjustments
+WHERE TenantId=@tenantId AND IsDeleted=0 AND Status='Approved'
+  AND Description='Fresh serialized fixed-asset stock entry for INV-FU-003 acceptance.';
+'@ @{ tenantId=$tenantId }
+    foreach ($row in $staleApprovedAdjustments.Rows) {
+        $approvedFixture = Invoke-JsonApi -Method GET -Path "/api/inventory/adjustments/$($row.Id)" -Token $tokens['admin'] -Body $null
+        $postedFixture = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($row.Id)/post" -Token $tokens['admin'] -Body @{
+            rowVersion=$approvedFixture.rowVersion
+            idempotencyKey="invfu003-cleanup-post-$([Guid]::NewGuid().ToString('N'))"
+            comment='Complete an interrupted acceptance fixture before reversing it.'
+        }
+        $null = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($row.Id)/reverse" -Token $tokens['admin'] -Body @{
+            rowVersion=$postedFixture.rowVersion
+            idempotencyKey="invfu003-cleanup-reverse-$([Guid]::NewGuid().ToString('N'))"
+            comment='Restore inventory after an interrupted acceptance fixture.'
+            reason='Interrupted INV-FU-003 acceptance fixture cleanup.'
+        }
+    }
+    $stalePostedAdjustments = Invoke-DbTable $connection @'
+SELECT DISTINCT sa.Id
+FROM StockAdjustments sa
+JOIN StockAdjustmentItems sai ON sai.AdjustmentId=sa.Id AND sai.IsDeleted=0
+WHERE sa.TenantId=@tenantId AND sa.IsDeleted=0 AND sa.Status='Posted'
+  AND sa.Description='Fresh serialized fixed-asset stock entry for INV-FU-003 acceptance.'
+  AND NOT EXISTS (
+      SELECT 1 FROM InventoryIssueVoucherLines ivl
+      WHERE ivl.TenantId=sa.TenantId AND ivl.IsDeleted=0 AND ivl.SerialNumber=sai.SerialNumber
+  );
+'@ @{ tenantId=$tenantId }
+    foreach ($row in $stalePostedAdjustments.Rows) {
+        $postedFixture = Invoke-JsonApi -Method GET -Path "/api/inventory/adjustments/$($row.Id)" -Token $tokens['admin'] -Body $null
+        $null = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($row.Id)/reverse" -Token $tokens['admin'] -Body @{
+            rowVersion=$postedFixture.rowVersion
+            idempotencyKey="invfu003-cleanup-reverse-$([Guid]::NewGuid().ToString('N'))"
+            comment='Restore inventory after an interrupted acceptance fixture.'
+            reason='Interrupted INV-FU-003 acceptance fixture cleanup before issue.'
+        }
+    }
+
     $null = Ensure-Workflow $connection $tokens['admin'] 'InventoryRequisition' "INV-FU-003 Inventory Requisition $([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
     $null = Ensure-Workflow $connection $tokens['admin'] 'InventoryReturnVoucher' "INV-FU-003 Store Return $([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
+    $null = Ensure-Workflow $connection $tokens['admin'] 'StockAdjustment' "INV-FU-003 Stock Adjustment $([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
 
     $maintenancePrerequisite = Invoke-DbTable $connection @'
 SELECT TOP (1)
@@ -294,33 +415,59 @@ WHERE a.TenantId=@tenantId AND a.IsDeleted=0
 
     $fixedAssetPrerequisite = Invoke-DbTable $connection @'
 SELECT TOP (1) i.Id ItemId,i.ItemCode,i.AverageCost,w.Id WarehouseId,l.Id LocationId,d.Id DepartmentId,
-    q.CurrentStock WarehouseStock,il.Quantity LocationStock,trace.SerialNumber
+    q.CurrentStock WarehouseStock
 FROM InventoryItems i
 JOIN InventoryIssueAccountingRules r ON r.TenantId=i.TenantId AND r.InventoryCategoryId=i.CategoryId
   AND r.ItemType=i.ItemType AND r.ItemType=4 AND r.Treatment=2 AND r.MovementReasonCode='ASSET_CUSTODY'
   AND r.IsDeleted=0 AND r.IsActive=1 AND r.EffectiveFromUtc<=SYSUTCDATETIME()
   AND (r.EffectiveToUtc IS NULL OR r.EffectiveToUtc>SYSUTCDATETIME()) AND r.FixedAssetCategoryId IS NOT NULL
-JOIN WarehouseQuantities q ON q.TenantId=i.TenantId AND q.InventoryItemId=i.Id AND q.IsDeleted=0 AND q.AvailableStock>=1
+JOIN WarehouseQuantities q ON q.TenantId=i.TenantId AND q.InventoryItemId=i.Id AND q.IsDeleted=0
 JOIN Warehouses w ON w.TenantId=q.TenantId AND w.Id=q.WarehouseId AND w.IsDeleted=0 AND w.IsActive=1
 JOIN WarehouseLocations l ON l.TenantId=q.TenantId AND l.WarehouseId=w.Id AND l.IsDeleted=0 AND l.IsActive=1
-JOIN InventoryLocations il ON il.TenantId=i.TenantId AND il.InventoryItemId=i.Id AND il.LocationId=l.Id AND il.IsDeleted=0 AND il.AvailableQuantity>=1
 CROSS APPLY (SELECT TOP (1) Id FROM Departments WHERE TenantId=i.TenantId AND IsDeleted=0 AND IsActive=1 ORDER BY Name) d
-CROSS APPLY (
-    SELECT TOP (1) t.SerialNumber
-    FROM InventoryTraceabilityEvents t
-    WHERE t.TenantId=i.TenantId AND t.InventoryItemId=i.Id AND t.WarehouseId=w.Id
-      AND t.LocationId=l.Id AND t.IsDeleted=0 AND t.SerialNumber IS NOT NULL
-    GROUP BY t.SerialNumber
-    HAVING SUM(CASE WHEN t.Direction IN (1,3,5,6) THEN t.Quantity ELSE -t.Quantity END)>=1
-    ORDER BY MIN(t.OccurredAtUtc),t.SerialNumber
-) trace
 WHERE i.TenantId=@tenantId AND i.IsDeleted=0 AND i.Status=1 AND i.ItemType=4
-  AND i.IsSerialTracked=1 AND i.AverageCost>0
+  AND i.AverageCost>0
 ORDER BY i.ItemCode,l.LocationCode;
 '@ @{ tenantId=$tenantId }
     if ($fixedAssetPrerequisite.Rows.Count -ne 1) { throw 'Fresh INV-FU-003 fixed-asset, accounting, stock or department prerequisites are incomplete.' }
     $f = $fixedAssetPrerequisite.Rows[0]
-    $serial = [string]$f.SerialNumber
+    $serial = "INVFU003-$([Guid]::NewGuid().ToString('N'))"
+    $adjustmentCreateKey = "invfu003-adjust-create-$([Guid]::NewGuid().ToString('N'))"
+    $adjustmentBody = @{
+        warehouseId=[Guid]$f.WarehouseId
+        reasonCode='POSITIVE_ADJUSTMENT'
+        description='Fresh serialized fixed-asset stock entry for INV-FU-003 acceptance.'
+        reference=$serial
+        adjustmentDate=[DateTime]::UtcNow
+        idempotencyKey=$adjustmentCreateKey
+        correlationId="INV-FU-003-$serial"
+        evidence=@()
+        items=@(@{
+            inventoryItemId=[Guid]$f.ItemId
+            locationId=[Guid]$f.LocationId
+            serialNumber=$serial
+            adjustmentQuantity=1
+            reason='Controlled serialized fixed-asset stock entry.'
+            notes='Created through the central governed stock-adjustment lifecycle.'
+        })
+    }
+    $adjustment = Invoke-JsonApi -Method POST -Path '/api/inventory/adjustments' -Token $tokens['employee'] -Body $adjustmentBody -ExpectedStatus @(201)
+    $adjustmentReplay = Invoke-JsonApi -Method POST -Path '/api/inventory/adjustments' -Token $tokens['employee'] -Body $adjustmentBody -ExpectedStatus @(200,201)
+    Assert-Equal ([Guid]$adjustmentReplay.id) ([Guid]$adjustment.id) 'Adjustment creation replay created a second record.'
+    $adjustmentSubmitKey = "invfu003-adjust-submit-$([Guid]::NewGuid().ToString('N'))"
+    $adjustmentSubmitBody = @{ rowVersion=$adjustment.rowVersion; idempotencyKey=$adjustmentSubmitKey; comment='Submit fixed-asset stock entry.' }
+    $adjustment = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($adjustment.id)/submit" -Token $tokens['employee'] -Body $adjustmentSubmitBody
+    $null = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($adjustment.id)/submit" -Token $tokens['employee'] -Body $adjustmentSubmitBody
+    $adjustmentDecisionKey = "invfu003-adjust-approve-$([Guid]::NewGuid().ToString('N'))"
+    $adjustmentDecisionBody = @{ rowVersion=$adjustment.rowVersion; idempotencyKey=$adjustmentDecisionKey; comment='Independent approval of fixed-asset stock entry.'; approved=$true }
+    $adjustment = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($adjustment.id)/decision" -Token $tokens['manager'] -Body $adjustmentDecisionBody
+    $null = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($adjustment.id)/decision" -Token $tokens['manager'] -Body $adjustmentDecisionBody
+    $adjustmentPostKey = "invfu003-adjust-post-$([Guid]::NewGuid().ToString('N'))"
+    $adjustmentPostBody = @{ rowVersion=$adjustment.rowVersion; idempotencyKey=$adjustmentPostKey; comment='Post fixed-asset stock entry.' }
+    $adjustment = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($adjustment.id)/post" -Token $tokens['admin'] -Body $adjustmentPostBody
+    $null = Invoke-JsonApi -Method POST -Path "/api/inventory/adjustments/$($adjustment.id)/post" -Token $tokens['admin'] -Body $adjustmentPostBody
+    Assert-Equal $adjustment.status 'Posted' 'The serialized fixed-asset stock adjustment did not post.'
+    Assert-Equal ([int]$adjustment.actions.Count) 4 'Adjustment idempotency produced an unexpected action count.'
     $requisition = Invoke-JsonApi -Method POST -Path '/api/inventory/requisitions' -Token $tokens['employee'] -Body @{
         departmentId=[Guid]$f.DepartmentId
         departmentName='INV-FU-003 acceptance'
@@ -342,7 +489,7 @@ ORDER BY i.ItemCode,l.LocationCode;
     $issueBody = @{
         idempotencyKey=$issueKey
         rowVersion=$approved.rowVersion
-        receiverUserId=$actors['finance.clerk']
+        receiverUserId=$actors[$receiverName]
         movementReasonCode='ASSET_CUSTODY'
         notes='Independent serial-tracked fixed-asset handover.'
         items=@(@{ itemId=[Guid]$approved.items[0].id; issuedQuantity=1; locationId=[Guid]$f.LocationId; serialNumber=$serial })
@@ -353,12 +500,12 @@ ORDER BY i.ItemCode,l.LocationCode;
     $null = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/$requisitionId/issue" -Token $tokens['admin'] -Body $issueBody
     $issueVoucher = $issued.voucher
     $ackKey = "invfu003-ack-$([Guid]::NewGuid().ToString('N'))"
-    $issueVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/issue-vouchers/$($issueVoucher.id)/acknowledge" -Token $tokens['finance.clerk'] -Body @{
+    $issueVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/issue-vouchers/$($issueVoucher.id)/acknowledge" -Token $tokens[$receiverName] -Body @{
         rowVersion=$issueVoucher.rowVersion
         comment='Fixed asset received into controlled custody.'
         idempotencyKey=$ackKey
     }
-    $requisition = Invoke-JsonApi -Method GET -Path "/api/inventory/requisitions/$requisitionId" -Token $tokens['finance.clerk'] -Body $null
+    $requisition = Invoke-JsonApi -Method GET -Path "/api/inventory/requisitions/$requisitionId" -Token $tokens[$receiverName] -Body $null
     $returnKey = "invfu003-return-$([Guid]::NewGuid().ToString('N'))"
     $returnBody = @{
         items=@(@{ itemId=[Guid]$requisition.items[0].id; returnedQuantity=1; locationId=[Guid]$f.LocationId; serialNumber=$serial })
@@ -370,11 +517,11 @@ ORDER BY i.ItemCode,l.LocationCode;
         rowVersion=$requisition.rowVersion
         evidence=@()
     }
-    $returnVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/$requisitionId/return" -Token $tokens['finance.clerk'] -Body $returnBody
-    $returnReplay = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/$requisitionId/return" -Token $tokens['finance.clerk'] -Body $returnBody
+    $returnVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/$requisitionId/return" -Token $tokens[$receiverName] -Body $returnBody
+    $returnReplay = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/$requisitionId/return" -Token $tokens[$receiverName] -Body $returnBody
     Assert-Equal ([Guid]$returnReplay.id) ([Guid]$returnVoucher.id) 'Return request replay created a second voucher.'
     $decisionKey = "invfu003-approve-$([Guid]::NewGuid().ToString('N'))"
-    $returnVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/decision" -Token $tokens['manager'] -Body @{
+    $returnVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/decision" -Token $tokens[$returnApproverName] -Body @{
         approved=$true; comment='Independent approval of the serial-tracked return.'; rowVersion=$returnVoucher.rowVersion; idempotencyKey=$decisionKey
     }
     $postKey = "invfu003-post-$([Guid]::NewGuid().ToString('N'))"
@@ -383,8 +530,8 @@ ORDER BY i.ItemCode,l.LocationCode;
     $null = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/post" -Token $tokens['admin'] -Body $postBody
     $reverseKey = "invfu003-reverse-$([Guid]::NewGuid().ToString('N'))"
     $reverseBody = @{ rowVersion=$returnVoucher.rowVersion; reason='Acceptance reversal proves compensating stock, Finance and fixed-asset lineage.'; idempotencyKey=$reverseKey }
-    $returnVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/reverse" -Token $tokens['ap.officer'] -Body $reverseBody
-    $null = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/reverse" -Token $tokens['ap.officer'] -Body $reverseBody
+    $returnVoucher = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/reverse" -Token $tokens[$returnReverserName] -Body $reverseBody
+    $null = Invoke-JsonApi -Method POST -Path "/api/inventory/requisitions/return-vouchers/$($returnVoucher.id)/reverse" -Token $tokens[$returnReverserName] -Body $reverseBody
     Assert-Equal $returnVoucher.status 'Reversed' 'The Store Return Voucher did not close as Reversed.'
 
     $returnEvidence = Invoke-DbTable $connection @'
@@ -479,6 +626,8 @@ WHERE TenantId=@tenantId AND WorkOrderPartId=@partId AND IsDeleted=0;
         ReturnActions=[int]$e.ActionCount
         DistinctReturnActors=[int]$e.ActorCount
         FixedAssetLineage=[int]$e.FixedAssetCount
+        StockAdjustmentNumber=[string]$adjustment.adjustmentNumber
+        StockAdjustmentActions=[int]$adjustment.actions.Count
         Browser=if ($SkipBrowser) { 'Not run' } else { 'Passed' }
     } | ConvertTo-Json -Compress
 }
@@ -496,6 +645,13 @@ finally {
     }
     foreach ($link in $addedRoleLinks) {
         try { $null = Invoke-DbNonQuery $connection 'DELETE FROM UserRoles WHERE UserId=@userId AND RoleId=@roleId;' @{ userId=$link.UserId; roleId=$link.RoleId } } catch { }
+    }
+    if ($financeSettingsBackup) {
+        try {
+            $null = Invoke-DbNonQuery $connection @'
+UPDATE FinanceSettings SET WriteOffExpenseAccountId=@expense,WriteOffRecoveryAccountId=@recovery WHERE Id=@id;
+'@ @{ id=$financeSettingsBackup.Id; expense=$financeSettingsBackup.Expense; recovery=$financeSettingsBackup.Recovery }
+        } catch { }
     }
     foreach ($entry in $passwordBackups.GetEnumerator()) {
         try {
