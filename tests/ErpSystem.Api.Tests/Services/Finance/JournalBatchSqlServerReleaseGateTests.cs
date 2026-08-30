@@ -1,14 +1,20 @@
+using System.Reflection;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -22,6 +28,97 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 /// </summary>
 public sealed class JournalBatchSqlServerReleaseGateTests
 {
+    [SqlServerFact]
+    [Trait("Batch", "FinanceDimensionCertification")]
+    [Trait("Category", "SqlServerTransaction")]
+    public async Task DimensionPromotion_ShouldOwnSerializableTransactionInsideRetryExecutionStrategy()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var tenantId = Guid.NewGuid();
+        await using (var seed = database.CreateContext())
+        {
+            seed.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "SQL Dimension Certification Test",
+                Code = $"DC-{tenantId:N}"[..12],
+                Status = TenantStatus.Active,
+                BaseCurrency = "GHS"
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var context = database.CreateRetryingContext();
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(service => service.TenantId).Returns(tenantId);
+        currentUser.SetupGet(service => service.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(service => service.UserName).Returns("sql.dimension.governor");
+        currentUser.SetupGet(service => service.Claims).Returns(new Dictionary<string, string>());
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(service => service.RecordAsync(
+                It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AuditLog { Id = Guid.NewGuid() });
+        var provider = new SqlDimensionReadinessProvider();
+        var service = new FinanceDimensionCertificationService(
+            context, currentUser.Object, audit.Object, [provider]);
+
+        var assessment = await service.AssessReadinessAsync(
+            provider.RouteId, FinanceDimensionCertificationState.Enforced);
+        var promoted = await service.PromoteAsync(provider.RouteId, new PromoteFinanceDimensionRouteDto
+        {
+            ReadinessAssessmentId = assessment.Id,
+            TargetState = FinanceDimensionCertificationState.Enforced,
+            Reason = "Relational promotion gate completed without blockers."
+        });
+
+        promoted.State.Should().Be(FinanceDimensionCertificationState.Enforced);
+        await using var verification = database.CreateContext();
+        (await verification.FinanceDimensionRouteCertifications.AsNoTracking()
+                .SingleAsync(item => item.TenantId == tenantId && item.RouteId == provider.RouteId))
+            .State.Should().Be(FinanceDimensionCertificationState.Enforced);
+        (await verification.FinanceDimensionReadinessAssessments.AsNoTracking()
+                .SingleAsync(item => item.Id == assessment.Id))
+            .ConsumedAt.Should().NotBeNull();
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinanceDimensionCertification")]
+    [Trait("Category", "SqlServerMigration")]
+    public async Task DimensionCertificationPermissionMigrationSql_ShouldBeIdempotentAndGrantOnlyGovernanceRoles()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        await using var context = database.CreateContext();
+        context.Roles.Add(new ApplicationRole("Financial Controller")
+        {
+            Id = Guid.NewGuid(),
+            NormalizedName = "FINANCIAL CONTROLLER",
+            IsSystemRole = true,
+            CreatedBy = "sql-permission-gate"
+        });
+        await context.SaveChangesAsync();
+
+        var migration = new AddFinanceDimensionSourceInfrastructure();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        var permissionSql = builder.Operations.OfType<SqlOperation>().Single(operation =>
+            operation.Sql.Contains("Finance.Dimensions.Certification.Manage", StringComparison.Ordinal));
+
+        await context.Database.ExecuteSqlRawAsync(permissionSql.Sql);
+        await context.Database.ExecuteSqlRawAsync(permissionSql.Sql);
+
+        var permission = await context.Permissions.AsNoTracking().SingleAsync(item =>
+            item.Name == FinancePermissions.ManageDimensionCertification && !item.IsDeleted);
+        var grantedRoles = await context.RolePermissions.AsNoTracking()
+            .Where(item => item.PermissionId == permission.Id)
+            .Select(item => item.Role.Name)
+            .OrderBy(name => name)
+            .ToListAsync();
+        grantedRoles.Should().Equal("Financial Controller", "SuperAdmin", "TenantAdmin");
+        (await context.RolePermissions.CountAsync(item => item.PermissionId == permission.Id))
+            .Should().Be(3, "running the permission upgrade twice must not duplicate grants");
+    }
+
     [SqlServerFact]
     [Trait("Batch", "FinancePerformance")]
     [Trait("Category", "SqlServerIntegration")]
@@ -412,6 +509,14 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             return new ApplicationDbContext(options);
         }
 
+        public ApplicationDbContext CreateRetryingContext()
+        {
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlServer(_connectionString, sql => sql.EnableRetryOnFailure())
+                .Options;
+            return new ApplicationDbContext(options);
+        }
+
         public async Task<SeededBatch> SeedSourceBatchAsync()
         {
             var tenantId = Guid.NewGuid();
@@ -597,4 +702,15 @@ public sealed class JournalBatchSqlServerReleaseGateTests
 
     private sealed record SeededBatch(Guid TenantId, Guid PeriodId, Guid BatchId, Guid ItemId);
     private sealed record SeededPostingAccounts(Guid TenantId, Guid DebitAccountId, Guid CreditAccountId);
+
+    private sealed class SqlDimensionReadinessProvider : IFinanceDimensionReadinessProvider
+    {
+        public FinanceDimensionRouteId RouteId => FinanceDimensionRouteId.FinanceApVendorInvoice;
+
+        public Task<FinanceDimensionReadinessContribution> EvaluateAsync(
+            Guid tenantId,
+            FinanceDimensionRouteDefinition route,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new FinanceDimensionReadinessContribution("sql-ready:v1", []));
+    }
 }

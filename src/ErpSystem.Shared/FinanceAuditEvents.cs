@@ -44,6 +44,9 @@ public static class FinanceAuditEvents
     public const string LegacyPostingPathBlocked = "Finance.LegacyPostingPath.Blocked";
     public const string MigrationOnlyPostingAttempted = "Finance.LegacyPostingPath.MigrationOnlyAttempted";
     public const string PostingEngineBypassRejected = "Finance.PostingEngine.BypassRejected";
+    public const string DimensionReadinessAssessed = "Finance.Dimensions.Certification.ReadinessAssessed";
+    public const string DimensionRoutePromoted = "Finance.Dimensions.Certification.RoutePromoted";
+    public const string DimensionRoutePromotionBlocked = "Finance.Dimensions.Certification.PromotionBlocked";
 
     public const string FinanceWorkflowSubmitted = "Finance.Workflow.Submitted";
     public const string FinanceWorkflowApproved = "Finance.Workflow.Approved";

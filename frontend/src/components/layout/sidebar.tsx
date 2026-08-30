@@ -2590,6 +2590,12 @@ export const navigationItems: NavItem[] = [
                 permissions: ['Finance.Dimensions.Manage'],
               },
               {
+                title: 'Dimension Route Readiness',
+                href: '/administration/finance/dimensions/readiness',
+                icon: ShieldCheck,
+                permissions: ['Finance.Dimensions.Certification.Manage'],
+              },
+              {
                 title: 'Account Generator',
                 href: '/administration/finance/account-generator',
                 icon: FileText,

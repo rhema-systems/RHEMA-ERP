@@ -644,8 +644,23 @@ public sealed class FinancePostingEngineTests
             .OrderBy(x => x.LineNumber).ToListAsync();
         firstLines[0].FinanceDimensionSetId.Should().Be(sets[0].Id);
         secondLines[0].FinanceDimensionSetId.Should().Be(sets[0].Id);
+        firstLines[0].FinanceDimensionSnapshotId.Should().NotBeNull();
+        secondLines[0].FinanceDimensionSnapshotId.Should().NotBeNull();
+        firstLines[0].FinanceDimensionSnapshotId!.Value.Should().NotBe(
+            secondLines[0].FinanceDimensionSnapshotId!.Value,
+            "each posting line freezes exact evidence even when its canonical set is reused");
         firstLines[1].FinanceDimensionSetId.Should().BeNull("legacy and control lines remain compatible while adapters are certified");
         secondLines[1].FinanceDimensionSetId.Should().BeNull();
+        var snapshots = await db.FinanceDimensionSnapshots.Include(snapshot => snapshot.Items).ToListAsync();
+        snapshots.Should().HaveCount(2);
+        snapshots.Should().OnlyContain(snapshot =>
+            snapshot.FinanceDimensionSetId == sets[0].Id &&
+            snapshot.SnapshotSource == "PostingResolution" &&
+            snapshot.SnapshotQuality == "Exact");
+        snapshots.SelectMany(snapshot => snapshot.Items)
+            .Should().OnlyContain(item =>
+                (item.DimensionNameSnapshot == "Department" || item.DimensionNameSnapshot == "Fund") &&
+                (item.DimensionValueNameSnapshot == "Estate" || item.DimensionValueNameSnapshot == "Capital"));
     }
 
     [Fact]
@@ -761,6 +776,12 @@ public sealed class FinancePostingEngineTests
         reversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
         (await db.FinanceDimensionSets.CountAsync()).Should().Be(1);
         (await db.FinanceDimensionSetItems.SingleAsync()).DimensionValueNameSnapshot.Should().Be("Sales");
+        var snapshots = await db.FinanceDimensionSnapshots.Include(snapshot => snapshot.Items).ToListAsync();
+        snapshots.Should().HaveCount(4);
+        snapshots.Select(snapshot => snapshot.Id).Should().OnlyHaveUniqueItems();
+        snapshots.Should().OnlyContain(snapshot => snapshot.FinanceDimensionSetId == originalSetId);
+        snapshots.SelectMany(snapshot => snapshot.Items).Should().OnlyContain(item =>
+            item.DimensionValueNameSnapshot == "Sales" && item.SnapshotQuality == "Exact");
     }
 
     [Fact]
