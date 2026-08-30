@@ -8,6 +8,16 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+// The first five Civil Engineering migrations keep their authoritative attributes in
+// generated designers for full builds. Fast Debug builds omit those designers, so these
+// lightweight partial registrations preserve runtime discovery without duplicating the
+// inline attributes retained by every later Civil migration.
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814205757_AddCivilEngineeringConfigurationLifecycle")] partial class AddCivilEngineeringConfigurationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814234022_AddCivilEngineeringDesignWorkflow")] partial class AddCivilEngineeringDesignWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815005453_AddCivilEngineeringReconnaissance")] partial class AddCivilEngineeringReconnaissance { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815031044_AddCivilEngineeringDesignInputRequests")] partial class AddCivilEngineeringDesignInputRequests { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815135156_AddCivilEngineeringDocumentRegister")] partial class AddCivilEngineeringDocumentRegister { }
+
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage")] partial class AllowReceiptDocumentDefaultsWithAuditLineage { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster")] partial class AlignRfqCommercialIdentityWithReceiptItemMaster { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260827090000_AlignSupplierOnboardingPartnerCategories")] partial class AlignSupplierOnboardingPartnerCategories { }

@@ -12,8 +12,8 @@ public static class AuditOperationClassifier
 
         if (ContainsAny(value, "reverse", "reversal", "reversed", "void")) return AuditOperationKind.Reverse;
         if (ContainsAny(value, "override", "emergency", "bypass", "waiver")) return AuditOperationKind.Override;
-        if (ContainsAny(value, "reject", "rejected", "decline", "declined")) return AuditOperationKind.Reject;
-        if (ContainsAny(value, "dispatch", "dispatched", "issue", "issued", "send", "sent")) return AuditOperationKind.Dispatch;
+        if (ContainsAny(value, "reject", "rejected", "decline", "declined", "returnsiteinstructionresponse")) return AuditOperationKind.Reject;
+        if (ContainsAny(value, "dispatch", "dispatched", "issue", "issued", "send", "sent", "escalate", "escalated")) return AuditOperationKind.Dispatch;
         if (ContainsAny(value, "receive", "received", "receipt", "acknowledge", "acknowledged")) return AuditOperationKind.Receive;
         if (ContainsAny(value, "post", "posted", "posting", "capitalize", "capitalized")) return AuditOperationKind.Post;
         if (ContainsAny(value, "approve", "approved", "authorize", "authorized", "accept", "accepted", "publish", "published",
@@ -22,6 +22,7 @@ public static class AuditOperationClassifier
         if (ContainsAny(value, "update", "updated", "amend", "amended", "edit", "edited", "change", "changed", "revise", "revised",
                 "correct", "corrected", "save", "saved", "link", "linked", "unlink", "unlinked", "retire", "retired", "recall", "recalled",
                 "delete", "deleted", "commit", "committed", "review", "reviewed", "schedule", "scheduled", "response", "attendance", "vet", "refresh", "confirm", "confirmed", "configure", "configured",
+                "followup", "followedup", "supersede", "superseded",
                 "settlecontractclaim", "assesssubcontractvaluation", "respondsubcontractcharge", "communicatesubcontractcharge", "allocatesubcontractcharge", "releasesubcontractchargeallocation"))
             return AuditOperationKind.Update;
         if (ContainsAny(value, "create", "created", "register", "registered", "generate", "generated", "submit", "submitted", "clone", "cloned",

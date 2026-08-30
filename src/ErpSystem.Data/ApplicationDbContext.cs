@@ -1205,6 +1205,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<WorkflowDelegation>().HasIndex(item => item.WorkflowStepId);
         ConfigureProcurementConfiguration(builder);
         ConfigureQuantitySurveyConfiguration(builder);
+        ConfigureCivilEngineeringConfiguration(builder);
         ConfigureProcurementPolicy(builder);
         ConfigureProcurementRequisitionAuthorityRoutes(builder);
         ConfigureProcurementRequisitionSourcingReleases(builder);

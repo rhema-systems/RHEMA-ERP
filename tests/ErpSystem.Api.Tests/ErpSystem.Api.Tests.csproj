@@ -117,6 +117,7 @@
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
+    <Compile Include="Controllers\Projects\CivilEngineering*.cs" />
     <Compile Include="Controllers\QuantitySurvey\**\*.cs" />
     <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />

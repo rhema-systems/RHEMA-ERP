@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Projects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -1311,6 +1312,13 @@ public sealed class ProjectAssetLinkConfiguration : IEntityTypeConfiguration<Pro
     public void Configure(EntityTypeBuilder<ProjectAssetLink> builder)
     {
         builder.HasIndex(x => new { x.ProjectId, x.LinkType, x.Status });
+        builder.HasIndex(x => new { x.TenantId, x.ReconciliationKey })
+            .IsUnique()
+            .HasFilter("[ReconciliationKey] IS NOT NULL AND [IsDeleted] = 0");
+        builder.HasOne<FixedAsset>()
+            .WithMany()
+            .HasForeignKey(x => x.FixedAssetId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
