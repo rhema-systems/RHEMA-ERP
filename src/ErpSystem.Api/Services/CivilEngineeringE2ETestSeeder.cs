@@ -8,6 +8,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +26,7 @@ public sealed class CivilEngineeringE2ETestSeeder(
     CivilEngineeringConfigurationProfileSeeder configurationSeeder)
 {
     public static readonly Guid ProjectId = Guid.Parse("c1b5f34d-618c-42af-95ea-744e9fe32b32");
+    private static readonly Guid IsolationTenantId = Guid.Parse("d892c595-2e62-409a-b83e-d58c66437570");
     private static readonly Guid WorkflowId = Guid.Parse("60a38642-67f4-4ca0-aa07-9e3c050db99f");
     private static readonly Guid WorkflowStepId = Guid.Parse("f21b4d60-08c3-474b-be9b-fd452cc39b6a");
     private static readonly Guid MetadataTemplateId = Guid.Parse("41d93292-8367-462f-912a-11f4fa7f5f33");
@@ -49,6 +51,7 @@ public sealed class CivilEngineeringE2ETestSeeder(
         var reviewer = await PrepareActorAsync("helpdesk.supervisor", "RHEMA_CIVIL_E2E_REVIEWER_PASSWORD",
             CivilEngineeringAccessControlRegistry.CivilEngineerRole, token);
         _ = await PrepareActorAsync("external", "RHEMA_CIVIL_E2E_UNAUTHORIZED_PASSWORD", null, token);
+        await PrepareIsolationActorAsync(token);
 
         var project = await db.Projects.IgnoreQueryFilters().SingleOrDefaultAsync(value => value.Id == ProjectId, token);
         if (project is null)
@@ -218,6 +221,89 @@ public sealed class CivilEngineeringE2ETestSeeder(
         }
 
         return user;
+    }
+
+    private async Task PrepareIsolationActorAsync(CancellationToken token)
+    {
+        const string username = "civil.tenant-isolation";
+        var password = Environment.GetEnvironmentVariable("RHEMA_CIVIL_E2E_ISOLATION_PASSWORD");
+        if (string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException("RHEMA_CIVIL_E2E_ISOLATION_PASSWORD must be set for disposable Civil browser seeding.");
+
+        var tenant = await db.Tenants.IgnoreQueryFilters().SingleOrDefaultAsync(value => value.Id == IsolationTenantId, token);
+        if (tenant is null)
+        {
+            tenant = new Tenant
+            {
+                Id = IsolationTenantId,
+                Name = "Civil Browser Isolation Tenant",
+                Code = "CIVIL-ISOLATION",
+                Description = "Disposable second-tenant boundary used only by Civil browser acceptance.",
+                Status = TenantStatus.Active,
+                BaseCurrency = "GHS",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Civil E2E Seeder"
+            };
+            db.Tenants.Add(tenant);
+            await db.SaveChangesAsync(token);
+        }
+
+        var user = await userManager.FindByNameAsync(username);
+        if (user is null)
+        {
+            user = new ApplicationUser
+            {
+                UserName = username,
+                Email = "civil.tenant-isolation@acceptance.test",
+                EmailConfirmed = true,
+                FirstName = "Civil",
+                LastName = "Isolation",
+                TenantId = tenant.Id,
+                AuthenticationProvider = AuthenticationProvider.Local,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Civil E2E Seeder"
+            };
+            var created = await userManager.CreateAsync(user, password);
+            if (!created.Succeeded)
+                throw new InvalidOperationException($"Could not create the Civil tenant-isolation actor: {string.Join(", ", created.Errors.Select(value => value.Description))}");
+        }
+        else
+        {
+            user.TenantId = tenant.Id;
+            user.IsActive = true;
+            var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+            var reset = await userManager.ResetPasswordAsync(user, resetToken, password);
+            if (!reset.Succeeded)
+                throw new InvalidOperationException("Could not assign the ephemeral password for the Civil tenant-isolation actor.");
+            await userManager.UpdateAsync(user);
+        }
+
+        if (!await userManager.IsInRoleAsync(user, CivilEngineeringAccessControlRegistry.CivilEngineerRole))
+        {
+            var roleResult = await userManager.AddToRoleAsync(user, CivilEngineeringAccessControlRegistry.CivilEngineerRole);
+            if (!roleResult.Succeeded)
+                throw new InvalidOperationException("Could not assign the Civil tenant-isolation role.");
+        }
+
+        if (!await db.UserTenants.IgnoreQueryFilters().AnyAsync(value =>
+                value.UserId == user.Id && value.TenantId == tenant.Id && !value.IsDeleted, token))
+        {
+            db.UserTenants.Add(new UserTenant
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                TenantId = tenant.Id,
+                AccessLevel = UserTenantAccessLevel.Standard,
+                Status = UserTenantStatus.Active,
+                IsDefault = true,
+                GrantedAt = DateTime.UtcNow,
+                GrantedBy = "Civil E2E Seeder",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Civil E2E Seeder"
+            });
+            await db.SaveChangesAsync(token);
+        }
     }
 
     private async Task EnsureProjectMemberAsync(Guid tenantId, Guid projectId, Guid userId, string role, CancellationToken token)

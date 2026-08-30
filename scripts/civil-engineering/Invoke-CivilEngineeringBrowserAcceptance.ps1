@@ -93,6 +93,7 @@ try {
     $assigneePassword = New-EphemeralPassword
     $reviewerPassword = New-EphemeralPassword
     $unauthorizedPassword = New-EphemeralPassword
+    $isolationPassword = New-EphemeralPassword
     $jwtSecret = New-EphemeralPassword
     $portalSecret = New-EphemeralPassword
     $encryptionKey = [Convert]::ToBase64String((New-EphemeralBytes 32))
@@ -115,6 +116,7 @@ try {
     Set-RunEnvironment 'RHEMA_CIVIL_E2E_ASSIGNEE_PASSWORD' $assigneePassword
     Set-RunEnvironment 'RHEMA_CIVIL_E2E_REVIEWER_PASSWORD' $reviewerPassword
     Set-RunEnvironment 'RHEMA_CIVIL_E2E_UNAUTHORIZED_PASSWORD' $unauthorizedPassword
+    Set-RunEnvironment 'RHEMA_CIVIL_E2E_ISOLATION_PASSWORD' $isolationPassword
 
     $apiDll = Join-Path $repoRoot 'src\ErpSystem.Api\bin\Debug\net8.0\ErpSystem.Api.dll'
     if (-not (Test-Path $apiDll)) { throw 'The Civil browser API build did not produce its expected assembly.' }
@@ -141,8 +143,8 @@ try {
     Set-RunEnvironment 'E2E_BASE_URL' "http://127.0.0.1:$FrontendPort"
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_ENABLED' '1'
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_PROJECT_ID' 'c1b5f34d-618c-42af-95ea-744e9fe32b32'
-    Set-RunEnvironment 'CIVIL_ACCEPTANCE_PROJECT_LABEL' 'CIV-E2E-001 · Civil Engineering Browser Acceptance'
-    Set-RunEnvironment 'CIVIL_ACCEPTANCE_ASSIGNEE_LABEL' 'Jane Employee · TDC_CIVIL_TECHNICIAN'
+    Set-RunEnvironment 'CIVIL_ACCEPTANCE_PROJECT_LABEL' 'CIV-E2E-001'
+    Set-RunEnvironment 'CIVIL_ACCEPTANCE_ASSIGNEE_LABEL' 'Jane Employee'
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_ASSIGNER_USERNAME' 'manager'
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_ASSIGNER_PASSWORD' $assignerPassword
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_ASSIGNEE_USERNAME' 'employee'
@@ -151,9 +153,14 @@ try {
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_REVIEWER_PASSWORD' $reviewerPassword
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_UNAUTHORIZED_USERNAME' 'external'
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_UNAUTHORIZED_PASSWORD' $unauthorizedPassword
+    Set-RunEnvironment 'CIVIL_ACCEPTANCE_ISOLATION_USERNAME' 'civil.tenant-isolation'
+    Set-RunEnvironment 'CIVIL_ACCEPTANCE_ISOLATION_PASSWORD' $isolationPassword
+    Set-RunEnvironment 'CIVIL_ACCEPTANCE_ISOLATION_TENANT_CODE' 'CIVIL-ISOLATION'
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_TENANT_CODE' 'DEFAULT'
     $taskTitle = "Civil browser acceptance $([Guid]::NewGuid().ToString('N'))"
     Set-RunEnvironment 'CIVIL_ACCEPTANCE_TASK_TITLE' $taskTitle
+    $idempotencyTaskTitle = "$taskTitle idempotency"
+    Set-RunEnvironment 'CIVIL_ACCEPTANCE_IDEMPOTENCY_TASK_TITLE' $idempotencyTaskTitle
 
     Push-Location (Join-Path $repoRoot 'e2e-tests')
     try {
@@ -166,6 +173,7 @@ try {
     $databaseAssertion = @"
 SET NOCOUNT ON;
 DECLARE @title nvarchar(200)=N'$taskTitle';
+DECLARE @idempotencyTitle nvarchar(200)=N'$idempotencyTaskTitle';
 DECLARE @taskId uniqueidentifier=(
     SELECT control.Id
     FROM dbo.ProjectCivilDirectTaskControls control
@@ -190,6 +198,12 @@ IF (SELECT COUNT(DISTINCT ActorUserId) FROM dbo.ProjectCivilDirectTaskFeedbackEn
     THROW 53005, 'Civil browser assignee and reviewer feedback actors are not separated.', 1;
 IF (SELECT COUNT(DISTINCT ActorUserId) FROM dbo.ProjectCivilDirectTaskRevisions WHERE DirectTaskControlId=@taskId AND IsDeleted=0) <> 3
     THROW 53006, 'Civil browser immutable revisions do not retain all three business actors.', 1;
+IF (SELECT COUNT(*) FROM dbo.ProjectCivilDirectTaskControls control
+    JOIN dbo.ProjectWorkItems workItem ON workItem.Id=control.WorkItemId AND workItem.TenantId=control.TenantId
+    WHERE control.TenantId='00000000-0000-0000-0000-000000000001'
+      AND control.ProjectId='c1b5f34d-618c-42af-95ea-744e9fe32b32'
+      AND workItem.Title=@idempotencyTitle AND control.IsDeleted=0 AND workItem.IsDeleted=0) <> 1
+    THROW 53008, 'Civil browser idempotent create did not persist exactly one task.', 1;
 IF EXISTS (
     SELECT 1 FROM sys.foreign_keys
     WHERE parent_object_id IN (
