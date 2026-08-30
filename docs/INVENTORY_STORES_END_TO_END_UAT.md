@@ -123,6 +123,26 @@ The same SQL journey also proves negative-stock rejection, post-submit amendment
 
 Run the broader focused Core/API and frontend suites for those cross-module seams. Authenticated browser scripts live in `e2e-tests/tests/inv-fu-002-maintenance-reservation.spec.ts`, `inv-fu-003-issue-return-asset.spec.ts`, and `inv-fu-004-transfer.spec.ts`; they require a running seeded local host and their named role credentials. A component or service test must not be recorded as browser evidence.
 
+The executable fresh-record INV-FU-002 / INV-FU-003 journey is:
+
+```powershell
+& .\scripts\acceptance\Invoke-InvFu002003.ps1
+```
+
+Run it against the configured local acceptance database with the API listening on `127.0.0.1:5100` and branch-locked dependencies installed in `frontend` and `e2e-tests`. The script uses the central Workflow, Inventory, Maintenance, Finance and Fixed Assets owners for lifecycle mutations. Database access is limited to prerequisite discovery, temporary isolated actor setup, durable postcondition read-back and cleanup. It restores temporary passwords and grants in `finally` and starts its own frontend for the two Chromium read-back specifications.
+
+| Acceptance actor | Fresh-record responsibility | Control evidence |
+| --- | --- | --- |
+| `employee` | Creates the maintenance work order/reservation and fixed-asset requisition | Maker identity and controlled source records |
+| `manager` | Independently approves the requisition and Store Return Voucher | Maker-checker separation and shared-workflow approval |
+| `admin` | Independently issues stock and posts the approved return | Warehouse/location authorization plus Finance/asset lineage |
+| `finance.clerk` | Returns unused maintenance stock and acknowledges/requests the fixed-asset return | Separate custody and return actors |
+| `ap.officer` | Independently reverses the posted return | Compensating stock, Finance and fixed-asset lineage |
+| `estate.officer1` | Attempts unauthorized reservation and issue mutations | HTTP 403 with no inventory mutation |
+| Anonymous caller | Attempts the requisition list | HTTP 401 authentication boundary |
+
+Before browser evidence can pass, the harness proves idempotent reserve/use/return actions, idempotent issue/return/post/reversal actions, exact Store Return Voucher allocations, four distinct return actors, one Finance reversal event and one fixed-asset lineage record. Use `-SkipBrowser` only for API/database diagnosis; it is not full acceptance evidence.
+
 The executable fresh-record INV-FU-004 / E2E-011 transfer journey is:
 
 ```powershell
