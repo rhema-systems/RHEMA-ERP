@@ -53,6 +53,12 @@ import type {
   SetAssetAttributeValueRequest,
   SetAssetRentalTermsRequest,
   UpdateCompanyAssetRequest,
+  UpdateAssetAssignmentRequest,
+  UpdateAssetRequisitionRequest,
+  UpdateAssetTypeAttributeRequest,
+  UpdateAssetMaintenanceRequest,
+  UpdateAssetTransferRequest,
+  UpdateAssetSurchargeRequest,
 } from '@/types/hr/assets';
 
 /**
@@ -248,6 +254,14 @@ class AssetRegisterService {
     return apiService.delete<void>(`${this.baseUrl}/attributes/${id}`);
   }
 
+  /** Corrects an attribute DEFINITION on a type — not a value on an asset. */
+  updateTypeAttribute(
+    id: string,
+    data: UpdateAssetTypeAttributeRequest,
+  ): Promise<AssetTypeAttribute> {
+    return apiService.put<AssetTypeAttribute>(`${this.baseUrl}/attributes/${id}`, { ...data, id });
+  }
+
   // ── The two link pickers ───────────────────────────────────────────────────
 
   /** ⚠ Rows already claimed come back FLAGGED, not filtered — render them, disabled. */
@@ -400,6 +414,16 @@ class AssetRegisterService {
   }
 
   /**
+   * Corrects the terms of a live custody.
+   *
+   * ⚠ Refused unless the assignment is Active — the service says so, and the screen only offers
+   * it there. Every field is written, so seed from {@link getAssignment}.
+   */
+  updateAssignment(id: string, data: UpdateAssetAssignmentRequest): Promise<AssetAssignment> {
+    return apiService.put<AssetAssignment>(`${this.baseUrl}/assignments/${id}`, { ...data, id });
+  }
+
+  /**
    * The responsibility-and-terms document — AST-5.
    *
    * `htmlBody` is a complete `<html>` document. Open it in its own window; injecting a whole letter
@@ -464,6 +488,10 @@ class AssetRegisterService {
     return apiService.delete<void>(`${this.baseUrl}/maintenance/${id}`);
   }
 
+  updateMaintenance(id: string, data: UpdateAssetMaintenanceRequest): Promise<AssetMaintenance> {
+    return apiService.put<AssetMaintenance>(`${this.baseUrl}/maintenance/${id}`, { ...data, id });
+  }
+
   // ── Requisitions ───────────────────────────────────────────────────────────
 
   getRequisitionsPaged(params: {
@@ -512,6 +540,15 @@ class AssetRegisterService {
 
   deleteRequisition(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/requisitions/${id}`);
+  }
+
+  /**
+   * ⚠ Draft only, and self-or-HR: an employee may correct their own request, HR may correct
+   * anyone's. The two rules are separate — editing someone else's draft is refused on the actor
+   * rule even when the status would allow it.
+   */
+  updateRequisition(id: string, data: UpdateAssetRequisitionRequest): Promise<AssetRequisition> {
+    return apiService.put<AssetRequisition>(`${this.baseUrl}/requisitions/${id}`, { ...data, id });
   }
 
   approveRequisition(id: string, approvalComments?: string): Promise<AssetRequisition> {
@@ -586,6 +623,11 @@ class AssetRegisterService {
     return apiService.delete<void>(`${this.baseUrl}/transfers/${id}`);
   }
 
+  /** ⚠ Draft only — a transfer out for approval must be recalled first. */
+  updateTransfer(id: string, data: UpdateAssetTransferRequest): Promise<AssetTransfer> {
+    return apiService.put<AssetTransfer>(`${this.baseUrl}/transfers/${id}`, { ...data, id });
+  }
+
   // ── Surcharges — AST-3, decision D9 ────────────────────────────────────────
 
   /** ⚠ This one pages on `page`, not `pageNumber`. Measured, not assumed. */
@@ -620,7 +662,7 @@ class AssetRegisterService {
 
   createSurcharge(data: {
     assignmentId: string;
-    /** 1 = Damage, 2 = Loss, 3 = NotReturned, 4 = Other. */
+    /** The NUMBER — see `ASSET_SURCHARGE_REASONS`. */
     reason: number;
     description: string;
     assessedAmount?: number | null;
@@ -633,9 +675,35 @@ class AssetRegisterService {
     return apiService.post<AssetSurcharge>(`${this.baseUrl}/surcharges/${id}/notify-employee`, {});
   }
 
-  submitSurcharge(id: string, proceededWithoutResponseReason?: string): Promise<AssetSurcharge> {
+  /** ⚠ Draft only. Changing an amount the employee has already been shown is refused. */
+  updateSurcharge(id: string, data: UpdateAssetSurchargeRequest): Promise<AssetSurcharge> {
+    return apiService.put<AssetSurcharge>(`${this.baseUrl}/surcharges/${id}`, { ...data, id });
+  }
+
+  /** ⚠ Admin, and Draft only. */
+  deleteSurcharge(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/surcharges/${id}`);
+  }
+
+  /**
+   * Brings a charge back from approval — the way back that requisitions and transfers both had
+   * and surcharges did not. Submitted only.
+   */
+  recallSurcharge(id: string, reason?: string): Promise<AssetSurcharge> {
+    return apiService.post<AssetSurcharge>(`${this.baseUrl}/surcharges/${id}/recall`, { reason });
+  }
+
+  /**
+   * Sends the charge for approval.
+   *
+   * ⚠ The reason key is `proceedWithoutResponseReason` — **not** "proceeded". It used to be sent
+   * with the extra "ed", which bound to nothing on `SubmitAssetSurchargeDto`, so a submit without
+   * an employee response was refused however carefully the reason was typed. Caught by slice 18,
+   * which now asserts both spellings.
+   */
+  submitSurcharge(id: string, proceedWithoutResponseReason?: string): Promise<AssetSurcharge> {
     return apiService.post<AssetSurcharge>(`${this.baseUrl}/surcharges/${id}/submit`,
-      { proceededWithoutResponseReason: proceededWithoutResponseReason ?? null });
+      { proceedWithoutResponseReason: proceedWithoutResponseReason ?? null });
   }
 
   /** ⚠ The approver may LOWER the amount but never raise it — the API refuses the raise in words. */

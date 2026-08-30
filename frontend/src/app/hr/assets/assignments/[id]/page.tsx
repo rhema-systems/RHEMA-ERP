@@ -48,6 +48,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
+import { AssetRecordEditDialog } from '@/components/hr/assets/AssetRecordEditDialog';
 import { useToast } from '@/hooks/use-toast';
 import { ASSET_CONDITIONS, RENTAL_FREQUENCIES } from '@/types/hr/assets';
 
@@ -295,6 +296,15 @@ export default function AssetAssignmentDetailPage() {
             </Button>
             {isOpen && (
               <>
+                {/*
+                  Active only. Once the asset is back the terms are history, and editing them
+                  would rewrite what the holder signed for — the service refuses it there.
+                */}
+                <AssetRecordEditDialog
+                  kind="assignment"
+                  record={a}
+                  queryKey={['hr', 'assets', 'assignment', id]}
+                />
                 <Button onClick={() => setReturning(true)}>
                   <Undo2 className="mr-2 h-4 w-4" /> Take it back
                 </Button>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, Loader2, PenLine, Plus, Trash2 } from 'lucide-react';
+import { Boxes, Loader2, PenLine, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -57,6 +57,12 @@ export default function AssetTypesSetupPage() {
   const [editing, setEditing] = useState<{ id: string; name: string; description: string;
     hasExtraAttributes: boolean } | null>(null);
   const [attrFor, setAttrFor] = useState<string | null>(null);
+  /**
+   * Set when the dialog is correcting an existing definition rather than adding one. A custom
+   * field could be added and deleted but never corrected, so fixing a typo in its name meant
+   * destroying the definition — and with it every value already recorded against it.
+   */
+  const [attrEditingId, setAttrEditingId] = useState<string | null>(null);
   const [attrForm, setAttrForm] = useState({
     attributeName: '', dataType: 'Text', isRequired: false, isExpiryDate: false, attributeOptions: '',
   });
@@ -116,8 +122,8 @@ export default function AssetTypesSetupPage() {
   });
 
   const addAttribute = useMutation({
-    mutationFn: () =>
-      assetRegisterService.createTypeAttribute(attrFor as string, {
+    mutationFn: () => {
+      const payload = {
         assetTypeId: attrFor as string,
         attributeName: attrForm.attributeName.trim(),
         // ⚠ The NUMBER, and it is not the position in this list — see the note at the top.
@@ -125,18 +131,28 @@ export default function AssetTypesSetupPage() {
         isRequired: attrForm.isRequired,
         isExpiryDate: attrForm.isExpiryDate,
         attributeOptions: attrForm.attributeOptions.trim(),
-      }),
+      };
+      return attrEditingId
+        ? assetRegisterService.updateTypeAttribute(attrEditingId, { ...payload, id: attrEditingId })
+        : assetRegisterService.createTypeAttribute(attrFor as string, payload);
+    },
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['hr', 'assets', 'type-detail'] });
+      const wasEdit = attrEditingId !== null;
       setAttrFor(null);
+      setAttrEditingId(null);
       setAttrForm({
         attributeName: '', dataType: 'Text', isRequired: false, isExpiryDate: false, attributeOptions: '',
       });
-      toast({ title: 'Attribute added' });
+      toast({ title: wasEdit ? 'Attribute updated' : 'Attribute added' });
     },
     onError: (e: Error) =>
-      toast({ title: 'Could not add the attribute', description: e.message, variant: 'destructive' }),
+      toast({
+        title: attrEditingId ? 'Could not save the attribute' : 'Could not add the attribute',
+        description: e.message,
+        variant: 'destructive',
+      }),
   });
 
   const removeAttribute = useMutation({
@@ -275,6 +291,20 @@ export default function AssetTypesSetupPage() {
                       <TableCell>{a.isExpiryDate ? 'Yes' : 'No'}</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm"
+                          onClick={() => {
+                            setAttrForm({
+                              attributeName: a.attributeName,
+                              dataType: a.dataType,
+                              isRequired: a.isRequired,
+                              isExpiryDate: a.isExpiryDate,
+                              attributeOptions: a.attributeOptions ?? '',
+                            });
+                            setAttrEditingId(a.id);
+                            setAttrFor(a.assetTypeId);
+                          }}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm"
                           onClick={() => removeAttribute.mutate(a.id)}
                           disabled={removeAttribute.isPending}>
                           <Trash2 className="h-4 w-4" />
@@ -375,12 +405,19 @@ export default function AssetTypesSetupPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={attrFor !== null} onOpenChange={(o) => !o && setAttrFor(null)}>
+      <Dialog
+        open={attrFor !== null}
+        onOpenChange={(o) => { if (!o) { setAttrFor(null); setAttrEditingId(null); } }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add a custom field</DialogTitle>
+            <DialogTitle>
+              {attrEditingId ? 'Edit the custom field' : 'Add a custom field'}
+            </DialogTitle>
             <DialogDescription>
-              Every asset of this type can then carry a value for it.
+              {attrEditingId
+                ? 'Changing the data type of a field that already holds values does not convert them.'
+                : 'Every asset of this type can then carry a value for it.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

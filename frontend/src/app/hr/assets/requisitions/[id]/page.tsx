@@ -29,6 +29,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
+import { AssetRecordEditDialog } from '@/components/hr/assets/AssetRecordEditDialog';
 import { useToast } from '@/hooks/use-toast';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -168,6 +169,8 @@ export default function AssetRequisitionDetailPage() {
                 <Button onClick={() => send.mutate()} disabled={send.isPending}>
                   <Send className="mr-2 h-4 w-4" /> Send for approval
                 </Button>
+                {/* Draft only, and self-or-HR — the service checks the actor separately. */}
+                <AssetRecordEditDialog kind="requisition" record={r} queryKey={['hr', 'assets', 'requisition', id]} />
                 <Button variant="outline" onClick={() => remove.mutate()} disabled={remove.isPending}>
                   <Trash2 className="mr-2 h-4 w-4" /> Delete
                 </Button>

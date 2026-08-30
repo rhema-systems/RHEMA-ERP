@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Ban,
@@ -11,7 +11,10 @@ import {
   HandCoins,
   Loader2,
   Mail,
+  Pencil,
   Send,
+  Trash2,
+  Undo2,
   XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -45,6 +48,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
+import { ASSET_SURCHARGE_REASONS } from '@/types/hr/assets';
 import { useToast } from '@/hooks/use-toast';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -83,11 +87,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function AssetSurchargeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
+  const router = useRouter();
   const queryClient = useQueryClient();
 
   const [dialog, setDialog] = useState<
-    null | 'notify' | 'submit' | 'approve' | 'reject' | 'plan' | 'waive' | 'cancel' | 'recovery'
+    | null | 'notify' | 'submit' | 'approve' | 'reject' | 'plan' | 'waive' | 'cancel' | 'recovery'
+    | 'edit' | 'delete' | 'recall'
   >(null);
+  /**
+   * The edit form. Draft only — once the charge has been served, changing the amount the employee
+   * was shown would make their answer an answer to something else, and the service refuses it.
+   */
+  const [edit, setEdit] = useState({ reason: '1', description: '', assessedAmount: '' });
   const [text, setText] = useState('');
   const [approvedAmount, setApprovedAmount] = useState('');
   const [plan, setPlan] = useState({ recoveryMethod: '1', instalmentCount: '1', recoveryStartDate: today() });
@@ -103,7 +114,10 @@ export default function AssetSurchargeDetailPage() {
 
   const close = () => { setDialog(null); setText(''); setApprovedAmount(''); };
 
-  const run = useMutation({
+  // The cases return different shapes — `deleteSurcharge` resolves to void while its siblings
+  // resolve to the charge — so the result is widened rather than each case rewritten. Nothing
+  // reads it: success refetches.
+  const run = useMutation<unknown, Error>({
     mutationFn: () => {
       switch (dialog) {
         case 'notify': return assetRegisterService.notifySurchargeEmployee(id);
@@ -125,6 +139,15 @@ export default function AssetSurchargeDetailPage() {
           reference: recovery.reference || null,
           notes: recovery.notes || null,
         });
+        case 'edit': return assetRegisterService.updateSurcharge(id, {
+          id,
+          reason: Number(edit.reason),
+          description: edit.description,
+          assessedAmount: Number(edit.assessedAmount),
+          currencyCode: s?.currencyCode ?? null,
+        });
+        case 'delete': return assetRegisterService.deleteSurcharge(id);
+        case 'recall': return assetRegisterService.recallSurcharge(id, text || undefined);
         case 'waive': return assetRegisterService.waiveSurcharge(id, text);
         case 'cancel': return assetRegisterService.cancelSurcharge(id, text);
         default: throw new Error('No action chosen');
@@ -133,7 +156,9 @@ export default function AssetSurchargeDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'assets'] });
       toast({ title: 'Done' });
+      const wasDelete = dialog === 'delete';
       close();
+      if (wasDelete) router.push('/hr/assets/surcharges');
     },
     onError: (e: Error) =>
       toast({ title: 'The action was refused', description: e.message, variant: 'destructive' }),
@@ -158,9 +183,30 @@ export default function AssetSurchargeDetailPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {s.status === 'Draft' && (
-              <Button onClick={() => setDialog('notify')}>
-                <Mail className="mr-2 h-4 w-4" /> Serve it on the employee
-              </Button>
+              <>
+                <Button onClick={() => setDialog('notify')}>
+                  <Mail className="mr-2 h-4 w-4" /> Serve it on the employee
+                </Button>
+                {/* Draft is the only state either of these is allowed in — see the service. */}
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEdit({
+                      reason: String(
+                        ASSET_SURCHARGE_REASONS.find((r) => r.label === s.reason)?.value ?? 1,
+                      ),
+                      description: s.description ?? '',
+                      assessedAmount: String(s.assessedAmount ?? ''),
+                    });
+                    setDialog('edit');
+                  }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" /> Edit
+                </Button>
+                <Button variant="outline" onClick={() => setDialog('delete')}>
+                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                </Button>
+              </>
             )}
             {s.status === 'WithEmployee' && (
               <Button onClick={() => setDialog('submit')}>
@@ -169,6 +215,13 @@ export default function AssetSurchargeDetailPage() {
             )}
             {s.status === 'Submitted' && (
               <>
+                {/*
+                  The way back. Requisitions and transfers both had a recall and surcharges did
+                  not, so a charge sent for approval in error was stuck there.
+                */}
+                <Button variant="outline" onClick={() => setDialog('recall')}>
+                  <Undo2 className="mr-2 h-4 w-4" /> Recall
+                </Button>
                 <Button onClick={() => { setApprovedAmount(String(s.assessedAmount)); setDialog('approve'); }}>
                   <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
                 </Button>
@@ -423,6 +476,78 @@ export default function AssetSurchargeDetailPage() {
               </div>
             </>
           )}
+          {dialog === 'edit' && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit the charge</DialogTitle>
+                <DialogDescription>
+                  Only while it is a draft. Once it has been served on {s.employeeName}, the
+                  amount they were shown is the amount they answered.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Reason</Label>
+                  <Select
+                    value={edit.reason}
+                    onValueChange={(v) => setEdit((f) => ({ ...f, reason: v }))}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ASSET_SURCHARGE_REASONS.map((r) => (
+                        <SelectItem key={r.value} value={String(r.value)}>{r.text}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={edit.description}
+                    onChange={(e) => setEdit((f) => ({ ...f, description: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Assessed amount</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={edit.assessedAmount}
+                    onChange={(e) => setEdit((f) => ({ ...f, assessedAmount: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {dialog === 'delete' && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Delete this charge?</DialogTitle>
+                <DialogDescription>
+                  For a charge raised in error. One the employee has answered should be cancelled
+                  or waived instead, so the answer and the decision both survive.
+                </DialogDescription>
+              </DialogHeader>
+            </>
+          )}
+
+          {dialog === 'recall' && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Recall the charge from approval</DialogTitle>
+                <DialogDescription>
+                  It goes back to a draft you can correct. A reason is optional but is recorded.
+                </DialogDescription>
+              </DialogHeader>
+              <Textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Why is it being recalled?"
+              />
+            </>
+          )}
+
           {dialog === 'recovery' && (
             <>
               <DialogHeader>
@@ -512,6 +637,8 @@ export default function AssetSurchargeDetailPage() {
                 || (['reject', 'waive', 'cancel'].includes(dialog ?? '') && !text.trim())
                 || (dialog === 'submit' && !s.employeeRespondedAt && !text.trim())
                 || (dialog === 'recovery' && !(Number(recovery.amount) > 0))
+                || (dialog === 'edit'
+                    && (!edit.description.trim() || !(Number(edit.assessedAmount) > 0)))
               }
             >
               {run.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

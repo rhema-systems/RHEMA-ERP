@@ -13,8 +13,8 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2151 |
-| Wired to a screen | 1758 |
-| No caller found (instrument 01) | 393 |
+| Wired to a screen | 1766 |
+| No caller found (instrument 01) | 385 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
 | Write-DTO fields no form can set | 91 across 40 DTOs |
 
@@ -38,6 +38,9 @@ yet classified.
 | 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |
 | 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
 | 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
+| 2026-08-30 | **The Assets missing-edit family is built** (slice 18, 43 assertions). All eight endpoints wired; eight left the coverage queue on their own. Unlike medical this needed **no backend change** — every endpoint already stamped its actor (five through `UpdateEntity(dto, userId)`, surcharges through a `Stamp(entity)` helper) and every screen already fetched its record by id, so both standing checks passed before any UI was written. |
+| 2026-08-30 | **A wired endpoint can still be unreachable through a misspelled payload key.** `submitSurcharge` sent `proceededWithoutResponseReason` while the DTO declares `ProceedWithoutResponseReason` — "proceeded" against "proceed" — so a submit without an employee response was refused however carefully the reason was typed. Instrument 01 counts the endpoint as wired, because it is: the ROUTE matched and the BODY did not. Slice 18 asserts both spellings. |
+| 2026-08-30 | ⚠ **A full-project `tsc --noEmit` crashes on this repo** (TypeScript 5.9.2, "Debug Failure. No error for last overload signature"), and `incremental: true` with a stale `tsconfig.tsbuildinfo` had been hiding it — earlier clean runs were partial, checking only changed files. Reproduced on a clean tree with no local changes, so it predates this work. Slices are type-checked against a scoped `tsconfig` until someone finds the offending file. |
 | 2026-08-29 | **The medical missing-edit family is built** (slice 6, 41 assertions). Pre-authorisations, referrals, appointments, expense claims and claim lines can all be corrected and removed; eleven endpoints left the coverage queue on their own, which is the check that the wiring is real. The claim edit also closes section E's `AdmissionStart`/`AdmissionEnd`. |
 | 2026-08-29 | **An edit dialog loads its record by id — never from the list row.** The appointment row carries 7 fields against the record's 32; the pre-authorisation row 9 against 34. Neither carries `purpose`, `serviceType`, `diagnosis` or `proposedTreatment`, all of which the update writes, so a row-bound dialog would have rendered them blank and blanked them on save — D-09 and D-12 one layer further out. Proved by `probe-clinical-byid.mjs` before any TypeScript was written, and now held by a standing assertion. |
 | 2026-08-29 | **D-16's sweep finished: eleven more transitions stamp their actor.** The blocker named the eight clinical ones; checking every `ApplyTo` helper in the medical mappers found eleven more with no actor at all — four of them moving money, and payment, flag and unflag wired and shipped. A claim being paid recorded the amount, the method and the reference, but not who did it. |
@@ -709,7 +712,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | PerformanceAppraisals | 15 | 29 | `BUILD` 5 · `INTENTIONAL` 10 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
 | StaffDisciplineSubEntity | 15 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
-| Assets | 12 | 63 | `BUILD` 8 · `INTENTIONAL` 2 · `FALSE` 2 | Classified 2026-08-29: 8 real. Every asset child wires create and delete and none wires the edit; surcharges wire neither, and have no recall while requisitions and transfers both do. The other 4 are 2 upload artefacts and the 2 employee-portal duplicates. See D2. |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
 | MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
@@ -717,6 +719,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
 | StaffTravelRequests | 5 | 18 | `BUILD` 3 · `FALSE` 2 | Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed. |
 | SuccessionCandidates | 5 | 17 | `BUILD` 1 · `INTENTIONAL` 4 | Classified 2026-08-29: 2 real (documents, blocked on D-14/D-15). The development-activity trio duplicates api/succession-development. |
+| Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
 | CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
 | ConsultantClientPortalAuth | 4 | 7 | `BUILD` | Client portal authentication. |
 | JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
@@ -790,7 +793,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**140 of the 366 queued endpoints are classified here — 52 BUILD, 42 INTENTIONAL, 46 FALSE.** The remaining 226 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**132 of the 358 queued endpoints are classified here — 44 BUILD, 42 INTENTIONAL, 46 FALSE.** The remaining 226 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -872,33 +875,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `PATCH  api/PerformanceAppraisals/{}/status` — **INTENTIONAL**
   <br>Raw status set. Status is moved by the named workflow transitions, each of which enforces its own preconditions.
 
-### Assets — 8 BUILD · 2 INTENTIONAL · 2 FALSE
-
-- `PUT    api/Assets/assignments/{}` — **BUILD**
-  <br>Create and delete are wired; the edit is not. The record can be raised and destroyed but never corrected.
-- `PUT    api/Assets/attributes/{}` — **BUILD**
-  <br>_As `PUT api/Assets/assignments/{}`._
-- `PUT    api/Assets/maintenance/{}` — **BUILD**
-  <br>_As `PUT api/Assets/assignments/{}`._
-- `PUT    api/Assets/requisitions/{}` — **BUILD**
-  <br>The requester may correct their own undecided request and HR may correct anyone's — the controller says so — and no screen offers it.
-- `DELETE api/Assets/surcharges/{}` — **BUILD**
-  <br>The only asset child with no delete wired; attributes, assignments, maintenance, requisitions and transfers all have one.
-- `PUT    api/Assets/surcharges/{}` — **BUILD**
-  <br>Surcharges have neither an edit nor a delete: a charge raised for the wrong amount can only be waived or cancelled, which is a different fact about the employee.
-- `POST   api/Assets/surcharges/{}/recall` — **BUILD**
-  <br>Requisitions and transfers both wire recall. The surcharge ladder wires submit but not the way back, so a charge sent for approval in error is stuck there.
-- `PUT    api/Assets/transfers/{}` — **BUILD**
-  <br>_As `PUT api/Assets/assignments/{}`._
-- `POST   api/Assets/{}/attachments` — **FALSE**
-  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
-- `POST   api/Assets/{}/images` — **FALSE**
-  <br>_As `POST api/Assets/{}/attachments`._
-- `POST   api/Assets/assignments/{}/acknowledge` — **INTENTIONAL**
-  <br>The assignee's own signature, and `InternalOnly` refuses HR by name (AssetActor.EnsureIsSubject). It is served by the employee's own route, `POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls — a portal route takes no employee id, so there is nothing to get wrong.
-- `POST   api/Assets/surcharges/{}/respond` — **INTENTIONAL**
-  <br>Same shape and same reason as acknowledge: the employee's right of reply, refused for HR. Served by `POST api/employee-portal/asset-surcharges/{}/respond`, wired from /me/assets.
-
 ### SuccessionPlan — 7 BUILD · 1 INTENTIONAL
 
 - `DELETE api/succession-plans/actions/{}` — **BUILD**
@@ -943,6 +919,17 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>_As `DELETE api/succession-candidates/development-activities/{}`._
 - `POST   api/succession-candidates/{}/documents` — **INTENTIONAL**
   <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### Assets — 2 INTENTIONAL · 2 FALSE
+
+- `POST   api/Assets/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/Assets/{}/images` — **FALSE**
+  <br>_As `POST api/Assets/{}/attachments`._
+- `POST   api/Assets/assignments/{}/acknowledge` — **INTENTIONAL**
+  <br>The assignee's own signature, and `InternalOnly` refuses HR by name (AssetActor.EnsureIsSubject). It is served by the employee's own route, `POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls - a portal route takes no employee id, so there is nothing to get wrong.
+- `POST   api/Assets/surcharges/{}/respond` — **INTENTIONAL**
+  <br>Same shape and same reason as acknowledge: the employee's right of reply, refused for HR. Served by `POST api/employee-portal/asset-surcharges/{}/respond`, wired from /me/assets.
 
 ### AppraisalCycleTarget — 3 INTENTIONAL
 

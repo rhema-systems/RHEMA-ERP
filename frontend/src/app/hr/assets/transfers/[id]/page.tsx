@@ -20,6 +20,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
+import { AssetRecordEditDialog } from '@/components/hr/assets/AssetRecordEditDialog';
 import { useToast } from '@/hooks/use-toast';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -149,6 +150,8 @@ export default function AssetTransferDetailPage() {
                 <Button onClick={() => setAction('submit')}>
                   <Send className="mr-2 h-4 w-4" /> Send for approval
                 </Button>
+                {/* Draft only — the service refuses an edit once it is out for approval. */}
+                <AssetRecordEditDialog kind="transfer" record={t} queryKey={['hr', 'assets', 'transfer', id]} />
                 <Button variant="outline" onClick={() => remove.mutate()} disabled={remove.isPending}>
                   <Trash2 className="mr-2 h-4 w-4" /> Delete
                 </Button>

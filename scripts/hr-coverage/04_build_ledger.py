@@ -95,7 +95,7 @@ DISPOSITIONS = {
         ("INTENTIONAL", "Checked 2026-08-29: they do. The appraisal screens move status through the named "
                         "transitions on api/PerformanceAppraisals, each with its own preconditions."),
     "AssetsController.cs":
-        ("BUILD", "Classified 2026-08-29: 8 real. Every asset child wires create and delete and none wires the edit; surcharges wire neither, and have no recall while requisitions and transfers both do. The other 4 are 2 upload artefacts and the 2 employee-portal duplicates. See D2."),
+        ("DONE", "Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates."),
     "SuccessionPlanController.cs":
         ("BUILD", "Classified 2026-08-29: all 8 real. Competency requirements and actions are read-only in the UI; the 2 document endpoints are blocked on D-14/D-15."),
     "MedicalClinicalController.cs":
@@ -238,36 +238,21 @@ def _d(file, rows):
 
 
 # ── Assets — 12 flagged: 2 artefacts, 2 portal duplicates, 8 real ────────────
-_ASSET_EDIT = ("BUILD", "Create and delete are wired; the edit is not. The record can be raised and "
-                        "destroyed but never corrected.")
+# Built 2026-08-30 (slice 18): the five edits, the surcharge delete and its recall all resolve to
+# a caller now and have left this queue. What remains is the two upload artefacts and the two
+# employee-portal duplicates.
 _d("AssetsController.cs", [
     ("POST", "api/Assets/{}/attachments", _HELPER),
     ("POST", "api/Assets/{}/images", _HELPER),
     ("POST", "api/Assets/assignments/{}/acknowledge",
      ("INTENTIONAL", "The assignee's own signature, and `InternalOnly` refuses HR by name "
                      "(AssetActor.EnsureIsSubject). It is served by the employee's own route, "
-                     "`POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls — "
+                     "`POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls - "
                      "a portal route takes no employee id, so there is nothing to get wrong.")),
     ("POST", "api/Assets/surcharges/{}/respond",
      ("INTENTIONAL", "Same shape and same reason as acknowledge: the employee's right of reply, "
                      "refused for HR. Served by `POST api/employee-portal/asset-surcharges/{}/respond`, "
                      "wired from /me/assets.")),
-    ("PUT", "api/Assets/assignments/{}", _ASSET_EDIT),
-    ("PUT", "api/Assets/attributes/{}", _ASSET_EDIT),
-    ("PUT", "api/Assets/maintenance/{}", _ASSET_EDIT),
-    ("PUT", "api/Assets/requisitions/{}",
-     ("BUILD", "The requester may correct their own undecided request and HR may correct anyone's — "
-               "the controller says so — and no screen offers it.")),
-    ("PUT", "api/Assets/surcharges/{}",
-     ("BUILD", "Surcharges have neither an edit nor a delete: a charge raised for the wrong amount "
-               "can only be waived or cancelled, which is a different fact about the employee.")),
-    ("DELETE", "api/Assets/surcharges/{}",
-     ("BUILD", "The only asset child with no delete wired; attributes, assignments, maintenance, "
-               "requisitions and transfers all have one.")),
-    ("POST", "api/Assets/surcharges/{}/recall",
-     ("BUILD", "Requisitions and transfers both wire recall. The surcharge ladder wires submit but "
-               "not the way back, so a charge sent for approval in error is stuck there.")),
-    ("PUT", "api/Assets/transfers/{}", _ASSET_EDIT),
 ])
 
 # ── PerformanceImprovementPlans — 22 flagged, none real ───────────────────────
@@ -1029,6 +1014,9 @@ w("| 2026-08-29 | Medical insurance: network facilities, provider documents and 
 w("| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |")
 w("| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |")
 w("| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |")
+w("| 2026-08-30 | **The Assets missing-edit family is built** (slice 18, 43 assertions). All eight endpoints wired; eight left the coverage queue on their own. Unlike medical this needed **no backend change** — every endpoint already stamped its actor (five through `UpdateEntity(dto, userId)`, surcharges through a `Stamp(entity)` helper) and every screen already fetched its record by id, so both standing checks passed before any UI was written. |")
+w("| 2026-08-30 | **A wired endpoint can still be unreachable through a misspelled payload key.** `submitSurcharge` sent `proceededWithoutResponseReason` while the DTO declares `ProceedWithoutResponseReason` — \"proceeded\" against \"proceed\" — so a submit without an employee response was refused however carefully the reason was typed. Instrument 01 counts the endpoint as wired, because it is: the ROUTE matched and the BODY did not. Slice 18 asserts both spellings. |")
+w("| 2026-08-30 | ⚠ **A full-project `tsc --noEmit` crashes on this repo** (TypeScript 5.9.2, \"Debug Failure. No error for last overload signature\"), and `incremental: true` with a stale `tsconfig.tsbuildinfo` had been hiding it — earlier clean runs were partial, checking only changed files. Reproduced on a clean tree with no local changes, so it predates this work. Slices are type-checked against a scoped `tsconfig` until someone finds the offending file. |")
 w("| 2026-08-29 | **The medical missing-edit family is built** (slice 6, 41 assertions). Pre-authorisations, referrals, appointments, expense claims and claim lines can all be corrected and removed; eleven endpoints left the coverage queue on their own, which is the check that the wiring is real. The claim edit also closes section E's `AdmissionStart`/`AdmissionEnd`. |")
 w("| 2026-08-29 | **An edit dialog loads its record by id — never from the list row.** The appointment row carries 7 fields against the record's 32; the pre-authorisation row 9 against 34. Neither carries `purpose`, `serviceType`, `diagnosis` or `proposedTreatment`, all of which the update writes, so a row-bound dialog would have rendered them blank and blanked them on save — D-09 and D-12 one layer further out. Proved by `probe-clinical-byid.mjs` before any TypeScript was written, and now held by a standing assertion. |")
 w("| 2026-08-29 | **D-16's sweep finished: eleven more transitions stamp their actor.** The blocker named the eight clinical ones; checking every `ApplyTo` helper in the medical mappers found eleven more with no actor at all — four of them moving money, and payment, flag and unflag wired and shipped. A claim being paid recorded the amount, the method and the reference, but not who did it. |")

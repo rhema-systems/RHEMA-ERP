@@ -255,6 +255,22 @@ export type AssetSurchargeStatus =
 
 export type AssetSurchargeReason = 'Damage' | 'Loss' | 'NotReturned' | 'Other';
 
+/**
+ * ⚠ The write takes the NUMBER while every read returns the label — the same asymmetry as
+ * priorities and maintenance types. This mapping used to live only in a comment on
+ * `createSurcharge`; it is exported so the create form and the edit form cannot drift apart.
+ */
+export const ASSET_SURCHARGE_REASONS: ReadonlyArray<{
+  value: number;
+  label: AssetSurchargeReason;
+  text: string;
+}> = [
+  { value: 1, label: 'Damage', text: 'Damage' },
+  { value: 2, label: 'Loss', text: 'Loss or theft' },
+  { value: 3, label: 'NotReturned', text: 'Not returned' },
+  { value: 4, label: 'Other', text: 'Other' },
+];
+
 export type AssetSurchargeEmployeeResponse = 'NotYetGiven' | 'Accepted' | 'Disputed';
 
 export type AssetSurchargeRecoveryMethod = 'PayrollDeduction' | 'DirectPayment' | 'ExitSettlement';
@@ -957,6 +973,22 @@ export interface AssetImage {
   updatedBy: string | null;
 }
 
+/**
+ * Correcting an attribute definition on an asset type.
+ *
+ * ⚠ `dataType` is the NUMBER from {@link ASSET_ATTRIBUTE_DATA_TYPES}, while the read returns the
+ * label. Map through the constant; the numbers are not in reading order.
+ */
+export interface UpdateAssetTypeAttributeRequest {
+  id: string;
+  assetTypeId: string;
+  attributeName: string;
+  dataType: number;
+  isRequired: boolean;
+  isExpiryDate: boolean;
+  attributeOptions?: string;
+}
+
 export interface CreateAssetTypeRequest {
   name: string;
   description?: string | null;
@@ -1126,6 +1158,24 @@ export interface AssetMaintenance extends AssetMaintenanceSummary {
   updatedBy: string | null;
 }
 
+/** Correcting a maintenance record. `type` and `status` are NUMBERS; the read returns labels. */
+export interface UpdateAssetMaintenanceRequest {
+  id: string;
+  maintenanceDate: string;
+  type: number;
+  description: string;
+  workPerformed?: string | null;
+  partsReplaced?: string | null;
+  isInternalMaintenance: boolean;
+  performedById?: string | null;
+  externalServiceProvider?: string | null;
+  serviceTicketNumber?: string | null;
+  cost?: number | null;
+  nextMaintenanceDate?: string | null;
+  status: number;
+  notes?: string | null;
+}
+
 export interface CreateAssetMaintenanceRequest {
   assetId: string;
   /** ⚠ A full `DateTime` here, unlike the DateOnly fields on the asset. */
@@ -1170,6 +1220,23 @@ export interface SendAssetForMaintenanceRequest {
 }
 
 // ── Assignments: the write side the register screens own ───────────────────────
+
+/**
+ * Correcting the terms of a live custody.
+ *
+ * ⚠ Refused unless the assignment is `Active`: once the asset is back, the terms are history and
+ * editing them rewrites what the holder signed for. `expectedReturnDate` is `DateOnly` on the API,
+ * so send `yyyy-MM-dd`.
+ */
+export interface UpdateAssetAssignmentRequest {
+  id: string;
+  expectedReturnDate?: string | null;
+  assignmentNotes?: string | null;
+  isPrimaryUser: boolean;
+  responsibleForLoss: boolean;
+  responsibleForDamage: boolean;
+  termsAndConditions?: string | null;
+}
 
 export interface CreateAssetAssignmentRequest {
   assetId: string;
@@ -1296,6 +1363,29 @@ export interface AssetTransfer {
 }
 
 /** ⚠ Exactly one destination, and it must match `type` — the API refuses the mismatch in words. */
+/** Correcting a transfer. ⚠ Draft only — a transfer out for approval must be recalled first. */
+export interface UpdateAssetTransferRequest {
+  id: string;
+  transferDate: string;
+  transferReason?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Correcting a charge.
+ *
+ * ⚠ Draft only, and the reason is deliberate: once the charge has been put to the employee,
+ * changing the amount they were shown would make their answer an answer to something else.
+ * `reason` is the NUMBER from {@link ASSET_SURCHARGE_REASONS}.
+ */
+export interface UpdateAssetSurchargeRequest {
+  id: string;
+  reason: number;
+  description: string;
+  assessedAmount: number;
+  currencyCode?: string | null;
+}
+
 export interface CreateAssetTransferRequest {
   assetId: string;
   transferDate: string;
