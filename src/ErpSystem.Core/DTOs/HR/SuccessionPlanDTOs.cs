@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 
@@ -939,7 +939,9 @@ public class CreateSuccessionActionDto : CreateDtoBase
     public ActionPriority Priority { get; set; }
 
     public Guid? ResponsiblePersonId { get; set; }
-    public Guid? AssignedById { get; set; }
+
+    // AssignedById is deliberately absent — see UpdateSuccessionActionDto below. Adding an action
+    // to a plan IS the act of assigning it, so the assigner comes from the token.
 
     public DateTime? DueDate { get; set; }
 
@@ -959,8 +961,15 @@ public class UpdateSuccessionActionDto : UpdateDtoBase
     public ActionPriority Priority { get; set; }
 
     public Guid? ResponsiblePersonId { get; set; }
-    public Guid? AssignedById { get; set; }
 
+    /// <remarks>
+    /// <c>AssignedById</c> was here and was copied straight onto the entity's <c>Employee</c> FK,
+    /// while the token's id went only to <c>CreatedBy</c> — so any HR user could record a
+    /// colleague as the person who assigned an action. The sixth instance of the D-05 shape, and
+    /// cleared the same way: the assigner is stamped from the token on create and this route no
+    /// longer touches it, so the original assigner survives every later edit. Nothing had ever
+    /// sent the field, so no caller broke.
+    /// </remarks>
     public DateTime? DueDate { get; set; }
     public DateTime? StartedDate { get; set; }
 

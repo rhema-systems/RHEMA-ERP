@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Services.HR;
@@ -652,7 +652,8 @@ public static class SuccessionPlanMappingExtensions
             Type = dto.Type,
             Priority = dto.Priority,
             ResponsiblePersonId = dto.ResponsiblePersonId,
-            AssignedById = dto.AssignedById,
+            // AssignedById is stamped by the service from the token, not read off the DTO — the
+            // field is gone from CreateSuccessionActionDto (D-05, sixth instance).
             DueDate = dto.DueDate,
             Status = ActionStatus.NotStarted,
             DependsOnActionId = dto.DependsOnActionId,
@@ -666,7 +667,8 @@ public static class SuccessionPlanMappingExtensions
         entity.Type = dto.Type;
         entity.Priority = dto.Priority;
         entity.ResponsiblePersonId = dto.ResponsiblePersonId;
-        entity.AssignedById = dto.AssignedById;
+        // AssignedById is deliberately untouched: it records who raised the action, and an edit
+        // is not a re-assignment. Correcting the owner means ResponsiblePersonId above.
         entity.DueDate = dto.DueDate;
         entity.StartedDate = dto.StartedDate;
         entity.Status = dto.Status;

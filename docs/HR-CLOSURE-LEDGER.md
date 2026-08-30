@@ -13,10 +13,10 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2135 |
-| Wired to a screen | 1777 |
-| No caller found (instrument 01) | 358 |
+| Wired to a screen | 1787 |
+| No caller found (instrument 01) | 348 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
-| Write-DTO fields no form can set | 87 across 38 DTOs |
+| Write-DTO fields no form can set | 83 across 35 DTOs |
 
 ## A. Decisions taken
 
@@ -39,6 +39,7 @@ yet classified.
 | 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
 | 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
 | 2026-08-30 | **The investigation and the hearing are recordable** (area 9 slice 11, 29 assertions). Both were read-only for no reason beyond nobody having built the editors — neither imposes a penalty, so FR-HR-080 never governed them. Five endpoints, and the panel is built around three traps: `complete` takes a bare JSON string, recording findings does NOT complete the investigation, and clearing the accompaniment must clear every representative field with it. |
+| 2026-08-30 | **Succession documents get one panel, not three.** A `SuccessionDocument` hangs off a plan, a plan candidate or a talent-pool member, and one table, one DTO and one upload route already served all three — so one frontend component takes the owner as a discriminated union and is mounted from the plan detail, the successors tab and the pool members table. The alternative was three near-identical panels drifting apart. |
 | 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** The recorded reason ("blocked on FR-HR-080") was imprecise — the rule exists — but the substance holds: no actor reaches the rule, and a warning can be recorded against a case nobody has decided. Tested rather than assumed; `probe-authority-gate.mjs` keeps both findings as passing assertions, so the day one fails is the day the gap closed. |
 | 2026-08-30 | **Stale-navigation-on-a-write-response, fourth instance.** `investigatorName`, `hearingOfficerName` and `representativeEmployeeName` all came back null from the create and update responses while the detail and queue reads resolved them. Four writers now re-read before mapping, the same fix the succession document uploader got. Every instance so far has been found by a harness assertion, never by reading the code. |
 | 2026-08-30 | **The discipline catalogue is authorable** (area 9 slice 10, 43 assertions). Offences, their procedure ladders and the sanction catalogue can all be created, corrected, reordered and retired from `/administration/hr/discipline/catalogue`. A client was previously stuck with whatever the seed shipped — unable to name an offence it had not anticipated, or fix a typo in one it had. |
@@ -180,6 +181,44 @@ yet classified.
   Two things would clear this: a role that actually holds `HR.Discipline.Write` without being HR (which is the org-authority model), and a founded-ness guard on the remaining sanctions matching the one termination already has. Until then an editable sanction would ship exactly the hole the original note warned about.
 
   _Blocks the 10 sanction endpoints on StaffDisciplineSubEntity_
+
+- [x] **D-19 — The per-plan actions read was a summary its panel could not edit from** · `DONE 2026-08-30`
+
+  `GET succession-plans/{id}/actions` returned `SuccessionActionSummaryDto` — id, description, type, priority, status, due date and the responsible person's NAME. `UpdateSuccessionActionDto` sends thirteen fields, so an edit form built on that read would have blanked the candidate, the assigner, the start and completion dates, both note fields, the dependency and the success flag on every save — and the plan's own detail read nests the same summary, so there was nowhere else to get them. **Sixth occurrence of the D-09 shape** and the third in this module after the four discipline reads and the per-provider premium read. The rule holds and is now stated in the interface: a per-parent read feeds a panel that must edit; a cross-record read (by status, by priority, overdue) feeds a list and stays a summary. Converted, with `DependsOnAction` and `SuccessionPlan` added to the repository's includes so `dependsOnActionDescription` and `planNumber` are not blank on the new shape. **Needs a backend rebuild.**
+
+  ⚠ Two write responses were wrong the same way and for a different reason: `AddActionAsync` and `AddCompetencyRequirementAsync` mapped a freshly-added entity whose navigations had never been loaded, so `planNumber`, `candidateEmployeeName`, `responsiblePersonName`, `assignedByName` and the competency's own code, name, category and scale maximum all came back empty on the row the panel had just created and correct after a refetch. Identical to the `uploadedByName` defect the slice-13 RUN found and a code read had missed. Both writers now re-read by id with their includes.
+
+  **Verified against the running API, 2026-08-30** — `hr-succession/run-slice14.mjs`, 74 assertions, green. The read assertion is written as *every field the update payload sends comes back on the read*, field by field, rather than "the read is not empty" — the second would have passed on the summary, which is how the defect survived a whole area being marked complete.
+
+  _Was going to make the actions panel wipe nine fields per save — cleared_
+
+- [x] **D-20 — The succession action's assigner was assertable by the request body** · `DONE 2026-08-30`
+
+  `CreateSuccessionActionDto.AssignedById` and its update twin were copied straight onto the entity's `Employee` FK while the token's id went only to `CreatedBy`, so any HR user could record a colleague as the person who assigned an action. **Sixth instance of the D-05 shape** — after the legal-review referrer, the case note author, the document uploader, the succession document uploader and the pool nominator. It survived area 13's own actor sweep because that sweep worked from the fields screens were binding, and no screen touched this one. Raising an action IS the caller assigning it, so it is stamped from the token; the field is gone from both DTOs and the update deliberately does not touch it, so the original assigner survives every later edit. Nothing had ever sent it, so no caller broke. **Needs a backend rebuild.**
+
+  **Verified against the running API, 2026-08-30.** The forged id goes over the wire under the name the DTO used to expose and is asserted to land in no field at all; then a SECOND actor raises their own action and the stamp is asserted to have followed the caller. Non-blank proves the line runs; changing with the caller proves it is the caller.
+
+  _Was an act-as-anyone field on the panel about to be built — cleared_
+
+- [x] **D-21 — Removing a competency requirement made it permanently unrequirable** · `DONE 2026-08-30`
+
+  `IX_SuccessionCompetencyReq_Tenant_Plan_Competency` is unique on (TenantId, SuccessionPlanId, CompetencyId) **with no filter**, and `DeleteCompetencyRequirementAsync` goes through the generic soft delete. So a removed row kept occupying the slot and requiring the same competency again hit the index and 500'd naming nothing: **once a competency was removed from a plan it could never be required again.** Unreachable before this slice because nothing could delete one; the delete affordance is what turns it into a one-click path, which is the recurring lesson that giving a dormant field teeth turns its neighbours into defects.
+
+  **Sixth face of the area-13 soft-delete/unique-index defect**, and fixed the way the fifth was rather than with a migration: re-requiring a competency revives the removed row, exactly as re-joining a talent pool revives a membership. `AddCompetencyRequirementAsync` looks the row up with `IgnoreQueryFilters` (re-applying the tenant by hand, because that call drops the tenant filter too), revives it at the level given on the re-add, and refuses a duplicate of a LIVE row with a 400 rather than merging it silently. Reviving is also the better record — it keeps the original `CreatedAt` instead of pretending this is the first time. **Needs a backend rebuild, but no migration.**
+
+  **Verified against the running API, 2026-08-30**: remove, re-require, and the row that comes back carries the SAME id at the NEW level, with exactly one row for that competency on the plan rather than two.
+
+  ⚠ The run also turned up a stale assertion three files away. `audit-content.mjs` asserted the competency lookup was **empty**, "until area 17 lands" — and area 17 landed on 2026-08-19, so the assertion was demanding the wrong thing and went red the moment anything created a competency. Replaced with a shape assertion (every row carries a code and its own `proficiencyScaleMax`), and the slice now deletes the catalogue rows it mints, because a competency is shared reference data rather than one run's fixture.
+
+  _Was going to make the competency panel's own delete/re-add path 500 — cleared_
+
+- [ ] **D-22 — `MedicalExpenseClaim`'s TypeScript type is five fields short of what the API returns** · `OPEN`
+
+  `ClaimEditDialogs.tsx` binds `claim.admissionStart`, `admissionEnd`, `preAuthorizationId`, `referralId` and `leaveRequestId`; the `MedicalExpenseClaim` interface declares none of them, though `MedicalExpenseClaimDto` returns all five and `MedicalExpenseClaimUpdateRequest` sends all five. So the dialog works at runtime and fails `tsc` — five of the 36 type errors the HR subtree currently carries. Found in passing while type-checking slice 19, not by looking for it; recorded rather than fixed because fixing five of 36 in another slice's area is arbitrary.
+
+  ⚠ Worth knowing separately: **`tsc` over the whole frontend does not merely fail, it crashes** — "Debug Failure. No error for last overload signature" out of `resolveJsxOpeningLikeElement` — on the clean tree as well as a dirty one. So `npm run type-check` reports nothing at all and every type error in the repo is currently invisible. A scoped `tsconfig` over the HR subtree gets round it and is how this slice was checked.
+
+  _Blocks nothing. Recorded because the project-wide type-check is silently dead_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -732,25 +771,22 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
 | MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
-| SuccessionPlan | 8 | 14 | `BUILD` 7 · `INTENTIONAL` 1 | Classified 2026-08-29: all 8 real. Competency requirements and actions are read-only in the UI; the 2 document endpoints are blocked on D-14/D-15. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
 | StaffTravelRequests | 5 | 18 | `BUILD` 3 · `FALSE` 2 | Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed. |
-| SuccessionCandidates | 5 | 17 | `BUILD` 1 · `INTENTIONAL` 4 | Classified 2026-08-29: 2 real (documents, blocked on D-14/D-15). The development-activity trio duplicates api/succession-development. |
 | Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
 | CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
 | ConsultantClientPortalAuth | 4 | 7 | `BUILD` | Client portal authentication. |
 | JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
 | SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
+| SuccessionCandidates | 4 | 17 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A candidate's own files hang off a Documents dialog on the successors tab, sharing the one panel the plan and the talent-pool member use — one table and one DTO serve all three owners, so one component does. The remaining flags are the metadata-only POST and the development-activity trio that duplicates api/succession-development. |
 | AppraisalCycleTarget | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired. |
 | ConsultantClientPortal | 3 | 3 | `BUILD` | Client portal for consultant engagements. |
 | EmployeeCareerPath | 3 | 3 | `BUILD` | Decided 2026-08-28: career paths are NOT server-write-only and should have a UI. |
 | InterviewQuestionPreset | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows. |
 | JobVacancy | 3 | 17 | `BUILD` | Stage assignments — create, edit, skip, delete. |
-| NHISClaims | 3 | 9 | `BUILD` 2 · `INTENTIONAL` 1 | Classified 2026-08-29: both real and both blocked on D-14 - the fifth caller-supplied file path in the medical module. |
 | PositionCompetency | 3 | 4 | `INTENTIONAL` | Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set. |
 | PositionVacancies | 3 | 5 | `BUILD` | Classified 2026-08-29: all 3 real. The establishment screen wires reconcile and raise-requisition only; a vacancy cannot be closed by hand, annotated, or have its status set. |
-| TalentPools | 3 | 9 | `BUILD` 1 · `INTENTIONAL` 2 | Classified 2026-08-29: 2 real (member documents, blocked on D-14/D-15); the development-activity route duplicates api/succession-development. |
 | TrainingServiceBonds | 3 | 8 | `BUILD` | Classified 2026-08-29: all 3 real. Bonds are minted server-side on nomination submit, so a bond with the wrong amount copied off its program has no correction path - and it is money. |
 | CheckIns | 2 | 9 | `BUILD` | Classified 2026-08-29: both real. Goals and review events wire an attachment panel; check-ins do not. |
 | ClientTimesheetConfirmation | 2 | 2 | `BUILD` | Anonymous client confirmation link. Without it consultant billing has no client step. |
@@ -759,6 +795,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | JobCandidate | 2 | 25 | `BUILD` 1 · `FALSE` 1 | Classified 2026-08-29: 1 real - a candidate's expressed interest can be added and removed but not edited. |
 | JobOffer | 2 | 19 | `FALSE` | hrDocumentService.upload artefact (both letter uploads). |
 | Leaves | 2 | 14 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route. |
+| NHISClaims | 2 | 9 | `INTENTIONAL` 1 · `DONE` 1 | Built 2026-08-30 (slice 19). The claims list gained a Documents dialog at every status - the scheme's rejection letter arrives after the decision and the attendance record before it - driving the gated upload, the download and the Admin-tier delete. No backend change was needed: D-14 had already built and harness-verified the whole transport in the medical slice-5 run, and it had simply never had a caller. The one remaining flag is the metadata-only POST. |
 | PeerNomination | 2 | 4 | `INTENTIONAL` | Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation. |
 | PreEmploymentCheck | 2 | 11 | `FALSE` | hrDocumentService.upload artefact (both document routes). |
 | PublicRecruitment | 2 | 3 | `BUILD` | Public job board / anonymous apply. |
@@ -767,6 +804,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
 | StaffTravelPolicies | 2 | 10 | `BUILD` | Classified 2026-08-29: both real. A rule cannot be edited, and nothing raises the policy exception the wired decide queue exists to rule on. |
+| TalentPools | 2 | 9 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A pool member's documents open from the members table on /hr/succession/pools/{id}, on the shared succession-document panel. The remaining flags are the metadata-only POST and the development-activity duplicate. |
 | AppraisalNotifications | 1 | 3 | `INTENTIONAL` | Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant. |
 | AppraisalReviewEvents | 1 | 9 | `FALSE` | hrDocumentService.upload artefact. |
 | AppraisalWorkflow | 1 | 1 | `INTENTIONAL` | Checked 2026-08-29: they do. The appraisal screens move status through the named transitions on api/PerformanceAppraisals, each with its own preconditions. |
@@ -797,7 +835,8 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffSecondments | 1 | 4 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
 | StaffTransfers | 1 | 3 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
 | StaffTravelCompliance | 1 | 25 | `BUILD` | Classified 2026-08-29: real - nothing raises a compliance alert, so the wired acknowledge action has nothing to acknowledge. |
-| SuccessionDocuments | 1 | 1 | `BUILD` |  |
+| SuccessionDocuments | 1 | 1 | `DONE` | Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. It still reads as flagged because the client calls it through hrDocumentService.upload(endpoint, file, fields) - the helper-indirection artefact, the single largest false-positive source in this queue - and its download sibling is a GET, which instrument 01 skips outright. |
+| SuccessionPlan | 1 | 14 | `INTENTIONAL` | Built 2026-08-30 (slice 19). The plan's actions and competency requirements are authorable from the detail screen, and the documents tab drives the gated upload, the token-bearing download and the Admin-tier delete. Three backend defects had to clear first, all found by the standing checks and none by a probe failing: the per-plan actions read was a summary missing nine of the update payload's thirteen fields (D-19), the assigner was assertable by the request body (D-20), and removing a competency requirement made it permanently unrequirable (D-21). The one remaining flag is the metadata-only document POST, deliberately unwired. |
 | TrainingCompletions | 1 | 6 | `BUILD` | Classified 2026-08-29: real, and already in section F - bulk completion has no UI. |
 | TrainingNominations | 1 | 14 | `BUILD` | Classified 2026-08-29: real, and already in section F - the availability check is never shown. |
 | UnitGoals | 1 | 5 | `FALSE` | hrDocumentService.upload artefact. |
@@ -809,7 +848,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**140 of the 331 queued endpoints are classified here — 53 BUILD, 43 INTENTIONAL, 44 FALSE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**130 of the 321 queued endpoints are classified here — 41 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -914,25 +953,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `PUT    api/discipline/cases/{}/warning` — **BUILD**
   <br>_As `POST api/discipline/cases/{}/fine`._
 
-### SuccessionPlan — 7 BUILD · 1 INTENTIONAL
-
-- `DELETE api/succession-plans/actions/{}` — **BUILD**
-  <br>Same collection.
-- `PUT    api/succession-plans/actions/{}` — **BUILD**
-  <br>_As `DELETE api/succession-plans/actions/{}`._
-- `DELETE api/succession-plans/competency-requirements/{}` — **BUILD**
-  <br>_As `DELETE api/succession-plans/actions/{}`._
-- `PUT    api/succession-plans/competency-requirements/{}` — **BUILD**
-  <br>_As `DELETE api/succession-plans/actions/{}`._
-- `DELETE api/succession-plans/documents/{}` — **BUILD**
-  <br>Unblocked 2026-08-29 (D-14, D-15). The upload, the download and the actor stamping all exist now; what is still missing is a screen. Removing a document attached in error has no caller.
-- `POST   api/succession-plans/{}/actions` — **BUILD**
-  <br>`getActions` is wired; the plan's action list is read-only in the UI.
-- `POST   api/succession-plans/{}/competency-requirements` — **BUILD**
-  <br>The read is wired and the panel renders; nothing can author a row.
-- `POST   api/succession-plans/{}/documents` — **INTENTIONAL**
-  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
-
 ### StaffTravelRequests — 3 BUILD · 2 FALSE
 
 - `DELETE api/staff-travel/requests/groups/{}/participants/{}` — **BUILD**
@@ -946,19 +966,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/staff-travel/requests/{}/attachments` — **FALSE**
   <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
 
-### SuccessionCandidates — 1 BUILD · 4 INTENTIONAL
-
-- `DELETE api/succession-candidates/documents/{}` — **BUILD**
-  <br>Unblocked 2026-08-29 (D-14, D-15). The upload, the download and the actor stamping all exist now; what is still missing is a screen. Removing a document attached in error has no caller.
-- `DELETE api/succession-candidates/development-activities/{}` — **INTENTIONAL**
-  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
-- `PUT    api/succession-candidates/development-activities/{}` — **INTENTIONAL**
-  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
-- `POST   api/succession-candidates/{}/development-activities` — **INTENTIONAL**
-  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
-- `POST   api/succession-candidates/{}/documents` — **INTENTIONAL**
-  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
-
 ### Assets — 2 INTENTIONAL · 2 FALSE
 
 - `POST   api/Assets/{}/attachments` — **FALSE**
@@ -969,6 +976,17 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>The assignee's own signature, and `InternalOnly` refuses HR by name (AssetActor.EnsureIsSubject). It is served by the employee's own route, `POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls - a portal route takes no employee id, so there is nothing to get wrong.
 - `POST   api/Assets/surcharges/{}/respond` — **INTENTIONAL**
   <br>Same shape and same reason as acknowledge: the employee's right of reply, refused for HR. Served by `POST api/employee-portal/asset-surcharges/{}/respond`, wired from /me/assets.
+
+### SuccessionCandidates — 4 INTENTIONAL
+
+- `DELETE api/succession-candidates/development-activities/{}` — **INTENTIONAL**
+  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
+- `PUT    api/succession-candidates/development-activities/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
+- `POST   api/succession-candidates/{}/development-activities` — **INTENTIONAL**
+  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
+- `POST   api/succession-candidates/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
 
 ### AppraisalCycleTarget — 3 INTENTIONAL
 
@@ -988,15 +1006,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `PUT    api/interview-question-presets/{}/items/{}` — **INTENTIONAL**
   <br>_As `DELETE api/interview-question-presets/items/{}`._
 
-### NHISClaims — 2 BUILD · 1 INTENTIONAL
-
-- `POST   api/nhis-claims/documents/upload` — **BUILD**
-  <br>Unblocked 2026-08-29 (D-14). The gated upload and the token-bearing download both exist; NHIS claim documents still have no screen.
-- `DELETE api/nhis-claims/documents/{}` — **BUILD**
-  <br>_As `POST api/nhis-claims/documents/upload`._
-- `POST   api/nhis-claims/documents` — **INTENTIONAL**
-  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `FilePath` and the three DMS ids outright, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST nhis-claims/documents/upload` is the supported way in.
-
 ### PositionCompetency — 3 INTENTIONAL
 
 - `POST   api/position-competencies` — **INTENTIONAL**
@@ -1014,15 +1023,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>No way to annotate a vacancy.
 - `PATCH  api/position-vacancies/{}/status` — **BUILD**
   <br>The establishment screen wires reconcile and raise-requisition only. A vacancy's status cannot be set by hand.
-
-### TalentPools — 1 BUILD · 2 INTENTIONAL
-
-- `DELETE api/talent-pools/documents/{}` — **BUILD**
-  <br>Unblocked 2026-08-29 (D-14, D-15). The upload, the download and the actor stamping all exist now; what is still missing is a screen. Removing a document attached in error has no caller.
-- `POST   api/talent-pools/members/{}/development-activities` — **INTENTIONAL**
-  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
-- `POST   api/talent-pools/members/{}/documents` — **INTENTIONAL**
-  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
 
 ### TrainingServiceBonds — 3 BUILD
 
@@ -1068,6 +1068,13 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/Leaves/balances/{}/adjustments` — **INTENTIONAL**
   <br>Superseded by the flat `POST api/Leaves/adjustments`, which is wired and looks the balance up or creates it, so the caller does not need a balance id it may not have.
 
+### NHISClaims — 1 INTENTIONAL · 1 DONE
+
+- `POST   api/nhis-claims/documents/upload` — **DONE**
+  <br>Built 2026-08-30 (slice 19). D-14 had already built the gated upload and the token-bearing download and hr-medical slice 5 had verified both against the running API; the collection simply had no screen. It has one now, on the NHIS claims list.
+- `POST   api/nhis-claims/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `FilePath` and the three DMS ids outright, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST nhis-claims/documents/upload` is the supported way in.
+
 ### PeerNomination — 2 INTENTIONAL
 
 - `POST   api/PeerNomination` — **INTENTIONAL**
@@ -1102,6 +1109,13 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>Nothing raises a policy exception. `CreateExceptionAsync` has exactly one caller — this endpoint — and no compliance sweep creates one, so the wired `exceptions/pending` queue and its wired `exceptions/{}/decide` action can never have anything to work on.
 - `PUT    api/staff-travel/policies/rules/{}` — **BUILD**
   <br>Rules can be added and deleted but not edited — a threshold correction means destroying the rule and its history and re-typing it.
+
+### TalentPools — 2 INTENTIONAL
+
+- `POST   api/talent-pools/members/{}/development-activities` — **INTENTIONAL**
+  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
+- `POST   api/talent-pools/members/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
 
 ### AppraisalNotifications — 1 INTENTIONAL
 
@@ -1233,10 +1247,15 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/staff-travel/compliance/alert-notifications` — **BUILD**
   <br>Same shape as the policy exception above: the alert list and its acknowledge action are wired, and `CreateAlertNotificationAsync` has no caller but this endpoint, so no alert can ever exist to acknowledge.
 
-### SuccessionDocuments — 1 BUILD
+### SuccessionDocuments — 1 DONE
 
-- `POST   api/succession-documents/upload` — **BUILD**
-  <br>Built 2026-08-29 to clear D-14, and waiting for a caller. The one gated upload for all three owners — succession plan, plan candidate and talent-pool member — since one table and one DTO serve all three. Its download sibling is a GET and so is invisible to instrument 01.
+- `POST   api/succession-documents/upload` — **DONE**
+  <br>Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. The one gated upload for all three owners — succession plan, plan candidate and talent-pool member — since one table and one DTO serve all three, and for the same reason one frontend panel drives it from three places rather than three panels being written. Its download sibling is a GET and so is invisible to instrument 01.
+
+### SuccessionPlan — 1 INTENTIONAL
+
+- `POST   api/succession-plans/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
 
 ### TrainingCompletions — 1 BUILD
 
@@ -1279,7 +1298,6 @@ missing — the class an endpoint audit cannot see.
 | `UpdateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
 | `CreateStaffTravelPolicyRuleDto` | 2 of 12 | LimitUnit, ViolationAction |
 | `UpdateStaffTravelPolicyRuleDto` | 2 of 11 | LimitUnit, ViolationAction |
-| `UpdateSuccessionActionDto` | 2 of 13 | DependsOnActionId, WasSuccessful |
 | `CreateEvaluatorEvaluationDto` | 1 of 7 | IsAuthoritative |
 | `UpdateEvaluatorEvaluationDto` | 1 of 7 | IsAuthoritative |
 | `CreateLongServiceAwardDto` | 1 of 10 | EmployeeAwardId |
@@ -1292,12 +1310,10 @@ missing — the class an endpoint audit cannot see.
 | `UpdateEmployeeMedicalExamDto` | 1 of 16 | BMIRecorded |
 | `CreateNHISClaimDto` | 1 of 16 | LinkedMedicalClaimId |
 | `UpdateNHISClaimDto` | 1 of 13 | LinkedMedicalClaimId |
-| `CreateNHISClaimDocumentDto` | 1 of 7 | NHISClaimId |
 | `CreateStaffActingAppointmentDto` | 1 of 11 | AllowanceCalculation |
 | `UpdateStaffActingAppointmentDto` | 1 of 6 | AllowanceCalculation |
 | `CreateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
 | `UpdateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
-| `CreateSuccessionActionDto` | 1 of 9 | DependsOnActionId |
 
 ## F. Demo-feedback backlog
 

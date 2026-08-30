@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Performance;
@@ -602,10 +602,47 @@ public class SuccessionPlanService : ISuccessionPlanService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedPlanAsync(createDto.SuccessionPlanId);
+
+        // Requiring a competency again REVIVES the old row; it does not insert a second one.
+        //
+        // Removing a requirement is a soft delete, but
+        // IX_SuccessionCompetencyReq_Tenant_Plan_Competency is unique on
+        // (TenantId, SuccessionPlanId, CompetencyId) with no filter, so the deleted row occupies
+        // the slot as firmly as a live one: inserting hits the index and 500s naming nothing.
+        // Once a competency was removed from a plan it could never be required again. Same
+        // disagreement between the code's idea of "exists" and the schema's that produced the
+        // talent-pool rejoin defect, and fixed the same way rather than with a filtered index —
+        // reviving keeps the original CreatedAt instead of pretending this is the first time.
+        var existing = await _competencyRequirementRepository.GetIncludingDeletedAsync(
+            createDto.SuccessionPlanId, createDto.CompetencyId, tenantId);
+
+        if (existing != null)
+        {
+            if (!existing.IsDeleted)
+                throw new InvalidOperationException("That competency is already required by this plan.");
+
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.DeletedBy = null;
+            existing.RequiredLevel = createDto.RequiredLevel;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = createdByUserId.ToString();
+
+            await _competencyRequirementRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return (await _competencyRequirementRepository.GetByIdWithCompetencyAsync(existing.Id))!.ToDto();
+        }
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _competencyRequirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the Competency loaded. Mapping the freshly-added entity returned a row
+        // whose code, name, category and scale maximum were all blank, so the panel showed an
+        // empty competency on the row it had just created and the right one after a refetch —
+        // the stale-nav-on-a-write-response shape.
+        return (await _competencyRequirementRepository.GetByIdWithCompetencyAsync(entity.Id))!.ToDto();
     }
 
     public async Task<IEnumerable<SuccessionCompetencyRequirementDto>> GetCompetencyRequirementsAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -626,7 +663,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         await _competencyRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await _competencyRequirementRepository.GetByIdWithCompetencyAsync(entity.Id))!.ToDto();
     }
 
     public async Task<bool> DeleteCompetencyRequirementAsync(Guid requirementId, CancellationToken cancellationToken = default)
@@ -643,23 +680,34 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     #region Action Operations
 
-    public async Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, Guid assignedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedPlanAsync(createDto.SuccessionPlanId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // Who assigned an action is a fact about the signed-in user, not a field the caller gets
+        // to choose. It arrived on the body and was honoured — the sixth instance of the shape
+        // that produced the approval actor in slice 1, the assessor in slice 4, the pool
+        // nominator, and the document uploader in slice 13 (D-15).
+        entity.AssignedById = assignedByEmployeeId;
+
         await EnsureNoDependencyCycleAsync(entity.Id, entity.DependsOnActionId, cancellationToken);
         await _actionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the navigations loaded — mapping the freshly-added entity returned blanks
+        // in planNumber, candidateEmployeeName, responsiblePersonName, assignedByName and
+        // dependsOnActionDescription, all of which the panel binds.
+        return (await _actionRepository.GetByIdWithDetailsAsync(entity.Id))!.ToDto();
     }
 
-    public async Task<IEnumerable<SuccessionActionSummaryDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<SuccessionActionDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
         await GetOwnedPlanAsync(planId);
         var tenantId = GetTenantId();
         var entities = (await _actionRepository.GetByPlanIdAsync(planId)).Where(a => a.TenantId == tenantId);
-        return entities.ToSummaryDtoList();
+        return entities.Select(a => a.ToDto()).ToList();
     }
 
     public async Task<SuccessionActionDto> UpdateActionAsync(UpdateSuccessionActionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -672,7 +720,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         await _actionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await _actionRepository.GetByIdWithDetailsAsync(entity.Id))!.ToDto();
     }
 
     public async Task<bool> DeleteActionAsync(Guid actionId, CancellationToken cancellationToken = default)

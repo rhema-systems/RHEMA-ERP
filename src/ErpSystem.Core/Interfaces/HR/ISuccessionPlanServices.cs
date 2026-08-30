@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -48,8 +48,20 @@ public interface ISuccessionPlanService
     Task<bool> DeleteCompetencyRequirementAsync(Guid requirementId, CancellationToken cancellationToken = default);
 
     // Action operations
-    Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<SuccessionActionSummaryDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default);
+    Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, Guid assignedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The plan's actions, in full.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This returned <c>SuccessionActionSummaryDto</c> — nine of the update DTO's thirteen
+    /// fields were absent from it, so an edit form built on this read would have wiped the
+    /// assigner, the candidate, the start and completion dates, the completion and outcome notes,
+    /// the dependency and the success flag on every save. A per-parent read feeds a panel that
+    /// must edit; a cross-record read (by status, by priority, overdue) feeds a list and stays a
+    /// summary. Sixth occurrence of that shape.
+    /// </remarks>
+    Task<IEnumerable<SuccessionActionDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default);
     Task<SuccessionActionDto> UpdateActionAsync(UpdateSuccessionActionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteActionAsync(Guid actionId, CancellationToken cancellationToken = default);
 

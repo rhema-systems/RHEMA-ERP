@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.SuccessionPlanning;
+﻿using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -225,6 +225,26 @@ public class SuccessionCompetencyRequirementRepository : GenericRepository<Succe
             .Include(r => r.SuccessionPlan).ThenInclude(p => p.Position)
             .Where(r => r.CompetencyId == competencyId && !r.IsDeleted)
             .ToListAsync();
+    }
+
+    public async Task<SuccessionCompetencyRequirement?> GetByIdWithCompetencyAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(r => r.Competency)
+            .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
+    }
+
+    // IgnoreQueryFilters drops the tenant filter along with the soft-delete one, so the tenant is
+    // re-applied by hand here. Reviving a row from another tenant would be worse than the 500 the
+    // unique index throws.
+    public async Task<SuccessionCompetencyRequirement?> GetIncludingDeletedAsync(Guid planId, Guid competencyId, Guid tenantId)
+    {
+        return await _dbSet
+            .IgnoreQueryFilters()
+            .Include(r => r.Competency)
+            .FirstOrDefaultAsync(r => r.SuccessionPlanId == planId
+                                   && r.CompetencyId == competencyId
+                                   && r.TenantId == tenantId);
     }
 }
 
@@ -492,17 +512,34 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
 {
     public SuccessionActionRepository(ApplicationDbContext context) : base(context) { }
 
+    // ⚠ The DependsOnAction include is not decoration. This read feeds the plan's actions panel,
+    // which edits the row, and `DependsOnActionDescription` is the only readable form of the
+    // dependency — without it the panel shows a blank where the prerequisite should be.
     public async Task<IEnumerable<SuccessionAction>> GetByPlanIdAsync(Guid planId)
     {
         return await _dbSet
+            .Include(a => a.SuccessionPlan)
             .Include(a => a.ResponsiblePerson)
             .Include(a => a.AssignedBy)
             .Include(a => a.Candidate).ThenInclude(c => c!.Employee)
+            .Include(a => a.DependsOnAction)
             .Where(a => a.SuccessionPlanId == planId && !a.IsDeleted)
             .OrderBy(a => a.Priority)
             .ThenBy(a => a.DueDate)
             .AsSplitQuery()
             .ToListAsync();
+    }
+
+    public async Task<SuccessionAction?> GetByIdWithDetailsAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.SuccessionPlan)
+            .Include(a => a.ResponsiblePerson)
+            .Include(a => a.AssignedBy)
+            .Include(a => a.Candidate).ThenInclude(c => c!.Employee)
+            .Include(a => a.DependsOnAction)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
     }
 
     public async Task<IEnumerable<SuccessionAction>> GetByCandidateIdAsync(Guid candidateId)

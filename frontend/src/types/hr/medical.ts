@@ -1535,6 +1535,26 @@ export interface NHISClaim extends NHISClaimSummary {
   linkedMedicalClaimNumber?: string | null;
 }
 
+/**
+ * A file held against an NHIS claim.
+ *
+ * The three DMS ids mark a row that came through the controlled upload boundary. A row with none
+ * of them predates it: `filePath` names a file the server never received, so there is nothing to
+ * download. Offer the download only when one is set.
+ */
+export interface NHISClaimDocument {
+  id: string;
+  tenantId: string;
+  nhisClaimId: string;
+  fileName: string;
+  filePath: string;
+  fileUploadRecordId?: string | null;
+  documentRecordId?: string | null;
+  documentVersionId?: string | null;
+  description?: string | null;
+  uploadDate: string;
+}
+
 export interface NHISClaimCreateRequest {
   employeeId: string;
   nhisMembershipNumber: string;

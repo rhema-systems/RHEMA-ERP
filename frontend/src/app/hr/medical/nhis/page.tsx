@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Landmark, Send } from 'lucide-react';
+import { Landmark, Paperclip, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -35,6 +35,9 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { useToast } from '@/hooks/use-toast';
 import { nhisClaimService } from '@/services/hr/medical-claims.service';
+import { NhisClaimDocumentsPanel } from '@/components/hr/medical/NhisClaimDocumentsPanel';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { useAuth } from '@/hooks/use-auth';
 import { NHIS_CLAIM_STATUS_OPTIONS } from '@/types/hr/medical';
 import type { NHISClaimStatus, NHISClaimSummary } from '@/types/hr/medical';
 
@@ -66,11 +69,13 @@ function NhisTable({
   empty,
   onSubmit,
   onSettle,
+  onDocuments,
 }: {
   items: NHISClaimSummary[];
   empty: string;
   onSubmit: (claim: NHISClaimSummary) => void;
   onSettle: (claim: NHISClaimSummary) => void;
+  onDocuments: (claim: NHISClaimSummary) => void;
 }) {
   if (items.length === 0) {
     return <EmptyState title="Nothing here" description={empty} icon={Landmark} />;
@@ -112,6 +117,11 @@ function NhisTable({
                       Record payment
                     </Button>
                   )}
+                  {/* Documents belong to a claim at every status — the scheme's rejection letter
+                      arrives after the decision, and the attendance record before it. */}
+                  <Button variant="ghost" size="sm" onClick={() => onDocuments(c)}>
+                    <Paperclip className="mr-2 h-4 w-4" /> Documents
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -131,6 +141,14 @@ export default function NhisClaimsPage() {
   const [settling, setSettling] = useState<NHISClaimSummary | null>(null);
   const [paymentReference, setPaymentReference] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
+  const [documentsFor, setDocumentsFor] = useState<NHISClaimSummary | null>(null);
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  // The medical ladder: create and update are Write, every delete is Admin, and the HR role
+  // holds Write but not Admin.
+  const canWrite =
+    hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']) || hasAnyRole(HR_ROLES);
+  const canDelete = hasAnyPermission(['HR.Medical.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const { data: all = [] } = useQuery({
     queryKey: ['hr', 'nhis-claims'],
@@ -194,6 +212,7 @@ export default function NhisClaimsPage() {
             empty="Nothing outstanding with the scheme."
             onSubmit={setSubmitting}
             onSettle={setSettling}
+            onDocuments={setDocumentsFor}
           />
         </TabsContent>
         <TabsContent value="all" className="mt-4">
@@ -202,9 +221,25 @@ export default function NhisClaimsPage() {
             empty="No NHIS claims have been recorded yet."
             onSubmit={setSubmitting}
             onSettle={setSettling}
+            onDocuments={setDocumentsFor}
           />
         </TabsContent>
       </Tabs>
+
+      <Dialog open={!!documentsFor} onOpenChange={(o) => !o && setDocumentsFor(null)}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Documents — {documentsFor?.claimNumber}</DialogTitle>
+          </DialogHeader>
+          {documentsFor && (
+            <NhisClaimDocumentsPanel
+              claimId={documentsFor.id}
+              canWrite={canWrite}
+              canDelete={canDelete}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!submitting} onOpenChange={(o) => !o && setSubmitting(null)}>
         <DialogContent>

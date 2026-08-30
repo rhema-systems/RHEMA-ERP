@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.SuccessionPlanning;
+﻿using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -72,6 +72,21 @@ public interface ISuccessionCompetencyRequirementRepository : IGenericRepository
 {
     /// <summary>Returns all competency requirements for a succession plan, with competency details loaded.</summary>
     Task<IEnumerable<SuccessionCompetencyRequirement>> GetByPlanIdAsync(Guid planId);
+
+    /// <summary>
+    /// One requirement with its <c>Competency</c> loaded. The plain <c>GetByIdAsync</c> loads no
+    /// navigation, so a writer that mapped its result returned a row whose competency code, name,
+    /// category and scale maximum were all blank — the panel would show an empty name on the row
+    /// it had just created and the correct one after a refetch.
+    /// </summary>
+    Task<SuccessionCompetencyRequirement?> GetByIdWithCompetencyAsync(Guid id);
+
+    /// <summary>
+    /// Finds the row for this plan/competency pair <b>including soft-deleted ones</b>, so a
+    /// re-add can revive it. <c>IX_SuccessionCompetencyReq_Tenant_Plan_Competency</c> is unique
+    /// and unfiltered, so a soft-deleted row occupies the slot as firmly as a live one.
+    /// </summary>
+    Task<SuccessionCompetencyRequirement?> GetIncludingDeletedAsync(Guid planId, Guid competencyId, Guid tenantId);
 
     /// <summary>Returns all plans that require the specified competency, useful for competency impact analysis.</summary>
     Task<IEnumerable<SuccessionCompetencyRequirement>> GetByCompetencyIdAsync(Guid competencyId);
@@ -192,6 +207,13 @@ public interface ISuccessionActionRepository : IGenericRepository<SuccessionActi
 {
     /// <summary>Returns all actions for a succession plan, with responsible person loaded.</summary>
     Task<IEnumerable<SuccessionAction>> GetByPlanIdAsync(Guid planId);
+
+    /// <summary>
+    /// One action with every navigation the full DTO resolves — plan, candidate, responsible
+    /// person, assigner and the action it depends on. The plain <c>GetByIdAsync</c> loads none of
+    /// them, so a writer mapping its result returned blanks in five name fields.
+    /// </summary>
+    Task<SuccessionAction?> GetByIdWithDetailsAsync(Guid id);
 
     /// <summary>Returns candidate-specific actions for a given candidate.</summary>
     Task<IEnumerable<SuccessionAction>> GetByCandidateIdAsync(Guid candidateId);

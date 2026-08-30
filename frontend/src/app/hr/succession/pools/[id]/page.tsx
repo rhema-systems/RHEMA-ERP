@@ -2,7 +2,7 @@
 
 import { use, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Plus, UserMinus, Users2 } from 'lucide-react';
+import { Loader2, Paperclip, Pencil, Plus, UserMinus, Users2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,6 +29,9 @@ import { useToast } from '@/hooks/use-toast';
 import { talentPoolService } from '@/services/hr/succession.service';
 import { TalentPoolFormDialog } from '@/components/hr/succession/TalentPoolFormDialog';
 import { TalentPoolMemberDialog } from '@/components/hr/succession/TalentPoolMemberDialog';
+import { SuccessionDocumentsPanel } from '@/components/hr/succession/SuccessionDocumentsPanel';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { useAuth } from '@/hooks/use-auth';
 import type { TalentPoolMemberSummary } from '@/types/hr/succession';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -50,6 +53,13 @@ export default function TalentPoolDetailPage({ params }: { params: Promise<{ id:
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<TalentPoolMemberSummary | null>(null);
   const [removalReason, setRemovalReason] = useState('');
+  const [documentsFor, setDocumentsFor] = useState<TalentPoolMemberSummary | null>(null);
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  // Succession's ladder: HR authors, Admin decides. Every delete is Admin-tier.
+  const canWrite =
+    hasAnyPermission(['HR.Succession.Write', 'HR.Succession.Admin']) || hasAnyRole(HR_ROLES);
+  const canAdmin = hasAnyPermission(['HR.Succession.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const { data: pool, isLoading } = useQuery({
     queryKey: ['talent-pools', id],
@@ -213,6 +223,10 @@ export default function TalentPoolDetailPage({ params }: { params: Promise<{ id:
                     <TableCell>{spaced(m.latestPotentialRating)}</TableCell>
                     <TableCell>{fmtDate(m.enrolledDate)}</TableCell>
                     <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => setDocumentsFor(m)}>
+                        <Paperclip className="mr-1 h-3.5 w-3.5" />
+                        Documents
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => setRemoving(m)}>
                         <UserMinus className="mr-1 h-3.5 w-3.5" />
                         Remove
@@ -228,6 +242,29 @@ export default function TalentPoolDetailPage({ params }: { params: Promise<{ id:
 
       <TalentPoolFormDialog open={editing} onOpenChange={setEditing} pool={pool} />
       <TalentPoolMemberDialog open={adding} onOpenChange={setAdding} pool={pool} />
+
+      {/*
+        A pool member's own files. Same table, same DTO and the same one upload route as a
+        succession plan's documents — the owner id is the only difference.
+      */}
+      <Dialog open={!!documentsFor} onOpenChange={(open) => !open && setDocumentsFor(null)}>
+        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Documents — {documentsFor?.employeeName}</DialogTitle>
+            <DialogDescription>
+              Files held against this membership: assessments, development plans, correspondence.
+            </DialogDescription>
+          </DialogHeader>
+          {documentsFor && (
+            <SuccessionDocumentsPanel
+              owner={{ kind: 'member', id: documentsFor.id }}
+              canWrite={canWrite}
+              canDelete={canAdmin}
+              title={`Files for ${documentsFor.employeeName}`}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!removing} onOpenChange={(open) => !open && setRemoving(null)}>
         <DialogContent>

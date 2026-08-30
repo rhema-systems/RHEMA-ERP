@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Plus,
   Star,
+  Paperclip,
   Target,
   Users,
 } from 'lucide-react';
@@ -39,6 +40,7 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { SuccessionDocumentsPanel } from '@/components/hr/succession/SuccessionDocumentsPanel';
 import { useToast } from '@/hooks/use-toast';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import {
@@ -125,7 +127,15 @@ type NominateValues = z.input<typeof nominateSchema>;
  * than failing with a bare 400. Assessment carries no assessor field: the assessor is the signed-in
  * user, which is the fix for the hole this slice closed.
  */
-export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
+export function CandidatesPanel({
+  plan,
+  canWrite = true,
+  canDelete = false,
+}: {
+  plan: SuccessionPlan;
+  canWrite?: boolean;
+  canDelete?: boolean;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [nominating, setNominating] = useState(false);
@@ -134,6 +144,7 @@ export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
   const [recommend, setRecommend] = useState(true);
   const [developmentFor, setDevelopmentFor] = useState<SuccessionCandidate | null>(null);
   const [feedbackFor, setFeedbackFor] = useState<SuccessionCandidate | null>(null);
+  const [documentsFor, setDocumentsFor] = useState<SuccessionCandidate | null>(null);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [disposition, setDisposition] = useState<'Support' | 'Neutral' | 'Oppose'>('Support');
 
@@ -418,6 +429,10 @@ export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
                           <MessageSquare className="mr-1 h-3.5 w-3.5" />
                           Feedback
                         </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setDocumentsFor(c)}>
+                          <Paperclip className="mr-1 h-3.5 w-3.5" />
+                          Documents
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -473,6 +488,31 @@ export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
           </CardContent>
         </Card>
       )}
+
+      {/*
+        ── Candidate documents ────────────────────────────────────────────────
+        Same collection and same upload route as the plan's own documents — one table and one
+        DTO serve the plan, its candidates and talent-pool members — so the panel is shared and
+        only the owner id differs.
+      */}
+      <Dialog open={!!documentsFor} onOpenChange={(open) => !open && setDocumentsFor(null)}>
+        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Documents — {documentsFor?.employeeName}</DialogTitle>
+            <DialogDescription>
+              Assessment reports, interview notes and board papers held against this candidacy.
+            </DialogDescription>
+          </DialogHeader>
+          {documentsFor && (
+            <SuccessionDocumentsPanel
+              owner={{ kind: 'candidate', id: documentsFor.id }}
+              canWrite={canWrite}
+              canDelete={canDelete}
+              title={`Files for ${documentsFor.employeeName}`}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ── Nominate ─────────────────────────────────────────────────────────── */}
       <Dialog open={nominating} onOpenChange={setNominating}>

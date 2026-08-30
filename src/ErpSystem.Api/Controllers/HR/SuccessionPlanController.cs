@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -265,8 +265,9 @@ public class SuccessionPlanController : ControllerBase
     // ACTIONS
     // =========================================================================
 
+    /// <summary>The plan's actions, in full — this read feeds a panel that edits them.</summary>
     [HttpGet("{id:guid}/actions")]
-    public async Task<ActionResult<IEnumerable<SuccessionActionSummaryDto>>> GetActions(Guid id)
+    public async Task<ActionResult<IEnumerable<SuccessionActionDto>>> GetActions(Guid id)
         => Ok(await _service.GetActionsForPlanAsync(id));
 
     [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
@@ -285,7 +286,8 @@ public class SuccessionPlanController : ControllerBase
         dto.SuccessionPlanId = id;
         try
         {
-            var created = await _service.AddActionAsync(dto, tenantId.Value, employeeId.Value);
+            var created = await _service.AddActionAsync(
+                dto, tenantId.Value, employeeId.Value, assignedByEmployeeId: employeeId.Value);
             return CreatedAtAction(nameof(GetActions), new { id }, created);
         }
         catch (InvalidOperationException ex)

@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   SuccessionPlan,
@@ -43,9 +44,14 @@ import type {
   SuccessionRisk,
   SuccessionDashboard,
   SuccessionCompetencyRequirement,
-  SuccessionActionSummary,
+  SuccessionAction,
   SuccessionDocument,
+  SuccessionDocumentOwner,
   CompetencyLookup,
+  CreateSuccessionAction,
+  UpdateSuccessionAction,
+  CreateSuccessionCompetencyRequirement,
+  UpdateSuccessionCompetencyRequirement,
   SuccessionCandidateSearchResult,
   CandidateFit,
   SuccessionPlanMovement,
@@ -218,7 +224,7 @@ class SuccessionService {
 
   // ── Children ───────────────────────────────────────────────────────────────
 
-  /** ⚠ Empty until area 17 (competency) lands. Render "none defined", not a spinner. */
+  /** The competency catalogue, active rows only. Area 17 fills it; before that it is empty. */
   getCompetencyLookup() {
     return apiService.get<CompetencyLookup[]>(`${this.baseUrl}/competency-lookup`);
   }
@@ -229,8 +235,50 @@ class SuccessionService {
     );
   }
 
+  /**
+   * ⚠ Re-requiring a competency the plan once had REVIVES the removed row rather than inserting
+   * a second one, so the level sent here wins over whatever it held before it was removed.
+   * Requiring one it already has is refused with a 400, not silently merged.
+   */
+  addCompetencyRequirement(id: string, data: CreateSuccessionCompetencyRequirement) {
+    return apiService.post<SuccessionCompetencyRequirement>(
+      `${this.baseUrl}/${id}/competency-requirements`,
+      { ...data, successionPlanId: id },
+    );
+  }
+
+  updateCompetencyRequirement(requirementId: string, data: UpdateSuccessionCompetencyRequirement) {
+    return apiService.put<SuccessionCompetencyRequirement>(
+      `${this.baseUrl}/competency-requirements/${requirementId}`,
+      data,
+    );
+  }
+
+  /** Admin-tier. */
+  removeCompetencyRequirement(requirementId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/competency-requirements/${requirementId}`);
+  }
+
+  /** Full records — this read feeds the panel that edits them, not a list. */
   getActions(id: string) {
-    return apiService.get<SuccessionActionSummary[]>(`${this.baseUrl}/${id}/actions`);
+    return apiService.get<SuccessionAction[]>(`${this.baseUrl}/${id}/actions`);
+  }
+
+  /** ⚠ No assigner is sent: the server stamps it from the token. */
+  addAction(id: string, data: CreateSuccessionAction) {
+    return apiService.post<SuccessionAction>(`${this.baseUrl}/${id}/actions`, {
+      ...data,
+      successionPlanId: id,
+    });
+  }
+
+  updateAction(actionId: string, data: UpdateSuccessionAction) {
+    return apiService.put<SuccessionAction>(`${this.baseUrl}/actions/${actionId}`, data);
+  }
+
+  /** Admin-tier. */
+  removeAction(actionId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/actions/${actionId}`);
   }
 
   getDocuments(id: string) {
@@ -241,9 +289,68 @@ class SuccessionService {
   getConfidentialDocuments(id: string) {
     return apiService.get<SuccessionDocument[]>(`${this.baseUrl}/${id}/documents/confidential`);
   }
+
+  /** Admin-tier. The metadata-only POST beside it is deliberately not wired — see the panel. */
+  removeDocument(documentId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
+  }
 }
 
 export const successionService = new SuccessionService();
+
+/**
+ * The file half of a succession document — one transport for three owners.
+ *
+ * A `SuccessionDocument` hangs off a succession plan, a plan candidate or a talent-pool member,
+ * and one table and one DTO serve all three, so the backend put the upload and the download in
+ * one controller (`api/succession-documents`) taking the owner as a form field. The metadata
+ * routes stayed on each parent, which is why the reads and the deletes above are per-parent while
+ * the transport is here.
+ *
+ * ⚠ **The metadata POST on each parent is deliberately not wired.** It refuses `documentUrl` and
+ * the three DMS ids outright, so through the API it can only mint a row naming a file the server
+ * never received. It survives for the legacy migration utility; this is the supported way in.
+ */
+class SuccessionDocumentService {
+  private readonly baseUrl = '/succession-documents';
+
+  /**
+   * Uploads through the scanning + DMS gate.
+   *
+   * ⚠ `owner` carries exactly one id. The server refuses none — the row would be written and then
+   * invisible, because every per-parent read filters on one of the three columns — and refuses
+   * two, which would put one document in two collections.
+   */
+  upload(
+    file: File,
+    owner: SuccessionDocumentOwner,
+    fields: {
+      documentName: string;
+      documentType: string;
+      description?: string | null;
+      isConfidential?: boolean;
+      retentionDate?: string | null;
+    },
+  ) {
+    return hrDocumentService.upload<SuccessionDocument>(`${this.baseUrl}/upload`, file, {
+      ...owner,
+      ...fields,
+    });
+  }
+
+  /**
+   * Streams the file back with the bearer token attached.
+   *
+   * ⚠ A confidential document is Admin-only here, matching the separate confidential list — that
+   * list is not a filter over the ordinary one, so a download ignoring the flag would hand back
+   * through one door what the other withholds.
+   */
+  download(documentId: string, fileName: string) {
+    return hrDocumentService.download(`${this.baseUrl}/${documentId}/download`, fileName);
+  }
+}
+
+export const successionDocumentService = new SuccessionDocumentService();
 
 /**
  * Succession candidates. Backend route: api/succession-candidates.
@@ -365,6 +472,15 @@ class SuccessionCandidateService {
   /** ⚠ Admin. */
   removeFeedback(feedbackId: string) {
     return apiService.delete<void>(`${this.baseUrl}/feedback/${feedbackId}`);
+  }
+
+  getDocuments(id: string) {
+    return apiService.get<SuccessionDocument[]>(`${this.baseUrl}/${id}/documents`);
+  }
+
+  /** Admin-tier. Upload goes through {@link successionDocumentService}. */
+  removeDocument(documentId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
   }
 
   getDevelopmentActivities(id: string) {
@@ -527,6 +643,15 @@ class TalentPoolService {
 
   getMemberById(memberId: string) {
     return apiService.get<TalentPoolMember>(`${this.baseUrl}/members/${memberId}`);
+  }
+
+  getMemberDocuments(memberId: string) {
+    return apiService.get<SuccessionDocument[]>(`${this.baseUrl}/members/${memberId}/documents`);
+  }
+
+  /** Admin-tier. Upload goes through {@link successionDocumentService}. */
+  removeMemberDocument(documentId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
   }
 
   getMembersByReadiness(id: string, readiness: ReadinessLevel) {

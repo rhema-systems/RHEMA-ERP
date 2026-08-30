@@ -7,13 +7,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ArrowUpRight,
-  CheckCircle2,
-  FileText,
   History,
   Loader2,
   Pencil,
   ShieldAlert,
-  Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +29,11 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { successionService } from '@/services/hr/succession.service';
 import { CandidatesPanel } from '@/components/hr/succession/CandidatesPanel';
+import { PlanActionsPanel } from '@/components/hr/succession/PlanActionsPanel';
+import { PlanCompetencyRequirementsPanel } from '@/components/hr/succession/PlanCompetencyRequirementsPanel';
+import { SuccessionDocumentsPanel } from '@/components/hr/succession/SuccessionDocumentsPanel';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { useAuth } from '@/hooks/use-auth';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
@@ -70,6 +72,18 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  /**
+   * Succession's three rungs: HR authors, **Admin decides**. Every delete on the plan's children
+   * sits on `HR.Succession.Admin`, and so does the confidential document list — the role check
+   * beside each permission mirrors `HrPermissions.RoleGrants`, which is what keeps a tenant
+   * working whose permission rows have not been seeded.
+   */
+  const canWrite =
+    hasAnyPermission(['HR.Succession.Write', 'HR.Succession.Admin']) || hasAnyRole(HR_ROLES);
+  const canAdmin =
+    hasAnyPermission(['HR.Succession.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const { data: plan, isLoading } = useQuery({
     queryKey: ['succession-plans', id],
@@ -296,129 +310,33 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
         </TabsContent>
 
         <TabsContent value="candidates" className="pt-4">
-          <CandidatesPanel plan={p} />
+          <CandidatesPanel plan={p} canWrite={canWrite} canDelete={canAdmin} />
         </TabsContent>
 
         <TabsContent value="competencies" className="pt-4">
-          <Card>
-            <CardContent className="p-0">
-              {p.competencyRequirements.length === 0 ? (
-                <EmptyState
-                  icon={FileText}
-                  title="No competency requirements"
-                  description="The competency library is not built yet, so there is nothing to require against. This fills in when area 17 lands."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Competency</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead className="text-right">Required level</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {p.competencyRequirements.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell>
-                          <div className="font-medium">{r.competencyName}</div>
-                          <div className="text-xs text-muted-foreground">{r.competencyCode}</div>
-                        </TableCell>
-                        <TableCell>{spaced(r.competencyCategory)}</TableCell>
-                        <TableCell className="text-right">
-                          {/* The scale max travels with the row — never assume it is 5. */}
-                          {r.requiredLevel} / {r.proficiencyScaleMax}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <PlanCompetencyRequirementsPanel
+            planId={id}
+            canWrite={canWrite}
+            canDelete={canAdmin}
+          />
         </TabsContent>
 
         <TabsContent value="actions" className="pt-4">
-          <Card>
-            <CardContent className="p-0">
-              {p.actions.length === 0 ? (
-                <EmptyState
-                  icon={CheckCircle2}
-                  title="No actions recorded"
-                  description="Actions are the work the plan commits to — recruit, develop, retain, assess."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Priority</TableHead>
-                      <TableHead>Owner</TableHead>
-                      <TableHead>Due</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {p.actions.map((a) => (
-                      <TableRow key={a.id}>
-                        <TableCell>{a.actionDescription}</TableCell>
-                        <TableCell>{a.type}</TableCell>
-                        <TableCell>{a.priority}</TableCell>
-                        <TableCell>{a.responsiblePersonName ?? '—'}</TableCell>
-                        <TableCell>{fmtDate(a.dueDate)}</TableCell>
-                        <TableCell>
-                          <StatusBadge status={a.status} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <PlanActionsPanel
+            planId={id}
+            candidates={p.candidates}
+            canWrite={canWrite}
+            canDelete={canAdmin}
+          />
         </TabsContent>
 
         <TabsContent value="documents" className="pt-4">
-          <Card>
-            <CardContent className="p-0">
-              {p.documents.length === 0 ? (
-                <EmptyState
-                  icon={FileText}
-                  title="No documents"
-                  description="Confidential documents are a separate, administrator-only list and do not appear here."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Document</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Uploaded by</TableHead>
-                      <TableHead>Uploaded</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {p.documents.map((d) => (
-                      <TableRow key={d.id}>
-                        <TableCell>
-                          {d.documentName}
-                          {d.isConfidential && (
-                            <Badge variant="outline" className="ml-2">
-                              Confidential
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>{d.documentType}</TableCell>
-                        <TableCell>{d.uploadedByName}</TableCell>
-                        <TableCell>{fmtDate(d.uploadDate)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <SuccessionDocumentsPanel
+            owner={{ kind: 'plan', id }}
+            canWrite={canWrite}
+            canDelete={canAdmin}
+            showConfidential
+          />
         </TabsContent>
 
         <TabsContent value="movements" className="pt-4">

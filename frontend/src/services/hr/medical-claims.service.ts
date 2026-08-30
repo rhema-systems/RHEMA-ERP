@@ -23,6 +23,7 @@ import type {
   NHISClaimCreateRequest,
   NHISClaimUpdateRequest,
   NHISClaimStatus,
+  NHISClaimDocument,
   MedicalDashboard,
 } from '@/types/hr/medical';
 
@@ -322,6 +323,33 @@ class NhisClaimService {
 
   remove(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
+  // ── Documents ──────────────────────────────────────────────────────────────
+  //
+  // The metadata-only `POST nhis-claims/documents` beside these is deliberately not wired: it
+  // refuses `filePath` and the three DMS ids outright, so through the API it can only mint a row
+  // naming a file the server never received. It survives for the legacy migration utility.
+
+  getDocuments(claimId: string): Promise<NHISClaimDocument[]> {
+    return apiService.get<NHISClaimDocument[]>(`${this.baseUrl}/${claimId}/documents`);
+  }
+
+  /** Through the scanning + DMS gate. NHIS shares the medical-claim document category. */
+  uploadDocument(claimId: string, file: File, description?: string | null) {
+    return hrDocumentService.upload<NHISClaimDocument>(`${this.baseUrl}/documents/upload`, file, {
+      nhisClaimId: claimId,
+      description,
+    });
+  }
+
+  downloadDocument(documentId: string, fileName: string) {
+    return hrDocumentService.download(`${this.baseUrl}/documents/${documentId}/download`, fileName);
+  }
+
+  /** Admin-tier. */
+  removeDocument(documentId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
   }
 }
 

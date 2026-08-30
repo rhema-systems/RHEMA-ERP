@@ -127,6 +127,84 @@ export interface SuccessionActionSummary {
   responsiblePersonName?: string | null;
 }
 
+/**
+ * The full action, as `GET succession-plans/{id}/actions` returns it.
+ *
+ * ⚠ That read used to return {@link SuccessionActionSummary}, which carries seven of these
+ * fields and drops nine — so an edit form built on it would have wiped the candidate, the
+ * assigner, both dates, both note fields, the dependency and the success flag on every save.
+ * The plan's own detail read still nests the summary, because it is a header, not a panel.
+ */
+export interface SuccessionAction {
+  id: string;
+  tenantId: string;
+  successionPlanId: string;
+  planNumber: string;
+  candidateId?: string | null;
+  candidateEmployeeName?: string | null;
+  actionDescription: string;
+  type: ActionType;
+  typeName: string;
+  priority: ActionPriority;
+  priorityName: string;
+  responsiblePersonId?: string | null;
+  responsiblePersonName?: string | null;
+  /** Server-stamped from the token on create; no write payload carries it. */
+  assignedById?: string | null;
+  assignedByName?: string | null;
+  dueDate?: string | null;
+  startedDate?: string | null;
+  status: ActionStatus;
+  statusName: string;
+  completionDate?: string | null;
+  completionNotes?: string | null;
+  dependsOnActionId?: string | null;
+  dependsOnActionDescription?: string | null;
+  wasSuccessful: boolean;
+  outcomeNotes?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+/** ⚠ No `assignedById` — the assigner comes from the token. Sending one lands in no field. */
+export interface CreateSuccessionAction {
+  successionPlanId?: string;
+  candidateId?: string | null;
+  actionDescription: string;
+  type: ActionType;
+  priority: ActionPriority;
+  responsiblePersonId?: string | null;
+  dueDate?: string | null;
+  dependsOnActionId?: string | null;
+}
+
+export interface UpdateSuccessionAction {
+  id: string;
+  actionDescription: string;
+  type: ActionType;
+  priority: ActionPriority;
+  responsiblePersonId?: string | null;
+  dueDate?: string | null;
+  startedDate?: string | null;
+  status: ActionStatus;
+  completionDate?: string | null;
+  completionNotes?: string | null;
+  dependsOnActionId?: string | null;
+  wasSuccessful: boolean;
+  outcomeNotes?: string | null;
+}
+
+export interface CreateSuccessionCompetencyRequirement {
+  successionPlanId?: string;
+  competencyId: string;
+  requiredLevel: number;
+}
+
+export interface UpdateSuccessionCompetencyRequirement {
+  id: string;
+  requiredLevel: number;
+}
+
 export interface SuccessionDocument {
   id: string;
   successionPlanId?: string | null;
@@ -142,11 +220,28 @@ export interface SuccessionDocument {
   uploadDate: string;
   uploadedById: string;
   uploadedByName: string;
+  /**
+   * Set on a row that came through the controlled upload boundary. A row with none of the three
+   * predates it: its `documentUrl` names a file the server never received, so there is nothing to
+   * stream and the panel says so rather than offering a download that cannot work.
+   */
+  fileUploadRecordId?: string | null;
+  documentRecordId?: string | null;
+  documentVersionId?: string | null;
   fileSizeBytes: number;
   fileHash?: string | null;
   isConfidential: boolean;
   retentionDate?: string | null;
 }
+
+/**
+ * Exactly one owner. `POST api/succession-documents/upload` refuses none (the row would be
+ * written and then invisible to every read) and refuses two (it would appear in two collections).
+ */
+export type SuccessionDocumentOwner =
+  | { successionPlanId: string }
+  | { candidateId: string }
+  | { talentPoolMemberId: string };
 
 export interface SuccessionPlan {
   id: string;
