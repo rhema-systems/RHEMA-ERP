@@ -108,7 +108,8 @@ public class NHISClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.UpdateClaimStatusAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.UpdateClaimStatusAsync(dto, userId, ct);
         return Ok(new { message = "Claim status updated." });
     }
 
@@ -120,7 +121,8 @@ public class NHISClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.SubmitClaimAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.SubmitClaimAsync(dto, userId, ct);
         return Ok(new { message = "Claim submitted." });
     }
 
@@ -132,7 +134,8 @@ public class NHISClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.RecordClaimPaymentAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.RecordClaimPaymentAsync(dto, userId, ct);
         return Ok(new { message = "Payment recorded." });
     }
 

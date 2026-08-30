@@ -13,10 +13,10 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2151 |
-| Wired to a screen | 1747 |
-| No caller found (instrument 01) | 404 |
+| Wired to a screen | 1758 |
+| No caller found (instrument 01) | 393 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
-| Write-DTO fields no form can set | 97 across 42 DTOs |
+| Write-DTO fields no form can set | 91 across 40 DTOs |
 
 ## A. Decisions taken
 
@@ -38,6 +38,9 @@ yet classified.
 | 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |
 | 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
 | 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
+| 2026-08-29 | **The medical missing-edit family is built** (slice 6, 41 assertions). Pre-authorisations, referrals, appointments, expense claims and claim lines can all be corrected and removed; eleven endpoints left the coverage queue on their own, which is the check that the wiring is real. The claim edit also closes section E's `AdmissionStart`/`AdmissionEnd`. |
+| 2026-08-29 | **An edit dialog loads its record by id — never from the list row.** The appointment row carries 7 fields against the record's 32; the pre-authorisation row 9 against 34. Neither carries `purpose`, `serviceType`, `diagnosis` or `proposedTreatment`, all of which the update writes, so a row-bound dialog would have rendered them blank and blanked them on save — D-09 and D-12 one layer further out. Proved by `probe-clinical-byid.mjs` before any TypeScript was written, and now held by a standing assertion. |
+| 2026-08-29 | **D-16's sweep finished: eleven more transitions stamp their actor.** The blocker named the eight clinical ones; checking every `ApplyTo` helper in the medical mappers found eleven more with no actor at all — four of them moving money, and payment, flag and unflag wired and shipped. A claim being paid recorded the amount, the method and the reference, but not who did it. |
 | 2026-08-29 | **The D-14/D-15/D-16 slice is harness-verified, not merely built.** `hr-succession/run-slice13.mjs` (36 assertions) and `hr-medical/run-slice5-actors-and-nhis-documents.mjs` (34) are both green. The run found one defect a code read had missed — a blank `uploadedByName` on the create response — which is the reason the harness runs before the hand-over rather than after it. |
 | 2026-08-29 | **The succession, talent-pool and NHIS document families now go through the controlled upload gate** (D-14). The succession half is served by one new controller, `api/succession-documents`, rather than three copies of the same transport: one table and one DTO serve the plan, the candidate and the pool member, so the upload takes the owner as a parameter — the same shape `api/succession-development` already uses for development activities. All four metadata routes survive for the legacy migration utility and refuse every file-location field. |
 | 2026-08-29 | **Succession document uploaders are stamped from the token** (D-15). `UploadedById` is an explicit service parameter, not a DTO field, so it cannot be asserted by a caller. Fifth instance of the D-05 shape. |
@@ -711,9 +714,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
 | SuccessionPlan | 8 | 14 | `BUILD` 7 · `INTENTIONAL` 1 | Classified 2026-08-29: all 8 real. Competency requirements and actions are read-only in the UI; the 2 document endpoints are blocked on D-14/D-15. |
-| MedicalClinical | 7 | 17 | `BUILD` | Classified 2026-08-29: all 7 real. Pre-authorizations, referrals and appointments each wire create and the transitions but neither edit nor delete. Read D-16 before building - the transitions stamp no actor. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
-| MedicalExpenseClaims | 6 | 13 | `BUILD` 5 · `FALSE` 1 | Classified 2026-08-29: 5 real. Neither a claim nor its items can be edited or removed, and a receipt attached in error cannot be taken off. |
 | StaffTravelRequests | 5 | 18 | `BUILD` 3 · `FALSE` 2 | Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed. |
 | SuccessionCandidates | 5 | 17 | `BUILD` 1 · `INTENTIONAL` 4 | Classified 2026-08-29: 2 real (documents, blocked on D-14/D-15). The development-activity trio duplicates api/succession-development. |
 | CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
@@ -762,6 +763,8 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | LeaveTypes | 1 | 14 | `BUILD` | Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either. |
 | LocationContact | 1 | 4 | `BUILD` | No screen. |
 | Location | 1 | 4 | `INTENTIONAL` | Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync. |
+| MedicalClinical | 1 | 17 | `BUILD` | Built 2026-08-29 (slice 6). All three clinical entities are now correctable and removable from the clinical screen; the one remaining flag is the free status set, which the screen deliberately does not call. D-16 was cleared first. |
+| MedicalExpenseClaims | 1 | 13 | `FALSE` | Built 2026-08-29 (slice 6). The claim, its lines and its documents are all correctable and removable; the one remaining flag is the upload artefact. The edit form also closes section E's AdmissionStart/AdmissionEnd pair. |
 | MedicalSelfService | 1 | 3 | `FALSE` | hrDocumentService.upload artefact. |
 | MyProfile | 1 | 4 | `FALSE` | DocumentUploadField artefact. |
 | OfferResponse | 1 | 1 | `BUILD` | Candidate offer response. |
@@ -787,7 +790,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**151 of the 377 queued endpoints are classified here — 63 BUILD, 42 INTENTIONAL, 46 FALSE.** The remaining 226 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**140 of the 366 queued endpoints are classified here — 52 BUILD, 42 INTENTIONAL, 46 FALSE.** The remaining 226 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -914,38 +917,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>The read is wired and the panel renders; nothing can author a row.
 - `POST   api/succession-plans/{}/documents` — **INTENTIONAL**
   <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
-
-### MedicalClinical — 7 BUILD
-
-- `DELETE api/medical-clinical/appointments/{}` — **BUILD**
-  <br>Create and the lifecycle transitions are wired; edit and delete are not. Every one of the three clinical entities has the same hole, so a pre-authorization, referral or appointment entered wrongly can only be cancelled, never corrected. The per-record reads already return the full DTO (the list reads are the summaries), so an edit panel has the fields it needs — but see D-16 before building: the status transitions stamp no actor at all.
-- `PUT    api/medical-clinical/appointments/{}` — **BUILD**
-  <br>_As `DELETE api/medical-clinical/appointments/{}`._
-- `PUT    api/medical-clinical/appointments/{}/status` — **BUILD**
-  <br>A free status set, distinct from cancel / check-in / check-out. See D-16: it takes no actor and the service records none, not even `UpdatedBy`.
-- `DELETE api/medical-clinical/pre-authorizations/{}` — **BUILD**
-  <br>_As `DELETE api/medical-clinical/appointments/{}`._
-- `PUT    api/medical-clinical/pre-authorizations/{}` — **BUILD**
-  <br>_As `DELETE api/medical-clinical/appointments/{}`._
-- `DELETE api/medical-clinical/referrals/{}` — **BUILD**
-  <br>_As `DELETE api/medical-clinical/appointments/{}`._
-- `PUT    api/medical-clinical/referrals/{}` — **BUILD**
-  <br>_As `DELETE api/medical-clinical/appointments/{}`._
-
-### MedicalExpenseClaims — 5 BUILD · 1 FALSE
-
-- `DELETE api/medical-expense-claims/documents/{}` — **BUILD**
-  <br>The upload is wired and the download is wired; removing a receipt attached in error is not.
-- `DELETE api/medical-expense-claims/items/{}` — **BUILD**
-  <br>The claim ladder wires create, approval, payment, flag, unflag, items and notes — but neither the claim nor its items can be edited or removed. A claim captured with the wrong amount has no correction path short of approving and paying it.
-- `PUT    api/medical-expense-claims/items/{}` — **BUILD**
-  <br>_As `DELETE api/medical-expense-claims/items/{}`._
-- `DELETE api/medical-expense-claims/{}` — **BUILD**
-  <br>_As `DELETE api/medical-expense-claims/items/{}`._
-- `PUT    api/medical-expense-claims/{}` — **BUILD**
-  <br>_As `DELETE api/medical-expense-claims/items/{}`._
-- `POST   api/medical-expense-claims/{}/documents` — **FALSE**
-  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
 
 ### StaffTravelRequests — 3 BUILD · 2 FALSE
 
@@ -1178,6 +1149,16 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/Location/{}/move` — **INTENTIONAL**
   <br>`PUT api/Location/{}` is wired, carries `ParentLocationId`, and applies the identical guards — self-parent, cycle, same structure, exactly-one-level-below, single root. Verified line by line against `MoveLocationAsync`.
 
+### MedicalClinical — 1 BUILD
+
+- `PUT    api/medical-clinical/appointments/{}/status` — **BUILD**
+  <br>A free status set, distinct from cancel / check-in / check-out. See D-16: it takes no actor and the service records none, not even `UpdatedBy`.
+
+### MedicalExpenseClaims — 1 FALSE
+
+- `POST   api/medical-expense-claims/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
 ### MedicalSelfService — 1 FALSE
 
 - `POST   api/medical/me/expense-claims/{}/documents` — **FALSE**
@@ -1277,10 +1258,6 @@ missing — the class an endpoint audit cannot see.
 | `CreateEmployeeDependentDto` | 2 of 16 | IsStudentDependent, IsEmergencyContact |
 | `CreateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
 | `UpdateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
-| `CreateEmployeeMedicalExamDto` | 2 of 17 | BMIRecorded, LinkedClaimId |
-| `UpdateEmployeeMedicalExamDto` | 2 of 16 | BMIRecorded, LinkedClaimId |
-| `CreateMedicalExpenseClaimDto` | 2 of 24 | AdmissionStart, AdmissionEnd |
-| `UpdateMedicalExpenseClaimDto` | 2 of 20 | AdmissionStart, AdmissionEnd |
 | `CreateStaffDisciplinaryActionTypeDto` | 2 of 7 | DefaultSuspensionDays, DefaultFineAmount |
 | `UpdateStaffDisciplinaryActionTypeDto` | 2 of 7 | DefaultSuspensionDays, DefaultFineAmount |
 | `CreateStaffTravelPolicyRuleDto` | 2 of 12 | LimitUnit, ViolationAction |
@@ -1294,6 +1271,8 @@ missing — the class an endpoint audit cannot see.
 | `CreateSectionDto` | 1 of 5 | SectionHeadId |
 | `CreateEmployeeMedicalInsurancePolicyDto` | 1 of 11 | BenefitTierId |
 | `UpdateEmployeeMedicalInsurancePolicyDto` | 1 of 10 | BenefitTierId |
+| `CreateEmployeeMedicalExamDto` | 1 of 17 | BMIRecorded |
+| `UpdateEmployeeMedicalExamDto` | 1 of 16 | BMIRecorded |
 | `CreateNHISClaimDto` | 1 of 16 | LinkedMedicalClaimId |
 | `UpdateNHISClaimDto` | 1 of 13 | LinkedMedicalClaimId |
 | `CreateNHISClaimDocumentDto` | 1 of 7 | NHISClaimId |

@@ -276,14 +276,14 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         return entity.ToDto();
     }
 
-    public async Task<bool> VerifyPhysicianAsync(VerifyPhysicianDto verifyDto, CancellationToken cancellationToken = default)
+    public async Task<bool> VerifyPhysicianAsync(VerifyPhysicianDto verifyDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _physicianRepository.GetByIdAsync(verifyDto.PhysicianId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Physician with ID '{verifyDto.PhysicianId}' not found.");
 
-        verifyDto.ApplyTo(entity);
+        verifyDto.ApplyTo(entity, updatedByUserId);
 
         await _physicianRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -752,14 +752,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<bool> CancelPolicyAsync(CancelEmployeeMedicalInsurancePolicyDto cancelDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelPolicyAsync(CancelEmployeeMedicalInsurancePolicyDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _policyRepository.GetByIdAsync(cancelDto.PolicyId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{cancelDto.PolicyId}' not found.");
 
-        cancelDto.ApplyTo(entity);
+        cancelDto.ApplyTo(entity, updatedByUserId);
 
         await _policyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -868,14 +868,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<MedicalInsuranceClaimDto> UpdateInsuranceClaimStatusAsync(UpdateMedicalInsuranceClaimStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<MedicalInsuranceClaimDto> UpdateInsuranceClaimStatusAsync(UpdateMedicalInsuranceClaimStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(statusDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{statusDto.ClaimId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _insuranceClaimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -885,14 +885,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(RecordMedicalInsuranceClaimPaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(RecordMedicalInsuranceClaimPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(paymentDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _insuranceClaimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1017,14 +1017,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         return entity.ToDto();
     }
 
-    public async Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _premiumRecordRepository.GetByIdAsync(paymentDto.PremiumRecordId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Premium record with ID '{paymentDto.PremiumRecordId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _premiumRecordRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2183,14 +2183,14 @@ public class NHISService : INHISService
         return entity.ToDto();
     }
 
-    public async Task<bool> UpdateClaimStatusAsync(UpdateNHISClaimStatusDto statusDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateClaimStatusAsync(UpdateNHISClaimStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(statusDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{statusDto.ClaimId}' not found.");
 
-        statusDto.ApplyTo(entity);
+        statusDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2200,14 +2200,14 @@ public class NHISService : INHISService
         return true;
     }
 
-    public async Task<bool> SubmitClaimAsync(SubmitNHISClaimDto submitDto, CancellationToken cancellationToken = default)
+    public async Task<bool> SubmitClaimAsync(SubmitNHISClaimDto submitDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(submitDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{submitDto.ClaimId}' not found.");
 
-        submitDto.ApplyTo(entity);
+        submitDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2217,14 +2217,14 @@ public class NHISService : INHISService
         return true;
     }
 
-    public async Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2541,14 +2541,14 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return true;
     }
 
-    public async Task<bool> ProcessPaymentAsync(ProcessMedicalExpensePaymentDto paymentDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ProcessPaymentAsync(ProcessMedicalExpensePaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity);
+        paymentDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2558,14 +2558,14 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return true;
     }
 
-    public async Task<bool> FlagClaimAsync(FlagMedicalExpenseClaimDto flagDto, CancellationToken cancellationToken = default)
+    public async Task<bool> FlagClaimAsync(FlagMedicalExpenseClaimDto flagDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(flagDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{flagDto.ClaimId}' not found.");
 
-        flagDto.ApplyTo(entity);
+        flagDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2573,14 +2573,14 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return true;
     }
 
-    public async Task<bool> UnflagClaimAsync(UnflagMedicalExpenseClaimDto unflagDto, CancellationToken cancellationToken = default)
+    public async Task<bool> UnflagClaimAsync(UnflagMedicalExpenseClaimDto unflagDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(unflagDto.ClaimId);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{unflagDto.ClaimId}' not found.");
 
-        unflagDto.ApplyTo(entity);
+        unflagDto.ApplyTo(entity, updatedByUserId);
 
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -5,6 +5,8 @@ import type {
   MedicalExpenseClaim,
   MedicalExpenseClaimSummary,
   MedicalExpenseClaimCreateRequest,
+  MedicalExpenseClaimUpdateRequest,
+  MedicalExpenseItemUpdateRequest,
   MedicalExpenseItem,
   MedicalExpenseItemCreateRequest,
   MedicalExpenseDocument,
@@ -70,6 +72,21 @@ class MedicalClaimService {
   }
 
   /**
+   * Corrects a claim.
+   *
+   * ⚠ Not a patch — every field is written, so seed the payload from {@link getClaim} rather than
+   * from a list row or the omitted ones are blanked.
+   */
+  updateClaim(id: string, payload: MedicalExpenseClaimUpdateRequest): Promise<MedicalExpenseClaim> {
+    return apiService.put<MedicalExpenseClaim>(`${this.baseUrl}/${id}`, { ...payload, id });
+  }
+
+  /** ⚠ Admin. */
+  deleteClaim(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
+  /**
    * Records the adjudication decision.
    *
    * Adjudicated exactly once — a second call is refused with 422. The approver is taken from the
@@ -114,10 +131,25 @@ class MedicalClaimService {
     });
   }
 
+  /** Note the flat route: an item is keyed by its own id once created, not by claim. */
+  updateItem(id: string, payload: MedicalExpenseItemUpdateRequest): Promise<MedicalExpenseItem> {
+    return apiService.put<MedicalExpenseItem>(`${this.baseUrl}/items/${id}`, { ...payload, id });
+  }
+
+  /** ⚠ Admin. */
+  deleteItem(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/items/${id}`);
+  }
+
   // ── Documents ──────────────────────────────────────────────────────────────
 
   getDocuments(claimId: string): Promise<MedicalExpenseDocument[]> {
     return apiService.get<MedicalExpenseDocument[]>(`${this.baseUrl}/${claimId}/documents`);
+  }
+
+  /** ⚠ Admin. Removes a receipt attached in error; the upload and download were already wired. */
+  deleteDocument(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/documents/${id}`);
   }
 
   /** Multipart through the controlled gate — scanned and DMS-registered since slice 3a. */

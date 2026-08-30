@@ -73,7 +73,8 @@ public class MedicalPhysiciansController : MedicalControllerBase
     public async Task<IActionResult> Verify(Guid id, [FromBody] VerifyPhysicianDto dto, CancellationToken ct)
     {
         dto.PhysicianId = id;
-        await _service.VerifyPhysicianAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.VerifyPhysicianAsync(dto, userId, ct);
         return Ok(new { message = "Physician verified." });
     }
 

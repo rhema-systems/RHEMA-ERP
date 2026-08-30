@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Flag, Lock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -34,10 +35,11 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
-import { HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { InsuranceClaimsPanel } from '@/components/hr/medical/InsuranceClaimsPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
+import { ClaimEditActions, ClaimItemActions } from '@/components/hr/medical/ClaimEditDialogs';
 import { useToast } from '@/hooks/use-toast';
 import { medicalClaimService } from '@/services/hr/medical-claims.service';
 import {
@@ -81,9 +83,12 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
   const [noteType, setNoteType] = useState<MedicalExpenseClaimNoteType>('General');
   const [noteInternal, setNoteInternal] = useState(true);
 
+  const router = useRouter();
   const { hasAnyPermission, hasAnyRole } = useAuth();
   const canWriteMedical =
     hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']) || hasAnyRole(HR_ROLES);
+  /** Every delete on this controller is Admin, a tier above the HR desk that files the claim. */
+  const canDeleteMedical = hasAnyPermission(['HR.Medical.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const claimKey = ['hr', 'medical-claims', id];
   const { data: claim } = useQuery({ queryKey: claimKey, queryFn: () => medicalClaimService.getClaim(id) });
@@ -195,6 +200,13 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
               {claim.status === 'Approved' && (
                 <Button onClick={() => setPayOpen(true)}>Record payment</Button>
               )}
+              <ClaimEditActions
+                claim={claim}
+                queryKey={claimKey}
+                canWrite={canWriteMedical}
+                canDelete={canDeleteMedical}
+                onDeleted={() => router.push('/hr/medical/claims')}
+              />
             </div>
           )
         }
@@ -315,6 +327,7 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Unit cost</TableHead>
                       <TableHead className="text-right">Line total</TableHead>
+                      <TableHead />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -326,6 +339,15 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
                         <TableCell className="text-right tabular-nums">{money(i.unitCost)}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {money(i.quantity * i.unitCost)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <ClaimItemActions
+                            item={i}
+                            claimId={id}
+                            queryKey={[...claimKey, 'items']}
+                            canWrite={canWriteMedical}
+                            canDelete={canDeleteMedical}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -360,6 +382,9 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
               medicalClaimService.uploadDocument(id, file, 'Receipt', description)
             }
             download={(doc) => medicalClaimService.downloadDocument(doc)}
+            {...(canDeleteMedical
+              ? { remove: (documentId: string) => medicalClaimService.deleteDocument(documentId) }
+              : {})}
             emptyDescription="No receipts or reports attached to this claim."
           />
         </TabsContent>

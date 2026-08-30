@@ -149,7 +149,8 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.ProcessPaymentAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.ProcessPaymentAsync(dto, userId, ct);
         return Ok(new { message = "Payment processed." });
     }
 
@@ -161,7 +162,8 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.FlagClaimAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.FlagClaimAsync(dto, userId, ct);
         return Ok(new { message = "Claim flagged." });
     }
 
@@ -173,7 +175,8 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.UnflagClaimAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.UnflagClaimAsync(dto, userId, ct);
         return Ok(new { message = "Claim unflagged." });
     }
 

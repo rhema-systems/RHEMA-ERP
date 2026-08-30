@@ -1,12 +1,18 @@
 import { apiService } from '../api.service';
 import type {
   MedicalPreAuthorizationSummary,
+  MedicalPreAuthorizationDetail,
   MedicalPreAuthorizationCreateRequest,
+  MedicalPreAuthorizationUpdateRequest,
   MedicalReferralSummary,
+  MedicalReferralDetail,
   MedicalReferralCreateRequest,
+  MedicalReferralUpdateRequest,
   MedicalReferralStatus,
   MedicalAppointmentSummary,
+  MedicalAppointmentDetail,
   MedicalAppointmentCreateRequest,
+  MedicalAppointmentUpdateRequest,
 } from '@/types/hr/medical';
 
 /**
@@ -38,6 +44,34 @@ class MedicalClinicalService {
     return apiService.get<MedicalPreAuthorizationSummary[]>(
       `${this.baseUrl}/employees/${employeeId}/pre-authorizations`,
     );
+  }
+
+  /**
+   * The whole record — 34 fields against the list read's 9.
+   *
+   * ⚠ **An edit form must load this first.** The list returns a summary with no `diagnosis`,
+   * `proposedTreatment`, `facilityId`, `physicianId` or `isEmergency`, so a dialog bound to a row
+   * would show those blank and blank them on save. Proved by probe-clinical-byid.mjs.
+   */
+  getPreAuthorization(id: string): Promise<MedicalPreAuthorizationDetail> {
+    return apiService.get<MedicalPreAuthorizationDetail>(
+      `${this.baseUrl}/pre-authorizations/${id}`,
+    );
+  }
+
+  updatePreAuthorization(
+    id: string,
+    payload: MedicalPreAuthorizationUpdateRequest,
+  ): Promise<MedicalPreAuthorizationDetail> {
+    return apiService.put<MedicalPreAuthorizationDetail>(
+      `${this.baseUrl}/pre-authorizations/${id}`,
+      { ...payload, id },
+    );
+  }
+
+  /** ⚠ Admin. */
+  deletePreAuthorization(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/pre-authorizations/${id}`);
   }
 
   createPreAuthorization(
@@ -87,6 +121,20 @@ class MedicalClinicalService {
     return apiService.get<MedicalReferralSummary[]>(`${this.baseUrl}/referrals/pending`);
   }
 
+  /** The whole record — bind edits here, not to the list row. */
+  getReferral(id: string): Promise<MedicalReferralDetail> {
+    return apiService.get<MedicalReferralDetail>(`${this.baseUrl}/referrals/${id}`);
+  }
+
+  updateReferral(id: string, payload: MedicalReferralUpdateRequest): Promise<MedicalReferralDetail> {
+    return apiService.put<MedicalReferralDetail>(`${this.baseUrl}/referrals/${id}`, { ...payload, id });
+  }
+
+  /** ⚠ Admin. */
+  deleteReferral(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/referrals/${id}`);
+  }
+
   createReferral(payload: MedicalReferralCreateRequest): Promise<MedicalReferralSummary> {
     return apiService.post<MedicalReferralSummary>(`${this.baseUrl}/referrals`, payload);
   }
@@ -121,6 +169,26 @@ class MedicalClinicalService {
     return apiService.get<MedicalAppointmentSummary[]>(`${this.baseUrl}/appointments/upcoming`, {
       daysAhead,
     });
+  }
+
+  /** The whole record — 32 fields against the list read's 7. Bind edits here. */
+  getAppointment(id: string): Promise<MedicalAppointmentDetail> {
+    return apiService.get<MedicalAppointmentDetail>(`${this.baseUrl}/appointments/${id}`);
+  }
+
+  updateAppointment(
+    id: string,
+    payload: MedicalAppointmentUpdateRequest,
+  ): Promise<MedicalAppointmentDetail> {
+    return apiService.put<MedicalAppointmentDetail>(
+      `${this.baseUrl}/appointments/${id}`,
+      { ...payload, id },
+    );
+  }
+
+  /** ⚠ Admin. */
+  deleteAppointment(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/appointments/${id}`);
   }
 
   createAppointment(

@@ -229,7 +229,8 @@ public class MedicalInsuranceController : MedicalControllerBase
     public async Task<IActionResult> CancelPolicy(Guid id, [FromBody] CancelEmployeeMedicalInsurancePolicyDto dto, CancellationToken ct)
     {
         dto.PolicyId = id;
-        await _service.CancelPolicyAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.CancelPolicyAsync(dto, userId, ct);
         return Ok(new { message = "Policy cancelled." });
     }
 
@@ -327,7 +328,8 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        return Ok(await _service.UpdateInsuranceClaimStatusAsync(dto, ct));
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        return Ok(await _service.UpdateInsuranceClaimStatusAsync(dto, userId, ct));
     }
 
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
@@ -338,7 +340,8 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        return Ok(await _service.RecordInsuranceClaimPaymentAsync(dto, ct));
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        return Ok(await _service.RecordInsuranceClaimPaymentAsync(dto, userId, ct));
     }
 
     // =========================================================================
@@ -576,6 +579,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.PremiumRecordId = id;
-        return Ok(await _service.RecordPremiumPaymentAsync(dto, ct));
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        return Ok(await _service.RecordPremiumPaymentAsync(dto, userId, ct));
     }
 }

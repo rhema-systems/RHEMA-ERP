@@ -662,6 +662,15 @@ export type ClaimStatus =
   | 'HrReview'
   | 'FinanceReview'
   | 'Approved'
+  /**
+   * ⚠ Declared by `ClaimStatus` and reachable in principle, but **nothing in HR sets either of
+   * these today** — the only writers are Approved, Rejected and Paid. `AdditionalInfoRequired` is
+   * nonetheless counted by the pending-claims repository query, so a row in that state would be
+   * listed and then fall through any status map that trusted the old union. Added because the
+   * enum is the contract; the missing writer is recorded in the closure ledger.
+   */
+  | 'PartiallyApproved'
+  | 'AdditionalInfoRequired'
   | 'Rejected'
   | 'Paid'
   | 'Cancelled';
@@ -1185,6 +1194,50 @@ export interface MedicalExpenseClaimCreateRequest {
   items?: MedicalExpenseItemCreateRequest[];
 }
 
+/**
+ * The claim edit payload.
+ *
+ * ⚠ Wider than the create request: `icdCode`, `treatmentReceived`, `admissionStart`,
+ * `admissionEnd`, `preAuthorizationId`, `referralId` and `leaveRequestId` are all settable on
+ * update and were on no form at all — `AdmissionStart` and `AdmissionEnd` are two of the fields
+ * the closure ledger's section E lists as unreachable. Sending a field omitted here would blank
+ * it, so the dialog seeds every one of them from the by-id read.
+ */
+export interface MedicalExpenseClaimUpdateRequest {
+  id: string;
+  serviceDate: string;
+  serviceEndDate?: string | null;
+  expenseType: MedicalExpenseType;
+  description: string;
+  facilityId: string;
+  physicianId?: string | null;
+  diagnosis?: string | null;
+  icdCode?: string | null;
+  treatmentReceived?: string | null;
+  isEmergency: boolean;
+  requiredHospitalization: boolean;
+  /** Date-only on the API (`DateOnly`), so send `yyyy-MM-dd`, not an ISO instant. */
+  admissionStart?: string | null;
+  admissionEnd?: string | null;
+  preAuthorizationId?: string | null;
+  referralId?: string | null;
+  totalAmount: number;
+  amountRequested: number;
+  insurancePolicyId?: string | null;
+  leaveRequestId?: string | null;
+  additionalNotes?: string | null;
+}
+
+export interface MedicalExpenseItemUpdateRequest {
+  id: string;
+  claimId: string;
+  description: string;
+  itemType: MedicalItemType;
+  quantity: number;
+  unitCost: number;
+  remarks?: string | null;
+}
+
 export interface MedicalExpenseItem {
   id: string;
   claimId: string;
@@ -1521,6 +1574,57 @@ export interface MedicalPreAuthorizationSummary {
   estimatedCost?: number | null;
 }
 
+/**
+ * The by-id read — `GET medical-clinical/pre-authorizations/{id}`, 34 keys.
+ *
+ * ⚠ **An edit form must bind to this, never to {@link MedicalPreAuthorizationSummary}.** The
+ * summary carries 9 keys and none of `diagnosis`, `proposedTreatment`, `facilityId`, `physicianId`
+ * or `isEmergency` — a dialog opened from a list row would render those blank and wipe them on
+ * save. Same shape as D-09 and D-12, one layer further out.
+ */
+export interface MedicalPreAuthorizationDetail extends MedicalPreAuthorizationSummary {
+  tenantId: string;
+  employeeId: string;
+  dependentId?: string | null;
+  dependentName?: string | null;
+  policyId: string;
+  policyNumber: string;
+  facilityId?: string | null;
+  facilityName?: string | null;
+  physicianId?: string | null;
+  physicianName: string;
+  serviceTypeName: string;
+  isEmergency: boolean;
+  diagnosis: string;
+  proposedTreatment: string;
+  requestDate: string;
+  statusName: string;
+  approvedBy?: string | null;
+  approvedByName?: string | null;
+  authorizedAmount?: number | null;
+  authorizationDate?: string | null;
+  expiryDate?: string | null;
+  rejectionReason?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  createdBy: string;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface MedicalPreAuthorizationUpdateRequest {
+  id: string;
+  facilityId?: string | null;
+  physicianId?: string | null;
+  serviceType: MedicalServiceType;
+  isEmergency: boolean;
+  diagnosis: string;
+  proposedTreatment: string;
+  plannedServiceDate?: string | null;
+  estimatedCost?: number | null;
+  notes?: string | null;
+}
+
 export interface MedicalPreAuthorizationCreateRequest {
   employeeId: string;
   policyId: string;
@@ -1561,6 +1665,46 @@ export interface MedicalReferralSummary {
   referralDate: string;
 }
 
+/** The by-id read — `GET medical-clinical/referrals/{id}`, 31 keys. Bind edits here, not to the summary. */
+export interface MedicalReferralDetail extends MedicalReferralSummary {
+  tenantId: string;
+  employeeId: string;
+  dependentId?: string | null;
+  dependentName?: string | null;
+  isForDependent: boolean;
+  referringFacilityId?: string | null;
+  referringFacilityName?: string | null;
+  referringPhysicianId?: string | null;
+  referringPhysicianName: string;
+  referredToFacilityId?: string | null;
+  referredToFacilityName?: string | null;
+  referredToPhysicianId?: string | null;
+  referredToPhysicianName: string;
+  expiryDate?: string | null;
+  priorityName: string;
+  statusName: string;
+  diagnosis?: string | null;
+  reasonForReferral: string;
+  completedDate?: string | null;
+  outcomeSummary?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  createdBy: string;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface MedicalReferralUpdateRequest {
+  id: string;
+  referredToFacilityId?: string | null;
+  referredToPhysicianId?: string | null;
+  expiryDate?: string | null;
+  priority: MedicalReferralPriority;
+  diagnosis?: string | null;
+  reasonForReferral: string;
+  notes?: string | null;
+}
+
 export interface MedicalReferralCreateRequest {
   employeeId: string;
   referringFacilityId?: string | null;
@@ -1593,6 +1737,50 @@ export interface MedicalAppointmentSummary {
   facilityName: string;
   appointmentDateTime: string;
   status: MedicalAppointmentStatus;
+}
+
+/**
+ * The by-id read — `GET medical-clinical/appointments/{id}`, 32 keys against the summary's 7.
+ * The summary has neither `purpose` nor `serviceType` nor `durationMinutes`, all of which the
+ * update requires, so an edit dialog must fetch this first.
+ */
+export interface MedicalAppointmentDetail extends MedicalAppointmentSummary {
+  tenantId: string;
+  employeeId: string;
+  dependentId?: string | null;
+  dependentName?: string | null;
+  isForDependent: boolean;
+  facilityId: string;
+  physicianId?: string | null;
+  physicianName: string;
+  durationMinutes?: number | null;
+  serviceType: MedicalServiceType;
+  serviceTypeName: string;
+  purpose: string;
+  statusName: string;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  outcomeSummary?: string | null;
+  cancellationReason?: string | null;
+  linkedReferralId?: string | null;
+  linkedReferralNumber?: string | null;
+  linkedClaimId?: string | null;
+  linkedClaimNumber?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  createdBy: string;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface MedicalAppointmentUpdateRequest {
+  id: string;
+  physicianId?: string | null;
+  appointmentDateTime: string;
+  durationMinutes?: number | null;
+  serviceType: MedicalServiceType;
+  purpose: string;
+  notes?: string | null;
 }
 
 export interface MedicalAppointmentCreateRequest {

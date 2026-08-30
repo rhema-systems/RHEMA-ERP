@@ -27,6 +27,9 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { ClinicalRecordActions } from '@/components/hr/medical/ClinicalRecordActions';
+import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { medicalClinicalService } from '@/services/hr/medical-clinical.service';
 import {
@@ -74,6 +77,17 @@ function PriorityBadge({ priority }: { priority: string }) {
 export default function MedicalClinicalPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  /**
+   * The controller's ladder: create and update are `HR.Medical.Write`, **every delete is
+   * `HR.Medical.Admin`**, and the HR role holds Write but not Admin. The role check beside each
+   * permission mirrors `HrPermissions.RoleGrants`, which is what keeps a tenant working whose
+   * permission rows have not been seeded — same idiom as the insurance detail screen.
+   */
+  const canWrite =
+    hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']) || hasAnyRole(HR_ROLES);
+  const canDelete = hasAnyPermission(['HR.Medical.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const [approving, setApproving] = useState<MedicalPreAuthorizationSummary | null>(null);
   const [authorizedAmount, setAuthorizedAmount] = useState('');
@@ -238,17 +252,27 @@ export default function MedicalClinicalPage() {
                           <PreAuthBadge status={p.status} />
                         </TableCell>
                         <TableCell className="text-right">
-                          {/* Only an undecided request can be decided. */}
-                          {(p.status === 'Requested' || p.status === 'PendingApproval') && (
-                            <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="sm" onClick={() => setApproving(p)}>
-                                Approve
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => setRejecting(p)}>
-                                Reject
-                              </Button>
-                            </div>
-                          )}
+                          {/* Only an undecided request can be decided; edit and delete are not
+                              state-gated, because correcting a record is not a transition. */}
+                          <div className="flex justify-end gap-1">
+                            {(p.status === 'Requested' || p.status === 'PendingApproval') && (
+                              <>
+                                <Button variant="ghost" size="sm" onClick={() => setApproving(p)}>
+                                  Approve
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => setRejecting(p)}>
+                                  Reject
+                                </Button>
+                              </>
+                            )}
+                            <ClinicalRecordActions
+                              kind="pre-authorization"
+                              id={p.id}
+                              recordLabel={p.authorizationNumber}
+                              canWrite={canWrite}
+                              canDelete={canDelete}
+                            />
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -293,11 +317,20 @@ export default function MedicalClinicalPage() {
                           <Badge variant="outline">{r.status}</Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {['Pending', 'Issued', 'Accepted'].includes(r.status) && (
-                            <Button variant="ghost" size="sm" onClick={() => setCompleting(r)}>
-                              Complete
-                            </Button>
-                          )}
+                          <div className="flex justify-end gap-1">
+                            {['Pending', 'Issued', 'Accepted'].includes(r.status) && (
+                              <Button variant="ghost" size="sm" onClick={() => setCompleting(r)}>
+                                Complete
+                              </Button>
+                            )}
+                            <ClinicalRecordActions
+                              kind="referral"
+                              id={r.id}
+                              recordLabel={r.referralNumber}
+                              canWrite={canWrite}
+                              canDelete={canDelete}
+                            />
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -369,6 +402,13 @@ export default function MedicalClinicalPage() {
                                 Check out
                               </Button>
                             )}
+                            <ClinicalRecordActions
+                              kind="appointment"
+                              id={a.id}
+                              recordLabel={a.appointmentNumber}
+                              canWrite={canWrite}
+                              canDelete={canDelete}
+                            />
                           </div>
                         </TableCell>
                       </TableRow>

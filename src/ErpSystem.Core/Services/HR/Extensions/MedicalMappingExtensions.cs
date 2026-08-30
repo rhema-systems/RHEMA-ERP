@@ -328,12 +328,16 @@ public static class MedicalMappingExtensions
         entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this VerifyPhysicianDto dto, Physician entity)
+    public static void ApplyTo(this VerifyPhysicianDto dto, Physician entity, Guid userId)
     {
         entity.IsVerified = true;
         entity.VerificationDate = dto.VerificationDate;
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = dto.Notes;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<PhysicianSummaryDto> ToSummaryDtoList(this IEnumerable<Physician> entities)
@@ -787,13 +791,17 @@ public static class MedicalMappingExtensions
         entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this CancelEmployeeMedicalInsurancePolicyDto dto, EmployeeMedicalInsurancePolicy entity)
+    public static void ApplyTo(this CancelEmployeeMedicalInsurancePolicyDto dto, EmployeeMedicalInsurancePolicy entity, Guid userId)
     {
         entity.Status = MedicalInsurancePolicyStatus.Cancelled;
         entity.IsActive = false;
         entity.CancellationDate = dto.CancellationDate;
         entity.CancellationReason = dto.CancellationReason;
         entity.EndDate ??= dto.CancellationDate;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<EmployeeMedicalInsurancePolicySummaryDto> ToSummaryDtoList(this IEnumerable<EmployeeMedicalInsurancePolicy> entities)
@@ -927,7 +935,7 @@ public static class MedicalMappingExtensions
         };
     }
 
-    public static void ApplyTo(this UpdateMedicalInsuranceClaimStatusDto dto, MedicalInsuranceClaim entity)
+    public static void ApplyTo(this UpdateMedicalInsuranceClaimStatusDto dto, MedicalInsuranceClaim entity, Guid userId)
     {
         entity.Status = dto.Status;
         entity.ApprovedAmount = dto.ApprovedAmount;
@@ -950,9 +958,13 @@ public static class MedicalMappingExtensions
 
         if (dto.Status == MedicalInsuranceClaimStatus.Rejected)
             entity.RejectionDate = DateTime.UtcNow;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this RecordMedicalInsuranceClaimPaymentDto dto, MedicalInsuranceClaim entity)
+    public static void ApplyTo(this RecordMedicalInsuranceClaimPaymentDto dto, MedicalInsuranceClaim entity, Guid userId)
     {
         entity.PaidAmount = dto.PaidAmount;
         entity.PaymentReference = dto.PaymentReference;
@@ -960,6 +972,10 @@ public static class MedicalMappingExtensions
         entity.Status = MedicalInsuranceClaimStatus.Paid;
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = dto.Notes;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<MedicalInsuranceClaimSummaryDto> ToSummaryDtoList(this IEnumerable<MedicalInsuranceClaim> entities)
@@ -1158,7 +1174,7 @@ public static class MedicalMappingExtensions
         };
     }
 
-    public static void ApplyTo(this RecordMedicalInsurancePremiumPaymentDto dto, MedicalInsurancePremiumRecord entity)
+    public static void ApplyTo(this RecordMedicalInsurancePremiumPaymentDto dto, MedicalInsurancePremiumRecord entity, Guid userId)
     {
         entity.PaymentMethod = dto.PaymentMethod;
         entity.PaymentReference = dto.PaymentReference;
@@ -1166,6 +1182,10 @@ public static class MedicalMappingExtensions
         entity.Status = MedicalInsurancePremiumPaymentStatus.Paid;
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = dto.Notes;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<MedicalInsurancePremiumRecordSummaryDto> ToSummaryDtoList(this IEnumerable<MedicalInsurancePremiumRecord> entities)
@@ -2220,7 +2240,7 @@ public static class MedicalMappingExtensions
         entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this UpdateNHISClaimStatusDto dto, NHISClaim entity)
+    public static void ApplyTo(this UpdateNHISClaimStatusDto dto, NHISClaim entity, Guid userId)
     {
         entity.Status = dto.Status;
         entity.ApprovedAmount = dto.ApprovedAmount;
@@ -2233,22 +2253,34 @@ public static class MedicalMappingExtensions
 
         if (dto.Status == NHISClaimStatus.Rejected)
             entity.RejectionDate = DateTime.UtcNow;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this SubmitNHISClaimDto dto, NHISClaim entity)
+    public static void ApplyTo(this SubmitNHISClaimDto dto, NHISClaim entity, Guid userId)
     {
         entity.BatchNumber = dto.BatchNumber;
         entity.SubmissionDate = dto.SubmissionDate;
         entity.Status = NHISClaimStatus.Submitted;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this RecordNHISClaimPaymentDto dto, NHISClaim entity)
+    public static void ApplyTo(this RecordNHISClaimPaymentDto dto, NHISClaim entity, Guid userId)
     {
         entity.PaymentReference = dto.PaymentReference;
         entity.PaymentDate = dto.PaymentDate;
         entity.Status = NHISClaimStatus.Paid;
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = dto.Notes;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<NHISClaimSummaryDto> ToSummaryDtoList(this IEnumerable<NHISClaim> entities)
@@ -2453,27 +2485,39 @@ public static class MedicalMappingExtensions
         entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this FlagMedicalExpenseClaimDto dto, MedicalExpenseClaim entity)
+    public static void ApplyTo(this FlagMedicalExpenseClaimDto dto, MedicalExpenseClaim entity, Guid userId)
     {
         entity.IsFlaggedForReview = true;
         entity.FlagReason = dto.FlagReason;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this UnflagMedicalExpenseClaimDto dto, MedicalExpenseClaim entity)
+    public static void ApplyTo(this UnflagMedicalExpenseClaimDto dto, MedicalExpenseClaim entity, Guid userId)
     {
         entity.IsFlaggedForReview = false;
         entity.FlagReason = null;
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.AdditionalNotes = dto.Notes;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
-    public static void ApplyTo(this ProcessMedicalExpensePaymentDto dto, MedicalExpenseClaim entity)
+    public static void ApplyTo(this ProcessMedicalExpensePaymentDto dto, MedicalExpenseClaim entity, Guid userId)
     {
         entity.PaymentProcessed = true;
         entity.PaymentMethod = dto.PaymentMethod;
         entity.PaymentReference = dto.PaymentReference;
         entity.PaymentDate = dto.PaymentDate;
         entity.Status = ClaimStatus.Paid;
+        // D-16: a transition is a write. None of these entities carries a domain actor FK,
+        // so UpdatedBy is the only record of who moved the row.
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<MedicalExpenseClaimSummaryDto> ToSummaryDtoList(this IEnumerable<MedicalExpenseClaim> entities)
