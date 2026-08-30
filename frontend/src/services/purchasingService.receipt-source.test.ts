@@ -41,6 +41,26 @@ describe('purchase-order receipt source client', () => {
     );
   });
 
+  it('supplies the selected receiving warehouse to readiness', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ canReceive: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await purchasingService.getReceiptSourceReadiness(
+      'po-0501',
+      'warehouse-1'
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/PurchaseOrders/po-0501/receipt-source-readiness?warehouseId=warehouse-1',
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+  });
+
   it('sends the stable receipt idempotency key in header and body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 'receipt-0501' }), {

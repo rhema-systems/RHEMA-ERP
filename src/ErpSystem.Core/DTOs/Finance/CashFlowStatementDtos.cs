@@ -13,6 +13,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime PeriodEnd { get; set; }
         public string BookClassification { get; set; } = "IFRS";
         public string CurrencyCode { get; set; } = "GHS";
+        public string Method { get; set; } = "Indirect";
+        public List<string> PresentationWarnings { get; set; } = new();
         
         // Three main sections
         public CashFlowSectionDto OperatingActivities { get; set; } = new();

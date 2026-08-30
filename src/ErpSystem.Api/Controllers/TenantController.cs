@@ -24,10 +24,13 @@ public class TenantController : ControllerBase
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
     private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
     private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
+    private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
+    private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
     private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
     private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
     private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
+    private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
 
     public TenantController(
         ITenantService tenantService,
@@ -41,10 +44,13 @@ public class TenantController : ControllerBase
         ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
         QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
         QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
+        CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
+        CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
         InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
         AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
-        QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null)
+        QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
+        CivilEngineeringStatutoryReportSeeder? civilEngineeringStatutoryReportSeeder = null)
     {
         _tenantService = tenantService;
         _logger = logger;
@@ -57,10 +63,13 @@ public class TenantController : ControllerBase
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
         _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
         _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
+        _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
+        _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
         _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
         _auditComplianceReportSeeder = auditComplianceReportSeeder;
         _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
+        _civilEngineeringStatutoryReportSeeder = civilEngineeringStatutoryReportSeeder;
     }
 
     /// <summary>
@@ -239,6 +248,17 @@ public class TenantController : ControllerBase
             {
                 await _quantitySurveyAccessControlSeeder.SeedAsync();
             }
+            if (_civilEngineeringConfigurationProfileSeeder is not null)
+            {
+                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedInitializerActorId)
+                    ? parsedInitializerActorId
+                    : (Guid?)null;
+                await _civilEngineeringConfigurationProfileSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+            if (_civilEngineeringAccessControlSeeder is not null)
+            {
+                await _civilEngineeringAccessControlSeeder.SeedAsync();
+            }
             if (_procurementStatutoryReportSeeder is not null)
             {
                 await _procurementStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
@@ -254,6 +274,10 @@ public class TenantController : ControllerBase
             if (_quantitySurveyStatutoryReportSeeder is not null)
             {
                 await _quantitySurveyStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
+            }
+            if (_civilEngineeringStatutoryReportSeeder is not null)
+            {
+                await _civilEngineeringStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
             }
 
             // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.

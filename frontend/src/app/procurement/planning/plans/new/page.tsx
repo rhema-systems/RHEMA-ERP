@@ -10,14 +10,24 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementPlanService, commonService, type CreateProcurementPlanDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import {
+  procurementBudgetService,
+  procurementPlanService,
+  commonService,
+  type CreateProcurementPlanDto,
+  type DepartmentDto,
+  type ProcurementBudgetDto,
+} from '@/services/procurementPlanningService';
 import { FiscalYearSelect } from '../../components/FiscalYearSelect';
+import { applyProcurementPlanBudgetSelection } from '../../components/procurementPlanBudgetSelection';
 
 export default function NewProcurementPlanPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [departments, setDepartments] = useState<DepartmentDto[]>([]);
   const [loadingDepartments, setLoadingDepartments] = useState(true);
+  const [availableBudgets, setAvailableBudgets] = useState<ProcurementBudgetDto[]>([]);
+  const [loadingBudgets, setLoadingBudgets] = useState(false);
   const [formData, setFormData] = useState<CreateProcurementPlanDto>({
     title: '',
     description: '',
@@ -51,8 +61,43 @@ export default function NewProcurementPlanPage() {
     fetchDepartments();
   }, []);
 
+  useEffect(() => {
+    if (!formData.departmentId || !formData.fiscalYear) {
+      setAvailableBudgets([]);
+      return;
+    }
+
+    let active = true;
+    const loadBudgets = async () => {
+      try {
+        setLoadingBudgets(true);
+        const values = await procurementBudgetService.getAvailableBudgetsForLinking(
+          formData.departmentId,
+          formData.fiscalYear,
+          true,
+        );
+        if (active) setAvailableBudgets(values);
+      } catch (error) {
+        console.error('Error fetching selectable procurement budgets:', error);
+        if (active) {
+          setAvailableBudgets([]);
+          toast.error('Failed to load approved budgets for the selected department and fiscal year');
+        }
+      } finally {
+        if (active) setLoadingBudgets(false);
+      }
+    };
+
+    void loadBudgets();
+    return () => { active = false; };
+  }, [formData.departmentId, formData.fiscalYear]);
+
   const handleInputChange = (field: keyof CreateProcurementPlanDto, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => ({
+      ...prev,
+      [field]: value,
+      ...(field === 'departmentId' || field === 'fiscalYear' ? { budgetId: undefined } : {}),
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -74,7 +119,7 @@ export default function NewProcurementPlanPage() {
       router.push('/procurement/planning/plans');
     } catch (error) {
       console.error('Error creating procurement plan:', error);
-      toast.error('Failed to create procurement plan');
+      toast.error(error instanceof Error ? error.message : 'Failed to create procurement plan');
     } finally {
       setLoading(false);
     }
@@ -255,6 +300,39 @@ export default function NewProcurementPlanPage() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label htmlFor="budgetId">Approved Budget</Label>
+                  <Select
+                    value={formData.budgetId || '__none__'}
+                    onValueChange={(value) => {
+                      setFormData((previous) =>
+                        applyProcurementPlanBudgetSelection(previous, availableBudgets, value));
+                    }}
+                    disabled={!formData.departmentId || loadingBudgets}
+                  >
+                    <SelectTrigger id="budgetId">
+                      <SelectValue placeholder={
+                        !formData.departmentId
+                          ? 'Select a department first'
+                          : loadingBudgets
+                            ? 'Loading approved budgets...'
+                            : 'Select approved budget'
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select later (draft only)</SelectItem>
+                      {availableBudgets.map((budget) => (
+                        <SelectItem key={budget.id} value={budget.id}>
+                          {budget.budgetCode} — {budget.title} ({budget.currency} {budget.allocatedAmount.toLocaleString()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Final approval requires an approved budget for this department and fiscal year. A budget may fund
+                    multiple plans while its controlled planning capacity remains sufficient.
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="totalEstimatedBudget">Estimated Budget</Label>
                   <Input
                     id="totalEstimatedBudget"
@@ -267,21 +345,15 @@ export default function NewProcurementPlanPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="currency">Currency</Label>
-                  <Select
-                    value={formData.currency}
-                    onValueChange={(value) => handleInputChange('currency', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select currency" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USD">USD - US Dollar</SelectItem>
-                      <SelectItem value="EUR">EUR - Euro</SelectItem>
-                      <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                      <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
-                      <SelectItem value="ETB">ETB - Ethiopian Birr</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    id="currency"
+                    value={formData.budgetId ? formData.currency : 'Select an approved budget'}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Currency is inherited from the selected approved budget.
+                  </p>
                 </div>
               </div>
 

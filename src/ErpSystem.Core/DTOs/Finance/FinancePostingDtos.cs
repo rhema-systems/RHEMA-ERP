@@ -37,11 +37,32 @@ public sealed class FinancePostingRequestDto
     public DateTime? ExchangeRateOverrideApprovedAt { get; set; }
 
     /// <summary>
+    /// Allows a narrowly controlled corrective document to reuse the immutable exchange-rate
+    /// record from its original posting even when that rate is no longer effective on the
+    /// correction date. The posting engine only honors this for independently approved,
+    /// Finance-owned AP supplier debit notes carrying an explicit ExchangeRateId on every FX line.
+    /// </summary>
+    public bool PreserveHistoricalExchangeRateSnapshot { get; set; }
+
+    /// <summary>
     /// Year-end closing entries must post into the year's final period after every period is
     /// closed, so the engine's open-period gate cannot apply. Honored only for the GL
     /// year-end close/reversal source document types; all other requests are still rejected.
     /// </summary>
     public bool AllowPostingToClosedPeriod { get; set; }
+
+    /// <summary>
+    /// Exact Finance budget commitments validated for this posting source. The central
+    /// posting engine consumes them in the same transaction as the GL posting.
+    /// </summary>
+    public IReadOnlyList<Guid> BudgetReservationIds { get; set; } = Array.Empty<Guid>();
+
+    /// <summary>
+    /// Stable source type that owns generic commitment reservations. Blank retains the legacy
+    /// manual-journal control path; nonblank values are validated by the module-neutral Finance
+    /// commitment boundary before the same posting transaction commits.
+    /// </summary>
+    public string? BudgetReservationSourceDocumentType { get; set; }
 
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
     public IReadOnlyList<FinanceTaxCalculationSnapshotDto> TaxCalculationSnapshots { get; set; } = Array.Empty<FinanceTaxCalculationSnapshotDto>();
@@ -50,6 +71,12 @@ public sealed class FinancePostingRequestDto
 public sealed class FinancePostingLineDto
 {
     public Guid AccountId { get; set; }
+    /// <summary>
+    /// Optional immutable source-document line that produced this GL line. Finance-owned
+    /// corrective documents use it to reverse the exact historical account lineage instead of
+    /// re-resolving today's account mappings.
+    /// </summary>
+    public Guid? SourceDocumentLineId { get; set; }
     public string? Description { get; set; }
     public decimal DebitAmount { get; set; }
     public decimal CreditAmount { get; set; }
@@ -63,9 +90,38 @@ public sealed class FinancePostingLineDto
     public DateTime? ExchangeRateDate { get; set; }
     public string? SourceReferenceNumber { get; set; }
     public int? LineNumber { get; set; }
+
+    /// <summary>
+    /// Structured operational classifications supplied by a posting producer. Producers submit
+    /// canonical codes or entity lineage; Finance resolves and owns the resulting dimension set.
+    /// The collection is optional during the dimension-adapter certification period.
+    /// </summary>
+    public IReadOnlyList<FinancePostingDimensionValueDto> Dimensions { get; set; }
+        = Array.Empty<FinancePostingDimensionValueDto>();
+
+    /// <summary>
+    /// Finance-internal historical set identity used only when reversing an already-posted journal.
+    /// Ordinary producers must submit <see cref="Dimensions"/> and cannot select a stored set ID.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
     public string? SegmentString { get; set; }
     public string? Notes { get; set; }
     public string? TransactionTag { get; set; }
+}
+
+public sealed class FinancePostingDimensionValueDto
+{
+    [System.ComponentModel.DataAnnotations.MaxLength(30)]
+    public string DimensionCode { get; set; } = string.Empty;
+
+    [System.ComponentModel.DataAnnotations.MaxLength(50)]
+    public string? ValueCode { get; set; }
+
+    [System.ComponentModel.DataAnnotations.MaxLength(100)]
+    public string? SourceEntityType { get; set; }
+
+    public Guid? SourceEntityId { get; set; }
 }
 
 public sealed class FinancePostingResultDto
@@ -101,8 +157,12 @@ public sealed class FinanceTaxCalculationSnapshotDto
 {
     public string DocumentType { get; set; } = string.Empty;
     public Guid DocumentId { get; set; }
+    /// <summary>The source line whose effective-dated tax calculation produced this component.</summary>
+    public Guid? DocumentLineId { get; set; }
     public Guid TaxId { get; set; }
     public Guid? TaxGroupId { get; set; }
+    /// <summary>Frozen GL account used for this tax component at source posting time.</summary>
+    public Guid? PostingAccountId { get; set; }
     public decimal BaseAmount { get; set; }
     public decimal TaxableAmount { get; set; }
     public decimal TaxRate { get; set; }

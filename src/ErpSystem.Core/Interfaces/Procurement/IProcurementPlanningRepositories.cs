@@ -26,6 +26,7 @@ public interface IProcurementPlanRepository : IGenericRepository<ProcurementPlan
         int? fiscalYear = null);
     Task<string> GeneratePlanNumberAsync(int fiscalYear);
     Task<bool> PlanNumberExistsAsync(string planNumber);
+    Task<decimal> GetPlannedBudgetExposureAsync(Guid budgetId, Guid? excludePlanId = null);
 }
 
 /// <summary>
@@ -40,6 +41,7 @@ public interface IProcurementPlanItemRepository : IGenericRepository<Procurement
     Task<IEnumerable<ProcurementPlanItem>> GetByMonthAsync(Guid planId, int month);
     Task<IEnumerable<ProcurementPlanItem>> GetByPriorityAsync(Guid planId, string priority);
     Task<decimal> GetTotalEstimatedCostAsync(Guid planId);
+    Task<decimal> GetPlannedBudgetExposureByAllocationAsync(Guid allocationId, Guid? excludeItemId = null);
 }
 
 /// <summary>
@@ -76,7 +78,7 @@ public interface IProcurementBudgetRepository : IGenericRepository<ProcurementBu
         string? status = null,
         Guid? departmentId = null,
         int? fiscalYear = null);
-    Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid departmentId);
+    Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid tenantId);
     Task<bool> BudgetCodeExistsAsync(string budgetCode);
     Task<decimal> GetTotalAllocatedBudgetAsync(Guid departmentId, int fiscalYear);
     Task<decimal> GetTotalUtilizedBudgetAsync(Guid departmentId, int fiscalYear);

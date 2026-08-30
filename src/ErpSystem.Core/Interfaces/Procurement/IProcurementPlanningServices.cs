@@ -87,7 +87,8 @@ public interface IProcurementBudgetService
     Task<IEnumerable<ProcurementBudgetDto>> GetActiveBudgetsAsync();
     Task<ProcurementBudgetDetailDto> CreateAsync(CreateProcurementBudgetDto dto);
     Task<ProcurementBudgetDetailDto> UpdateAsync(Guid id, CreateProcurementBudgetDto dto);
-    Task<ProcurementBudgetDetailDto> ApproveAsync(Guid id);
+    Task<ProcurementBudgetDetailDto> SubmitForApprovalAsync(Guid id);
+    Task<ProcurementBudgetDetailDto> ApproveAsync(Guid id, ApproveProcurementBudgetDto dto);
     Task DeleteAsync(Guid id);
 
     // Budget Allocations
@@ -97,7 +98,7 @@ public interface IProcurementBudgetService
 
     // Budget Revisions
     Task<ProcurementBudgetRevisionDto> CreateRevisionAsync(Guid budgetId, CreateProcurementBudgetRevisionDto dto);
-    Task<ProcurementBudgetRevisionDto> ApproveRevisionAsync(Guid revisionId);
+    Task<ProcurementBudgetRevisionDto> ApproveRevisionAsync(Guid revisionId, string? comments = null);
     Task<ProcurementBudgetRevisionDto> RejectRevisionAsync(Guid revisionId, string reason);
     Task<IEnumerable<ProcurementBudgetRevisionDto>> GetRevisionsAsync(Guid budgetId);
 
@@ -128,9 +129,13 @@ public interface IProcurementBudgetService
     Task<bool> UtilizePurchaseOrderCommittedBudgetAsync(Guid purchaseOrderId, decimal amount);
 
     /// <summary>
-    /// Get available budgets for linking (Active/Approved) for a department and fiscal year
+    /// Get eligible budgets for plan selection (Active/Approved) for a department and fiscal year.
+    /// Linked budgets are excluded unless includeLinked is requested for explanatory UI display.
     /// </summary>
-    Task<IEnumerable<ProcurementBudgetDto>> GetAvailableBudgetsForLinkingAsync(Guid departmentId, int fiscalYear);
+    Task<IEnumerable<ProcurementBudgetDto>> GetAvailableBudgetsForLinkingAsync(
+        Guid departmentId,
+        int fiscalYear,
+        bool includeLinked = false);
 
     /// <summary>
     /// Link a budget to a procurement plan
@@ -199,6 +204,7 @@ public interface IMarketAnalysisService
 
     // Price History
     Task<PriceHistoryDto> AddPriceHistoryAsync(Guid analysisId, CreatePriceHistoryDto dto);
+    Task<PriceHistoryDto> UpdatePriceHistoryAsync(Guid analysisId, Guid priceHistoryId, CreatePriceHistoryDto dto);
     Task DeletePriceHistoryAsync(Guid priceHistoryId);
     Task<IEnumerable<PriceHistoryDto>> GetPriceHistoryAsync(Guid analysisId);
     Task<PriceTrendDto> GetPriceTrendAsync(Guid analysisId, int months = 12);

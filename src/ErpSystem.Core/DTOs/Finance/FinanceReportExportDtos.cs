@@ -60,6 +60,7 @@ public sealed class FinanceReportExportRequestDto
     public bool ShowSupplierCurrency { get; set; }
     public bool ShowCustomerCurrency { get; set; }
     public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+    public List<FinanceDimensionFilterDto> DimensionFilters { get; set; } = new();
     public FixedAssetReportQueryDto? FixedAssetQuery { get; set; }
     public TaxReportRequestDto? TaxReportQuery { get; set; }
 }

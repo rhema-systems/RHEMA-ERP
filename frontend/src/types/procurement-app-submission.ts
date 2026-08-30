@@ -4,10 +4,7 @@ import type {
 } from './procurement-control-event';
 
 export type ProcurementAppSubmissionStatus =
-  | 'Exported'
-  | 'Submitted'
-  | 'Acknowledged'
-  | 'Rejected';
+  'Exported' | 'Submitted' | 'Acknowledged' | 'Rejected';
 
 export interface ProcurementAppSubmissionSearch {
   procurementPlanId?: string;
@@ -123,10 +120,7 @@ export interface ProcurementAppEvidenceReference {
 
 export interface RecordProcurementAppExport {
   procurementPlanId: string;
-  exportFileName: string;
   exportFormat: string;
-  exportTemplateVersion: string;
-  exportChecksumSha256: string;
   notes?: string;
   evidence?: ProcurementAppEvidenceReference[];
 }
@@ -157,10 +151,7 @@ export interface RejectProcurementApp {
 }
 
 export interface ResubmitProcurementApp {
-  exportFileName: string;
   exportFormat: string;
-  exportTemplateVersion: string;
-  exportChecksumSha256: string;
   notes?: string;
   rowVersion: string;
   evidence?: ProcurementAppEvidenceReference[];

@@ -828,6 +828,9 @@ export interface ProjectMobileAssignmentDto {
   status: string;
   percentComplete: number;
   plannedEndDate?: string;
+  civilDirectTaskId?: string;
+  civilDirectTaskStatus?: string;
+  civilDirectTaskRowVersion?: string;
 }
 
 export interface ProjectMobileSummaryDto {
@@ -2313,6 +2316,9 @@ export interface QuantitySurveyEstimateVersionDto {
   estimateDate: string;
   currencyId: string;
   currencyCode: string;
+  fundingSource?: string;
+  propertyReference?: string;
+  sourceSnapshotSchemaVersion: number;
   directCost: number;
   markupTotal: number;
   totalAmount: number;

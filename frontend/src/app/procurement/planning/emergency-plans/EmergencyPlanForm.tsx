@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
-import { currencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import { procurementCurrencyService, type CurrencyListDto } from '@/services/financeCommonService';
 import {
   inventoryManagementService,
   type InventoryCategoryDto,
@@ -161,7 +161,7 @@ export function EmergencyPlanForm({ initialValue, mode }: EmergencyPlanFormProps
   useEffect(() => {
     Promise.all([
       commonService.getDepartments().catch(() => []),
-      currencyService.getActive().catch(() => []),
+      procurementCurrencyService.getActive().catch(() => []),
       inventoryManagementService.getInventoryItems({ isActive: true }).catch(() => []),
       inventoryManagementService.getActiveInventoryCategories().catch(() => []),
       inventoryManagementService.getUnitsOfMeasure(true).catch(() => []),

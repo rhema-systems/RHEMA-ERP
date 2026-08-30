@@ -146,6 +146,8 @@ public class CreateTenderBidDto
 
     public bool AcceptedDeclaration { get; set; } = false;
 
+    public List<Guid> SelectedLotIds { get; set; } = new();
+
     [Required]
     public List<CreateTenderBidItemDto> Items { get; set; } = new();
 }
@@ -166,6 +168,13 @@ public class UpdateTenderBidDto
 
     public string? TechnicalProposal { get; set; }
     public string? CommercialProposal { get; set; }
+
+    [MaxLength(50)]
+    public string? AssociationType { get; set; }
+
+    public bool? AcceptedDeclaration { get; set; }
+
+    public List<Guid>? SelectedLotIds { get; set; }
 
     public List<UpdateTenderBidItemDto>? Items { get; set; }
 }

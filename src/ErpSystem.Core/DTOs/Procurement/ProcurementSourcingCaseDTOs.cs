@@ -35,10 +35,10 @@ public sealed class ProcurementSourcingCaseSourceOptionDto
     public Guid RequisitionId { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public string RequisitionStatus { get; set; } = string.Empty;
-    public Guid SourcingReleaseId { get; set; }
-    public string ReleaseReference { get; set; } = string.Empty;
-    public Guid SourcePlanId { get; set; }
-    public Guid SourcePlanItemId { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public string? ReleaseReference { get; set; }
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public string? SourcePlanNumber { get; set; }
     public string? SourcePlanItemDescription { get; set; }
     public ProcurementCategoryClass Category { get; set; }
@@ -94,7 +94,7 @@ public sealed class CreateProcurementSourcingCaseRequest
 {
     public Guid RequisitionId { get; set; }
     public ProcurementMethodType? SelectedMethod { get; set; }
-    [Required, StringLength(1000, MinimumLength = 5)] public string Justification { get; set; } = string.Empty;
+    [StringLength(1000)] public string? Justification { get; set; }
     [StringLength(1000, MinimumLength = 5)] public string? MethodOverrideReason { get; set; }
     [MinLength(1)] public List<CreateProcurementSourcingCaseLotRequest> Lots { get; set; } = new();
 }
@@ -172,8 +172,8 @@ public sealed class ProcurementSourcingCaseDto
     public string RequisitionNumber { get; set; } = string.Empty;
     public Guid SourcingReleaseId { get; set; }
     public string SourcingReleaseReference { get; set; } = string.Empty;
-    public Guid SourcePlanId { get; set; }
-    public Guid SourcePlanItemId { get; set; }
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public string? SourcePlanNumber { get; set; }
     public string? SourcePlanItemDescription { get; set; }
     public ProcurementCategoryClass Category { get; set; }
@@ -189,8 +189,8 @@ public sealed class ProcurementSourcingCaseDto
     public string MethodRuleCode { get; set; } = string.Empty;
     public Guid ThresholdRuleId { get; set; }
     public string ThresholdRuleCode { get; set; } = string.Empty;
-    public Guid AuthorityRouteId { get; set; }
-    public string AuthorityRouteReference { get; set; } = string.Empty;
+    public Guid? AuthorityRouteId { get; set; }
+    public string? AuthorityRouteReference { get; set; }
     public Guid? ApprovedExceptionRuleId { get; set; }
     public Guid? MethodOverrideWorkflowInstanceId { get; set; }
     public string? MethodOverrideReason { get; set; }
@@ -221,12 +221,12 @@ public sealed class ProcurementSourcingCaseDto
 
 public sealed class ProcurementSourcingCaseEntryGateDto
 {
-    public Guid SourcingCaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
     public string SourcingCaseNumber { get; set; } = string.Empty;
     public Guid SourcingReleaseId { get; set; }
-    public Guid SourcePlanItemId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
     public ProcurementMethodType SelectedMethod { get; set; }
-    public Guid MethodRuleId { get; set; }
+    public Guid? MethodRuleId { get; set; }
     public string MethodRuleCode { get; set; } = string.Empty;
     public int MinimumQuotationCount { get; set; }
     public Guid? WorkflowDefinitionId { get; set; }

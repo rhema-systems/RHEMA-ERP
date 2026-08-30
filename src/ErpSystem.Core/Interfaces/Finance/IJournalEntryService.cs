@@ -13,9 +13,20 @@ namespace ErpSystem.Core.Interfaces.Finance
     public interface IJournalEntryService
     {
         /// <summary>
-        /// Retrieves all journal entries (alias for GetAllJournalEntriesAsync).
+        /// Retrieves all journal entries.
         /// </summary>
         Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Retrieves journal entries filtered at the database query.
+        /// </summary>
+        Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+            string? status,
+            DateTime? startDate,
+            DateTime? endDate,
+            Guid? fiscalPeriodId,
+            string? sourceModule,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Retrieves a single journal entry by ID.

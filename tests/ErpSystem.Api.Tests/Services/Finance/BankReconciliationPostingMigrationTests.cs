@@ -55,6 +55,72 @@ public sealed class BankReconciliationPostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task ForeignBankOpening_ShouldReconcileUsingNativePostedEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-USD-OPEN", 0m, glAccountNumber: "1020-USD");
+        setup.BankAccount.Currency = "USD";
+        setup.BankGlAccount.CurrencyCode = "USD";
+        var period = db.FiscalPeriods.Local.Single(p => p.TenantId == tenantId);
+        var journalId = Guid.NewGuid();
+        db.JournalEntries.Add(new JournalEntry
+        {
+            Id = journalId,
+            TenantId = tenantId,
+            JournalEntryNumber = "JE-USD-OPEN-001",
+            JournalType = "Opening Balance",
+            EntryDate = new DateTime(2026, 7, 1),
+            PostingDate = new DateTime(2026, 7, 1),
+            Description = "Foreign bank opening",
+            SourceModule = "MIGRATION",
+            SourceDocumentType = "OpeningBalanceBatch",
+            TotalDebitAmount = 625_000m,
+            TotalCreditAmount = 625_000m,
+            IsBalanced = true,
+            FiscalPeriodId = period.Id,
+            PostingStatus = "Posted",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        db.AccountTransactions.Add(new AccountTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryId = journalId,
+            AccountId = setup.BankGlAccount.Id,
+            FiscalPeriodId = period.Id,
+            TransactionDate = new DateTime(2026, 7, 1),
+            DebitAmount = 625_000m,
+            CreditAmount = 0m,
+            FunctionalCurrencyCode = "GHS",
+            TransactionCurrency = "USD",
+            TransactionDebitAmount = 50_000m,
+            TransactionCreditAmount = 0m,
+            ExchangeRate = 12.5m,
+            PostingStatus = "Posted",
+            BookClassification = "IFRS",
+            LineNumber = 1,
+            SourceModule = "MIGRATION",
+            SourceDocumentType = "OpeningBalanceBatch"
+        });
+        await db.SaveChangesAsync();
+
+        var reconciliation = await CreateReconciliationService(db, tenantId)
+            .StartReconciliationAsync(new StartReconciliationDto
+            {
+                BankAccountId = setup.BankAccount.Id,
+                ReconciliationDate = new DateTime(2026, 7, 6),
+                StatementBalance = 50_000m
+            });
+
+        reconciliation.BookBalance.Should().Be(50_000m);
+        reconciliation.Difference.Should().Be(0m);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-CrossCurrencyBankTransfer")]
     [Trait("Category", "CashBank")]
     public async Task CrossCurrencyTransferLegs_ShouldReconcileIndependentlyInEachBankCurrency()

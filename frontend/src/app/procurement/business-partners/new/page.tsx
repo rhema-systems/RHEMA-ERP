@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { businessPartnerService, type CreateBusinessPartnerDto, type BusinessPartnerDto } from '@/services/businessPartnerService';
-import { paymentTermService, currencyService } from '@/services/financeCommonService';
+import { paymentTermService, procurementCurrencyService } from '@/services/financeCommonService';
 import type { PaymentTermListDto, CurrencyListDto } from '@/services/financeCommonService';
 import { priceListService, PriceListDto, PriceListType } from '@/services/priceListService';
 
@@ -182,7 +182,7 @@ export default function NewBusinessPartnerPage() {
         
         const [terms, currs, partnersData] = await Promise.all([
           paymentTermService.getActive(),
-          currencyService.getActive(),
+          procurementCurrencyService.getActive(),
           businessPartnerService.getAllPartnersForDropdown().catch(() => [])
         ]);
         console.log('Business Partner New Page: Other data loaded - terms:', terms?.length, 'currencies:', currs?.length, 'partners:', partnersData?.length);

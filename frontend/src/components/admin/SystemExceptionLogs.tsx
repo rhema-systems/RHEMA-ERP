@@ -90,6 +90,9 @@ export default function SystemExceptionLogs() {
 
   const [items, setItems] = useState<ExceptionLogListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageSize = 100;
   const [level, setLevel] = useState<string>('all');
   const [resolved, setResolved] = useState<string>('all');
   const [search, setSearch] = useState<string>('');
@@ -107,14 +110,16 @@ export default function SystemExceptionLogs() {
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
-    params.set('page', '1');
-    params.set('pageSize', '100');
+    params.set('page', String(page));
+    params.set('pageSize', String(pageSize));
     if (level !== 'all') params.set('level', level);
     if (resolved !== 'all')
       params.set('resolved', resolved === 'resolved' ? 'true' : 'false');
     if (search.trim()) params.set('search', search.trim());
     return params.toString();
-  }, [level, resolved, search]);
+  }, [level, page, resolved, search]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const load = async () => {
     setLoading(true);
@@ -134,6 +139,7 @@ export default function SystemExceptionLogs() {
       }
       const data = await response.json();
       setItems(data.items || []);
+      setTotalCount(Number(data.totalCount) || 0);
     } catch {
       toast({
         description: 'Failed to load exception logs',
@@ -320,12 +326,21 @@ export default function SystemExceptionLogs() {
             <Input
               placeholder="Search message / logger / path / user / trace..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') load();
               }}
             />
-            <Select value={level} onValueChange={setLevel}>
+            <Select
+              value={level}
+              onValueChange={(value) => {
+                setLevel(value);
+                setPage(1);
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Level" />
               </SelectTrigger>
@@ -336,7 +351,13 @@ export default function SystemExceptionLogs() {
                 <SelectItem value="Critical">Critical</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={resolved} onValueChange={setResolved}>
+            <Select
+              value={resolved}
+              onValueChange={(value) => {
+                setResolved(value);
+                setPage(1);
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Resolved" />
               </SelectTrigger>
@@ -347,7 +368,7 @@ export default function SystemExceptionLogs() {
               </SelectContent>
             </Select>
             <div className="flex items-center justify-end text-sm text-muted-foreground">
-              {loading ? 'Loading...' : `${items.length} shown`}
+              {loading ? 'Loading...' : `${items.length} of ${totalCount} shown`}
             </div>
           </div>
 
@@ -445,6 +466,33 @@ export default function SystemExceptionLogs() {
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              Page {page} of {totalPages} · {totalCount} total records
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={loading || page <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={loading || page >= totalPages}
+                onClick={() =>
+                  setPage((current) => Math.min(totalPages, current + 1))
+                }
+              >
+                Next
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

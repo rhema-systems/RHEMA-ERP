@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -626,7 +627,7 @@ public sealed class ProcurementRequisitionAuthorityRouteService : IProcurementRe
         CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permissionCode,
@@ -640,10 +641,10 @@ public sealed class ProcurementRequisitionAuthorityRouteService : IProcurementRe
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
         throw new ProcurementRequisitionAuthorityAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureRequisition(PurchaseRequisition requisition, bool requireDraft = true)
@@ -663,7 +664,7 @@ public sealed class ProcurementRequisitionAuthorityRouteService : IProcurementRe
             throw new ProcurementRequisitionAuthorityAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static string NormalizeCurrency(string? value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
     private static string NormalizeCorrelation(string correlationId) => string.IsNullOrWhiteSpace(correlationId)

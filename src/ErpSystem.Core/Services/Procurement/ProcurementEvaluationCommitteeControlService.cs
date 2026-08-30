@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -2439,13 +2440,11 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementEvaluationCommitteeAuthorizationException(
-            "A TDC procurement, audit, or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -2459,25 +2458,15 @@ public sealed class ProcurementEvaluationCommitteeControlService
     }
 
     private bool CanAdminister() =>
-        IsAdministrator() ||
-        _currentUser.Roles.Any(role =>
-            string.Equals(role, "TDC_PROCUREMENT_OFFICER",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role, "TDC_SENIOR_PROCUREMENT_OFFICER",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role, "TDC_HEAD_OF_PROCUREMENT",
-                StringComparison.OrdinalIgnoreCase));
+        HasPlatformSuperAdministratorBypass() ||
+        _currentUser.HasRegisteredProcurementPermission(ManagePermission);
 
     private bool CanApprove() =>
-        IsAdministrator() ||
-        _currentUser.Roles.Any(role =>
-            ProcurementAccessControlRegistry.FindRole(role)?.PermissionCodes
-                .Contains(ApprovePermission, StringComparer.OrdinalIgnoreCase) == true);
+        HasPlatformSuperAdministratorBypass() ||
+        _currentUser.HasRegisteredProcurementPermission(ApprovePermission);
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("Admin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string ActorName() =>
         string.IsNullOrWhiteSpace(_currentUser.FullName)

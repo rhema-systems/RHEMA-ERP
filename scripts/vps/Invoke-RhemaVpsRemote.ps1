@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'Verify')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -43,6 +43,17 @@ function Get-ApiConfigurationXml {
     Assert-True (Test-Path -LiteralPath $ApiServiceXml) `
         "API service configuration is missing: $ApiServiceXml"
     return [xml](Get-Content -LiteralPath $ApiServiceXml)
+}
+
+function Assert-SyncfusionLicenseConfigured {
+    $xml = Get-ApiConfigurationXml
+    $configured = @($xml.service.env | Where-Object {
+        $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.value)
+    })
+    Assert-True ($configured.Count -gt 0) `
+        'The protected Syncfusion license is missing from the API service environment.'
+    Write-Output 'SYNCFUSION_LICENSE|CONFIGURED'
 }
 
 function Get-DatabaseConnectionString {
@@ -350,6 +361,155 @@ BEGIN
            AND CHARINDEX(N'TDC0502_RECEIPT_INSPECTION_WORKFLOW_ID', @inspectionTrigger) = 0)
         INSERT @R VALUES(N'INV-FU-004 receipt-inspection trigger baseline', 1);
 END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260820100000_AddInventoryOpeningStockBook')
+BEGIN
+    IF OBJECT_ID(N'dbo.StockAdjustments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.StockAdjustmentItems', N'U') IS NULL
+        INSERT @R VALUES(N'Inventory opening-stock book table prerequisites', 1);
+    IF OBJECT_ID(N'dbo.StockAdjustments', N'U') IS NOT NULL
+       AND COL_LENGTH(N'dbo.StockAdjustments', N'BookClassification') IS NOT NULL
+        INSERT @R VALUES(N'Inventory opening-stock book partial migration state', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260826170000_AllowReleaseOnlyRfqAwardTransition')
+BEGIN
+    IF OBJECT_ID(N'dbo.RequestForQuotations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.RequestForQuotationAwardLines', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcePurchaseRequisitionId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingReleaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SourcingCaseId') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'SubmissionDeadline') IS NULL
+       OR COL_LENGTH(N'dbo.RequestForQuotations', N'AwardedAt') IS NULL
+        INSERT @R VALUES(N'Release-only RFQ award transition prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes')
+BEGIN
+    DECLARE @purchaseOrderSourceTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrders_ApprovedSourceProtected', N'TR'));
+    IF @purchaseOrderSourceTrigger IS NULL
+       OR CHARINDEX(N'TDC0406_PO_AMENDMENT_ID', @purchaseOrderSourceTrigger) = 0
+       OR CHARINDEX(N'THROW 51202', @purchaseOrderSourceTrigger) = 0
+       OR CHARINDEX(N'THROW 51205', @purchaseOrderSourceTrigger) = 0
+        INSERT @R VALUES(N'Purchase-order source trigger alignment prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260827090000_AlignSupplierOnboardingPartnerCategories')
+BEGIN
+    IF OBJECT_ID(N'dbo.PartnerCategories', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartnerCategories', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartnerRegistrations', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.BusinessPartners', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenants', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.PartnerCategories', N'TenantId') IS NULL
+       OR COL_LENGTH(N'dbo.PartnerCategories', N'CategoryCode') IS NULL
+       OR COL_LENGTH(N'dbo.BusinessPartnerRegistrations', N'RegistrationCategory') IS NULL
+       OR COL_LENGTH(N'dbo.BusinessPartnerRegistrations', N'BusinessPartnerId') IS NULL
+       OR NOT EXISTS
+          (
+              SELECT 1
+              FROM sys.indexes
+              WHERE object_id = OBJECT_ID(N'dbo.PartnerCategories')
+                AND name = N'IX_PartnerCategories_CategoryCode'
+          )
+       OR EXISTS
+          (
+              SELECT 1
+              FROM sys.indexes
+              WHERE object_id = OBJECT_ID(N'dbo.PartnerCategories')
+                AND name = N'IX_PartnerCategories_TenantId_CategoryCode'
+          )
+        INSERT @R VALUES(N'Supplier onboarding category alignment prerequisites', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle')
+BEGIN
+    IF OBJECT_ID(N'dbo.ProcurementBudgetCommitments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Tenders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Contracts', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.PurchaseOrders', N'U') IS NULL
+        INSERT @R VALUES(N'FR-PR-005 commitment lifecycle table prerequisites', 1);
+    ELSE
+    BEGIN
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 active contract exposure above reservation'', COUNT_BIG(*)
+            FROM (
+                SELECT c.Id
+                FROM dbo.ProcurementBudgetCommitments c
+                JOIN dbo.Tenders tender
+                  ON tender.SourcePurchaseRequisitionId = c.PurchaseRequisitionId
+                 AND tender.TenantId = c.TenantId AND tender.IsDeleted = 0
+                JOIN dbo.Contracts contract
+                  ON contract.TenderId = tender.Id
+                 AND contract.TenantId = c.TenantId AND contract.IsDeleted = 0
+                WHERE c.Status = 1 AND contract.Status = N''Active'' AND contract.ContractValue > 0
+                GROUP BY c.Id, c.ReservedAmount
+                HAVING SUM(contract.ContractValue) > c.ReservedAmount
+            ) violation');
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 child PO exposure above active contract'', COUNT_BIG(*)
+            FROM (
+                SELECT contract.Id
+                FROM dbo.Contracts contract
+                JOIN dbo.PurchaseOrders po
+                  ON po.ContractId = contract.Id
+                 AND po.TenantId = contract.TenantId AND po.IsDeleted = 0 AND po.TotalAmount > 0
+                 AND po.Status IN (N''Approved'', N''Open'', N''Sent'', N''Acknowledged'', N''Partially Received'', N''Received'')
+                WHERE contract.IsDeleted = 0 AND contract.Status = N''Active'' AND contract.ContractValue > 0
+                GROUP BY contract.Id, contract.ContractValue
+                HAVING SUM(po.TotalAmount) > contract.ContractValue
+            ) violation');
+        INSERT @R EXEC(N'
+            SELECT ''FR-PR-005 combined formal exposure above reservation'', COUNT_BIG(*)
+            FROM dbo.ProcurementBudgetCommitments c
+            OUTER APPLY (
+                SELECT COALESCE(SUM(contract.ContractValue), 0) ContractAmount
+                FROM dbo.Tenders tender
+                JOIN dbo.Contracts contract
+                  ON contract.TenderId = tender.Id
+                 AND contract.TenantId = tender.TenantId AND contract.IsDeleted = 0
+                WHERE tender.SourcePurchaseRequisitionId = c.PurchaseRequisitionId
+                  AND tender.TenantId = c.TenantId AND tender.IsDeleted = 0
+                  AND contract.Status = N''Active'' AND contract.ContractValue > 0
+            ) formal
+            OUTER APPLY (
+                SELECT COALESCE(SUM(po.TotalAmount), 0) DirectPurchaseOrderAmount
+                FROM dbo.PurchaseOrders po
+                WHERE po.TenantId = c.TenantId
+                  AND po.SourceRequisitionId = c.PurchaseRequisitionId
+                  AND po.IsDeleted = 0 AND po.TotalAmount > 0 AND po.ContractId IS NULL
+                  AND po.Status IN (N''Approved'', N''Open'', N''Sent'', N''Acknowledged'', N''Partially Received'', N''Received'')
+            ) purchaseOrders
+            WHERE c.Status = 1
+              AND formal.ContractAmount + purchaseOrders.DirectPurchaseOrderAmount > c.ReservedAmount');
+    END;
+END;
+IF EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle')
+   AND NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment')
+BEGIN
+    IF OBJECT_ID(N'dbo.PurchaseOrders', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementRequisitionSourcingReleases', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.PurchaseRequisitions', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementBudgetCommitments', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementBudgets', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementPurchaseOrderCommitmentAdjustments', N'U') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'EntryType') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'SourceType') IS NULL
+       OR COL_LENGTH(N'dbo.ProcurementBudgetCommitmentLedgerEntries', N'SourceId') IS NULL
+       OR OBJECT_ID(N'dbo.TR_PurchaseOrders_GovernedCommitment', N'TR') IS NULL
+        INSERT @R VALUES(N'Atomic PO budget commitment trigger prerequisites', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -393,6 +553,7 @@ function Invoke-Preflight {
     Assert-True ($freeGb -ge 5) 'Less than 5 GB of free disk space remains on the VPS.'
 
     $xml = Get-ApiConfigurationXml
+    Assert-SyncfusionLicenseConfigured
     $requiredSettings = @{
         'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
         'StartupInitialization__SeedDevelopmentData' = 'true'
@@ -485,6 +646,101 @@ function Invoke-Preflight {
     Write-Output 'GUARD_COVERAGE|20260813171000_INVREQFU004RequireCleanTransferEvidence'
     Write-Output 'GUARD_COVERAGE|20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse'
     Write-Output 'GUARD_COVERAGE|20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind'
+    # Opening-stock book governance adds one defaulted column and replaces two
+    # trigger bodies without mutating legacy rows. The preflight probe above
+    # rejects missing source tables and any partial column apply before startup.
+    Write-Output 'GUARD_COVERAGE|20260820100000_AddInventoryOpeningStockBook'
+    # The simplified PR control migration only relaxes existing columns to nullable
+    # and replaces the insert-time tenant/approval-lineage trigger. Its THROW is in
+    # the new trigger body and is not evaluated against stored rows during apply.
+    Write-Output 'GUARD_COVERAGE|20260824183000_SimplifyPurchaseRequisitionControls'
+    # This migration only relaxes advanced sourcing-case lineage columns. Its
+    # Up THROW statements are contained in the replacement lifecycle trigger;
+    # the stored-row guard belongs to Down and is not executed during deploy.
+    Write-Output 'GUARD_COVERAGE|20260825120000_SimplifyProcurementSourcingCaseLineage'
+    # This migration replaces the RFQ and tender lineage triggers. Its THROW
+    # statements protect future writes and do not evaluate stored rows in Up.
+    Write-Output 'GUARD_COVERAGE|20260825170000_AllowReleaseOnlyProcurementSourceEntry'
+    # This migration replaces only the RFQ lifecycle trigger. The read-only
+    # prerequisite probe above verifies the tables and columns used by the new
+    # release-only transition; existing RFQ rows are not updated during Up.
+    Write-Output 'GUARD_COVERAGE|20260826170000_AllowReleaseOnlyRfqAwardTransition'
+    # This migration only replaces the purchase-order commitment trigger. Its
+    # THROW protects future writes and existing rows are not updated in Up.
+    Write-Output 'GUARD_COVERAGE|20260826190000_AlignPurchaseOrderCommitmentWithRequisition'
+    # This migration patches two guarded blocks in the installed PO source
+    # trigger without updating stored rows. The prerequisite probe above checks
+    # the exact baseline markers before startup is allowed to apply it.
+    Write-Output 'GUARD_COVERAGE|20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes'
+    # This migration replaces the global category-code index with a tenant-safe
+    # composite index, provisions canonical supplier categories, and repairs
+    # approved supplier assignments. The probe above rejects missing tables,
+    # columns, and partially applied index state before any data is changed.
+    Write-Output 'GUARD_COVERAGE|20260827090000_AlignSupplierOnboardingPartnerCategories'
+    # FR-PR-005 backfills formal contract and direct-PO exposure into the new
+    # immutable ledger. The probes above mirror every legacy-data THROW in the
+    # migration so over-exposed reservations fail before any schema change.
+    Write-Output 'GUARD_COVERAGE|20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle'
+    # This forward correction replaces only the PO exposure trigger. The
+    # prerequisite probe prevents a partially applied FR-PR-005 baseline from
+    # reaching migration startup without the immutable ledger it must enforce.
+    Write-Output 'GUARD_COVERAGE|20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment'
+    # Civil Engineering migrations create new governed tables. The document-register migration
+    # idempotently inserts only a missing tenant metadata template; existing Project, Workflow
+    # and central-DMS records are not rewritten. All THROW statements live in trigger bodies.
+    Write-Output 'GUARD_COVERAGE|20260814205757_AddCivilEngineeringConfigurationLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260814234022_AddCivilEngineeringDesignWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260815005453_AddCivilEngineeringReconnaissance'
+    Write-Output 'GUARD_COVERAGE|20260815031044_AddCivilEngineeringDesignInputRequests'
+    Write-Output 'GUARD_COVERAGE|20260815135156_AddCivilEngineeringDocumentRegister'
+    # CIV-0201 creates empty appointment and append-only revision registers. Its
+    # tenant/policy/lifecycle hard stops live exclusively in triggers.
+    Write-Output 'GUARD_COVERAGE|20260820150000_AddCivilEngineeringProjectEngineerAssignments'
+    # CIV-0202 adds only Civil routing/envelope, DMS-reference, response, and revision
+    # tables around the existing Projects instruction.
+    Write-Output 'GUARD_COVERAGE|20260820170000_AddCivilEngineeringSiteInstructionRouting'
+    # CIV-0203 through CIV-0205 create empty Projects-owned governed registers with
+    # foreign keys and post-migration trigger hard stops only.
+    Write-Output 'GUARD_COVERAGE|20260820190000_AddCivilEngineeringRfiRouting'
+    Write-Output 'GUARD_COVERAGE|20260820193000_AddCivilEngineeringQualityTestRegister'
+    Write-Output 'GUARD_COVERAGE|20260820213000_AddCivilEngineeringWeeklySupervisionReports'
+    Write-Output 'GUARD_COVERAGE|20260820233000_AddCivilEngineeringIpcEndorsements'
+    # The maintenance overlays create new governed registers and do not rewrite source records.
+    Write-Output 'GUARD_COVERAGE|20260821033000_AddCivilEngineeringMaintenanceIntakes'
+    Write-Output 'GUARD_COVERAGE|20260821050000_AddCivilEngineeringMaintenanceAssessments'
+    Write-Output 'GUARD_COVERAGE|20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs'
+    Write-Output 'GUARD_COVERAGE|20260821060000_AddCivilEngineeringMaintenanceExecutionLinks'
+    Write-Output 'GUARD_COVERAGE|20260821063000_AddCivilEngineeringMaintenanceCompletionControls'
+    # Development-approval and direct-task migrations create Civil-owned envelopes;
+    # their THROW statements protect future writes and do not mutate legacy owner records.
+    Write-Output 'GUARD_COVERAGE|20260821110000_AddCivilEngineeringDevelopmentApprovalFiles'
+    Write-Output 'GUARD_COVERAGE|20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs'
+    Write-Output 'GUARD_COVERAGE|20260821143000_AddCivilEngineeringPermittingEngineeringReviews'
+    Write-Output 'GUARD_COVERAGE|20260821153000_AddCivilEngineeringPermittingHodDecisions'
+    Write-Output 'GUARD_COVERAGE|20260821170000_AddCivilEngineeringDirectTaskControls'
+    Write-Output 'GUARD_COVERAGE|20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260821190000_AddCivilEngineeringUrgentTaskControls'
+    Write-Output 'GUARD_COVERAGE|20260821200000_AddCivilEngineeringMobileFieldFeedback'
+    # The migration workbench is an empty Projects-owned staging and validation register.
+    Write-Output 'GUARD_COVERAGE|20260821210000_AddCivilEngineeringMigrationWorkbench'
+    # Works initiation adds nullable, legacy-safe provenance fields; its hard stops are trigger-only.
+    Write-Output 'GUARD_COVERAGE|20260821230000_AddCivilEngineeringWorksCaseInitiation'
+    # Planning/GIS and its evidence hardening add governed children and trigger controls only.
+    Write-Output 'GUARD_COVERAGE|20260822000000_AddCivilEngineeringPlanningGisValidation'
+    Write-Output 'GUARD_COVERAGE|20260822001000_HardenCivilEngineeringPlanningGisEvidenceBinding'
+    # These lifecycle hardening migrations preserve existing Projects and central-owner records.
+    Write-Output 'GUARD_COVERAGE|20260822002000_HardenCivilEngineeringSiteInstructionLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260822003000_AddCivilEngineeringInspectionControls'
+    Write-Output 'GUARD_COVERAGE|20260822003100_HardenCivilEngineeringInspectionAuditActions'
+    Write-Output 'GUARD_COVERAGE|20260822003200_GovernCivilWeeklyProgressControls'
+    Write-Output 'GUARD_COVERAGE|20260822003300_SnapshotCivilWeeklyMilestoneSchedule'
+    Write-Output 'GUARD_COVERAGE|20260822003400_AddCivilEngineeringExtensionOfTimeControls'
+    # Project-asset reconciliation adds nullable Finance lineage without creating assets.
+    Write-Output 'GUARD_COVERAGE|20260822003500_AddProjectAssetLinkFixedAssetReconciliation'
+    # Configuration reconciliation affects only an editable missing decision; published profiles remain immutable.
+    Write-Output 'GUARD_COVERAGE|20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue'
+    # Inspection-plan governance binds future plans to existing shared workflow owners.
+    Write-Output 'GUARD_COVERAGE|20260822003700_GovernCivilInspectionPlanWorkflow'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
@@ -539,9 +795,10 @@ function Invoke-Backup {
     )
     Invoke-RobocopyChecked @(
         $FrontendRoot, $frontendBackup, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
-        '/NJH', '/NJS', '/NP',
+        '/NJH', '/NJS', '/NP', '/XJ',
         '/XD', (Join-Path $FrontendRoot 'node_modules'),
-        (Join-Path $FrontendRoot 'logs')
+        (Join-Path $FrontendRoot 'logs'),
+        '/XF', (Join-Path $FrontendRoot 'let')
     )
     Copy-Item -LiteralPath $ApiServiceXml -Destination `
         (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
@@ -635,11 +892,13 @@ function Wait-ApiReady {
 }
 
 function Wait-FrontendReady {
-    $deadline = (Get-Date).AddMinutes(2)
+    param([int]$TimeoutSeconds = 600)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
             $response = Invoke-WebRequest 'http://127.0.0.1:3001/login' `
-                -UseBasicParsing -TimeoutSec 5
+                -UseBasicParsing -TimeoutSec 30
             if ($response.StatusCode -eq 200) {
                 Write-Output 'FRONTEND_READY|200'
                 return
@@ -648,7 +907,65 @@ function Wait-FrontendReady {
         catch { }
         Start-Sleep -Seconds 3
     }
-    throw 'Frontend readiness exceeded two minutes.'
+    throw "Frontend readiness exceeded $TimeoutSeconds seconds."
+}
+
+function Start-ApiWithControlledMigrations {
+    param([DateTime]$StartedAt)
+
+    $originalXml = Get-ApiConfigurationXml
+    $migrationXml = Get-ApiConfigurationXml
+    Set-ServiceEnvironmentValue $migrationXml 'SkipStartupInitialization' 'false'
+    Set-ServiceEnvironmentValue $migrationXml `
+        'StartupInitialization__SeedDevelopmentData' 'false'
+    Set-ServiceEnvironmentValue $migrationXml `
+        'StartupInitialization__SeedWorkflowDefinitions' 'false'
+    $migrationXml.Save($ApiServiceXml)
+
+    try {
+        Start-Service RhemaERPAPI
+        Wait-ApiReady $StartedAt
+    }
+    finally {
+        # The test VPS normally skips the expensive startup initializer. Enable it
+        # only for the controlled deployment restart, then restore the exact service
+        # configuration regardless of migration or readiness success.
+        $originalXml.Save($ApiServiceXml)
+    }
+}
+
+function Stop-ManagedService {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('RhemaERPAPI', 'RhemaERPFrontend')]
+        [string]$Name,
+        [int]$GracefulTimeoutSeconds = 45
+    )
+
+    $service = Get-Service $Name
+    if ($service.Status -eq 'Stopped') { return }
+
+    # Submit the graceful stop without allowing a stuck wrapper process to
+    # block the whole release indefinitely.
+    & sc.exe stop $Name | Out-Null
+    $deadline = (Get-Date).AddSeconds($GracefulTimeoutSeconds)
+    do {
+        Start-Sleep -Seconds 2
+        $service.Refresh()
+    } while ($service.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
+
+    if ($service.Status -ne 'Stopped') {
+        $serviceProcess = Get-CimInstance Win32_Service |
+            Where-Object Name -eq $Name
+        if ($null -ne $serviceProcess -and $serviceProcess.ProcessId -gt 0) {
+            Stop-Process -Id $serviceProcess.ProcessId -Force
+        }
+        (Get-Service $Name).WaitForStatus(
+            'Stopped', [TimeSpan]::FromSeconds(30))
+    }
+
+    Assert-True ((Get-Service $Name).Status -eq 'Stopped') `
+        "Service '$Name' did not stop within the controlled deployment window."
 }
 
 function Invoke-Apply {
@@ -709,9 +1026,7 @@ function Invoke-Apply {
     Set-TestServerConfiguration
     $apiStartedAt = Get-Date
     try {
-        Stop-Service RhemaERPAPI -Force
-        (Get-Service RhemaERPAPI).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPAPI
         Invoke-RobocopyChecked @(
             $stageApi, $ApiRoot, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
             '/NJH', '/NJS', '/NP',
@@ -721,8 +1036,7 @@ function Invoke-Apply {
             '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'),
             (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
         )
-        Start-Service RhemaERPAPI
-        Wait-ApiReady $apiStartedAt
+        Start-ApiWithControlledMigrations $apiStartedAt
     }
     catch {
         Stop-Service RhemaERPAPI -Force -ErrorAction SilentlyContinue
@@ -741,9 +1055,7 @@ function Invoke-Apply {
     }
 
     try {
-        Stop-Service RhemaERPFrontend -Force
-        (Get-Service RhemaERPFrontend).WaitForStatus(
-            'Stopped', [TimeSpan]::FromMinutes(2))
+        Stop-ManagedService RhemaERPFrontend
         if (Test-Path (Join-Path $FrontendRoot '.next')) {
             Move-Item (Join-Path $FrontendRoot '.next') (Join-Path $retired '.next')
         }
@@ -796,7 +1108,105 @@ function Invoke-Apply {
     Write-Output 'APPLY|PASS'
 }
 
+function Invoke-ResumeFrontend {
+    Assert-DeploymentId
+    foreach ($value in @($ExpectedCommit, $ExpectedBuildId, $ExpectedCacheVersion,
+            $ApiSha256, $FrontendSha256)) {
+        Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
+            'ResumeFrontend requires commit, build, cache, and package hashes.'
+    }
+
+    $stageFrontend = Join-Path $PackagesRoot "stage-$DeploymentId\frontend"
+    $failedFrontend = Join-Path $PackagesRoot "failed-$DeploymentId"
+    $rollbackFrontend = Join-Path $PackagesRoot "resume-old-$DeploymentId"
+    $retryFailed = Join-Path $PackagesRoot "resume-failed-$DeploymentId"
+    Assert-True (Test-Path (Join-Path $stageFrontend 'server.js')) `
+        'The staged frontend server is missing.'
+    Assert-True (Test-Path (Join-Path $failedFrontend '.next\BUILD_ID')) `
+        'The failed frontend build is unavailable for retry.'
+    Assert-True (-not (Test-Path $rollbackFrontend)) `
+        "Frontend retry rollback path already exists: $rollbackFrontend"
+
+    $candidateBuildId = (Get-Content `
+        (Join-Path $failedFrontend '.next\BUILD_ID') -Raw).Trim()
+    Assert-True ($candidateBuildId -eq $ExpectedBuildId) `
+        'The retry candidate build differs from the expected release.'
+    $candidateWorker = Get-Content `
+        (Join-Path $failedFrontend 'public\sw.js') -Raw
+    Assert-True ($candidateWorker -match [regex]::Escape($ExpectedCacheVersion)) `
+        'The retry candidate service-worker version differs from the release.'
+
+    $currentResponse = Invoke-WebRequest 'http://127.0.0.1:3001/login' `
+        -UseBasicParsing -TimeoutSec 30
+    Assert-True ($currentResponse.StatusCode -eq 200) `
+        'The current frontend is not healthy enough for a controlled retry.'
+
+    New-Item -ItemType Directory -Path $rollbackFrontend | Out-Null
+    $swapped = $false
+    try {
+        Stop-ManagedService RhemaERPFrontend
+        foreach ($name in @('.next', 'public')) {
+            Move-Item (Join-Path $FrontendRoot $name) `
+                (Join-Path $rollbackFrontend $name)
+        }
+        Copy-Item (Join-Path $FrontendRoot 'server.js'), `
+            (Join-Path $FrontendRoot 'package.json') `
+            -Destination $rollbackFrontend -Force
+        foreach ($name in @('.next', 'public')) {
+            Move-Item (Join-Path $failedFrontend $name) `
+                (Join-Path $FrontendRoot $name)
+        }
+        Copy-Item (Join-Path $stageFrontend 'server.js'), `
+            (Join-Path $stageFrontend 'package.json') `
+            -Destination $FrontendRoot -Force
+        $swapped = $true
+        Start-Service RhemaERPFrontend
+        Wait-FrontendReady -TimeoutSeconds 600
+
+        $liveBuildId = (Get-Content `
+            (Join-Path $FrontendRoot '.next\BUILD_ID') -Raw).Trim()
+        Assert-True ($liveBuildId -eq $ExpectedBuildId) `
+            'The live frontend build differs from the expected release.'
+        $release = [ordered]@{
+            deploymentId = $DeploymentId
+            commit = $ExpectedCommit
+            buildId = $ExpectedBuildId
+            cacheVersion = $ExpectedCacheVersion
+            deployedUtc = [DateTime]::UtcNow.ToString('o')
+            apiSha256 = $ApiSha256
+            frontendSha256 = $FrontendSha256
+        }
+        [System.IO.File]::WriteAllText(
+            (Join-Path $LogsRoot 'current-release.json'),
+            ($release | ConvertTo-Json -Depth 4),
+            (New-Object System.Text.UTF8Encoding($false)))
+    }
+    catch {
+        $failure = $_.Exception.Message
+        if ($swapped) {
+            Stop-Service RhemaERPFrontend -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $retryFailed -Force | Out-Null
+            foreach ($name in @('.next', 'public')) {
+                $livePath = Join-Path $FrontendRoot $name
+                if (Test-Path $livePath) {
+                    Move-Item $livePath (Join-Path $retryFailed $name) -Force
+                }
+                $oldPath = Join-Path $rollbackFrontend $name
+                if (Test-Path $oldPath) { Move-Item $oldPath $livePath }
+            }
+            Copy-Item (Join-Path $rollbackFrontend 'server.js'), `
+                (Join-Path $rollbackFrontend 'package.json') `
+                -Destination $FrontendRoot -Force
+            Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
+        }
+        throw "Frontend retry failed and rollback was attempted: $failure"
+    }
+
+    Write-Output 'RESUME_FRONTEND|PASS'
+}
+
 function Invoke-Verify {
+    Assert-SyncfusionLicenseConfigured
     Write-ServiceState
     $notRunning = @(Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
         Where-Object { $_.Status -ne 'Running' })
@@ -854,5 +1264,6 @@ switch ($Action) {
     'Preflight' { Invoke-Preflight }
     'Backup' { Invoke-Backup }
     'Apply' { Invoke-Apply }
+    'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
 }

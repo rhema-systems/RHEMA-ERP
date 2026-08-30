@@ -406,6 +406,16 @@ export const currencyService = {
   },
 };
 
+// Procurement consumes the Finance-owned currency master through a narrowly
+// scoped Procurement projection. This avoids requiring operational Procurement
+// users to hold the unrelated finance.view permission.
+export const procurementCurrencyService = {
+  getActive: async (): Promise<CurrencyListDto[]> => {
+    const response = await api.get<CurrencyApiDto[]>('/procurement/reference-data/currencies');
+    return normalizeCurrencyList(response ?? []);
+  },
+};
+
 const financeCommonService = {
   paymentTerms: paymentTermService,
   currencies: currencyService,

@@ -28,6 +28,8 @@ export const procurementAppSubmissionService = {
     ),
   get: (id: string) =>
     apiService.get<ProcurementAppSubmission>(`${root}/${id}`),
+  downloadExport: (id: string) =>
+    apiService.downloadBlob(`${root}/${id}/export-file`),
   recordExport: (request: RecordProcurementAppExport) =>
     apiService.post<ProcurementAppSubmission>(`${root}/exports`, request),
   submit: (id: string, request: SubmitProcurementApp) =>

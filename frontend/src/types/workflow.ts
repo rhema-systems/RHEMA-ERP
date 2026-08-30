@@ -381,6 +381,7 @@ export interface WorkflowEntitySummaryDto {
   entityType: string;
   entityId: string;
   hasActiveInstance: boolean;
+  approvalRequired: boolean;
   workflowInstanceId?: string;
   workflowName?: string;
   status?: WorkflowInstanceStatus;

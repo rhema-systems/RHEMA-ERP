@@ -215,6 +215,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         // - Not blacklisted
         var query = _dbSet.Where(bp =>
             !bp.IsDeleted &&
+            bp.IsActive &&
             !bp.IsBlacklisted &&
             bp.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
             (bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
@@ -232,6 +233,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         var query = _dbSet.Where(bp =>
             bp.IsPreferred &&
             !bp.IsDeleted &&
+            bp.IsActive &&
             !bp.IsBlacklisted &&
             bp.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
             (bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||

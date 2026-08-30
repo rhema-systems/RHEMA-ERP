@@ -40,7 +40,9 @@ public interface IEvaluationTemplateService
     /// <summary>
     /// Get active templates for dropdown (minimal data)
     /// </summary>
-    Task<IEnumerable<EvaluationTemplateListItemDto>> GetActiveForDropdownAsync();
+    Task<IEnumerable<EvaluationTemplateListItemDto>> GetActiveForDropdownAsync(
+        string? category = null,
+        string? tenderType = null);
 
     /// <summary>
     /// Get the default template for a category and tender type

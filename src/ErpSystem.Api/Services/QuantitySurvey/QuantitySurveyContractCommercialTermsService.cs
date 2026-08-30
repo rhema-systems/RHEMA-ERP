@@ -259,8 +259,8 @@ public sealed class QuantitySurveyContractCommercialTermsService(
 
     private async Task RequireProjectAccessAsync(Guid projectId)
     {
-        _ = await projectService.GetProjectByIdAsync(projectId)
-            ?? throw new UnauthorizedAccessException("The governed project is outside the current user scope.");
+        if (!await projectService.HasProjectAccessAsync(projectId))
+            throw new UnauthorizedAccessException("The governed project is outside the current user scope.");
     }
 
     private async Task<PaymentTerm> RequirePaymentTermAsync(Guid id, CancellationToken token) =>

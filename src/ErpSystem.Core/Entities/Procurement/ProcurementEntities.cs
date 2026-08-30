@@ -227,7 +227,7 @@ public class PurchaseOrder : TenantEntity
     public DateTime? ReceivedDate { get; set; }
 
     // Status and Approval
-    [MaxLength(20)]
+    [MaxLength(50)]
     public string Status { get; set; } = "Draft"; // Draft, Approved, Sent, Acknowledged, PartiallyReceived, Received, Cancelled
 
     public Guid? RequestedById { get; set; }
@@ -880,6 +880,13 @@ public class PurchaseRequisitionItem : TenantEntity
 
     public Guid? InventoryItemId { get; set; } // Can be null for non-inventory items
 
+    /// <summary>
+    /// Exact approved procurement-plan item that originated this requisition
+    /// line. Multi-line requisitions retain one lineage reference per line while
+    /// the requisition header keeps the primary item for legacy integrations.
+    /// </summary>
+    public Guid? SourcePlanItemId { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string ItemDescription { get; set; } = string.Empty;
@@ -917,6 +924,7 @@ public class PurchaseRequisitionItem : TenantEntity
     public virtual BusinessPartner? PreferredBusinessPartner { get; set; }
     public virtual PurchaseOrder? PurchaseOrder { get; set; }
     public virtual InventoryItem? InventoryItem { get; set; }
+    public virtual ProcurementPlanItem? SourcePlanItem { get; set; }
 }
 
 #endregion

@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using FluentAssertions;
@@ -97,6 +98,13 @@ public sealed class InventoryPhysicalCountControlTests : IDisposable
         source.Should().Contain("legacy single-approval path is disabled");
         source.Should().Contain("legacy direct quantity overwrite path is disabled");
         source.Should().Contain("IsSystemQuantityVisible");
+    }
+
+    [Fact]
+    public void Stock_taking_evidence_category_always_requires_a_clean_scan()
+    {
+        ControlledFileUploadCategories.SystemCleanScanRequired.Should().Contain(
+            ControlledFileUploadCategories.InventoryStockTakingEvidence);
     }
 
     private static string FindRepositoryRoot()

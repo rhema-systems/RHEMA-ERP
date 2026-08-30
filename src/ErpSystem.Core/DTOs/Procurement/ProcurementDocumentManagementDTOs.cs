@@ -10,7 +10,8 @@ public enum ProcurementDocumentFamily
     GoodsReceiptNote = 5,
     MaterialReceiptNote = 6,
     VendorInvoice = 7,
-    Disposal = 8
+    Disposal = 8,
+    Requisition = 9
 }
 public sealed class ProcurementDocumentFamilyDto
 {

@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Api.Controllers.Inventory;
@@ -15,11 +17,13 @@ namespace ErpSystem.Api.Controllers.Inventory;
 [Authorize]
 public class WarehouseItemsController : ControllerBase
 {
+    private const string ManagePermission = "procurement.inventory.master-data.manage";
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IProcurementAccessControlService _accessControl;
     private readonly ILogger<WarehouseItemsController> _logger;
 
     public WarehouseItemsController(
@@ -28,6 +32,7 @@ public class WarehouseItemsController : ControllerBase
         IInventoryItemRepository inventoryItemRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IProcurementAccessControlService accessControl,
         ILogger<WarehouseItemsController> logger)
     {
         _warehouseQuantityRepository = warehouseQuantityRepository;
@@ -35,6 +40,7 @@ public class WarehouseItemsController : ControllerBase
         _inventoryItemRepository = inventoryItemRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _accessControl = accessControl;
         _logger = logger;
     }
 
@@ -115,6 +121,9 @@ public class WarehouseItemsController : ControllerBase
     {
         try
         {
+            if (!await HasMutationPermissionAsync("warehouse-item-assignment"))
+                return Forbid();
+
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
@@ -156,8 +165,8 @@ public class WarehouseItemsController : ControllerBase
                         TenantId = tenantId,
                         WarehouseId = warehouseId,
                         InventoryItemId = itemId,
-                        CurrentStock = dto.InitialQuantity,
-                        AvailableStock = dto.InitialQuantity,
+                        CurrentStock = 0,
+                        AvailableStock = 0,
                         AllocatedStock = 0,
                         ReorderLevel = dto.ReorderLevel,
                         MaxStock = dto.MaxStock,
@@ -186,13 +195,17 @@ public class WarehouseItemsController : ControllerBase
     }
 
     /// <summary>
-    /// Updates quantity for a warehouse item
+    /// Updates stocking parameters for a warehouse item. Quantity changes must
+    /// use a governed inventory transaction.
     /// </summary>
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<WarehouseItemDto>> UpdateQuantity(Guid id, [FromBody] UpdateWarehouseItemDto dto)
+    public async Task<ActionResult<WarehouseItemDto>> UpdateMetadata(Guid id, [FromBody] UpdateWarehouseItemDto dto)
     {
         try
         {
+            if (!await HasMutationPermissionAsync($"warehouse-item:{id:N}:metadata"))
+                return Forbid();
+
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
@@ -200,26 +213,16 @@ public class WarehouseItemsController : ControllerBase
             if (item == null)
                 return NotFound($"Warehouse item with ID {id} not found");
 
-            // Calculate the change in stock
-            var stockChange = dto.CurrentStock - item.CurrentStock;
-
-            item.CurrentStock = dto.CurrentStock;
-            item.AvailableStock = dto.CurrentStock - item.AllocatedStock;
             item.ReorderLevel = dto.ReorderLevel;
             item.MaxStock = dto.MaxStock;
             item.Notes = dto.Notes;
             item.LastModifiedById = _currentUserProvider.UserId;
             item.UpdatedAt = DateTime.UtcNow;
 
-            if (stockChange != 0)
-            {
-                item.LastMovementDate = DateTime.UtcNow;
-            }
-
             await _warehouseQuantityRepository.UpdateAsync(item);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Updated warehouse item {Id}, stock changed by {Change}", id, stockChange);
+            _logger.LogInformation("Updated stocking parameters for warehouse item {Id}", id);
             return Ok(MapToDto(item));
         }
         catch (Exception ex)
@@ -237,12 +240,22 @@ public class WarehouseItemsController : ControllerBase
     {
         try
         {
+            if (!await HasMutationPermissionAsync($"warehouse-item:{id:N}:delete"))
+                return Forbid();
+
             var item = await _warehouseQuantityRepository.GetByIdAsync(id);
             if (item == null)
                 return NotFound($"Warehouse item with ID {id} not found");
 
-            if (item.AllocatedStock > 0)
-                return BadRequest("Cannot remove item with allocated stock. Release allocations first.");
+            if (item.CurrentStock != 0 || item.AvailableStock != 0 || item.AllocatedStock != 0)
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Warehouse assignment is not empty",
+                    Detail = "Only an empty warehouse assignment can be removed. Complete the governed stock transfer, issue, return, or adjustment first.",
+                    Instance = HttpContext.Request.Path,
+                    Extensions = { ["code"] = "WAREHOUSE_ITEM_BALANCE_NOT_ZERO" }
+                });
 
             item.IsDeleted = true;
             item.DeletedAt = DateTime.UtcNow;
@@ -257,6 +270,24 @@ public class WarehouseItemsController : ControllerBase
         {
             _logger.LogError(ex, "Error removing warehouse item {Id}", id);
             return StatusCode(500, "An error occurred while removing the warehouse item");
+        }
+    }
+
+    private async Task<bool> HasMutationPermissionAsync(string sourceReference)
+    {
+        try
+        {
+            var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = ManagePermission,
+                SourceType = "WarehouseItemAssignment",
+                SourceReference = sourceReference
+            }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+            return decision.Allowed;
+        }
+        catch (Exception exception) when (exception is ProcurementAccessAuthorizationException or ProcurementAccessValidationException)
+        {
+            return false;
         }
     }
 
@@ -326,17 +357,12 @@ public class BulkAssignItemsDto
     [MinLength(1, ErrorMessage = "At least one warehouse is required")]
     public List<Guid> WarehouseIds { get; set; } = new();
 
-    public decimal InitialQuantity { get; set; } = 0;
     public decimal ReorderLevel { get; set; } = 0;
     public decimal MaxStock { get; set; } = 0;
 }
 
 public class UpdateWarehouseItemDto
 {
-    [Required]
-    [Range(0, double.MaxValue, ErrorMessage = "Current stock must be non-negative")]
-    public decimal CurrentStock { get; set; }
-
     [Range(0, double.MaxValue)]
     public decimal ReorderLevel { get; set; }
 

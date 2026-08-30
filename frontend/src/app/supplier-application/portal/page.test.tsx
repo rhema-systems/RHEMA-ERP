@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   recordPayment: vi.fn(),
   uploadDocument: vi.fn(),
+  deleteDocument: vi.fn(),
   clearSession: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ vi.mock('@/services/procurement-supplier-applicant-access.service', () => ({
     submit: mocks.submit,
     recordPayment: mocks.recordPayment,
     uploadDocument: mocks.uploadDocument,
+    deleteDocument: mocks.deleteDocument,
     clearSession: mocks.clearSession,
   },
 }));
@@ -102,6 +104,7 @@ describe('supplier applicant evidence uploads', () => {
     mocks.updateApplication.mockResolvedValue(portal);
     mocks.submit.mockResolvedValue({ ...portal, status: 'Submitted' });
     mocks.uploadDocument.mockResolvedValue({});
+    mocks.deleteDocument.mockResolvedValue(undefined);
   });
 
   it('keeps the submit action visible above every portal tab', async () => {
@@ -215,6 +218,45 @@ describe('supplier applicant evidence uploads', () => {
     expect(form.get('classificationCode')).toBe('Current');
     expect(form.get('issueDate')).toBe('2026-07-01');
     expect(form.get('expiryDate')).toBe('2027-07-01');
+  });
+
+  it('lets the applicant confirm and delete an uploaded document while the application is editable', async () => {
+    const uploadedDocument = {
+      id: 'document-1',
+      documentName: 'tax-clearance.pdf',
+      documentType: 'TaxClearance',
+      fileSize: 2048,
+      isVerified: false,
+      isRejected: false,
+      evidenceRequirementCode: 'SUP-TAX',
+    };
+    mocks.portal
+      .mockResolvedValueOnce({ ...portal, documents: [uploadedDocument] })
+      .mockResolvedValueOnce(portal);
+
+    render(<SupplierApplicantPortalPage />);
+
+    await screen.findByText('REG-001');
+    const documentsTab = screen.getByRole('tab', { name: 'Documents' });
+    fireEvent.mouseDown(documentsTab, { button: 0, ctrlKey: false });
+    fireEvent.click(documentsTab);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Delete tax-clearance.pdf',
+      })
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Delete uploaded document?' })
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete document' })
+    );
+
+    await waitFor(() =>
+      expect(mocks.deleteDocument).toHaveBeenCalledWith('document-1')
+    );
+    await waitFor(() => expect(mocks.portal).toHaveBeenCalledTimes(2));
   });
 
   it('presents payment first and locks every downstream tab until verification', async () => {

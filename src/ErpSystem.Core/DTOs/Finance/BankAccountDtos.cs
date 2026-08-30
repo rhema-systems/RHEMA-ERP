@@ -65,6 +65,7 @@ public class BankAccountBalanceDto
 
 public class CashPositionSummaryDto
 {
+    public DateTime AsOfDate { get; set; }
     public decimal TotalBalance { get; set; }
     public string Currency { get; set; } = "GHS";
     public int AccountCount { get; set; }
@@ -82,6 +83,10 @@ public class CashPositionByAccountTypeDto
 public class CashPositionByCurrencyDto
 {
     public string Currency { get; set; } = "GHS";
+    /// <summary>
+    /// Functional-currency GL balance for bank accounts whose native currency matches Currency.
+    /// This is a base-equivalent reporting amount, not a sum of native-currency bank snapshots.
+    /// </summary>
     public decimal Balance { get; set; }
     public int Count { get; set; }
 }

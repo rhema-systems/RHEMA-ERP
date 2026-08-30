@@ -228,8 +228,8 @@ export default function DataRetentionAdminPage() {
             <ShieldCheck className="h-5 w-5" /> Audit event coverage
           </CardTitle>
           <CardDescription>
-            Shared semantic coverage used by procurement, inventory, and future
-            module contributors.
+            Shared semantic coverage used by procurement, inventory, Quantity
+            Survey, and Civil Engineering.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -118,6 +118,24 @@ public class StockAdjustmentsController : ControllerBase
     }
 
     /// <summary>
+    /// Returns only active, tenant-owned opening-stock master-data evidence within the actor's
+    /// Inventory adjustment scope. Finance book/account ownership remains outside this projection.
+    /// </summary>
+    [HttpGet("opening-stock/options")]
+    public async Task<ActionResult<OpeningStockOptionsDto>> GetOpeningStockOptions(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _adjustmentService.GetOpeningStockOptionsAsync(GetCurrentUserId(), cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Creates a new stock adjustment
     /// </summary>
     [HttpPost]
@@ -141,6 +159,33 @@ public class StockAdjustmentsController : ControllerBase
         {
             _logger.LogError(ex, "Error creating stock adjustment");
             return StatusCode(500, "An error occurred while creating the stock adjustment");
+        }
+    }
+
+    /// <summary>
+    /// Creates an immutable, governed opening-stock schedule. Inventory owns canonical item,
+    /// warehouse, location, quantity and unit-cost evidence; Finance derives the mapped journal at post.
+    /// </summary>
+    [HttpPost("opening-stock")]
+    public async Task<ActionResult<StockAdjustmentDetailDto>> CreateOpeningStock(
+        [FromBody] CreateOpeningStockAdjustmentDto dto)
+    {
+        try
+        {
+            var adjustment = await _adjustmentService.CreateOpeningStockAsync(dto, GetCurrentUserId());
+            return CreatedAtAction(nameof(GetById), new { id = adjustment.Id }, adjustment);
+        }
+        catch (StockAdjustmentIdempotencyConflictException ex)
+        {
+            return Conflict(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 

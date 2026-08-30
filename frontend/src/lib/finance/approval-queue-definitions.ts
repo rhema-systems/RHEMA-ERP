@@ -36,6 +36,29 @@ function normalizeEntityType(entityType?: string | null): string {
     return (entityType || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 }
 
+const DEFAULT_FINANCE_APPROVAL_CURRENCY = 'GHS';
+
+export function normalizeFinanceApprovalCurrencyCode(currencyCode?: string | null): string {
+    const normalized = currencyCode?.trim().toUpperCase();
+    if (!normalized || !/^[A-Z]{3}$/.test(normalized)) {
+        return DEFAULT_FINANCE_APPROVAL_CURRENCY;
+    }
+
+    try {
+        if (typeof Intl.supportedValuesOf === 'function' && !Intl.supportedValuesOf('currency').includes(normalized)) {
+            return DEFAULT_FINANCE_APPROVAL_CURRENCY;
+        }
+
+        new Intl.NumberFormat('en-GH', {
+            style: 'currency',
+            currency: normalized,
+        });
+        return normalized;
+    } catch {
+        return DEFAULT_FINANCE_APPROVAL_CURRENCY;
+    }
+}
+
 function toMetadata(row: FinanceWorkflowApprovalQueueItem): ApprovalQueueItem['metadata'] {
     const metadata: ApprovalQueueItem['metadata'] = [
         { label: 'Step', value: row.currentStep || 'Approval' },
@@ -69,7 +92,7 @@ function toWorkflowApprovalItem(row: FinanceWorkflowApprovalQueueItem): Approval
         statusLabel: row.statusLabel || 'Pending Approval',
         date: row.submittedAt,
         amount: Number.isFinite(amount) ? amount : null,
-        currencyCode: row.currencyCode || 'GHS',
+        currencyCode: normalizeFinanceApprovalCurrencyCode(row.currencyCode),
         submittedBy: row.submittedBy,
         canApprove: row.canApprove,
         canReject: row.canReject,

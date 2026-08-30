@@ -63,6 +63,20 @@ public class FinanceControlledDocumentIssue : TenantEntity
     [MaxLength(100)]
     public string ContentType { get; set; } = "application/pdf";
 
+    /// <summary>
+    /// Private object-storage location of the exact emitted PDF. Older issue rows may be
+    /// hash-only; new retained statutory documents must populate all storage fields.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? StoragePath { get; set; }
+
+    [MaxLength(100)]
+    public string? StorageProvider { get; set; }
+
+    public long? FileSize { get; set; }
+
+    public DateTime? RetainUntilUtc { get; set; }
+
     public Guid? JournalEntryId { get; set; }
 
     public virtual ApplicationUser IssuedBy { get; set; } = null!;

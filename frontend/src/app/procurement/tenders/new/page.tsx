@@ -8,9 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, ArrowRight, Save, FileText, Package, Upload, DollarSign, Users, CheckCircle2, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { tenderService, type CreateTenderDto, type CreateTenderItemDto, type TenderDocumentDto, type CreateTenderLotDto, type TenderLotDto } from '@/services/tenderService';
+import { tenderService, type CreateTenderItemDto, type TenderDocumentDto, type CreateTenderLotDto, type TenderLotDto } from '@/services/tenderService';
 import { purchasingService, type PurchaseRequisitionDetailDto } from '@/services/purchasingService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  buildCreateTenderDto,
+  buildUpdateTenderDto,
+} from '@/lib/tender-form-payload';
 
 // Import step components (we'll create these)
 import BasicInformation from '@/components/procurement/tenders/BasicInformation';
@@ -468,31 +472,11 @@ function NewTenderPageContent() {
     if (currentStep === 1 && !tenderId) {
       try {
         setSavingDraft(true);
-        const createDto: CreateTenderDto = {
-          sourcePurchaseRequisitionId: fromRequisitionId || '',
-          title: formData.title,
-          description: formData.description,
-          tenderType: formData.tenderType,
-          submissionDeadline: formData.submissionDeadline || undefined,
-          openingDate: formData.openingDate || undefined,
-          estimatedValue: formData.estimatedValue || undefined,
-          currency: formData.currency,
-          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
-          requiresPrequalification: formData.requiresPrequalification,
-          allowPartialBids: formData.allowPartialBids,
-          priceWeightage: formData.priceWeightage,
-          qualityWeightage: formData.qualityWeightage,
-          deliveryWeightage: formData.deliveryWeightage,
-          experienceWeightage: formData.experienceWeightage,
-          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
-          notes: formData.notes || undefined,
-          termsAndConditions: formData.termsAndConditions || undefined,
-          requiredDocuments: formData.documentRequirements.length > 0
-            ? JSON.stringify(formData.documentRequirements)
-            : undefined,
-          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-          items: fromRequisitionId ? [] : formData.items,
-        };
+        const createDto = buildCreateTenderDto(
+          formData,
+          fromRequisitionId || '',
+          !fromRequisitionId
+        );
 
         const result = await tenderService.createTender(createDto);
         setTenderId(result.id);
@@ -551,28 +535,7 @@ function NewTenderPageContent() {
 
       if (tenderId) {
         // Update existing tender - basic information
-        const updateDto = {
-          title: formData.title,
-          description: formData.description,
-          submissionDeadline: formData.submissionDeadline || undefined,
-          openingDate: formData.openingDate || undefined,
-          estimatedValue: formData.estimatedValue || undefined,
-          currency: formData.currency,
-          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
-          requiresPrequalification: formData.requiresPrequalification,
-          allowPartialBids: formData.allowPartialBids,
-          priceWeightage: formData.priceWeightage,
-          qualityWeightage: formData.qualityWeightage,
-          deliveryWeightage: formData.deliveryWeightage,
-          experienceWeightage: formData.experienceWeightage,
-          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
-          notes: formData.notes || undefined,
-          termsAndConditions: formData.termsAndConditions || undefined,
-          requiredDocuments: formData.documentRequirements.length > 0
-            ? JSON.stringify(formData.documentRequirements)
-            : undefined,
-          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-        };
+        const updateDto = buildUpdateTenderDto(formData);
 
         console.log('Saving draft for tender:', tenderId);
         console.log('Current items in form state:', formData.items);
@@ -628,31 +591,11 @@ function NewTenderPageContent() {
         toast.success('Draft updated successfully');
       } else {
         // Create new tender with items
-        const createDto: CreateTenderDto = {
-          sourcePurchaseRequisitionId: fromRequisitionId || '',
-          title: formData.title,
-          description: formData.description,
-          tenderType: formData.tenderType,
-          submissionDeadline: formData.submissionDeadline || undefined,
-          openingDate: formData.openingDate || undefined,
-          estimatedValue: formData.estimatedValue || undefined,
-          currency: formData.currency,
-          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
-          requiresPrequalification: formData.requiresPrequalification,
-          allowPartialBids: formData.allowPartialBids,
-          priceWeightage: formData.priceWeightage,
-          qualityWeightage: formData.qualityWeightage,
-          deliveryWeightage: formData.deliveryWeightage,
-          experienceWeightage: formData.experienceWeightage,
-          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
-          notes: formData.notes || undefined,
-          termsAndConditions: formData.termsAndConditions || undefined,
-          requiredDocuments: formData.documentRequirements.length > 0
-            ? JSON.stringify(formData.documentRequirements)
-            : undefined,
-          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-          items: fromRequisitionId ? [] : formData.items,
-        };
+        const createDto = buildCreateTenderDto(
+          formData,
+          fromRequisitionId || '',
+          !fromRequisitionId
+        );
 
         const result = await tenderService.createTender(createDto);
         setTenderId(result.id);
@@ -739,31 +682,11 @@ function NewTenderPageContent() {
       // Create tender if not already created
       if (!finalTenderId) {
         console.log('🔵 No tender ID yet, creating new tender...');
-        const createDto: CreateTenderDto = {
-          sourcePurchaseRequisitionId: fromRequisitionId || '',
-          title: formData.title,
-          description: formData.description,
-          tenderType: formData.tenderType,
-          submissionDeadline: formData.submissionDeadline || undefined,
-          openingDate: formData.openingDate || undefined,
-          estimatedValue: formData.estimatedValue || undefined,
-          currency: formData.currency,
-          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
-          requiresPrequalification: formData.requiresPrequalification,
-          allowPartialBids: formData.allowPartialBids,
-          priceWeightage: formData.priceWeightage,
-          qualityWeightage: formData.qualityWeightage,
-          deliveryWeightage: formData.deliveryWeightage,
-          experienceWeightage: formData.experienceWeightage,
-          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
-          notes: formData.notes || undefined,
-          termsAndConditions: formData.termsAndConditions || undefined,
-          requiredDocuments: formData.documentRequirements.length > 0
-            ? JSON.stringify(formData.documentRequirements)
-            : undefined,
-          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-          items: fromRequisitionId ? [] : formData.items,
-        };
+        const createDto = buildCreateTenderDto(
+          formData,
+          fromRequisitionId || '',
+          !fromRequisitionId
+        );
 
         console.log('🔵 createDto:', createDto);
         const result = await tenderService.createTender(createDto);
@@ -819,7 +742,11 @@ function NewTenderPageContent() {
 
     switch (currentStep) {
       case 1:
-        return <BasicInformation formData={formData} updateFormData={updateFormData} />;
+        return <BasicInformation
+          formData={formData}
+          updateFormData={updateFormData}
+          procurementCategory={sourceRequisition?.procurementCategory}
+        />;
       case 2:
         return <TenderLots formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 3:

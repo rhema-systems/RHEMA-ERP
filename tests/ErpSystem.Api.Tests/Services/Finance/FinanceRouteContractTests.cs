@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ErpSystem.Api.Controllers.Finance;
 using FluentAssertions;
 using Xunit;
 
@@ -63,6 +64,43 @@ public sealed class FinanceRouteContractTests
 
         var documentOutput = File.ReadAllText(checkedFiles[0]);
         documentOutput.Should().Contain("window.location.origin", "relative document render URLs should resolve against the deployed browser origin");
+    }
+
+    [Fact]
+    [Trait("Category", "RouteContract")]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    public void OpeningBalanceApprovalWithoutDisplayRoute_ShouldDeepLinkToRequestedBatch()
+    {
+        var batchId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+        var result = FinanceApprovalsController.ResolveDetailHref(
+            "OpeningBalanceBatch",
+            batchId,
+            displayUrl: null);
+
+        result.Should().Be(
+            "/finance/opening-balances?batchId=11111111-2222-3333-4444-555555555555");
+    }
+
+    [Theory]
+    [Trait("Category", "RouteContract")]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [InlineData("VendorInvoice", "/finance/ap/invoices/ap-invoice-1")]
+    [InlineData("Invoice", "/finance/ar/invoices/ar-invoice-1")]
+    [InlineData("OpeningBalanceBatch", "/future/canonical/opening-balance-route")]
+    public void ExistingDisplayRoute_ShouldRemainAuthoritative(string entityType, string displayUrl)
+    {
+        FinanceApprovalsController.ResolveDetailHref(entityType, Guid.NewGuid(), displayUrl)
+            .Should().Be(displayUrl);
+    }
+
+    [Fact]
+    [Trait("Category", "RouteContract")]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    public void UnknownApprovalWithoutDisplayRoute_ShouldRemainInFinanceWorkbench()
+    {
+        FinanceApprovalsController.ResolveDetailHref("FutureFinanceDocument", Guid.NewGuid(), "   ")
+            .Should().Be("/finance/approvals");
     }
 
     private sealed record FrontendCall(string Verb, string Route, string File);

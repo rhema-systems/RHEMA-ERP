@@ -1005,6 +1005,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 voucher.UpdatedAt = DateTime.UtcNow;
                 voucher.LastModifiedById = _currentUserProvider.UserId;
                 voucher.IntegrityHash = VoucherIntegrity(voucher);
+                // The append-only action trigger validates StatusAfter against the
+                // durable voucher row. Flush the governed parent first inside this
+                // transaction so EF cannot insert the dependent acknowledgement
+                // action before the Acknowledged status update.
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Acknowledged,
                     voucher.Status, normalizedComment, new { idempotencyKey = normalizedKey }, normalizedCorrelation);
                 await AddIssueAuditAsync("InventoryIssueVoucher.Acknowledge", voucher, before,
@@ -1545,9 +1550,26 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     {
         var candidates = requisitions.ToList();
         var readable = new List<InventoryRequisition>();
+        var scopeDecisions = new Dictionary<(Guid WarehouseId, Guid? LocationId), bool>();
         foreach (var requisition in candidates)
         {
-            if (await CanReadRequisitionAsync(requisition))
+            if (requisition.RequestedById == _currentUserProvider.UserId)
+            {
+                readable.Add(requisition);
+                continue;
+            }
+
+            // A list can contain many requisitions for the same stores scope. Resolve the
+            // capability once per distinct scope instead of issuing an authorization query
+            // for every row; the decision inputs are identical for that scope.
+            var scope = (requisition.WarehouseId, requisition.LocationId);
+            if (!scopeDecisions.TryGetValue(scope, out var allowed))
+            {
+                allowed = await CanReadRequisitionAsync(requisition);
+                scopeDecisions.Add(scope, allowed);
+            }
+
+            if (allowed)
                 readable.Add(requisition);
         }
 

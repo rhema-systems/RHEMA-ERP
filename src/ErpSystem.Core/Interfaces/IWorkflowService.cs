@@ -6,6 +6,12 @@ namespace ErpSystem.Core.Interfaces;
 public interface IWorkflowService
 {
     /// <summary>
+    /// Returns true only when the current tenant has an active Published
+    /// approval workflow for the requested entity type.
+    /// </summary>
+    Task<bool> HasActiveApprovalWorkflowAsync(string entityType);
+
+    /// <summary>
     /// Starts an approval workflow for an entity
     /// </summary>
     Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId);

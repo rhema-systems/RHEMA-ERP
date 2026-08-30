@@ -127,7 +127,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             BookClassification = request.BookClassification,
             IncludeZeroBalances = request.IncludeZeroBalances,
             AccountIds = request.AccountIds,
-            SegmentFilters = request.SegmentFilters
+            SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters
         });
 
         var rows = new List<string[]>
@@ -173,6 +174,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             IncludeAccountDetails = request.IncludeAccountDetails,
             AccountIds = request.AccountIds,
             SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters,
             LayoutId = request.LayoutId,
             UseDefaultLayout = request.UseDefaultLayout
         });
@@ -270,6 +272,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             IncludeAccountDetails = request.IncludeAccountDetails,
             AccountIds = request.AccountIds,
             SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters,
             LayoutId = request.LayoutId,
             UseDefaultLayout = request.UseDefaultLayout
         });
@@ -366,12 +369,13 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             BookClassification = request.BookClassification,
             IncludeReversed = request.IncludeReversed,
             IncludeOpeningBalances = request.IncludeOpeningBalances,
-            SegmentFilters = request.SegmentFilters
+            SegmentFilters = request.SegmentFilters,
+            DimensionFilters = request.DimensionFilters
         });
 
         var rows = new List<string[]>
         {
-            new[] { "AccountNumber", "AccountName", "JournalEntryNumber", "TransactionDate", "LineNumber", "Description", "Reference", "SourceModule", "Debit", "Credit", "RunningBalance", "RunningBalanceType", "Segment" }
+            new[] { "AccountNumber", "AccountName", "JournalEntryNumber", "TransactionDate", "LineNumber", "Description", "Reference", "SourceModule", "Debit", "Credit", "RunningBalance", "RunningBalanceType", "Segment", "TransactionDimensions" }
         };
         foreach (var account in report.Accounts)
         {
@@ -389,7 +393,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 Money(line.CreditAmount),
                 Money(line.RunningBalance),
                 line.RunningBalanceType,
-                line.SegmentString ?? string.Empty
+                line.SegmentString ?? string.Empty,
+                line.FinanceDimensionDisplay ?? string.Empty
             }));
         }
 
@@ -423,7 +428,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
 
         var rows = new List<string[]>
         {
-            new[] { "BankAccountNumber", "BankAccountName", "GlAccountNumber", "JournalEntryNumber", "TransactionDate", "Description", "Reference", "SourceDocumentType", "Debit", "Credit", "RunningBalance", "StoredSnapshotBalance", "SnapshotVariance" }
+            new[] { "BankAccountNumber", "BankAccountName", "BankCurrency", "GlAccountNumber", "JournalEntryNumber", "TransactionDate", "Description", "Reference", "SourceDocumentType", "Debit", "Credit", "RunningBalance", "StoredSnapshotBalance", "SnapshotVariance" }
         };
         foreach (var account in report.Accounts)
         {
@@ -431,6 +436,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             {
                 account.BankAccountNumber,
                 account.BankAccountName,
+                account.BankCurrencyCode,
                 account.GlAccountNumber,
                 line.JournalEntryNumber,
                 Date(line.TransactionDate),
@@ -471,7 +477,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
 
         var rows = new List<string[]>
         {
-            new[] { "SupplierName", "InvoiceNumber", "InvoiceDate", "DueDate", "TotalAmount", "SettledAmount", "CreditedAmount", "WithheldAmount", "OutstandingAmount", "AgingBucket", "SettlementStatus", "SourcePostingEventId", "SourceJournalEntryId", "Diagnostics" }
+            new[] { "SupplierName", "InvoiceNumber", "InvoiceDate", "DueDate", "FunctionalCurrency", "FunctionalTotalAmount", "FunctionalSettledAmount", "FunctionalCreditedAmount", "FunctionalWithheldAmount", "FunctionalOutstandingAmount", "DocumentCurrency", "DocumentTotalAmount", "DocumentSettledAmount", "DocumentCreditedAmount", "DocumentWithheldAmount", "DocumentOutstandingAmount", "AgingBucket", "SettlementStatus", "SourcePostingEventId", "SourceJournalEntryId", "Diagnostics" }
         };
         foreach (var supplier in report.SupplierDetails)
         {
@@ -481,11 +487,18 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 invoice.InvoiceNumber,
                 Date(invoice.InvoiceDate),
                 Date(invoice.DueDate),
+                invoice.CurrencyCode,
                 Money(invoice.TotalAmount),
                 Money(invoice.SettledAmount),
                 Money(invoice.CreditedAmount),
                 Money(invoice.WithheldAmount),
                 Money(invoice.BalanceAmount),
+                invoice.DocumentCurrencyCode,
+                Money(invoice.DocumentTotalAmount),
+                Money(invoice.DocumentSettledAmount),
+                Money(invoice.DocumentCreditedAmount),
+                Money(invoice.DocumentWithheldAmount),
+                Money(invoice.DocumentBalanceAmount),
                 invoice.AgingBucket,
                 invoice.SettlementStatus ?? string.Empty,
                 invoice.SourcePostingEventId?.ToString() ?? string.Empty,
@@ -523,7 +536,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
 
         var rows = new List<string[]>
         {
-            new[] { "CustomerName", "InvoiceNumber", "InvoiceDate", "DueDate", "TotalAmount", "PaidAmount", "CreditedAmount", "WithheldAmount", "OutstandingAmount", "AgingBucket", "SettlementStatus", "SourcePostingEventId", "SourceJournalEntryId", "Diagnostics" }
+            new[] { "CustomerName", "InvoiceNumber", "InvoiceDate", "DueDate", "FunctionalCurrency", "FunctionalTotalAmount", "FunctionalPaidAmount", "FunctionalCreditedAmount", "FunctionalWithheldAmount", "FunctionalOutstandingAmount", "DocumentCurrency", "DocumentTotalAmount", "DocumentPaidAmount", "DocumentCreditedAmount", "DocumentWithheldAmount", "DocumentOutstandingAmount", "AgingBucket", "SettlementStatus", "SourcePostingEventId", "SourceJournalEntryId", "Diagnostics" }
         };
         foreach (var customer in report.Customers)
         {
@@ -533,11 +546,18 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 invoice.InvoiceNumber,
                 Date(invoice.InvoiceDate),
                 Date(invoice.DueDate),
+                invoice.CurrencyCode,
                 Money(invoice.TotalAmount),
                 Money(invoice.PaidAmount),
                 Money(invoice.CreditedAmount),
                 Money(invoice.WithheldAmount),
                 Money(invoice.BalanceAmount),
+                invoice.DocumentCurrencyCode,
+                Money(invoice.DocumentTotalAmount),
+                Money(invoice.DocumentPaidAmount),
+                Money(invoice.DocumentCreditedAmount),
+                Money(invoice.DocumentWithheldAmount),
+                Money(invoice.DocumentBalanceAmount),
                 invoice.AgingBucket,
                 invoice.SettlementStatus ?? string.Empty,
                 invoice.SourcePostingEventId?.ToString() ?? string.Empty,
@@ -643,18 +663,28 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             });
         }
 
-        return BuildCsvResult(
-            FinanceReportExportTypes.CustomerStatement,
-            "AR subledger statement of account with opening balance, period movements, and closing balance",
-            rows,
-            report.Customers.Sum(customer => customer.Lines.Count + 2),
-            new Dictionary<string, decimal>
+        var totals = report.CurrencyTotals.Count > 1
+            ? report.CurrencyTotals.SelectMany(total => new Dictionary<string, decimal>
+            {
+                [$"{total.CurrencyCode}.TotalOpeningBalance"] = total.OpeningBalance,
+                [$"{total.CurrencyCode}.TotalDebits"] = total.TotalDebits,
+                [$"{total.CurrencyCode}.TotalCredits"] = total.TotalCredits,
+                [$"{total.CurrencyCode}.TotalClosingBalance"] = total.ClosingBalance
+            }).ToDictionary(pair => pair.Key, pair => pair.Value)
+            : new Dictionary<string, decimal>
             {
                 ["TotalOpeningBalance"] = report.TotalOpeningBalance,
                 ["TotalDebits"] = report.TotalDebits,
                 ["TotalCredits"] = report.TotalCredits,
                 ["TotalClosingBalance"] = report.TotalClosingBalance
-            },
+            };
+
+        return BuildCsvResult(
+            FinanceReportExportTypes.CustomerStatement,
+            "AR subledger statement of account with opening balance, period movements, and closing balance",
+            rows,
+            report.Customers.Sum(customer => customer.Lines.Count + 2),
+            totals,
             report.Warnings);
     }
 
@@ -737,18 +767,28 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             });
         }
 
-        return BuildCsvResult(
-            FinanceReportExportTypes.SupplierStatement,
-            "AP subledger statement of account with opening balance, period movements, and closing balance",
-            rows,
-            report.Suppliers.Sum(supplier => supplier.Lines.Count + 2),
-            new Dictionary<string, decimal>
+        var totals = report.CurrencyTotals.Count > 1
+            ? report.CurrencyTotals.SelectMany(total => new Dictionary<string, decimal>
+            {
+                [$"{total.CurrencyCode}.TotalOpeningBalance"] = total.OpeningBalance,
+                [$"{total.CurrencyCode}.TotalDebits"] = total.TotalDebits,
+                [$"{total.CurrencyCode}.TotalCredits"] = total.TotalCredits,
+                [$"{total.CurrencyCode}.TotalClosingBalance"] = total.ClosingBalance
+            }).ToDictionary(pair => pair.Key, pair => pair.Value)
+            : new Dictionary<string, decimal>
             {
                 ["TotalOpeningBalance"] = report.TotalOpeningBalance,
                 ["TotalDebits"] = report.TotalDebits,
                 ["TotalCredits"] = report.TotalCredits,
                 ["TotalClosingBalance"] = report.TotalClosingBalance
-            },
+            };
+
+        return BuildCsvResult(
+            FinanceReportExportTypes.SupplierStatement,
+            "AP subledger statement of account with opening balance, period movements, and closing balance",
+            rows,
+            report.Suppliers.Sum(supplier => supplier.Lines.Count + 2),
+            totals,
             report.Warnings);
     }
 

@@ -118,4 +118,22 @@ describe('bidder-communication workspace authorization', () => {
       screen.queryByTestId('external-bidder-communication-status')
     ).not.toBeInTheDocument();
   });
+
+  it('shows a neutral pending state when an award communication is not published yet', () => {
+    render(
+      <BidderCommunicationWorkspace
+        sourceType="RequestForQuotation"
+        sourceId="rfq-1"
+        external
+      />
+    );
+
+    expect(
+      screen.getByTestId('external-bidder-communication-pending')
+    ).toHaveTextContent('Award result pending');
+    expect(screen.getByText(/No award communication has been published/)).toBeVisible();
+    expect(
+      screen.queryByTestId('bidder-communication-unavailable')
+    ).not.toBeInTheDocument();
+  });
 });

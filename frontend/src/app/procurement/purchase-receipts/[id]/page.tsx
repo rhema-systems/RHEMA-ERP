@@ -73,6 +73,12 @@ export default function PurchaseReceiptDetailPage() {
   const [landedCostLoading, setLandedCostLoading] = useState(false);
   const [landedCostAllocating, setLandedCostAllocating] = useState(false);
   const [landedCostPosting, setLandedCostPosting] = useState(false);
+  const inspectionCompleted = Boolean(
+    receipt?.requiresInspection &&
+    receipt.inspectionDate &&
+    receipt.inspectionResult &&
+    receipt.inspectionResult.toLowerCase() !== 'pending'
+  );
 
   const getLandedCostTypeLabel = (costType: string | number): string => {
     const value = typeof costType === 'string' ? costType : String(costType);
@@ -327,9 +333,16 @@ export default function PurchaseReceiptDetailPage() {
               <h1 className="text-3xl font-bold">{receipt.receiptNumber}</h1>
               {getStatusBadge(receipt.status)}
               {receipt.requiresInspection && (
-                <Badge variant="outline" className="bg-yellow-50">
-                  <AlertTriangle className="h-3 w-3 mr-1" />
-                  Inspection Required
+                <Badge
+                  variant="outline"
+                  className={inspectionCompleted
+                    ? 'border-green-200 bg-green-50 text-green-800'
+                    : 'bg-yellow-50'}
+                >
+                  {inspectionCompleted
+                    ? <CheckCircle className="h-3 w-3 mr-1" />
+                    : <AlertTriangle className="h-3 w-3 mr-1" />}
+                  {inspectionCompleted ? 'Inspection Complete' : 'Inspection Required'}
                 </Badge>
               )}
             </div>

@@ -10,13 +10,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Calendar, Plus, ChevronRight, Calculator, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { BudgetScenario, CreateBudgetScenarioDto } from '@/types/budget';
-import type { FiscalYear } from '@/types/finance';
+import type { FinanceDimensionDefinition, FiscalYear } from '@/types/finance';
 
 export default function BudgetScenariosPage() {
     const { toast } = useToast();
@@ -24,6 +25,7 @@ export default function BudgetScenariosPage() {
     const canCreateScenario = hasPermission('Finance.Budgeting.Write');
     const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
     const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
+    const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [formData, setFormData] = useState<CreateBudgetScenarioDto>({
@@ -31,6 +33,7 @@ export default function BudgetScenariosPage() {
         description: '',
         fiscalYearId: '',
         baseCurrencyCode: 'GHS',
+        controlDimensionDefinitionIds: [],
     });
 
     useEffect(() => {
@@ -40,8 +43,13 @@ export default function BudgetScenariosPage() {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const fiscalYearsData = await financeDataService.getFiscalYears();
+            const [fiscalYearsData, dimensionsData] = await Promise.all([
+                financeDataService.getFiscalYears(),
+                financeDataService.getFinanceDimensions(true),
+            ]);
             setFiscalYears(fiscalYearsData);
+            setFinanceDimensions(dimensionsData.filter(dimension =>
+                dimension.isActive && dimension.classification !== 'Derived'));
 
             const scenariosData = await budgetDataService.getScenarios(fiscalYearsData);
             setScenarios(scenariosData);
@@ -88,6 +96,7 @@ export default function BudgetScenariosPage() {
                 description: '',
                 fiscalYearId: '',
                 baseCurrencyCode: 'GHS',
+                controlDimensionDefinitionIds: [],
             });
             loadData();
         } catch (error) {
@@ -204,6 +213,43 @@ export default function BudgetScenariosPage() {
                                         />
                                         <p className="text-xs text-muted-foreground">Budgeting always uses the system base currency for consolidation.</p>
                                     </div>
+                                    <div className="space-y-3 rounded-md border p-3">
+                                        <div>
+                                            <Label>Budget-control dimensions</Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                Optional. Every worksheet cell must provide one value for each selected dimension.
+                                                This policy is locked after entries exist.
+                                            </p>
+                                        </div>
+                                        {financeDimensions.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                No active analytical or balancing dimensions are configured.
+                                            </p>
+                                        ) : [...financeDimensions]
+                                            .sort((left, right) => left.displayOrder - right.displayOrder)
+                                            .map(dimension => {
+                                                const selected = formData.controlDimensionDefinitionIds.includes(dimension.id);
+                                                return (
+                                                    <label key={dimension.id} className="flex items-start gap-3 rounded border p-2">
+                                                        <Checkbox
+                                                            checked={selected}
+                                                            onCheckedChange={(checked) => setFormData(current => ({
+                                                                ...current,
+                                                                controlDimensionDefinitionIds: checked
+                                                                    ? [...current.controlDimensionDefinitionIds, dimension.id]
+                                                                    : current.controlDimensionDefinitionIds.filter(id => id !== dimension.id),
+                                                            }))}
+                                                        />
+                                                        <span className="text-sm">
+                                                            <span className="font-medium">{dimension.code} — {dimension.name}</span>
+                                                            <span className="block text-xs text-muted-foreground">
+                                                                {dimension.classification} · {dimension.values.filter(value => value.isActive).length} active values
+                                                            </span>
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
+                                    </div>
                                 </div>
                                 <DialogFooter>
                                     <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -271,6 +317,17 @@ export default function BudgetScenariosPage() {
                                                 <p className="text-sm text-muted-foreground mt-1 italic">
                                                     {scenario.description}
                                                 </p>
+                                            )}
+                                            {scenario.controlDimensions.length > 0 && (
+                                                <div className="mt-2 flex flex-wrap gap-1">
+                                                    {[...scenario.controlDimensions]
+                                                        .sort((left, right) => left.displayOrder - right.displayOrder)
+                                                        .map(dimension => (
+                                                            <Badge key={dimension.financeDimensionDefinitionId} variant="outline">
+                                                                {dimension.dimensionCode}
+                                                            </Badge>
+                                                        ))}
+                                                </div>
                                             )}
                                         </div>
                                     </div>

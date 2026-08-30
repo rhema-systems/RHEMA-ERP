@@ -11,7 +11,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 /// </summary>
 [ApiController]
 [Route("api/procurement/[controller]")]
-[Authorize(Roles = "SuperAdmin,TenantAdmin")]
+[Authorize]
 public class ProcurementSettingsController : ControllerBase
 {
     private readonly IProcurementSettingsService _settingsService;
@@ -32,6 +32,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Get procurement settings for current tenant
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<ProcurementSettingsDto>> GetSettings()
     {
         try
@@ -50,6 +51,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Update procurement settings
     /// </summary>
     [HttpPut]
+    [Authorize(Policy = "procurement.access.manage")]
     public async Task<ActionResult<ProcurementSettingsDto>> UpdateSettings([FromBody] UpdateProcurementSettingsDto dto)
     {
         try
@@ -93,8 +95,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Check if auto-create inventory items is enabled
     /// </summary>
     [HttpGet("auto-create-inventory-items")]
-    [AllowAnonymous] // Allow all authenticated users to check this setting
-    [Authorize]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> ShouldAutoCreateInventoryItems()
     {
         try
@@ -113,8 +114,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Check if auto-create supplier items is enabled
     /// </summary>
     [HttpGet("auto-create-supplier-items")]
-    [AllowAnonymous] // Allow all authenticated users to check this setting
-    [Authorize]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> ShouldAutoCreateSupplierItems()
     {
         try
@@ -133,8 +133,7 @@ public class ProcurementSettingsController : ControllerBase
     /// Check if non-inventory items are allowed
     /// </summary>
     [HttpGet("allow-non-inventory-items")]
-    [AllowAnonymous] // Allow all authenticated users to check this setting
-    [Authorize]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<bool>> AllowNonInventoryItems()
     {
         try

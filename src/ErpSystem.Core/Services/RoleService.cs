@@ -9,6 +9,7 @@ namespace ErpSystem.Core.Services;
 public interface IRoleService
 {
     Task<IEnumerable<ApplicationRole>> GetAllRolesAsync();
+    Task<IReadOnlyList<ApplicationRole>> GetRolesForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
     Task<ApplicationRole?> GetRoleByIdAsync(Guid roleId);
     Task<ApplicationRole?> GetRoleByNameAsync(string roleName);
     Task<ApplicationRole> CreateRoleAsync(ApplicationRole role);
@@ -39,6 +40,32 @@ public class RoleService : IRoleService
         return await _roleManager.Roles
             .OrderBy(r => r.Name)
             .ToListAsync();
+    }
+
+    public async Task<IReadOnlyList<ApplicationRole>> GetRolesForTenantAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        if (tenantId == Guid.Empty) return Array.Empty<ApplicationRole>();
+
+        var now = DateTime.UtcNow;
+        var roleIds = await _userManager.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive &&
+                (user.TenantId == tenantId || user.UserTenants.Any(link =>
+                    link.TenantId == tenantId &&
+                    !link.IsDeleted &&
+                    link.Status == UserTenantStatus.Active &&
+                    (!link.ExpiresAt.HasValue || link.ExpiresAt.Value > now))))
+            .SelectMany(user => user.UserRoles.Select(link => link.RoleId))
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return await _roleManager.Roles
+            .AsNoTracking()
+            .Where(role => roleIds.Contains(role.Id))
+            .OrderBy(role => role.Name)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<ApplicationRole?> GetRoleByIdAsync(Guid roleId)

@@ -640,7 +640,7 @@ public sealed class FinanceConcurrencyHardeningTests
         var atomicMethod = ExtractMember(
             source,
             "private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync",
-            "private IQueryable<WorkflowApproval> QueryPendingApprovals");
+            "internal IQueryable<WorkflowApproval> QueryPendingApprovals");
 
         processMethod.Should().Contain("ProcessWorkflowAndOutcomeAtomicallyAsync",
             "controller actions must not finalize workflow state separately from the Finance outcome");

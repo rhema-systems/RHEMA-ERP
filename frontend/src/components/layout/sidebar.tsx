@@ -20,6 +20,7 @@ import {
   X,
   Shield,
   FileText,
+  FileInput,
   Scale,
   Banknote,
   Globe,
@@ -42,6 +43,7 @@ import {
   Wrench,
   Calendar,
   ClipboardCheck,
+  ClipboardPlus,
   AlertTriangle,
   Clock,
   CheckSquare,
@@ -168,10 +170,13 @@ export const navigationItems: NavItem[] = [
             icon: Repeat2,
           },
           {
+            // Opening balances are a controlled operational lifecycle (prepare,
+            // validate, approve and post), not stable Finance setup. Keep the
+            // workspace discoverable beside the journals it ultimately creates.
             title: 'Opening Balances',
             href: '/finance/opening-balances',
             icon: Database,
-            navigationSurface: 'settings',
+            permissions: ['Finance.Read'],
           },
           {
             title: 'Journal Approval Queue',
@@ -344,6 +349,12 @@ export const navigationItems: NavItem[] = [
             title: 'Supplier Returns',
             href: '/finance/ap/returns',
             icon: RotateCcw,
+          },
+          {
+            title: 'Supplier Debit Notes',
+            href: '/finance/ap/supplier-debit-notes',
+            icon: Receipt,
+            permissions: ['Finance.Read'],
           },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
           {
@@ -1021,72 +1032,249 @@ export const navigationItems: NavItem[] = [
     title: 'Projects',
     href: '/development/projects',
     icon: Briefcase,
-    permissions: ['project.access'],
     children: [
-      { title: 'Projects', href: '/development/projects', icon: Briefcase },
+      {
+        title: 'Projects',
+        href: '/development/projects',
+        icon: Briefcase,
+        permissions: ['project.access'],
+      },
       {
         title: 'Town Planning',
         href: '/development/planning',
         icon: MapPin,
+        permissions: ['project.access'],
         children: [
-          { title: 'Planning Dashboard', href: '/development/planning/dashboard', icon: BarChart3 },
-          { title: 'SOP Procedures', href: '/development/planning', icon: ClipboardList },
-          { title: 'Workflow Setup', href: '/administration/workflow?q=Planning', icon: Workflow },
-          { title: 'Documents', href: '/document-management?module=Planning', icon: FileText },
-          { title: 'Reports', href: '/reports?module=planning', icon: FileCheck },
+          {
+            title: 'Planning Dashboard',
+            href: '/development/planning/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'SOP Procedures',
+            href: '/development/planning',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Workflow Setup',
+            href: '/administration/workflow?q=Planning',
+            icon: Workflow,
+          },
+          {
+            title: 'Documents',
+            href: '/document-management?module=Planning',
+            icon: FileText,
+          },
+          {
+            title: 'Reports',
+            href: '/reports?module=planning',
+            icon: FileCheck,
+          },
         ],
       },
       {
         title: 'Operations',
         href: '/development/project-operations',
         icon: Activity,
+        permissions: ['project.access'],
       },
       {
         title: 'Portfolios',
         href: '/development/portfolios',
         icon: FolderTree,
+        permissions: ['project.access'],
       },
-      { title: 'Programs', href: '/development/programs', icon: Target },
+      {
+        title: 'Programs',
+        href: '/development/programs',
+        icon: Target,
+        permissions: ['project.access'],
+      },
       {
         title: 'Dependencies',
         href: '/development/project-dependencies',
         icon: AlertCircle,
+        permissions: ['project.access'],
       },
       {
         title: 'Analytics',
         href: '/development/project-analytics',
         icon: TrendingUp,
+        permissions: ['project.access'],
       },
       {
         title: 'Reports',
         href: '/development/project-reports',
         icon: FileCheck,
+        permissions: ['project.access'],
       },
       {
         title: 'Approvals',
         href: '/development/project-approvals',
         icon: ClipboardCheck,
+        permissions: ['project.access'],
       },
       {
         title: 'Billing',
         href: '/development/project-billing',
         icon: DollarSign,
+        permissions: ['project.access'],
       },
       {
         title: 'Materials',
         href: '/development/project-materials',
         icon: Package,
+        permissions: ['project.access'],
       },
       {
         title: 'Mobile',
         href: '/development/project-mobile',
         icon: Smartphone,
+        permissions: ['project.access'],
       },
-      { title: 'Tasks', href: '/development/tasks', icon: FileText },
-      { title: 'Timesheets', href: '/development/timesheets', icon: Clock },
-      { title: 'Expenses', href: '/development/expenses', icon: DollarSign },
-      { title: 'Resources', href: '/development/resources', icon: Users },
-      { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
+      {
+        title: 'Tasks',
+        href: '/development/tasks',
+        icon: FileText,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Timesheets',
+        href: '/development/timesheets',
+        icon: Clock,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Expenses',
+        href: '/development/expenses',
+        icon: DollarSign,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Resources',
+        href: '/development/resources',
+        icon: Users,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Timeline',
+        href: '/development/timeline',
+        icon: BarChart3,
+        permissions: ['project.access'],
+      },
+      {
+        title: 'Civil Engineering',
+        href: '/development/civil-engineering',
+        icon: Building2,
+        children: [
+          {
+            title: 'Design & Delivery',
+            href: '/development/civil-engineering/design-inputs',
+            icon: FileInput,
+            children: [
+              {
+                title: 'Design Inputs',
+                href: '/development/civil-engineering/design-inputs',
+                icon: FileInput,
+                permissions: ['civil-engineering.design-input.respond'],
+              },
+              {
+                title: 'Task Assignments',
+                href: '/development/civil-engineering/direct-tasks',
+                icon: ClipboardList,
+                permissions: ['civil-engineering.workspace.read'],
+              },
+            ],
+          },
+          {
+            title: 'Maintenance',
+            href: '/development/civil-engineering/maintenance-intakes',
+            icon: Wrench,
+            children: [
+              {
+                title: 'Intake',
+                href: '/development/civil-engineering/maintenance-intakes',
+                icon: ClipboardPlus,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Assessments',
+                href: '/development/civil-engineering/maintenance-assessments',
+                icon: ClipboardCheck,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Costing Handoffs',
+                href: '/development/civil-engineering/maintenance-costing-handoffs',
+                icon: DollarSign,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Execution',
+                href: '/development/civil-engineering/maintenance-execution-links',
+                icon: Wrench,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Completion',
+                href: '/development/civil-engineering/maintenance-completion-controls',
+                icon: ClipboardCheck,
+                permissions: ['civil-engineering.maintenance.manage'],
+              },
+              {
+                title: 'Complaint Resolution',
+                href: '/development/civil-engineering/complaint-resolutions',
+                icon: MessageSquare,
+                permissions: ['civil-engineering.workspace.read'],
+              },
+            ],
+          },
+          {
+            title: 'Permitting',
+            href: '/development/civil-engineering/development-approval-files',
+            icon: ShieldCheck,
+            children: [
+              {
+                title: 'Development Approval Files',
+                href: '/development/civil-engineering/development-approval-files',
+                icon: Building2,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+              {
+                title: 'File Handoffs',
+                href: '/development/civil-engineering/development-approval-handoffs',
+                icon: ArrowRightLeft,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+              {
+                title: 'Engineering Reviews',
+                href: '/development/civil-engineering/permitting-engineering-reviews',
+                icon: ClipboardCheck,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+              {
+                title: 'HOD Decisions',
+                href: '/development/civil-engineering/permitting-hod-decisions',
+                icon: ShieldCheck,
+                permissions: ['civil-engineering.permitting.manage'],
+              },
+            ],
+          },
+          {
+            title: 'Administration',
+            href: '/development/civil-engineering/migration-batches',
+            icon: Settings,
+            children: [
+              {
+                title: 'Migration Workbench',
+                href: '/development/civil-engineering/migration-batches',
+                icon: FileCheck,
+                permissions: ['civil-engineering.migration.manage'],
+              },
+            ],
+          },
+        ],
+      },
     ],
   },
   {
@@ -1490,6 +1678,16 @@ export const navigationItems: NavItem[] = [
             title: 'Inventory Transfers',
             href: '/inventory/transfers',
             icon: Package,
+          },
+          {
+            title: 'Supplier Returns',
+            href: '/inventory/supplier-returns',
+            icon: RotateCcw,
+            permissions: [
+              'procurement.inventory.issue',
+              'procurement.inventory.adjust.approve',
+            ],
+            accessMode: 'any',
           },
           {
             title: 'Bin Stock',
@@ -2264,7 +2462,11 @@ export const navigationItems: NavItem[] = [
         icon: ShoppingCart,
       },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
-      { title: 'Quantity Survey Reports', href: '/reports/quantity-survey', icon: Scale },
+      {
+        title: 'Quantity Survey Reports',
+        href: '/reports/quantity-survey',
+        icon: Scale,
+      },
       {
         title: 'Audit & Compliance Reports',
         href: '/reports/audit-compliance',
@@ -2382,6 +2584,12 @@ export const navigationItems: NavItem[] = [
                 title: 'Account Segments',
                 href: '/administration/finance/account-segments',
                 icon: FolderTree,
+              },
+              {
+                title: 'Coding Dimensions',
+                href: '/administration/finance/dimensions',
+                icon: ListTree,
+                permissions: ['Finance.Dimensions.Manage'],
               },
               {
                 title: 'Account Generator',
@@ -2645,7 +2853,7 @@ export const navigationItems: NavItem[] = [
             icon: ShieldCheck,
           },
           {
-            title: 'Executable Policies',
+            title: 'Policy Sets',
             href: '/administration/procurement/policy-sets',
             icon: ShieldCheck,
           },
@@ -2846,6 +3054,7 @@ export const navigationItems: NavItem[] = [
           'admin.project-management',
           'quantity-survey.configuration.read',
           'quantity-survey.workspace.read',
+          'civil-engineering.configuration.read',
         ],
         accessMode: 'any',
         children: [
@@ -2889,6 +3098,12 @@ export const navigationItems: NavItem[] = [
             href: '/administration/project-management/quantity-survey-config',
             icon: ShieldCheck,
             permissions: ['quantity-survey.configuration.read'],
+          },
+          {
+            title: 'Civil Engineering Policy',
+            href: '/administration/project-management/civil-engineering-config',
+            icon: ShieldCheck,
+            permissions: ['civil-engineering.configuration.read'],
           },
           {
             title: 'Quantity Survey Catalogues',

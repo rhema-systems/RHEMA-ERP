@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
 using System.Text;
@@ -945,7 +946,7 @@ public sealed class ProcurementSupplierPerformanceScorecardService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierPerformanceAuthorizationException(
                 "Supplier portal users cannot calculate supplier scorecards.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -964,13 +965,11 @@ public sealed class ProcurementSupplierPerformanceScorecardService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierPerformanceAuthorizationException(
                 "Supplier portal users cannot access performance-scorecard administration.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementSupplierPerformanceAuthorizationException(
-            "A supplier-review, Internal Audit, or TDC procurement role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -981,9 +980,8 @@ public sealed class ProcurementSupplierPerformanceScorecardService :
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") || _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task RecordEventAsync(
         ProcurementSupplierPerformanceScorecard scorecard,

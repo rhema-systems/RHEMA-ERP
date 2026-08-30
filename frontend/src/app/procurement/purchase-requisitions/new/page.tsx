@@ -47,17 +47,32 @@ import {
   purchasingService,
   CreatePurchaseRequisitionDto,
   CreatePurchaseRequisitionItemDto,
+  PurchaseRequisitionLinkageOptionDto,
   PurchaseRequisitionLinkageOptionsDto,
   SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
+import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  PendingPurchaseRequisitionDocument,
+  PurchaseRequisitionDocuments,
+  uploadPendingPurchaseRequisitionDocuments,
+} from '@/components/procurement/PurchaseRequisitionDocuments';
 import {
   EMPTY_REQUISITION_LINKAGE,
+  applyPlanItemToRequisitionLinkage,
   normalizeRequisitionLinkage,
   validateExceptionLinkage,
 } from '@/lib/procurement-requisition-linkage';
 import { inventoryManagementService, InventoryItemDto, ItemUnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
+import { procurementCurrencyService, type CurrencyListDto } from '@/services/financeCommonService';
+import {
+  formatProcurementMoney,
+  getProcurementBaseCurrency,
+  normalizeProcurementCurrency,
+} from '@/lib/procurement-currency';
 import { format } from 'date-fns';
 
 interface PRItemFormData extends CreatePurchaseRequisitionItemDto {
@@ -82,21 +97,27 @@ export default function NewPurchaseRequisitionPage() {
   // Form data
   const [requiredDate, setRequiredDate] = useState('');
   const [priority, setPriority] = useState('Normal');
-  const [department, setDepartment] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [currency, setCurrency] = useState('');
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PRItemFormData[]>([]);
+  const [pendingDocuments, setPendingDocuments] = useState<PendingPurchaseRequisitionDocument[]>([]);
   const [linkage, setLinkage] = useState<SavePurchaseRequisitionLinkageRequest>({ ...EMPTY_REQUISITION_LINKAGE });
   
   // Reference data
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
+  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
   // Item dialog
   const [showItemDialog, setShowItemDialog] = useState(false);
+  const [itemIndexToDelete, setItemIndexToDelete] = useState<number | null>(null);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [deleteItemIndex, setDeleteItemIndex] = useState<number | null>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [availableUOMs, setAvailableUOMs] = useState<ItemUnitOfMeasureDto[]>([]);
@@ -119,10 +140,12 @@ export default function NewPurchaseRequisitionPage() {
     const loadData = async () => {
       try {
         setLoadingData(true);
-        const [itemsData, suppliersData, linkageData] = await Promise.all([
+        const [itemsData, suppliersData, linkageData, departmentsData, currencyData] = await Promise.all([
           inventoryManagementService.getInventoryItems({ isActive: true }),
           businessPartnerService.getActivePartners(),
-          purchasingService.getPurchaseRequisitionLinkageOptions()
+          purchasingService.getPurchaseRequisitionLinkageOptions(),
+          commonService.getDepartments(),
+          procurementCurrencyService.getActive(),
         ]);
         
         setInventoryItems(itemsData || []);
@@ -131,6 +154,20 @@ export default function NewPurchaseRequisitionPage() {
           bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
         ));
         setLinkageOptions(linkageData);
+        setDepartments((departmentsData || []).filter((department) => department.isActive));
+        const activeCurrencies = (currencyData || []).filter((item) => item.isActive);
+        setCurrencies(activeCurrencies);
+        setCurrency(getProcurementBaseCurrency(activeCurrencies));
+
+        const requestedPlanItemId = new URLSearchParams(window.location.search).get('sourcePlanItemId');
+        if (requestedPlanItemId) {
+          const requestedPlanItem = linkageData.planItems.find((option) => option.id === requestedPlanItemId);
+          if (requestedPlanItem) {
+            applyPlanItemSelection(requestedPlanItem);
+          } else {
+            toast.error('The selected plan item is not Approved or its plan is not Active');
+          }
+        }
       } catch (error) {
         console.error('Error loading reference data:', error);
         toast.error('Failed to load reference data');
@@ -142,6 +179,46 @@ export default function NewPurchaseRequisitionPage() {
     loadData();
   }, []);
 
+  function applyPlanItemSelection(option?: PurchaseRequisitionLinkageOptionDto) {
+    if (!option) {
+      setDepartmentId('');
+      setItems([]);
+      setCurrency(getProcurementBaseCurrency(currencies));
+      return;
+    }
+
+    setLinkage((current) => applyPlanItemToRequisitionLinkage(current, option));
+    setDepartmentId(option.departmentId || '');
+    setCurrency(normalizeProcurementCurrency(option.currency, getProcurementBaseCurrency(currencies)));
+    if (option.requiredDate) setRequiredDate(option.requiredDate.slice(0, 10));
+    setItems([{
+      tempId: `plan-${option.id}`,
+      sourcePlanItemId: option.id,
+      inventoryItemId: option.inventoryItemId || '',
+      itemName: option.name,
+      itemDescription: option.name,
+      quantity: option.quantity || 1,
+      unitOfMeasure: option.unitOfMeasure || 'EA',
+      estimatedUnitPrice: option.unitPrice || 0,
+      requiredDate: option.requiredDate?.slice(0, 10),
+      preferredSupplierId: option.preferredSupplierId || '',
+      specifications: option.specifications || '',
+      notes: '',
+    }]);
+  }
+
+  const handleLinkageChange = (next: SavePurchaseRequisitionLinkageRequest) => {
+    setLinkage(next);
+    const planItem = linkageOptions?.planItems.find((option) => option.id === next.sourcePlanItemId);
+    const budget = linkageOptions?.budgets.find((option) => option.id === next.budgetId);
+    setCurrency(normalizeProcurementCurrency(
+      planItem?.currency || budget?.currency,
+      getProcurementBaseCurrency(currencies)
+    ));
+  };
+
+  const documentCurrency = normalizeProcurementCurrency(currency, getProcurementBaseCurrency(currencies));
+
   // Calculate totals
   const calculateLineTotal = (quantity: number, unitPrice: number) => {
     return quantity * unitPrice;
@@ -150,12 +227,12 @@ export default function NewPurchaseRequisitionPage() {
   const totalAmount = items.reduce((sum, item) => 
     sum + calculateLineTotal(item.quantity, item.estimatedUnitPrice), 0
   );
-
   // Handle inventory item selection
   const handleInventoryItemSelect = async (itemId: string) => {
     const item = inventoryItems.find(i => i.id === itemId);
     if (item) {
       setSelectedInventoryItem(item);
+      setItemSearch('');
       
       try {
         // Load available UOMs
@@ -173,7 +250,7 @@ export default function NewPurchaseRequisitionPage() {
           itemName: item.name,
           itemDescription: item.description || item.name,
           unitOfMeasure: purchaseUOM?.unitCode || item.unitOfMeasure || 'EA',
-          estimatedUnitPrice: item.lastPurchaseCost || item.standardCost || item.currentCost || 0
+          estimatedUnitPrice: item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0
         }));
       } catch (error) {
         console.error('Error loading UOMs:', error);
@@ -186,7 +263,7 @@ export default function NewPurchaseRequisitionPage() {
           itemName: item.name,
           itemDescription: item.description || item.name,
           unitOfMeasure: item.unitOfMeasure || 'EA',
-          estimatedUnitPrice: item.lastPurchaseCost || item.standardCost || item.currentCost || 0
+          estimatedUnitPrice: item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0
         }));
       }
     }
@@ -261,17 +338,24 @@ export default function NewPurchaseRequisitionPage() {
 
   // Delete item
   const handleDeleteItem = (index: number) => {
-    if (confirm('Are you sure you want to remove this item?')) {
-      const updatedItems = items.filter((_, i) => i !== index);
-      setItems(updatedItems);
-      toast.success('Item removed');
-    }
+    setItemIndexToDelete(index);
+  };
+
+  const confirmDeleteItem = () => {
+    if (itemIndexToDelete === null) return;
+    setItems((current) => current.filter((_, index) => index !== itemIndexToDelete));
+    setItemIndexToDelete(null);
+    toast.success('Item removed');
   };
 
   // Save as draft
   const handleSaveDraft = async () => {
     if (items.length === 0) {
       toast.error('Please add at least one item');
+      return;
+    }
+    if (!departmentId) {
+      toast.error('Select an HR department');
       return;
     }
     const linkageError = validateExceptionLinkage(linkage);
@@ -297,13 +381,14 @@ export default function NewPurchaseRequisitionPage() {
         requestedById,
         requiredDate: requiredDate || undefined,
         priority,
-        department: department || undefined,
-        costCenter: linkage.costCenter || undefined,
+        departmentId,
+        currency: documentCurrency,
         justification: justification || undefined,
         notes: notes || undefined,
         linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
+          sourcePlanItemId: item.sourcePlanItemId || undefined,
           itemDescription: item.itemDescription,
           quantity: item.quantity,
           unitOfMeasure: item.unitOfMeasure || undefined,
@@ -316,7 +401,14 @@ export default function NewPurchaseRequisitionPage() {
       };
 
       const result = await purchasingService.createPurchaseRequisition(createData);
-      toast.success('Purchase requisition saved as draft');
+      const documentResult = await uploadPendingPurchaseRequisitionDocuments(result.id, pendingDocuments);
+      if (documentResult.failed.length > 0) {
+        toast.error(
+          `Purchase requisition saved as draft, but ${documentResult.failed.length} supporting document(s) could not be uploaded. Open the requisition to retry.`
+        );
+      } else {
+        toast.success('Purchase requisition saved as draft');
+      }
       router.push(`/procurement/purchase-requisitions/${result.id}`);
     } catch (error: any) {
       console.error('Error saving purchase requisition:', error);
@@ -335,6 +427,10 @@ export default function NewPurchaseRequisitionPage() {
 
     if (!justification.trim()) {
       toast.error('Please provide justification for this requisition');
+      return;
+    }
+    if (!departmentId) {
+      toast.error('Select an HR department');
       return;
     }
     const linkageError = validateExceptionLinkage(linkage);
@@ -360,13 +456,14 @@ export default function NewPurchaseRequisitionPage() {
         requestedById,
         requiredDate: requiredDate || undefined,
         priority,
-        department: department || undefined,
-        costCenter: linkage.costCenter || undefined,
+        departmentId,
+        currency: documentCurrency,
         justification: justification || undefined,
         notes: notes || undefined,
         linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
+          sourcePlanItemId: item.sourcePlanItemId || undefined,
           itemDescription: item.itemDescription,
           quantity: item.quantity,
           unitOfMeasure: item.unitOfMeasure || undefined,
@@ -379,6 +476,15 @@ export default function NewPurchaseRequisitionPage() {
       };
 
       const result = await purchasingService.createPurchaseRequisition(createData);
+
+      const documentResult = await uploadPendingPurchaseRequisitionDocuments(result.id, pendingDocuments);
+      if (documentResult.failed.length > 0) {
+        toast.error(
+          `Purchase requisition was saved as draft because ${documentResult.failed.length} supporting document(s) could not be uploaded. Open it to retry before submission.`
+        );
+        router.push(`/procurement/purchase-requisitions/${result.id}`);
+        return;
+      }
       
       // Submit for approval
       await purchasingService.submitPurchaseRequisition(result.id);
@@ -488,13 +594,45 @@ export default function NewPurchaseRequisitionPage() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="department">Department</Label>
-              <Input
-                id="department"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                placeholder="e.g., IT, HR, Operations"
-              />
+              <Label htmlFor="departmentId">Department *</Label>
+              <Select value={departmentId} onValueChange={setDepartmentId} disabled={loadingData || Boolean(linkage.sourcePlanItemId)}>
+                <SelectTrigger id="departmentId">
+                  <SelectValue placeholder={loadingData ? 'Loading departments...' : 'Select HR department'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {departments.map((department) => (
+                    <SelectItem key={department.id} value={department.id}>
+                      {department.code ? `${department.code} - ${department.name}` : department.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {linkage.sourcePlanItemId && (
+                <p className="text-xs text-muted-foreground">Inherited from the selected procurement plan.</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="currency">Transaction Currency *</Label>
+              <Select
+                value={documentCurrency}
+                onValueChange={setCurrency}
+                disabled={loadingData || Boolean(linkage.sourcePlanItemId || linkage.budgetId)}
+              >
+                <SelectTrigger id="currency">
+                  <SelectValue placeholder="Select currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencies.map((item) => (
+                    <SelectItem key={item.id} value={item.code}>
+                      {item.code} - {item.name}{item.isBaseCurrency ? ' (Base)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(linkage.sourcePlanItemId || linkage.budgetId) && (
+                <p className="text-xs text-muted-foreground">Inherited from the approved procurement budget.</p>
+              )}
             </div>
             
           </div>
@@ -530,9 +668,10 @@ export default function NewPurchaseRequisitionPage() {
 
       <PurchaseRequisitionLinkageFields
         value={linkage}
-        onChange={setLinkage}
+        onChange={handleLinkageChange}
         options={linkageOptions}
         loading={loadingData}
+        onPlanItemChange={applyPlanItemSelection}
       />
 
       {/* Items Section */}
@@ -600,10 +739,10 @@ export default function NewPurchaseRequisitionPage() {
                         <TableCell className="text-right">{item.quantity}</TableCell>
                         <TableCell>{item.unitOfMeasure || '-'}</TableCell>
                         <TableCell className="text-right">
-                          ${item.estimatedUnitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(item.estimatedUnitPrice, documentCurrency)}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${calculateLineTotal(item.quantity, item.estimatedUnitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(calculateLineTotal(item.quantity, item.estimatedUnitPrice), documentCurrency)}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">{item.preferredSupplierName || '-'}</div>
@@ -649,7 +788,7 @@ export default function NewPurchaseRequisitionPage() {
                           Total Amount:
                         </span>
                         <span className="text-xl font-bold text-primary">
-                          ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatProcurementMoney(totalAmount, documentCurrency)}
                         </span>
                       </div>
                     </div>
@@ -660,6 +799,11 @@ export default function NewPurchaseRequisitionPage() {
           )}
         </CardContent>
       </Card>
+
+      <PurchaseRequisitionDocuments
+        pendingDocuments={pendingDocuments}
+        onPendingDocumentsChange={setPendingDocuments}
+      />
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-4">
@@ -751,7 +895,10 @@ export default function NewPurchaseRequisitionPage() {
                               <div className="text-sm text-muted-foreground">{item.description}</div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 Stock: {item.currentStock} {item.unitOfMeasure} • 
-                                Last Cost: ${item.lastPurchaseCost?.toFixed(2) || item.standardCost?.toFixed(2) || '0.00'}
+                                Managed cost: {formatProcurementMoney(
+                                  item.lastPurchaseCost > 0 ? item.lastPurchaseCost : item.standardCost > 0 ? item.standardCost : item.averageCost || 0,
+                                  documentCurrency
+                                )}
                               </div>
                             </div>
                             {selectedInventoryItem?.id === item.id && (
@@ -839,29 +986,8 @@ export default function NewPurchaseRequisitionPage() {
                 )}
               </div>
               
-              <div className="space-y-2">
-                <Label htmlFor="estimatedUnitPrice" className="flex items-center gap-2">
-                  <DollarSign className="h-4 w-4" />
-                  Estimated Unit Price *
-                </Label>
-                <Input
-                  id="estimatedUnitPrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={itemFormData.estimatedUnitPrice}
-                  onChange={(e) => setItemFormData(prev => ({ ...prev, estimatedUnitPrice: parseFloat(e.target.value) || 0 }))}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Line Total</Label>
-                <Input
-                  type="text"
-                  value={`$${calculateLineTotal(itemFormData.quantity, itemFormData.estimatedUnitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  disabled
-                  className="bg-muted font-medium"
-                />
+              <div className="md:col-span-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                The requester does not enter pricing. For an inventory item, the system uses its managed cost; Procurement completes commercial pricing during sourcing.
               </div>
               
               <div className="space-y-2">
@@ -973,6 +1099,16 @@ export default function NewPurchaseRequisitionPage() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmationDialog
+        open={itemIndexToDelete !== null}
+        onOpenChange={(open) => { if (!open) setItemIndexToDelete(null); }}
+        title="Remove requisition item?"
+        description="This removes the item from the draft requisition. It does not change the approved procurement plan."
+        confirmText="Remove item"
+        variant="destructive"
+        onConfirm={confirmDeleteItem}
+      />
     </div>
   );
 }

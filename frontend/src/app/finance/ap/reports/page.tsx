@@ -5,10 +5,10 @@ import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
     AlertCircle,
-    Calendar as CalendarIcon,
     Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
     Card,
     CardContent,
@@ -17,15 +17,9 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
-import { formatCurrency, cn } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PartnerStatementReport } from '@/components/finance/PartnerStatementReport';
@@ -46,6 +40,13 @@ import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import type { VendorInvoiceMatchExceptionStatus } from '@/types/ap';
 import { ProcurementFinanceReconciliation } from '@/components/finance/ProcurementFinanceReconciliation';
+import { ApAgingExportButton } from '@/components/finance/ap/ApAgingExportButton';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useTenant } from '@/contexts/TenantContext';
+import {
+    apAgingReportQueryKey,
+    apCashRequirementsQueryKey,
+} from '@/lib/finance/ap-report-query-keys';
 
 const REPORT_TABS = ['aging', 'cash', 'statements', 'match-exceptions', 'procurement-reconciliation'] as const;
 const supplierPartnerTypes = new Set(['supplier', 'contractor', 'both']);
@@ -119,6 +120,8 @@ export default function ApReportsPage() {
 }
 
 function MatchExceptionReportView() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const today = format(new Date(), 'yyyy-MM-dd');
     const thirtyDaysAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
     const [fromDate, setFromDate] = useState(thirtyDaysAgo);
@@ -172,9 +175,27 @@ function MatchExceptionReportView() {
                             <option value="Cancelled">Cancelled</option>
                             <option value="Expired">Expired</option>
                         </select>
-                        <Button variant="outline" disabled={downloading || query.isLoading} onClick={download}>
-                            <Download className="mr-2 h-4 w-4" /> {downloading ? 'Exporting…' : 'Export CSV'}
-                        </Button>
+                        {canExport && (
+                            <>
+                                <Button variant="outline" disabled={downloading || query.isLoading} onClick={download}>
+                                    <Download className="mr-2 h-4 w-4" /> {downloading ? 'Exporting…' : 'Export CSV'}
+                                </Button>
+                                <ReportPdfActions
+                                    reportName="AP match exception report"
+                                    onDownloadPdf={() => accountsPayableService.downloadMatchExceptionReportPdf({
+                                        fromDate,
+                                        toDate,
+                                        status: status || undefined,
+                                    })}
+                                    onPrint={() => accountsPayableService.printMatchExceptionReport({
+                                        fromDate,
+                                        toDate,
+                                        status: status || undefined,
+                                    })}
+                                    disabled={query.isLoading || !query.data}
+                                />
+                            </>
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -230,47 +251,44 @@ function Metric({ label, value }: { label: string; value: number }) {
 }
 
 function ApAgingReportView() {
-    const [asOfDate, setAsOfDate] = useState<Date>(new Date());
+    const { currentTenantCode, isLoadingTenants } = useTenant();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
+    const [asOfDate, setAsOfDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
 
     const { data: agingReport, isLoading, isError, error } = useQuery({
-        queryKey: ['ap-aging-report', asOfDate],
-        queryFn: () => accountsPayableService.getAgingReport(format(asOfDate, 'yyyy-MM-dd')),
+        queryKey: apAgingReportQueryKey(currentTenantCode, asOfDate),
+        queryFn: () => accountsPayableService.getAgingReport(asOfDate),
+        enabled: !isLoadingTenants && Boolean(currentTenantCode),
     });
 
     return (
         <Card>
             <CardHeader>
-                <div className="flex items-center justify-between">
-                    <div>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                         <CardTitle>Aged Payables (AP Aging)</CardTitle>
                         <CardDescription>Breakdown of outstanding balances to suppliers by days overdue</CardDescription>
                     </div>
-                    <div className="flex items-center space-x-2">
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    className={cn(
-                                        "w-[200px] justify-start text-left font-normal",
-                                        !asOfDate && "text-muted-foreground"
-                                    )}
-                                >
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {asOfDate ? format(asOfDate, "PPP") : <span>As of Date</span>}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0">
-                                <Calendar
-                                    mode="single"
-                                    selected={asOfDate}
-                                    onSelect={(date) => date && setAsOfDate(date)}
-                                    initialFocus
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                            type="date"
+                            aria-label="AP aging as-of date"
+                            value={asOfDate}
+                            onChange={(event) => event.target.value && setAsOfDate(event.target.value)}
+                            className="w-full sm:w-[200px]"
+                        />
+                        {canExport && (
+                            <>
+                                <ApAgingExportButton asOfDate={asOfDate} isReportLoading={isLoading} />
+                                <ReportPdfActions
+                                    reportName="AP aging report"
+                                    onDownloadPdf={() => accountsPayableService.downloadAgingReportPdf(asOfDate)}
+                                    onPrint={() => accountsPayableService.printAgingReport(asOfDate)}
+                                    disabled={isLoading || !agingReport}
                                 />
-                            </PopoverContent>
-                        </Popover>
-                        <Button variant="outline" size="icon">
-                            <Download className="h-4 w-4" />
-                        </Button>
+                            </>
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -380,11 +398,15 @@ function ApAgingReportView() {
 }
 
 function CashRequirementsView() {
-    const [asOfDate, setAsOfDate] = useState<Date>(new Date());
+    const { currentTenantCode, isLoadingTenants } = useTenant();
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
+    const [asOfDate, setAsOfDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
 
     const { data: forecastReport, isLoading } = useQuery({
-        queryKey: ['ap-cash-requirements', asOfDate],
-        queryFn: () => accountsPayableService.getCashRequirementForecast(format(asOfDate, 'yyyy-MM-dd')),
+        queryKey: apCashRequirementsQueryKey(currentTenantCode, asOfDate),
+        queryFn: () => accountsPayableService.getCashRequirementForecast(asOfDate),
+        enabled: !isLoadingTenants && Boolean(currentTenantCode),
     });
 
     return (
@@ -396,31 +418,21 @@ function CashRequirementsView() {
                         <CardDescription>Estimated cash needed to pay obligations over upcoming periods</CardDescription>
                     </div>
                     <div className="flex items-center space-x-2">
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    className={cn(
-                                        "w-[200px] justify-start text-left font-normal",
-                                        !asOfDate && "text-muted-foreground"
-                                    )}
-                                >
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {asOfDate ? format(asOfDate, "PPP") : <span>As of Date</span>}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0">
-                                <Calendar
-                                    mode="single"
-                                    selected={asOfDate}
-                                    onSelect={(date) => date && setAsOfDate(date)}
-                                    initialFocus
-                                />
-                            </PopoverContent>
-                        </Popover>
-                        <Button variant="outline" size="icon">
-                            <Download className="h-4 w-4" />
-                        </Button>
+                        <Input
+                            type="date"
+                            aria-label="Cash requirements as-of date"
+                            value={asOfDate}
+                            onChange={(event) => event.target.value && setAsOfDate(event.target.value)}
+                            className="w-[200px]"
+                        />
+                        {canExport && (
+                            <ReportPdfActions
+                                reportName="AP cash requirements forecast"
+                                onDownloadPdf={() => accountsPayableService.downloadCashRequirementsPdf(asOfDate)}
+                                onPrint={() => accountsPayableService.printCashRequirements(asOfDate)}
+                                disabled={isLoading || !forecastReport}
+                            />
+                        )}
                     </div>
                 </div>
             </CardHeader>
@@ -552,6 +564,7 @@ function SupplierStatementsView() {
                     totalDebits: report.totalDebits,
                     totalCredits: report.totalCredits,
                     totalClosingBalance: report.totalClosingBalance,
+                    currencyTotals: report.currencyTotals ?? [],
                     warnings: report.warnings ?? [],
                     accounts: report.suppliers.map((supplier) => ({
                         id: supplier.businessPartnerId ?? supplier.supplierId,
@@ -578,6 +591,12 @@ function SupplierStatementsView() {
                 supplierIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
                 format: 'pdf',
+            })}
+            printPdf={(params) => accountsPayableService.printSupplierStatementDocument({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
             })}
             downloadXlsx={(params) => accountsPayableService.downloadSupplierStatementDocument({
                 fromDate: params.fromDate,

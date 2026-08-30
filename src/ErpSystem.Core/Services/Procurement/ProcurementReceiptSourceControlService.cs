@@ -54,7 +54,8 @@ public sealed class ProcurementReceiptSourceControlService :
     public async Task<ProcurementReceiptSourceReadinessDto> GetReadinessAsync(
         Guid purchaseOrderId,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? warehouseId = null)
     {
         EnsureTenant();
         var purchaseOrder = await LoadPurchaseOrderAsync(
@@ -64,7 +65,8 @@ public sealed class ProcurementReceiptSourceControlService :
             "procurement.inventory.read",
             purchaseOrder,
             correlation,
-            cancellationToken);
+            cancellationToken,
+            warehouseId);
 
         return await EvaluateAsync(
             purchaseOrder,
@@ -95,7 +97,8 @@ public sealed class ProcurementReceiptSourceControlService :
             "procurement.inventory.receive",
             purchaseOrder,
             correlation,
-            cancellationToken);
+            cancellationToken,
+            requestLines: lines);
 
         var readiness = await EvaluateAsync(
             purchaseOrder,
@@ -147,23 +150,41 @@ public sealed class ProcurementReceiptSourceControlService :
         var permission = ProcurementPurchaseOrderSodRules.IsReceiptAction(normalizedAction)
             ? ProcurementPurchaseOrderSodRules.RequiredPermissionForReceiptAction(normalizedAction)
             : "procurement.inventory.receive";
-        await EnsureCapabilityAsync(
-            permission,
-            purchaseOrder,
-            correlation,
-            cancellationToken);
-        var lines = await _unitOfWork.Repository<PurchaseOrderReceiptItem>()
+        var receiptLines = await _unitOfWork.Repository<PurchaseOrderReceiptItem>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.ReceiptId == receipt.Id &&
                 !item.IsDeleted)
             .AsNoTracking()
+            .Select(item => new
+            {
+                item.PurchaseOrderItemId,
+                item.ReceivedQuantity,
+                item.LocationId
+            })
+            .ToListAsync(cancellationToken);
+        var warehouseByLocation = await ResolveLocationWarehousesAsync(
+            receiptLines.Select(item => item.LocationId),
+            cancellationToken);
+        var lines = receiptLines
             .Select(item => new ProcurementReceiptSourceLineRequest
             {
                 PurchaseOrderItemId = item.PurchaseOrderItemId,
+                WarehouseId = item.LocationId.HasValue &&
+                              warehouseByLocation.TryGetValue(
+                                  item.LocationId.Value,
+                                  out var warehouseId)
+                    ? warehouseId
+                    : null,
                 ReceivedQuantity = item.ReceivedQuantity
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
+        await EnsureCapabilityAsync(
+            permission,
+            purchaseOrder,
+            correlation,
+            cancellationToken,
+            requestLines: lines);
         var readiness = await EvaluateAsync(
             purchaseOrder,
             lines,
@@ -228,24 +249,43 @@ public sealed class ProcurementReceiptSourceControlService :
             tracking: false,
             cancellationToken);
         var correlation = NormalizeCorrelation(correlationId);
-        await EnsureCapabilityAsync(
-            "procurement.inventory.receive",
-            purchaseOrder,
-            correlation,
-            cancellationToken);
-        var lines = await _unitOfWork.Repository<GoodsReceiptNoteItem>()
+        var goodsReceiptLines = await _unitOfWork.Repository<GoodsReceiptNoteItem>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.GoodsReceiptNoteId == goodsReceiptNote.Id &&
                 !item.IsDeleted)
             .AsNoTracking()
+            .Select(item => new
+            {
+                item.PurchaseOrderItemId,
+                item.InventoryItemId,
+                item.ReceivedQuantity,
+                item.StorageLocationId
+            })
+            .ToListAsync(cancellationToken);
+        var warehouseByStorageLocation = await ResolveLocationWarehousesAsync(
+            goodsReceiptLines.Select(item => item.StorageLocationId),
+            cancellationToken);
+        var lines = goodsReceiptLines
             .Select(item => new ProcurementReceiptSourceLineRequest
             {
                 PurchaseOrderItemId = item.PurchaseOrderItemId ?? Guid.Empty,
                 InventoryItemId = item.InventoryItemId,
+                WarehouseId = item.StorageLocationId.HasValue &&
+                              warehouseByStorageLocation.TryGetValue(
+                                  item.StorageLocationId.Value,
+                                  out var warehouseId)
+                    ? warehouseId
+                    : null,
                 ReceivedQuantity = item.ReceivedQuantity
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
+        await EnsureCapabilityAsync(
+            "procurement.inventory.receive",
+            purchaseOrder,
+            correlation,
+            cancellationToken,
+            requestLines: lines);
         var readiness = await EvaluateAsync(
             purchaseOrder,
             lines,
@@ -884,24 +924,52 @@ public sealed class ProcurementReceiptSourceControlService :
         string permission,
         PurchaseOrder purchaseOrder,
         string correlationId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? warehouseId = null,
+        IReadOnlyCollection<ProcurementReceiptSourceLineRequest>? requestLines = null)
     {
         try
         {
-            var decision = await _accessControl.EnforceCapabilityAsync(
-                new ProcurementAccessCapabilityRequest
-                {
-                    PermissionCode = permission,
-                    SourceType = EventType,
-                    SourceReference = purchaseOrder.OrderNumber,
-                    WarehouseId = purchaseOrder.DeliveryWarehouseId
-                },
-                correlationId,
+            var warehouseIds = await ResolveWarehouseIdsAsync(
+                purchaseOrder,
+                warehouseId,
+                requestLines,
                 cancellationToken);
-            if (!decision.Allowed)
+            var isWarehouseScopedPermission = string.Equals(
+                    permission,
+                    "procurement.inventory.read",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    permission,
+                    "procurement.inventory.receive",
+                    StringComparison.OrdinalIgnoreCase);
+            if (isWarehouseScopedPermission && warehouseIds.Count == 0)
             {
                 throw new ProcurementReceiptSourceAuthorizationException(
-                    decision.Message);
+                    "Select a receiving warehouse before this receipt can be authorised.");
+            }
+
+            IEnumerable<Guid?> capabilityWarehouseIds =
+                isWarehouseScopedPermission
+                    ? warehouseIds.Select(item => (Guid?)item)
+                    : [purchaseOrder.DeliveryWarehouseId];
+            foreach (var capabilityWarehouseId in capabilityWarehouseIds)
+            {
+                var decision = await _accessControl.EnforceCapabilityAsync(
+                    new ProcurementAccessCapabilityRequest
+                    {
+                        PermissionCode = permission,
+                        SourceType = EventType,
+                        SourceReference = purchaseOrder.OrderNumber,
+                        WarehouseId = capabilityWarehouseId
+                    },
+                    correlationId,
+                    cancellationToken);
+                if (!decision.Allowed)
+                {
+                    throw new ProcurementReceiptSourceAuthorizationException(
+                        decision.Message);
+                }
             }
         }
         catch (ProcurementAccessAuthorizationException exception)
@@ -914,6 +982,87 @@ public sealed class ProcurementReceiptSourceControlService :
             throw new ProcurementReceiptSourceAuthorizationException(
                 exception.Message);
         }
+    }
+
+    private async Task<IReadOnlyList<Guid>> ResolveWarehouseIdsAsync(
+        PurchaseOrder purchaseOrder,
+        Guid? selectedWarehouseId,
+        IReadOnlyCollection<ProcurementReceiptSourceLineRequest>? requestLines,
+        CancellationToken cancellationToken)
+    {
+        if (selectedWarehouseId.HasValue &&
+            selectedWarehouseId.Value != Guid.Empty)
+        {
+            return [selectedWarehouseId.Value];
+        }
+
+        var resolved = requestLines?
+            .Where(item => item.WarehouseId.HasValue &&
+                           item.WarehouseId.Value != Guid.Empty)
+            .Select(item => item.WarehouseId!.Value)
+            .Distinct()
+            .ToList() ?? [];
+        var unresolvedLineIds = requestLines?
+            .Where(item => !item.WarehouseId.HasValue ||
+                           item.WarehouseId.Value == Guid.Empty)
+            .Select(item => item.PurchaseOrderItemId)
+            .Where(item => item != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var purchaseOrderLineQuery = _unitOfWork.Repository<PurchaseOrderItem>()
+            .GetQueryable(item =>
+                item.TenantId == purchaseOrder.TenantId &&
+                item.PurchaseOrderId == purchaseOrder.Id &&
+                !item.IsDeleted &&
+                item.WarehouseId.HasValue &&
+                item.WarehouseId.Value != Guid.Empty);
+        if (requestLines is not null)
+        {
+            if (unresolvedLineIds is not { Count: > 0 })
+                return resolved;
+            purchaseOrderLineQuery = purchaseOrderLineQuery.Where(item =>
+                unresolvedLineIds.Contains(item.Id));
+        }
+
+        resolved.AddRange(await purchaseOrderLineQuery
+            .AsNoTracking()
+            .Select(item => item.WarehouseId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken));
+        if (resolved.Count == 0 &&
+            purchaseOrder.DeliveryWarehouseId.HasValue &&
+            purchaseOrder.DeliveryWarehouseId.Value != Guid.Empty)
+        {
+            resolved.Add(purchaseOrder.DeliveryWarehouseId.Value);
+        }
+
+        return resolved.Distinct().ToList();
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, Guid>>
+        ResolveLocationWarehousesAsync(
+            IEnumerable<Guid?> locationIds,
+            CancellationToken cancellationToken)
+    {
+        var ids = locationIds
+            .Where(item => item.HasValue && item.Value != Guid.Empty)
+            .Select(item => item!.Value)
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0)
+            return new Dictionary<Guid, Guid>();
+
+        return await _unitOfWork.Repository<WarehouseLocation>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                ids.Contains(item.Id) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToDictionaryAsync(
+                item => item.Id,
+                item => item.WarehouseId,
+                cancellationToken);
     }
 
     private async Task<PurchaseOrder> LoadPurchaseOrderAsync(

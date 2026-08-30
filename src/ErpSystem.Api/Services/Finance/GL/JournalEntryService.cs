@@ -29,6 +29,8 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IDocumentNumberingService? _documentNumberingService;
+        private readonly IFinanceBudgetControlService? _budgetControl;
+        private readonly FinanceDimensionAdministrationService? _financeDimensions;
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -40,7 +42,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             IAccountingBookService accountingBookService,
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
-            IDocumentNumberingService? documentNumberingService = null)
+            IDocumentNumberingService? documentNumberingService = null,
+            IFinanceBudgetControlService? budgetControl = null,
+            FinanceDimensionAdministrationService? financeDimensions = null)
         {
             _context = context;
             _currentUserService = currentUserService;
@@ -51,20 +55,65 @@ namespace ErpSystem.Api.Services.Finance.GL
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
             _documentNumberingService = documentNumberingService;
+            _budgetControl = budgetControl;
+            _financeDimensions = financeDimensions;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
-        public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+            CancellationToken cancellationToken = default) =>
+            GetJournalEntriesAsync(null, null, null, null, null, cancellationToken);
+
+        public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
+            string? status,
+            DateTime? startDate,
+            DateTime? endDate,
+            Guid? fiscalPeriodId,
+            string? sourceModule,
+            CancellationToken cancellationToken = default)
         {
             var tenantId = TenantId;
-            var entries = await _context.JournalEntries
+            var query = _context.JournalEntries
+                .Where(j => j.TenantId == tenantId && !j.IsDeleted);
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var normalizedStatus = status.Trim().ToUpper();
+                query = query.Where(j => j.PostingStatus.ToUpper() == normalizedStatus);
+            }
+
+            if (startDate.HasValue)
+            {
+                var from = startDate.Value.Date;
+                query = query.Where(j => j.EntryDate >= from);
+            }
+
+            if (endDate.HasValue)
+            {
+                var untilExclusive = endDate.Value.Date.AddDays(1);
+                query = query.Where(j => j.EntryDate < untilExclusive);
+            }
+
+            if (fiscalPeriodId.HasValue)
+                query = query.Where(j => j.FiscalPeriodId == fiscalPeriodId.Value);
+
+            if (!string.IsNullOrWhiteSpace(sourceModule))
+            {
+                var normalizedSourceModule = sourceModule.Trim().ToUpper();
+                query = query.Where(j => j.SourceModule != null &&
+                    j.SourceModule.ToUpper() == normalizedSourceModule);
+            }
+
+            var entries = await query
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
-                .Where(j => j.TenantId == tenantId && !j.IsDeleted)
                 .OrderByDescending(j => j.EntryDate)
                 .ToListAsync(cancellationToken);
 
@@ -77,6 +126,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -91,6 +143,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entry = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -105,6 +160,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             var entries = await _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -197,6 +255,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     throw new InvalidOperationException("Transaction type must be either Debit or Credit.");
 
                 await GetValidManualPostingAccountAsync(tenantId, txnDto.AccountId, cancellationToken);
+                var dimensionSet = await ResolveManualJournalDimensionsAsync(
+                    txnDto.AccountId, dto.TransactionDate, txnDto.Dimensions, cancellationToken);
 
                 var transaction = new AccountTransaction
                 {
@@ -214,7 +274,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                     ForeignCurrencyAmount = txnDto.ForeignAmount,
                     TenantId = tenantId,
                     FiscalPeriodId = journalEntry.FiscalPeriodId,
-                    BookClassification = bookClassification
+                    BookClassification = bookClassification,
+                    FinanceDimensionSetId = dimensionSet?.Id,
+                    FinanceDimensionSet = dimensionSet
                 };
                 
                 _context.AccountTransactions.Add(transaction);
@@ -313,6 +375,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         throw new InvalidOperationException("Transaction type must be either Debit or Credit.");
 
                     await GetValidManualPostingAccountAsync(tenantId, txnDto.AccountId, cancellationToken);
+                    var dimensionSet = await ResolveManualJournalDimensionsAsync(
+                        txnDto.AccountId, transactionDate, txnDto.Dimensions, cancellationToken);
 
                     var transaction = new AccountTransaction
                     {
@@ -331,6 +395,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         TenantId = tenantId,
                         FiscalPeriodId = fiscalPeriodId,
                         BookClassification = bookClassification,
+                        FinanceDimensionSetId = dimensionSet?.Id,
+                        FinanceDimensionSet = dimensionSet,
                         PostingStatus = "Draft"
                     };
 
@@ -350,6 +416,14 @@ namespace ErpSystem.Api.Services.Finance.GL
             await PersistJournalMutationWithAuditAsync(
                 () => LogJournalAuditAsync(FinanceAuditEvents.JournalUpdated, entry, before, BuildJournalAuditSnapshot(entry)),
                 cancellationToken);
+
+            if (_budgetControl != null)
+            {
+                await _budgetControl.InvalidateManualJournalOverridesAsync(
+                    entry.Id,
+                    "The source journal was edited after the budget override was evaluated.",
+                    cancellationToken);
+            }
 
             var updatedEntry = await LoadJournalEntryAsync(entry.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Journal entry was updated but could not be reloaded.");
@@ -382,6 +456,14 @@ namespace ErpSystem.Api.Services.Finance.GL
             await PersistJournalMutationWithAuditAsync(
                 () => LogJournalAuditAsync(FinanceAuditEvents.JournalDeleted, entry, before, BuildJournalAuditSnapshot(entry)),
                 cancellationToken);
+
+            if (_budgetControl != null)
+            {
+                await _budgetControl.InvalidateManualJournalOverridesAsync(
+                    entry.Id,
+                    "The source journal was deleted after the budget override was evaluated.",
+                    cancellationToken);
+            }
         }
 
         public Task<JournalEntryDto> PostJournalEntryAsync(
@@ -465,8 +547,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 await ValidateManualJournalEntryAsync(entry, requireApproved: true, cancellationToken);
 
+                if (_budgetControl == null)
+                    throw new InvalidOperationException("Finance budget control is not configured for manual-journal posting.");
+                var budgetReservationIds = (await _budgetControl
+                    .ValidateManualJournalForPostingAsync(entry.Id, cancellationToken))
+                    .ToArray();
+
                 var functionalCurrency = await GetBaseCurrencyCodeForTenantAsync(entry.TenantId, cancellationToken);
-                postingResult = await _financePostingEngine.PostAsync(BuildManualJournalPostingRequest(entry, functionalCurrency), cancellationToken);
+                postingResult = await _financePostingEngine.PostAsync(
+                    BuildManualJournalPostingRequest(entry, functionalCurrency, budgetReservationIds),
+                    cancellationToken);
             }
             catch (Exception ex)
             {
@@ -780,7 +870,10 @@ namespace ErpSystem.Api.Services.Finance.GL
             await EnsureFiscalPeriodOpenAsync(entry.FiscalPeriodId, entry.TenantId, entry.EntryDate, cancellationToken);
         }
 
-        private FinancePostingRequestDto BuildManualJournalPostingRequest(JournalEntry entry, string functionalCurrency)
+        private FinancePostingRequestDto BuildManualJournalPostingRequest(
+            JournalEntry entry,
+            string functionalCurrency,
+            IReadOnlyList<Guid> budgetReservationIds)
         {
             return new FinancePostingRequestDto
             {
@@ -797,6 +890,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 JournalType = entry.JournalType,
                 BookClassification = entry.BookClassification,
                 FunctionalCurrencyCode = functionalCurrency,
+                BudgetReservationIds = budgetReservationIds,
                 Lines = entry.Transactions
                     .Where(t => !t.IsDeleted)
                     .OrderBy(t => t.LineNumber)
@@ -813,6 +907,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ExchangeRateDate = t.ExchangeRateDate,
                         SourceReferenceNumber = t.SourceReferenceNumber,
                         LineNumber = t.LineNumber,
+                        FinanceDimensionSetId = t.FinanceDimensionSetId,
                         SegmentString = t.SegmentString,
                         Notes = t.Notes,
                         TransactionTag = t.TransactionTag
@@ -861,6 +956,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ExchangeRateDate = t.ExchangeRateDate,
                         SourceReferenceNumber = t.SourceReferenceNumber,
                         LineNumber = t.LineNumber,
+                        FinanceDimensionSetId = t.FinanceDimensionSetId,
                         SegmentString = t.SegmentString,
                         Notes = reason,
                         TransactionTag = "Reversal"
@@ -1271,6 +1367,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ForeignCurrencyAmount = source.ForeignCurrencyAmount,
                 TenantId = source.TenantId,
                 FiscalPeriodId = source.FiscalPeriodId,
+                FinanceDimensionSetId = source.FinanceDimensionSetId,
                 BookClassification = bookCode,
                 PostingStatus = "Posted",
                 PostedDate = postingDate
@@ -1379,6 +1476,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             return _context.JournalEntries
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
+                .Include(j => j.Transactions)
+                .ThenInclude(t => t.FinanceDimensionSet)
+                .ThenInclude(set => set!.Items)
                 .Include(j => j.Attachments)
                 .Include(j => j.JournalBatchItem)
                 .ThenInclude(i => i!.JournalBatch)
@@ -1395,7 +1495,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 JournalType = entry.JournalType,
                 Description = entry.Description,
                 Reference = entry.ReferenceNumber,
+                SourceModule = entry.SourceModule,
+                OriginModuleCode = entry.OriginModuleCode,
+                SourceDocumentId = entry.SourceDocumentId,
+                SourceDocumentType = entry.SourceDocumentType,
                 BookClassification = entry.BookClassification,
+                FiscalPeriodId = entry.FiscalPeriodId,
                 TotalDebit = entry.TotalDebitAmount,
                 TotalCredit = entry.TotalCreditAmount,
                 Status = entry.PostingStatus,
@@ -1450,8 +1555,38 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CurrencyCode = transaction.TransactionCurrency,
                 ForeignAmount = transaction.ForeignCurrencyAmount,
                 ExchangeRate = transaction.ExchangeRate,
-                LineNumber = transaction.LineNumber
+                LineNumber = transaction.LineNumber,
+                FinanceDimensionSetId = transaction.FinanceDimensionSetId,
+                FinanceDimensionDisplayValue = transaction.FinanceDimensionSet?.DisplayValue,
+                Dimensions = transaction.FinanceDimensionSet?.Items
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .Select(item => new FinanceDimensionAssignmentDto
+                    {
+                        DefinitionId = item.FinanceDimensionDefinitionId,
+                        ValueId = item.FinanceDimensionValueId,
+                        DimensionCode = item.DimensionCodeSnapshot,
+                        DimensionName = item.DimensionCodeSnapshot,
+                        ValueCode = item.DimensionValueCodeSnapshot,
+                        ValueName = item.DimensionValueNameSnapshot
+                    }).ToList() ?? []
             };
+        }
+
+        private async Task<FinanceDimensionSet?> ResolveManualJournalDimensionsAsync(
+            Guid accountId,
+            DateTime transactionDate,
+            IReadOnlyList<FinancePostingDimensionValueDto>? dimensions,
+            CancellationToken cancellationToken)
+        {
+            if (_financeDimensions is null)
+            {
+                if (dimensions is { Count: > 0 })
+                    throw new InvalidOperationException("Finance dimension controls are unavailable; the journal was not saved.");
+                return null;
+            }
+
+            return await _financeDimensions.ResolveManualJournalLineAsync(
+                accountId, transactionDate, dimensions, cancellationToken);
         }
 
         public async Task UpdateApprovalStatusAsync(
@@ -1468,6 +1603,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (entry == null) throw new ArgumentException($"Journal Entry {id} not found.");
 
             var before = BuildJournalAuditSnapshot(entry);
+
+            if (approvalStatus == "Approved" && _budgetControl != null)
+                await _budgetControl.ValidateManualJournalForPostingAsync(id, cancellationToken);
 
             entry.PostingStatus = postingStatus;
             entry.ApprovalStatus = approvalStatus;
@@ -1489,6 +1627,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             await _context.SaveChangesAsync(cancellationToken);
+
+            if ((approvalStatus == "Rejected" || approvalStatus == "Withdrawn") && _budgetControl != null)
+                await _budgetControl.ReleaseManualJournalAsync(id, rejectionReason ?? $"Journal approval status changed to {approvalStatus}.", cancellationToken);
             await LogJournalAuditAsync(
                 GetApprovalAuditAction(approvalStatus),
                 entry,
@@ -1762,6 +1903,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                         t.TransactionCurrency,
                         t.ExchangeRate,
                         t.ForeignCurrencyAmount,
+                        t.FinanceDimensionSetId,
+                        FinanceDimensionDisplayValue = t.FinanceDimensionSet != null
+                            ? t.FinanceDimensionSet.DisplayValue
+                            : null,
                         t.BookClassification,
                         t.PostingStatus
                     })

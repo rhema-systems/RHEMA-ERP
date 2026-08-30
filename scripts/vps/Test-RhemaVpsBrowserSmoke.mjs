@@ -254,6 +254,13 @@ try {
   results.supplierSignals = snapshotSignals();
 
   results.portalRedirectUrl = await navigate('/supplier-application/portal');
+  const portalRedirectDeadline = Date.now() + 10_000;
+  while (new URL(results.portalRedirectUrl).pathname === '/supplier-application/portal'
+    && Date.now() < portalRedirectDeadline) {
+    await delay(100);
+    results.portalRedirectUrl = await evaluate('location.href');
+  }
+  await waitForNetworkSettle();
   results.portalSignals = snapshotSignals();
   results.adminRedirectUrl = await navigate(
     '/administration/procurement/supplier-applicant-access');

@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -64,6 +65,38 @@ public sealed class TenderBidsOwnershipControllerTests
         Assert.Same(bid, ok.Value);
     }
 
+    [Fact]
+    public async Task CreateBidReturnsStructuredForbiddenWhenSupplierEvidenceCannotBeRead()
+    {
+        var fixture = new Fixture();
+        var tenderId = Guid.NewGuid();
+        fixture.Bids.Setup(item => item.CreateBidAsync(It.Is<CreateTenderBidDto>(dto =>
+                dto.TenderId == tenderId)))
+            .ThrowsAsync(new ProcurementSupplierEvidencePackAuthorizationException(
+                "Supplier evidence is not linked to the current supplier account."));
+
+        var result = await fixture.Controller.CreateBid(new CreateTenderBidDto
+        {
+            TenderId = tenderId,
+            Items =
+            [
+                new CreateTenderBidItemDto
+                {
+                    TenderItemId = Guid.NewGuid(),
+                    OfferedQuantity = 1m,
+                    UnitPrice = 0m
+                }
+            ]
+        });
+
+        var forbidden = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        var problem = Assert.IsType<ProblemDetails>(forbidden.Value);
+        Assert.Equal("SUPPLIER_BID_EVIDENCE_ACCESS_FORBIDDEN", problem.Extensions["code"]);
+        Assert.Equal("trace-tender-bid", problem.Extensions["correlationId"]);
+        Assert.Equal("/api/procurement/TenderBids", problem.Instance);
+    }
+
     private sealed class Fixture
     {
         public Mock<ITenderBidService> Bids { get; } = new();
@@ -84,6 +117,14 @@ public sealed class TenderBidsOwnershipControllerTests
                 new Mock<IControlledFileUploadService>().Object,
                 new Mock<ICentralDocumentRepositoryFileService>().Object,
                 new Mock<ILogger<TenderBidsController>>().Object);
+            Controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    TraceIdentifier = "trace-tender-bid"
+                }
+            };
+            Controller.HttpContext.Request.Path = "/api/procurement/TenderBids";
         }
     }
 }

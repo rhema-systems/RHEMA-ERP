@@ -67,12 +67,22 @@ export interface WorkflowApprovalActionsProps {
   hideSatisfiedTaskDocumentUploads?: boolean;
   hideSatisfiedTaskDocumentSection?: boolean;
   hideDocumentChecklistItems?: boolean;
+  approveLabel?: string;
+  rejectLabel?: string;
 
   // UI tuning
   size?: 'sm' | 'default' | 'lg' | 'icon';
   iconOnly?: boolean;
   renderMode?: 'buttons' | 'menu-items';
+  submitCopyMode?: 'automatic' | 'approval';
   className?: string;
+}
+
+export function shouldUseApprovalSubmitCopy(
+  directLifecycle: boolean,
+  submitCopyMode: 'automatic' | 'approval' = 'automatic'
+) {
+  return submitCopyMode === 'approval' || !directLifecycle;
 }
 
 export function WorkflowApprovalActions({
@@ -84,7 +94,7 @@ export function WorkflowApprovalActions({
   showStepBadge = false,
   currentStepName,
   workflowSummary,
-  loadWorkflowSummary = false,
+  loadWorkflowSummary = true,
   canSubmit,
   canApproveReject,
   forwardActionsDisabled = false,
@@ -99,9 +109,12 @@ export function WorkflowApprovalActions({
   hideSatisfiedTaskDocumentUploads = false,
   hideSatisfiedTaskDocumentSection = false,
   hideDocumentChecklistItems = false,
+  approveLabel = 'Approve',
+  rejectLabel = 'Reject',
   size = 'sm',
   iconOnly = false,
   renderMode = 'buttons',
+  submitCopyMode = 'automatic',
   className,
 }: WorkflowApprovalActionsProps) {
   const formatPendingApprovers = (pending: WorkflowPendingApproverDto[], maxNames = 2) => {
@@ -152,11 +165,18 @@ export function WorkflowApprovalActions({
   const [summaryTaskConfig, setSummaryTaskConfig] = React.useState<WorkflowTaskConfigDto | undefined>(undefined);
   const [summaryTaskAttachments, setSummaryTaskAttachments] = React.useState<WorkflowTaskAttachmentDto[]>([]);
   const [canCurrentUserApprove, setCanCurrentUserApprove] = React.useState<boolean | undefined>(undefined);
+  const [summaryApprovalRequired, setSummaryApprovalRequired] = React.useState<boolean | undefined>(undefined);
   const [canCurrentUserRecall, setCanCurrentUserRecall] = React.useState<boolean | undefined>(undefined);
   const [canCurrentUserComplete, setCanCurrentUserComplete] = React.useState<boolean | undefined>(undefined);
   const [summaryPendingApprovers, setSummaryPendingApprovers] = React.useState<WorkflowPendingApproverDto[]>([]);
 
   const hasActiveSummary = workflowSummary?.hasActiveInstance === true;
+  const effectiveApprovalRequired = hasActiveSummary
+    ? true
+    : workflowSummary
+      ? workflowSummary.approvalRequired !== false
+      : summaryApprovalRequired === true;
+  const approvalAvailabilityKnown = hasActiveSummary || workflowSummary !== undefined || summaryApprovalRequired !== undefined;
   const effectiveStepName = currentStepName || (hasActiveSummary ? workflowSummary?.currentStepName : undefined) || summaryStepName;
   const effectiveStepInstanceId = (hasActiveSummary ? workflowSummary?.currentStepInstanceId : undefined) || summaryStepInstanceId;
   const effectiveStepType = hasActiveSummary ? workflowSummary?.currentStepType : summaryStepType;
@@ -190,8 +210,14 @@ export function WorkflowApprovalActions({
   const defaultCanSubmit = status === 'Draft';
   const defaultCanApproveReject = status === 'Pending Approval' || status === 'Submitted';
 
-  const submitEnabled = (canSubmit ?? defaultCanSubmit) && !!onSubmit;
-  const approveRejectEnabledByStatus = (canApproveReject ?? defaultCanApproveReject) && !!onApprove && !!onReject;
+  const submitEnabled = approvalAvailabilityKnown && (canSubmit ?? defaultCanSubmit) && !!onSubmit;
+  const directLifecycle = submitEnabled && !effectiveApprovalRequired;
+  const approvalSubmitCopy = shouldUseApprovalSubmitCopy(
+    directLifecycle,
+    submitCopyMode
+  );
+  const approveRejectEnabledByStatus = effectiveApprovalRequired &&
+    (canApproveReject ?? defaultCanApproveReject) && !!onApprove && !!onReject;
 
   const effectiveCanApproveFlag =
     hasActiveSummary ? workflowSummary?.canCurrentUserApprove : canCurrentUserApprove;
@@ -327,6 +353,7 @@ export function WorkflowApprovalActions({
         setSummaryLoading(true);
         const s = await workflowApiService.getWorkflowEntitySummary(entityType, entityId);
         if (!mounted) return;
+        setSummaryApprovalRequired(s.approvalRequired);
         setSummaryStepName(s.currentStepName || undefined);
         setSummaryStepInstanceId(s.currentStepInstanceId || undefined);
         setSummaryStepType(s.currentStepType);
@@ -338,8 +365,9 @@ export function WorkflowApprovalActions({
         setCanCurrentUserComplete(!!s.canCurrentUserComplete);
         setSummaryPendingApprovers(s.pendingApprovers || []);
       } catch (e: any) {
-        // Summary is best-effort; actions still work and will show API error if forbidden.
+        // Fail closed: approval actions are unsafe unless an active workflow is confirmed.
         if (!mounted) return;
+        setSummaryApprovalRequired(undefined);
         setCanCurrentUserApprove(undefined);
         setCanCurrentUserRecall(undefined);
         setCanCurrentUserComplete(undefined);
@@ -382,6 +410,7 @@ export function WorkflowApprovalActions({
       // refresh summary after an action
       try {
         const s = await workflowApiService.getWorkflowEntitySummary(entityType, entityId);
+        setSummaryApprovalRequired(s.approvalRequired);
         setSummaryStepName(s.currentStepName || undefined);
         setSummaryStepInstanceId(s.currentStepInstanceId || undefined);
         setSummaryStepType(s.currentStepType);
@@ -408,8 +437,12 @@ export function WorkflowApprovalActions({
     try {
       setSubmitting(true);
       await onSubmit();
-      toast.success(`${entityLabel} submitted for approval`, {
-        description: entityNumber ? `${entityNumber} has been submitted.` : undefined,
+      toast.success(approvalSubmitCopy ? `${entityLabel} submitted for approval` : `${entityLabel} finalized`, {
+        description: entityNumber
+          ? approvalSubmitCopy
+            ? `${entityNumber} has been submitted.`
+            : `${entityNumber} has been finalized because approval is not enabled for this process.`
+          : undefined,
       });
       await runAfter();
       return true;
@@ -793,7 +826,7 @@ export function WorkflowApprovalActions({
             title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
           >
             <Send className="mr-2 h-4 w-4" />
-            Submit for Approval
+            {approvalSubmitCopy ? 'Submit for Approval' : 'Finalize'}
           </DropdownMenuItem>
         )}
 
@@ -809,7 +842,7 @@ export function WorkflowApprovalActions({
               title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
             >
               <CheckCircle className="mr-2 h-4 w-4" />
-              Approve
+              {approveLabel}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-red-600 focus:text-red-700"
@@ -820,7 +853,7 @@ export function WorkflowApprovalActions({
               disabled={!effectiveCanApprove || processing || summaryLoading}
             >
               <XCircle className="mr-2 h-4 w-4" />
-              Reject
+              {rejectLabel}
             </DropdownMenuItem>
           </>
         )}
@@ -872,18 +905,21 @@ export function WorkflowApprovalActions({
         <ConfirmationDialog
           open={submitOpen}
           onOpenChange={setSubmitOpen}
-          title={`Submit ${entityLabel} For Approval?`}
+          title={approvalSubmitCopy ? `Submit ${entityLabel} For Approval?` : `Finalize ${entityLabel}?`}
           description={
             <div className="space-y-2">
               <div>
-                You are about to submit <strong>{entityNumber || entityLabel}</strong> for approval.
+                {approvalSubmitCopy ? 'You are about to submit ' : 'You are about to finalize '}
+                <strong>{entityNumber || entityLabel}</strong>{approvalSubmitCopy ? ' for approval.' : '.'}
               </div>
               <div className="text-xs text-muted-foreground">
-                This will start (or resume) the configured approval workflow for this record.
+                {approvalSubmitCopy
+                  ? 'This will start (or resume) the configured approval workflow for this record.'
+                  : 'No active approval workflow is configured for this process, so no approver action will be created.'}
               </div>
             </div>
           }
-          confirmText={submitting ? 'Submitting...' : 'Submit'}
+          confirmText={submitting ? (approvalSubmitCopy ? 'Submitting...' : 'Finalizing...') : (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
           cancelText="Cancel"
           onConfirm={confirmSubmit}
           isLoading={submitting}
@@ -1159,11 +1195,11 @@ export function WorkflowApprovalActions({
             size={size}
             onClick={() => setSubmitOpen(true)}
             disabled={submitting || forwardActionsDisabled}
-            title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `Submit ${entityLabel}` : undefined}
-            aria-label={iconOnly ? `Submit ${entityLabel}` : undefined}
+            title={forwardActionsDisabled ? forwardActionsDisabledReason : iconOnly ? `${approvalSubmitCopy ? 'Submit for Approval' : 'Finalize'} ${entityLabel}` : undefined}
+            aria-label={iconOnly ? `${approvalSubmitCopy ? 'Submit for Approval' : 'Finalize'} ${entityLabel}` : undefined}
           >
             <Send className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
-            {!iconOnly && 'Submit'}
+            {!iconOnly && (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
           </Button>
         )}
 
@@ -1179,7 +1215,7 @@ export function WorkflowApprovalActions({
               aria-label={iconOnly ? `Approve ${entityLabel}` : undefined}
             >
               <CheckCircle className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
-              {!iconOnly && 'Approve'}
+              {!iconOnly && approveLabel}
             </Button>
             <Button
               size={size}
@@ -1191,7 +1227,7 @@ export function WorkflowApprovalActions({
               aria-label={iconOnly ? `Reject ${entityLabel}` : undefined}
             >
               <XCircle className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
-              {!iconOnly && 'Reject'}
+              {!iconOnly && rejectLabel}
             </Button>
           </>
         )}
@@ -1245,18 +1281,21 @@ export function WorkflowApprovalActions({
       <ConfirmationDialog
         open={submitOpen}
         onOpenChange={setSubmitOpen}
-        title={`Submit ${entityLabel} For Approval?`}
+        title={approvalSubmitCopy ? `Submit ${entityLabel} For Approval?` : `Finalize ${entityLabel}?`}
         description={
           <div className="space-y-2">
             <div>
-              You are about to submit <strong>{entityNumber || entityLabel}</strong> for approval.
+              {approvalSubmitCopy ? 'You are about to submit ' : 'You are about to finalize '}
+              <strong>{entityNumber || entityLabel}</strong>{approvalSubmitCopy ? ' for approval.' : '.'}
             </div>
             <div className="text-xs text-muted-foreground">
-              This will start (or resume) the configured approval workflow for this record.
+              {approvalSubmitCopy
+                ? 'This will start (or resume) the configured approval workflow for this record.'
+                : 'No active approval workflow is configured for this process, so no approver action will be created.'}
             </div>
           </div>
         }
-        confirmText={submitting ? 'Submitting...' : 'Submit'}
+        confirmText={submitting ? (approvalSubmitCopy ? 'Submitting...' : 'Finalizing...') : (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
         cancelText="Cancel"
         onConfirm={confirmSubmit}
         isLoading={submitting}

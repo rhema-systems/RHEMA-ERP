@@ -20,6 +20,21 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementSourcingCaseServiceTests
 {
     [Fact]
+    public async Task ApprovedReadyRequisitionIsSelectableBeforeItsAutomaticReleaseExists()
+    {
+        await using var fixture = new Fixture();
+        fixture.MarkReadyWithoutRelease();
+
+        var options = await fixture.Service.GetSourceOptionsAsync();
+
+        var option = options.Should().ContainSingle().Which;
+        option.RequisitionId.Should().Be(fixture.Requisition.Id);
+        option.SourcingReleaseId.Should().BeNull();
+        option.ReleaseReference.Should().BeNull();
+        option.CurrentCaseId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task AutomaticRecommendationCreatesImmutablePolicyReleaseLotsAndRequestLineage()
     {
         await using var fixture = new Fixture();
@@ -48,6 +63,33 @@ public sealed class ProcurementSourcingCaseServiceTests
         events.Should().HaveCount(2);
         events.Should().ContainSingle(item => item.Action == "SourcingMethodRecommended" && item.RuleCode == "TDC-0202");
         events.Should().ContainSingle(item => item.Action == "SourcingCaseCreated" && item.RuleCode == "TDC-0201");
+    }
+
+    [Fact]
+    public async Task ApprovedReleaseWithoutLegacyPlanOrAuthorityLineageCanLockAControlledCase()
+    {
+        await using var fixture = new Fixture();
+        fixture.RemoveLegacyAdvancedLineage();
+        var request = fixture.ValidRequest();
+        request.Justification = null;
+        request.Lots =
+        [
+            new CreateProcurementSourcingCaseLotRequest
+            {
+                LotCode = "LOT-01",
+                Title = "Approved operational equipment",
+                PurchaseRequisitionItemIds = fixture.Items.Select(item => item.Id).ToList()
+            }
+        ];
+
+        var created = await fixture.Service.CreateAsync(request, "trace-simplified-lineage");
+
+        created.SourcePlanId.Should().BeNull();
+        created.SourcePlanItemId.Should().BeNull();
+        created.AuthorityRouteId.Should().BeNull();
+        created.AuthorityRouteReference.Should().BeNull();
+        created.Justification.Should().Contain("selected automatically by policy");
+        created.Status.Should().Be(ProcurementSourcingCaseStatus.Ready);
     }
 
     [Theory]
@@ -165,26 +207,27 @@ public sealed class ProcurementSourcingCaseServiceTests
     }
 
     [Fact]
-    public async Task MissingCurrentReleaseAndBlockedMethodFailClosedWithoutPartialCase()
+    public async Task ReadyRequisitionAutoRecordsReleaseWhileBlockedMethodStillFailsClosed()
     {
-        await using var fixture = new Fixture();
-        fixture.Readiness.IsReleased = false;
-        fixture.Readiness.CurrentRelease = null;
-        fixture.Readiness.DecisionCode = "PR_SOURCING_RELEASE_REQUIRED";
-        fixture.Readiness.Message = "Release is required.";
+        await using (var ready = new Fixture())
+        {
+            ready.MarkReadyWithoutRelease();
 
-        await fixture.Service.Invoking(service => service.CreateAsync(fixture.ValidRequest(), "trace-no-release"))
-            .Should().ThrowAsync<ProcurementSourcingCaseValidationException>()
-            .Where(exception => exception.Code == "PR_SOURCING_RELEASE_REQUIRED");
-        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(0);
+            var created = await ready.Service.CreateAsync(ready.ValidRequest(), "trace-auto-release");
 
-        fixture.Readiness.IsReleased = true;
-        fixture.Readiness.CurrentRelease = fixture.ReleaseDto;
-        fixture.AllowMethod = false;
-        await fixture.Service.Invoking(service => service.CreateAsync(fixture.ValidRequest(), "trace-method-blocked"))
-            .Should().ThrowAsync<ProcurementSourcingCaseValidationException>()
-            .Where(exception => exception.Code == "METHOD_BLOCKED");
-        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(0);
+            created.SourcingReleaseId.Should().Be(ready.ReleaseDto.Id);
+            ready.VerifyAutomaticRelease();
+            (await ready.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
+        }
+
+        await using (var blocked = new Fixture())
+        {
+            blocked.AllowMethod = false;
+            await blocked.Service.Invoking(service => service.CreateAsync(blocked.ValidRequest(), "trace-method-blocked"))
+                .Should().ThrowAsync<ProcurementSourcingCaseValidationException>()
+                .Where(exception => exception.Code == "METHOD_BLOCKED");
+            (await blocked.Context.ProcurementSourcingCases.CountAsync()).Should().Be(0);
+        }
     }
 
     [Fact]
@@ -229,14 +272,14 @@ public sealed class ProcurementSourcingCaseServiceTests
     }
 
     [Fact]
-    public async Task SourceEntryRequiresCurrentCaseThenRegistrationAndCloseFollowLifecycle()
+    public async Task SourceEntryAllowsReleaseOnlyAndAdvancedCaseRegistrationFollowsLifecycle()
     {
         await using var fixture = new Fixture();
-        await fixture.Service.Invoking(service => service.EnforceSourceEntryAsync(
-                fixture.Requisition.Id, ProcurementMethodType.RequestForQuotation,
-                "RequestForQuotation", "RFQ-CASE-001", "trace-no-case"))
-            .Should().ThrowAsync<ProcurementRequisitionSourcingValidationException>()
-            .Where(exception => exception.Code == "SOURCING_CASE_REQUIRED");
+        var direct = await fixture.Service.EnforceSourceEntryAsync(
+            fixture.Requisition.Id, ProcurementMethodType.RequestForQuotation,
+            "RequestForQuotation", "RFQ-DIRECT-001", "trace-no-case");
+        direct.SourcingCaseId.Should().BeNull();
+        direct.SourcingReleaseId.Should().Be(fixture.ReleaseDto.Id);
 
         var created = await fixture.Service.CreateAsync(fixture.ValidRequest(), "trace-create");
         await fixture.Service.Invoking(service => service.EnforceSourceEntryAsync(
@@ -452,6 +495,24 @@ public sealed class ProcurementSourcingCaseServiceTests
                 EffectiveFrom = DateTime.UtcNow.AddDays(-30),
                 RowVersion = Guid.NewGuid().ToByteArray()
             });
+            Context.Add(new ProcurementPolicyThresholdRule
+            {
+                Id = ThresholdRuleId,
+                TenantId = TenantId,
+                PolicySetId = PolicySetId,
+                RuleCode = "THRESHOLD-RequestForQuotation",
+                Name = "Approved sourcing value band",
+                Category = ProcurementCategoryClass.Goods,
+                Method = ProcurementMethodType.RequestForQuotation,
+                CurrencyCode = "GHS",
+                LowerBound = 0m,
+                UpperBound = 100000m,
+                StatutoryReference = "Configured procurement threshold",
+                SourceDecisionKey = "DEC-001",
+                IsEnabled = true,
+                EffectiveFrom = DateTime.UtcNow.AddDays(-30),
+                RowVersion = Guid.NewGuid().ToByteArray()
+            });
             Context.SaveChanges();
 
             _currentUser.SetupGet(item => item.TenantId).Returns(() => TenantId);
@@ -470,6 +531,17 @@ public sealed class ProcurementSourcingCaseServiceTests
                 .ReturnsAsync(() => Readiness);
             _releases.Setup(item => item.EnforceSourcingAsync(Requisition.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => ReleaseDto);
+            _releases.Setup(item => item.ReleaseAsync(
+                    Requisition.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() =>
+                {
+                    Readiness.IsReleased = true;
+                    Readiness.CanRelease = false;
+                    Readiness.DecisionCode = "PR_SOURCING_RELEASE_CURRENT";
+                    Readiness.Message = "System-generated release is current.";
+                    Readiness.CurrentRelease = ReleaseDto;
+                    return ReleaseDto;
+                });
             _compliance.Setup(item => item.EvaluateAsync(
                     It.IsAny<ProcurementComplianceDecisionRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((ProcurementComplianceDecisionRequest request, string _, CancellationToken _) => Decision(request.RequestedMethod));
@@ -511,11 +583,44 @@ public sealed class ProcurementSourcingCaseServiceTests
         public PurchaseRequisitionSourcingReadinessDto Readiness { get; }
         public ProcurementSourcingCaseService Service { get; }
 
+        public void MarkReadyWithoutRelease()
+        {
+            Readiness.IsCompliant = true;
+            Readiness.IsReleased = false;
+            Readiness.CanRelease = true;
+            Readiness.DecisionCode = "PR_SOURCING_READY";
+            Readiness.Message = "Ready for sourcing.";
+            Readiness.CurrentRelease = null;
+        }
+
+        public void VerifyAutomaticRelease() =>
+            _releases.Verify(item => item.ReleaseAsync(
+                    Requisition.Id,
+                    It.Is<string>(reason => reason.StartsWith("System-generated release for sourcing case")),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+
         public void MakeSourceUnavailable() =>
             _releases.Setup(item => item.GetLinkedControlReadinessAsync(
                     Requisition.Id, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ProcurementRequisitionSourcingNotFoundException(
                     "PR_NOT_FOUND", "The purchase requisition is no longer operationally available."));
+
+        public void RemoveLegacyAdvancedLineage()
+        {
+            Requisition.SourcePlanId = null;
+            Requisition.SourcePlanItemId = null;
+            _release.SourcePlanId = null;
+            _release.SourcePlanItemId = null;
+            _release.AuthorityRouteId = null;
+            _release.AuthorityRouteReference = null;
+            ReleaseDto.SourcePlanId = null;
+            ReleaseDto.SourcePlanItemId = null;
+            ReleaseDto.AuthorityRouteId = null;
+            ReleaseDto.AuthorityRouteReference = null;
+            Context.SaveChanges();
+        }
 
         public void DenyOverrideCapability()
         {

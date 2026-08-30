@@ -44,6 +44,9 @@ public sealed class ProcurementWorksCloseoutRulesTests
         ProcurementWorksCloseoutRules.RequiredEvidence
             [ProcurementWorksCloseoutActionType.Termination]
             .Should().Contain(["termination-notice", "legal-review"]);
+        ProcurementWorksCloseoutRules.RequiredEvidence
+            [ProcurementWorksCloseoutActionType.Closeout]
+            .Should().Contain("as-built-drawing-current-version");
     }
 
     [Theory]

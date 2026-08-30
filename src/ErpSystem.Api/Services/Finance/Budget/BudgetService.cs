@@ -9,6 +9,10 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ErpSystem.Api.Services.Finance.Budget;
 
@@ -65,6 +69,8 @@ public partial class BudgetService : IBudgetService
     public async Task<BudgetScenarioDto> CreateScenarioAsync(CreateBudgetScenarioDto dto)
     {
         var tenantId = TenantId;
+        var controlDimensions = await ResolveControlDimensionsAsync(
+            tenantId, dto.ControlDimensionDefinitionIds);
         var fiscalYearExists = await _context.FiscalYears
             .AnyAsync(fy => fy.TenantId == tenantId && fy.Id == dto.FiscalYearId && !fy.IsDeleted);
         if (!fiscalYearExists)
@@ -103,6 +109,18 @@ public partial class BudgetService : IBudgetService
         };
 
         _context.BudgetScenarios.Add(scenario);
+        foreach (var (definition, index) in controlDimensions.Select((definition, index) => (definition, index)))
+        {
+            scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FinanceDimensionDefinitionId = definition.Id,
+                DisplayOrder = index,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = CurrentUserId
+            });
+        }
         await _context.SaveChangesAsync();
         await RecordAuditAsync(
             FinanceAuditEvents.BudgetScenarioCreated,
@@ -119,6 +137,7 @@ public partial class BudgetService : IBudgetService
         var scenario = await _context.BudgetScenarios
             .Include(s => s.FiscalYear)
             .Include(s => s.BudgetReturns)
+            .Include(s => s.ControlDimensions)
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == dto.Id);
 
         if (scenario == null)
@@ -139,6 +158,39 @@ public partial class BudgetService : IBudgetService
         if (dto.IsActive)
             throw new InvalidOperationException(
                 "A budget scenario becomes active only after workflow approval.");
+
+        if (dto.ControlDimensionDefinitionIds is not null)
+        {
+            var controlDimensions = await ResolveControlDimensionsAsync(
+                tenantId, dto.ControlDimensionDefinitionIds);
+            var requestedControlIds = controlDimensions.Select(item => item.Id).ToHashSet();
+            var currentControlIds = scenario.ControlDimensions
+                .Where(item => !item.IsDeleted)
+                .Select(item => item.FinanceDimensionDefinitionId)
+                .ToHashSet();
+            if (!requestedControlIds.SetEquals(currentControlIds))
+            {
+                var hasEntries = await _context.BudgetEntries.AnyAsync(entry =>
+                    entry.TenantId == tenantId && !entry.IsDeleted
+                    && entry.BudgetReturn!.BudgetScenarioId == scenario.Id);
+                if (hasEntries)
+                    throw new InvalidOperationException(
+                        "Budget-control dimensions cannot change after worksheet entries exist. Create a new scenario version instead.");
+
+                _context.BudgetScenarioControlDimensions.RemoveRange(scenario.ControlDimensions);
+                scenario.ControlDimensions.Clear();
+                foreach (var (definition, index) in controlDimensions.Select((definition, index) => (definition, index)))
+                {
+                    scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId,
+                        FinanceDimensionDefinitionId = definition.Id,
+                        DisplayOrder = index, CreatedAt = DateTime.UtcNow,
+                        CreatedById = CurrentUserId
+                    });
+                }
+            }
+        }
 
         scenario.Name = normalizedName;
         scenario.Description = NormalizeOptionalText(dto.Description);
@@ -240,33 +292,43 @@ public partial class BudgetService : IBudgetService
     public async Task<BudgetScenarioDto> SubmitScenarioAsync(Guid id, string rowVersion)
     {
         var tenantId = TenantId;
-        var scenario = await _context.BudgetScenarios
-            .Include(s => s.FiscalYear)
-            .Include(s => s.BudgetReturns)
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
+        var submittedAt = DateTime.UtcNow;
+        Guid? workflowInstanceId = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        if (scenario == null)
-            throw new KeyNotFoundException("Budget scenario not found.");
-        if (scenario.Status != CollectingStatus)
-            throw new InvalidOperationException("Only Collecting scenarios can be submitted for approval.");
-        ApplyRowVersion(scenario, rowVersion);
-        if (scenario.BudgetReturns.Count == 0)
-            throw new InvalidOperationException("A scenario without budget returns cannot be submitted.");
-        if (scenario.BudgetReturns.Any(budgetReturn => budgetReturn.Status != ApprovedStatus))
-            throw new InvalidOperationException("All budget returns must be approved before the scenario can be submitted.");
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        async Task SubmitAttemptAsync(CancellationToken cancellationToken)
         {
+            // Every retry must reload the aggregate and workflow graph. Reusing tracked entities
+            // from a rolled-back attempt can leak stale status or duplicate workflow evidence.
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var scenario = await _context.BudgetScenarios
+                .Include(s => s.FiscalYear)
+                .Include(s => s.BudgetReturns)
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id, cancellationToken);
+
+            if (scenario == null)
+                throw new KeyNotFoundException("Budget scenario not found.");
+            if (scenario.Status != CollectingStatus)
+                throw new InvalidOperationException("Only Collecting scenarios can be submitted for approval.");
+            ApplyRowVersion(scenario, rowVersion);
+            if (scenario.BudgetReturns.Count == 0)
+                throw new InvalidOperationException("A scenario without budget returns cannot be submitted.");
+            if (scenario.BudgetReturns.Any(budgetReturn => budgetReturn.Status != ApprovedStatus))
+                throw new InvalidOperationException("All budget returns must be approved before the scenario can be submitted.");
+
             scenario.Status = InReviewStatus;
-            scenario.UpdatedAt = DateTime.UtcNow;
+            scenario.UpdatedAt = submittedAt;
             scenario.LastModifiedById = CurrentUserId;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BudgetScenario", id);
             if (!workflowResult.Success)
                 throw new InvalidOperationException(
                     workflowResult.Message ?? "Unable to start budget scenario approval workflow.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+            if (!workflowInstanceId.HasValue || workflowInstanceId == Guid.Empty)
+                throw new InvalidOperationException("Budget scenario workflow did not return an instance ID.");
 
             await RecordAuditAsync(
                 FinanceAuditEvents.BudgetScenarioSubmitted,
@@ -274,16 +336,34 @@ public partial class BudgetService : IBudgetService
                 scenario.Id,
                 new { Status = CollectingStatus },
                 new { scenario.Status },
-                workflowInstanceId: workflowResult.WorkflowInstanceId);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
+                workflowInstanceId: workflowInstanceId);
         }
 
-        return await MapToDtoAsync(scenario);
+        if (_context.Database.IsRelational())
+        {
+            await strategy.ExecuteInTransactionAsync(
+                async operationToken => await SubmitAttemptAsync(operationToken),
+                async verificationToken => workflowInstanceId.HasValue
+                    && await _context.BudgetScenarios.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == id
+                            && item.Status == InReviewStatus, verificationToken)
+                    && await _context.WorkflowInstances.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == workflowInstanceId.Value
+                            && item.EntityId == id && !item.IsDeleted, verificationToken),
+                IsolationLevel.ReadCommitted,
+                CancellationToken.None);
+        }
+        else
+        {
+            await SubmitAttemptAsync(CancellationToken.None);
+        }
+
+        _context.ChangeTracker.Clear();
+        var submittedScenario = await _context.BudgetScenarios
+            .Include(s => s.FiscalYear)
+            .Include(s => s.BudgetReturns)
+            .FirstAsync(s => s.TenantId == tenantId && s.Id == id);
+        return await MapToDtoAsync(submittedScenario);
     }
 
     public async Task<BudgetScenarioDto> ArchiveScenarioAsync(Guid id, string rowVersion)
@@ -486,39 +566,49 @@ public partial class BudgetService : IBudgetService
 
     public async Task<BudgetReturnDto> SubmitReturnAsync(Guid id, string rowVersion)
     {
-        var budgetReturn = await GetReturnEntityAsync(id);
-        EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
-        await EnsureCanPrepareReturnAsync(budgetReturn);
+        var tenantId = TenantId;
+        var submittedAt = DateTime.UtcNow;
+        Guid? workflowInstanceId = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        if (budgetReturn.Status != DraftStatus && budgetReturn.Status != RejectedStatus)
-            throw new InvalidOperationException("Only Draft or Rejected returns can be submitted.");
-        if (!budgetReturn.AssignedToUserId.HasValue)
-            throw new InvalidOperationException("The budget return must be assigned before it can be submitted.");
-
-        var hasMaterialEntry = await _context.BudgetEntries.AnyAsync(entry =>
-            entry.TenantId == TenantId
-            && entry.BudgetReturnId == id
-            && entry.Amount != 0);
-        if (!hasMaterialEntry)
-            throw new InvalidOperationException("Enter at least one non-zero budget amount before submitting.");
-        ApplyRowVersion(budgetReturn, rowVersion);
-        var previousStatus = budgetReturn.Status;
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        async Task SubmitAttemptAsync(CancellationToken cancellationToken)
         {
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var budgetReturn = await GetReturnEntityAsync(id);
+            EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
+            await EnsureCanPrepareReturnAsync(budgetReturn);
+
+            if (budgetReturn.Status != DraftStatus && budgetReturn.Status != RejectedStatus)
+                throw new InvalidOperationException("Only Draft or Rejected returns can be submitted.");
+            if (!budgetReturn.AssignedToUserId.HasValue)
+                throw new InvalidOperationException("The budget return must be assigned before it can be submitted.");
+
+            var hasMaterialEntry = await _context.BudgetEntries.AnyAsync(entry =>
+                entry.TenantId == tenantId
+                && entry.BudgetReturnId == id
+                && entry.Amount != 0,
+                cancellationToken);
+            if (!hasMaterialEntry)
+                throw new InvalidOperationException("Enter at least one non-zero budget amount before submitting.");
+            ApplyRowVersion(budgetReturn, rowVersion);
+            var previousStatus = budgetReturn.Status;
+
             budgetReturn.Status = SubmittedStatus;
-            budgetReturn.SubmittedDate = DateTime.UtcNow;
+            budgetReturn.SubmittedDate = submittedAt;
             budgetReturn.ApprovedDate = null;
             budgetReturn.RejectionReason = null;
-            budgetReturn.UpdatedAt = DateTime.UtcNow;
+            budgetReturn.UpdatedAt = submittedAt;
             budgetReturn.LastModifiedById = CurrentUserId;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BudgetReturn", id);
             if (!workflowResult.Success)
                 throw new InvalidOperationException(
                     workflowResult.Message ?? "Unable to start budget return approval workflow.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+            if (!workflowInstanceId.HasValue || workflowInstanceId == Guid.Empty)
+                throw new InvalidOperationException("Budget return workflow did not return an instance ID.");
 
             await RecordAuditAsync(
                 FinanceAuditEvents.BudgetReturnSubmitted,
@@ -526,31 +616,52 @@ public partial class BudgetService : IBudgetService
                 budgetReturn.Id,
                 new { Status = previousStatus },
                 new { budgetReturn.Status, budgetReturn.SubmittedDate },
-                workflowInstanceId: workflowResult.WorkflowInstanceId);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
+                workflowInstanceId: workflowInstanceId);
         }
 
-        return await MapToReturnDtoAsync(budgetReturn);
+        if (_context.Database.IsRelational())
+        {
+            await strategy.ExecuteInTransactionAsync(
+                async operationToken => await SubmitAttemptAsync(operationToken),
+                async verificationToken => workflowInstanceId.HasValue
+                    && await _context.BudgetReturns.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == id
+                            && item.Status == SubmittedStatus && item.SubmittedDate != null,
+                            verificationToken)
+                    && await _context.WorkflowInstances.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == workflowInstanceId.Value
+                            && item.EntityId == id && !item.IsDeleted, verificationToken),
+                IsolationLevel.ReadCommitted,
+                CancellationToken.None);
+        }
+        else
+        {
+            await SubmitAttemptAsync(CancellationToken.None);
+        }
+
+        _context.ChangeTracker.Clear();
+        return await MapToReturnDtoAsync(await GetReturnEntityAsync(id));
     }
 
     public async Task<BudgetReturnDto> RecallReturnAsync(Guid id, string rowVersion, string? reason)
     {
-        var budgetReturn = await GetReturnEntityAsync(id);
-        EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
-        await EnsureCanPrepareReturnAsync(budgetReturn);
-        if (budgetReturn.Status != SubmittedStatus)
-            throw new InvalidOperationException("Only Submitted returns can be recalled.");
-        ApplyRowVersion(budgetReturn, rowVersion);
+        var tenantId = TenantId;
         var normalizedReason = NormalizeOptionalText(reason) ?? "Recalled by preparer.";
+        var recalledAt = DateTime.UtcNow;
+        Guid? workflowInstanceId = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        async Task RecallAttemptAsync(CancellationToken cancellationToken)
         {
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var budgetReturn = await GetReturnEntityAsync(id);
+            EnsureScenarioCollecting(budgetReturn.BudgetScenario!);
+            await EnsureCanPrepareReturnAsync(budgetReturn);
+            if (budgetReturn.Status != SubmittedStatus)
+                throw new InvalidOperationException("Only Submitted returns can be recalled.");
+            ApplyRowVersion(budgetReturn, rowVersion);
+
             var workflowResult = await _workflowService.RecallWorkflowAsync(
                 "BudgetReturn",
                 id,
@@ -559,14 +670,17 @@ public partial class BudgetService : IBudgetService
             if (!workflowResult.Success)
                 throw new InvalidOperationException(
                     workflowResult.Message ?? "Unable to recall the budget return workflow.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+            if (!workflowInstanceId.HasValue || workflowInstanceId == Guid.Empty)
+                throw new InvalidOperationException("Budget return recall did not return a workflow instance ID.");
 
             budgetReturn.Status = DraftStatus;
             budgetReturn.SubmittedDate = null;
             budgetReturn.ApprovedDate = null;
             budgetReturn.RejectionReason = normalizedReason;
-            budgetReturn.UpdatedAt = DateTime.UtcNow;
+            budgetReturn.UpdatedAt = recalledAt;
             budgetReturn.LastModifiedById = CurrentUserId;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             await RecordAuditAsync(
                 FinanceAuditEvents.BudgetReturnRecalled,
@@ -575,16 +689,32 @@ public partial class BudgetService : IBudgetService
                 new { Status = SubmittedStatus },
                 new { budgetReturn.Status },
                 normalizedReason,
-                workflowResult.WorkflowInstanceId);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
+                workflowInstanceId);
         }
 
-        return await MapToReturnDtoAsync(budgetReturn);
+        if (_context.Database.IsRelational())
+        {
+            await strategy.ExecuteInTransactionAsync(
+                async operationToken => await RecallAttemptAsync(operationToken),
+                async verificationToken => workflowInstanceId.HasValue
+                    && await _context.BudgetReturns.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == id
+                            && item.Status == DraftStatus && item.SubmittedDate == null,
+                            verificationToken)
+                    && await _context.WorkflowInstances.IgnoreQueryFilters().AsNoTracking()
+                        .AnyAsync(item => item.TenantId == tenantId && item.Id == workflowInstanceId.Value
+                            && item.EntityId == id && item.Status == WorkflowInstanceStatus.Cancelled
+                            && !item.IsDeleted, verificationToken),
+                IsolationLevel.ReadCommitted,
+                CancellationToken.None);
+        }
+        else
+        {
+            await RecallAttemptAsync(CancellationToken.None);
+        }
+
+        _context.ChangeTracker.Clear();
+        return await MapToReturnDtoAsync(await GetReturnEntityAsync(id));
     }
 
     // ========================================================================
@@ -601,6 +731,10 @@ public partial class BudgetService : IBudgetService
             .AsNoTracking()
             .Include(e => e.Account)
             .Include(e => e.FiscalPeriod)
+            .Include(e => e.FinanceDimensionSet).ThenInclude(set => set!.Items)
+                .ThenInclude(item => item.FinanceDimensionDefinition)
+            .Include(e => e.FinanceDimensionSet).ThenInclude(set => set!.Items)
+                .ThenInclude(item => item.FinanceDimensionValue)
             .Where(e => e.TenantId == tenantId && e.BudgetReturnId == returnId)
             .OrderBy(e => e.Account!.AccountCode)
             .ThenBy(e => e.FiscalPeriod!.PeriodNumber)
@@ -625,12 +759,6 @@ public partial class BudgetService : IBudgetService
         if (dto.Entries.Any(entry => entry.Amount < 0))
             throw new InvalidOperationException("Budget amounts cannot be negative.");
 
-        var duplicateCell = dto.Entries
-            .GroupBy(entry => new { entry.AccountId, entry.FiscalPeriodId })
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicateCell != null)
-            throw new InvalidOperationException("The request contains duplicate account and period entries.");
-
         var accountIds = dto.Entries.Select(e => e.AccountId).Distinct().ToList();
         var periodIds = dto.Entries.Select(e => e.FiscalPeriodId).Distinct().ToList();
 
@@ -644,14 +772,42 @@ public partial class BudgetService : IBudgetService
             throw new InvalidOperationException(
                 "One or more budget accounts are inactive, non-posting, or outside the current tenant.");
 
-        var validPeriodCount = await _context.FiscalPeriods.CountAsync(period =>
+        var periods = await _context.FiscalPeriods.Where(period =>
             period.TenantId == tenantId
             && periodIds.Contains(period.Id)
             && period.FiscalYearId == budgetReturn.BudgetScenario!.FiscalYearId
-            && !period.IsDeleted);
-        if (validPeriodCount != periodIds.Count)
+            && !period.IsDeleted).ToListAsync();
+        if (periods.Count != periodIds.Count)
             throw new InvalidOperationException(
                 "One or more fiscal periods do not belong to the scenario fiscal year.");
+
+        var controlDimensionIds = await _context.BudgetScenarioControlDimensions
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && item.BudgetScenarioId == budgetReturn.BudgetScenarioId)
+            .OrderBy(item => item.DisplayOrder)
+            .Select(item => item.FinanceDimensionDefinitionId)
+            .ToListAsync();
+        var periodById = periods.ToDictionary(period => period.Id);
+        var resolvedEntries = new List<(BudgetEntrySaveDto Incoming, FinanceDimensionSet? Set)>();
+        foreach (var incoming in dto.Entries)
+        {
+            var set = await ResolveBudgetDimensionSetAsync(
+                tenantId, controlDimensionIds, incoming.DimensionAssignments,
+                periodById[incoming.FiscalPeriodId]);
+            resolvedEntries.Add((incoming, set));
+        }
+        var duplicateCell = resolvedEntries
+            .GroupBy(item => new
+            {
+                item.Incoming.AccountId,
+                item.Incoming.FiscalPeriodId,
+                FinanceDimensionSetId = item.Set?.Id
+            })
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateCell != null)
+            throw new InvalidOperationException(
+                "The request contains duplicate account, period, and budget-dimension entries.");
 
         var baseCurrency = NormalizeCurrency(budgetReturn.BudgetScenario!.BaseCurrencyCode);
         foreach (var incoming in dto.Entries)
@@ -669,14 +825,30 @@ public partial class BudgetService : IBudgetService
         var existingEntries = await _context.BudgetEntries
             .Where(e => e.TenantId == tenantId && e.BudgetReturnId == dto.BudgetReturnId)
             .ToListAsync();
-        var entryMap = existingEntries.ToDictionary(e => (e.AccountId, e.FiscalPeriodId));
+        var entryMap = existingEntries.ToDictionary(
+            e => (e.AccountId, e.FiscalPeriodId, e.FinanceDimensionSetId));
+        var entryById = existingEntries.ToDictionary(entry => entry.Id);
 
-        foreach (var incoming in dto.Entries)
+        foreach (var (incoming, dimensionSet) in resolvedEntries)
         {
-            if (entryMap.TryGetValue((incoming.AccountId, incoming.FiscalPeriodId), out var existing))
+            BudgetEntry? existing = null;
+            if (incoming.Id.HasValue)
+            {
+                if (!entryById.TryGetValue(incoming.Id.Value, out existing))
+                    throw new InvalidOperationException("A budget worksheet entry was not found in this return.");
+            }
+            else
+            {
+                entryMap.TryGetValue(
+                    (incoming.AccountId, incoming.FiscalPeriodId, dimensionSet?.Id), out existing);
+            }
+            if (existing is not null)
             {
                 if (!string.IsNullOrWhiteSpace(incoming.RowVersion))
                     ApplyRowVersion(existing, incoming.RowVersion);
+                existing.AccountId = incoming.AccountId;
+                existing.FiscalPeriodId = incoming.FiscalPeriodId;
+                existing.FinanceDimensionSetId = dimensionSet?.Id;
                 existing.Amount = incoming.Amount;
                 existing.CurrencyCode = baseCurrency;
                 existing.ExchangeRate = 1;
@@ -694,6 +866,7 @@ public partial class BudgetService : IBudgetService
                 BudgetReturnId = dto.BudgetReturnId,
                 AccountId = incoming.AccountId,
                 FiscalPeriodId = incoming.FiscalPeriodId,
+                FinanceDimensionSetId = dimensionSet?.Id,
                 CurrencyCode = baseCurrency,
                 ExchangeRate = 1,
                 Amount = incoming.Amount,
@@ -703,7 +876,7 @@ public partial class BudgetService : IBudgetService
                 CreatedById = CurrentUserId
             };
             _context.BudgetEntries.Add(newEntry);
-            entryMap.Add((incoming.AccountId, incoming.FiscalPeriodId), newEntry);
+            entryMap.Add((incoming.AccountId, incoming.FiscalPeriodId, dimensionSet?.Id), newEntry);
         }
 
         budgetReturn.UpdatedAt = DateTime.UtcNow;
@@ -732,6 +905,10 @@ public partial class BudgetService : IBudgetService
             .Include(e => e.Account)
             .Include(e => e.FiscalPeriod)
             .Include(e => e.BudgetReturn)
+            .Include(e => e.FinanceDimensionSet).ThenInclude(set => set!.Items)
+                .ThenInclude(item => item.FinanceDimensionDefinition)
+            .Include(e => e.FinanceDimensionSet).ThenInclude(set => set!.Items)
+                .ThenInclude(item => item.FinanceDimensionValue)
             .Where(e => e.TenantId == tenantId
                 && e.BudgetReturn!.TenantId == tenantId
                 && e.BudgetReturn.BudgetScenarioId == scenarioId
@@ -920,6 +1097,14 @@ public partial class BudgetService : IBudgetService
 
     private async Task<BudgetScenarioDto> MapToDtoAsync(BudgetScenario scenario)
     {
+        var controlDimensions = await _context.BudgetScenarioControlDimensions
+            .AsNoTracking()
+            .Include(item => item.FinanceDimensionDefinition)
+            .Where(item => item.TenantId == scenario.TenantId
+                && item.BudgetScenarioId == scenario.Id && !item.IsDeleted)
+            .OrderBy(item => item.DisplayOrder)
+            .ThenBy(item => item.FinanceDimensionDefinition.Code)
+            .ToListAsync();
         var userIds = new[]
             {
                 scenario.LockedByUserId,
@@ -983,8 +1168,129 @@ public partial class BudgetService : IBudgetService
             CreatedAt = scenario.CreatedAt,
             UpdatedAt = scenario.UpdatedAt,
             ReturnCount = scenario.BudgetReturns.Count,
+            ControlDimensions = controlDimensions.Select(item => new BudgetControlDimensionDto
+            {
+                FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                DimensionCode = item.FinanceDimensionDefinition.Code,
+                DimensionName = item.FinanceDimensionDefinition.Name,
+                DisplayOrder = item.DisplayOrder
+            }).ToList(),
             RowVersion = Convert.ToBase64String(scenario.RowVersion)
         };
+    }
+
+    private async Task<IReadOnlyList<FinanceDimensionDefinition>> ResolveControlDimensionsAsync(
+        Guid tenantId,
+        IEnumerable<Guid>? requestedIds)
+    {
+        var ids = (requestedIds ?? Array.Empty<Guid>()).ToList();
+        if (ids.Any(id => id == Guid.Empty) || ids.Distinct().Count() != ids.Count)
+            throw new InvalidOperationException("Budget-control dimensions must contain unique Finance dimension IDs.");
+        if (ids.Count == 0)
+            return Array.Empty<FinanceDimensionDefinition>();
+
+        var definitions = await _context.FinanceDimensionDefinitions.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && ids.Contains(item.Id)
+                && !item.IsDeleted && item.IsActive && item.Classification != "Derived")
+            .ToListAsync();
+        if (definitions.Count != ids.Count)
+            throw new InvalidOperationException(
+                "One or more budget-control dimensions are missing, inactive, derived, or outside the current tenant.");
+        var byId = definitions.ToDictionary(item => item.Id);
+        return ids.Select(id => byId[id]).ToList();
+    }
+
+    private async Task<FinanceDimensionSet?> ResolveBudgetDimensionSetAsync(
+        Guid tenantId,
+        IReadOnlyCollection<Guid> controlDimensionIds,
+        IReadOnlyCollection<BudgetDimensionAssignmentInputDto>? assignments,
+        FiscalPeriod period)
+    {
+        var supplied = assignments?.ToList() ?? new List<BudgetDimensionAssignmentInputDto>();
+        if (controlDimensionIds.Count == 0)
+        {
+            if (supplied.Count != 0)
+                throw new InvalidOperationException(
+                    "This legacy budget scenario declares no controlling transaction dimensions.");
+            return null;
+        }
+        if (supplied.Count != controlDimensionIds.Count
+            || supplied.Any(item => item.FinanceDimensionDefinitionId == Guid.Empty
+                || item.FinanceDimensionValueId == Guid.Empty)
+            || supplied.Select(item => item.FinanceDimensionDefinitionId).Distinct().Count() != supplied.Count
+            || !supplied.Select(item => item.FinanceDimensionDefinitionId).ToHashSet()
+                .SetEquals(controlDimensionIds))
+        {
+            throw new InvalidOperationException(
+                "Every budget entry must provide exactly one value for each scenario budget-control dimension.");
+        }
+
+        var valueIds = supplied.Select(item => item.FinanceDimensionValueId).ToArray();
+        var values = await _context.FinanceDimensionValues.AsNoTracking()
+            .Include(item => item.FinanceDimensionDefinition)
+            .Where(item => item.TenantId == tenantId && valueIds.Contains(item.Id)
+                && !item.IsDeleted && item.IsActive
+                && item.FinanceDimensionDefinition.TenantId == tenantId
+                && !item.FinanceDimensionDefinition.IsDeleted
+                && item.FinanceDimensionDefinition.IsActive
+                && item.EffectiveDate.Date <= period.StartDate.Date
+                && (!item.ExpiryDate.HasValue || item.ExpiryDate.Value.Date >= period.EndDate.Date))
+            .ToListAsync();
+        if (values.Count != supplied.Count)
+            throw new InvalidOperationException(
+                "A budget dimension value is inactive, outside the tenant, or not effective for the full fiscal period.");
+        var valueById = values.ToDictionary(item => item.Id);
+        if (supplied.Any(item => valueById[item.FinanceDimensionValueId].FinanceDimensionDefinitionId
+            != item.FinanceDimensionDefinitionId))
+            throw new InvalidOperationException("A budget dimension value does not belong to its declared dimension.");
+
+        var resolved = supplied.Select(item => valueById[item.FinanceDimensionValueId])
+            .OrderBy(item => item.FinanceDimensionDefinition.DisplayOrder)
+            .ThenBy(item => item.FinanceDimensionDefinition.Code)
+            .ToList();
+        var canonical = string.Join("|", resolved.Select(item =>
+            $"{item.FinanceDimensionDefinitionId:N}:{item.Id:N}"));
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        var idBytes = SHA256.HashData(Encoding.UTF8.GetBytes($"FIN-DIMSET|{tenantId:N}|{hash}"));
+        var setId = new Guid(idBytes.AsSpan(0, 16));
+        var existing = _context.FinanceDimensionSets.Local.FirstOrDefault(item => item.Id == setId)
+            ?? await _context.FinanceDimensionSets.Include(item => item.Items)
+                .SingleOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted
+                    && (item.Id == setId || item.CombinationHash == hash));
+        if (existing is not null)
+        {
+            if (existing.Id != setId || existing.CombinationHash != hash
+                || existing.Items.Count != resolved.Count
+                || resolved.Any(value => !existing.Items.Any(item =>
+                    item.FinanceDimensionDefinitionId == value.FinanceDimensionDefinitionId
+                    && item.FinanceDimensionValueId == value.Id)))
+                throw new InvalidOperationException("Finance dimension-set identity or assignment evidence is inconsistent.");
+            return existing;
+        }
+
+        var now = DateTime.UtcNow;
+        var set = new FinanceDimensionSet
+        {
+            Id = setId, TenantId = tenantId, CombinationHash = hash,
+            DisplayValue = string.Join(" · ", resolved.Select(item =>
+                $"{item.FinanceDimensionDefinition.Code}={item.Code}")),
+            CreatedAt = now, CreatedById = CurrentUserId
+        };
+        foreach (var value in resolved)
+        {
+            set.Items.Add(new FinanceDimensionSetItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FinanceDimensionSetId = set.Id,
+                FinanceDimensionDefinitionId = value.FinanceDimensionDefinitionId,
+                FinanceDimensionValueId = value.Id,
+                DimensionCodeSnapshot = value.FinanceDimensionDefinition.Code,
+                DimensionValueCodeSnapshot = value.Code,
+                DimensionValueNameSnapshot = value.Name,
+                CreatedAt = now, CreatedById = CurrentUserId
+            });
+        }
+        _context.FinanceDimensionSets.Add(set);
+        return set;
     }
 
     private async Task<BudgetReturnDto> MapToReturnDtoAsync(BudgetReturn budgetReturn)
@@ -1074,6 +1380,20 @@ public partial class BudgetService : IBudgetService
             AccountCode = entry.Account?.AccountCode ?? string.Empty,
             AccountName = entry.Account?.AccountName ?? string.Empty,
             FiscalPeriodId = entry.FiscalPeriodId,
+            FinanceDimensionSetId = entry.FinanceDimensionSetId,
+            DimensionCombinationHash = entry.FinanceDimensionSet?.CombinationHash,
+            DimensionAssignments = entry.FinanceDimensionSet?.Items
+                .OrderBy(item => item.FinanceDimensionDefinition.DisplayOrder)
+                .ThenBy(item => item.DimensionCodeSnapshot)
+                .Select(item => new BudgetDimensionAssignmentDto
+                {
+                    FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                    FinanceDimensionValueId = item.FinanceDimensionValueId,
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    DimensionName = item.FinanceDimensionDefinition.Name,
+                    ValueCode = item.DimensionValueCodeSnapshot,
+                    ValueName = item.DimensionValueNameSnapshot
+                }).ToList() ?? new List<BudgetDimensionAssignmentDto>(),
             PeriodName = entry.FiscalPeriod?.PeriodName ?? string.Empty,
             CurrencyCode = entry.CurrencyCode,
             ExchangeRate = entry.ExchangeRate,

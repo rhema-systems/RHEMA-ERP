@@ -23,6 +23,8 @@ namespace ErpSystem.Core.Services.Inventory;
 /// </summary>
 public sealed class InventoryDirectedOperationService : IInventoryDirectedOperationService
 {
+    private const string SupervisoryPermission = "procurement.inventory.master-data.manage";
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementAccessControlService _access;
@@ -310,7 +312,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             id, request.RowVersion, correlationId, cancellationToken,
             async task =>
             {
-                EnsureAssignedActor(task);
+                await EnsureAssignedActorAsync(task, correlationId, cancellationToken);
                 if (task.Status != InventoryDirectedTaskStatus.Assigned)
                     throw StatusConflict(task, "started");
                 var before = new { task.Status, task.StartedAtUtc };
@@ -333,7 +335,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
         var normalizedComment = NormalizeRequired(request.Comment, 1000, "Comment");
         return await MutateAsync(id, request.RowVersion, correlationId, cancellationToken, async task =>
         {
-            EnsureAssignedActor(task);
+            await EnsureAssignedActorAsync(task, correlationId, cancellationToken);
             if (task.Status is not (InventoryDirectedTaskStatus.Assigned or InventoryDirectedTaskStatus.InProgress))
                 throw StatusConflict(task, "confirmed");
             await ValidateTaskSourceAsync(task, cancellationToken);
@@ -459,7 +461,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
         EnsureActor();
         return await MutateAsync(id, request.RowVersion, correlationId, cancellationToken, async task =>
         {
-            EnsureAssignedActor(task);
+            await EnsureAssignedActorAsync(task, correlationId, cancellationToken);
             if (task.Status != InventoryDirectedTaskStatus.AwaitingStockMove || !task.LinkedInventoryTransferId.HasValue)
                 throw StatusConflict(task, "reconciled");
             var transfer = await _unitOfWork.Repository<InventoryTransfer>().GetQueryable().AsNoTracking()
@@ -504,7 +506,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
         EnsureActor();
         return await MutateAsync(id, request.RowVersion, correlationId, cancellationToken, async task =>
         {
-            EnsureAssignedActor(task);
+            await EnsureAssignedActorAsync(task, correlationId, cancellationToken);
             if (task.Status is InventoryDirectedTaskStatus.Completed or InventoryDirectedTaskStatus.Cancelled)
                 throw StatusConflict(task, "cancelled");
             if (task.Status == InventoryDirectedTaskStatus.AwaitingStockMove)
@@ -1224,10 +1226,22 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                 "An authenticated internal tenant user is required for directed warehouse operations.");
     }
 
-    private void EnsureAssignedActor(InventoryDirectedTask task)
+    private async Task EnsureAssignedActorAsync(
+        InventoryDirectedTask task,
+        string correlationId,
+        CancellationToken cancellationToken)
     {
-        if (task.AssignedToUserId != UserId && !_currentUser.HasRole("TenantAdmin") && !_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("Admin"))
-            throw new InventoryDirectedOperationAuthorizationException("Only the assignee or a tenant administrator can mutate this directed task.");
+        if (task.AssignedToUserId == UserId) return;
+
+        var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = SupervisoryPermission,
+            SourceType = "InventoryDirectedOperation",
+            SourceReference = task.TaskNumber
+        }, correlationId, cancellationToken);
+        if (!decision.Allowed)
+            throw new InventoryDirectedOperationAuthorizationException(
+                "Only the assignee or an actor with the inventory supervisory permission can mutate this directed task.");
     }
 
     private static void EnsureRowVersion(InventoryDirectedTask task, string encoded)

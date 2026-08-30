@@ -209,6 +209,11 @@ public partial class ProjectService
     public async Task<ProjectRfiDto> UpdateProjectRfiAsync(Guid rfiId, UpdateProjectRfiDto dto)
     {
         var entity = await GetProjectRfiEntityAsync(rfiId);
+        if (entity.CivilDesignCaseId.HasValue)
+            throw new InvalidOperationException("Civil design-input requests must use the governed cross-section response and review endpoints.");
+        if (await _unitOfWork.Repository<ProjectCivilRfiRouting>().ExistsAsync(value =>
+                value.TenantId == _currentUserProvider.TenantId && value.ProjectRfiId == rfiId && !value.IsDeleted))
+            throw new InvalidOperationException("A governed Civil supervision RFI must use the Project Engineer and Project Manager routing endpoints.");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
@@ -239,6 +244,11 @@ public partial class ProjectService
     public async Task DeleteProjectRfiAsync(Guid rfiId)
     {
         var entity = await GetProjectRfiEntityAsync(rfiId);
+        if (entity.CivilDesignCaseId.HasValue)
+            throw new InvalidOperationException("A governed Civil design-input request cannot be deleted through the generic RFI endpoint.");
+        if (await _unitOfWork.Repository<ProjectCivilRfiRouting>().ExistsAsync(value =>
+                value.TenantId == _currentUserProvider.TenantId && value.ProjectRfiId == rfiId && !value.IsDeleted))
+            throw new InvalidOperationException("A governed Civil supervision RFI cannot be deleted through the generic RFI endpoint.");
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
         await _unitOfWork.Repository<ProjectRfi>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -256,6 +266,8 @@ public partial class ProjectService
     public async Task<ProjectSiteInstructionDto> AddProjectSiteInstructionAsync(Guid projectId, CreateProjectSiteInstructionDto dto)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManageExecution);
+        if (string.Equals(NormalizeProjectSiteInstructionType(dto.InstructionType), ProjectSiteInstructionTypes.EngineerInstruction, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Use the governed Civil Engineering site-instruction route for Engineer Instructions.");
         var phase = await ValidateProjectDesignPhaseAsync(projectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(projectId, dto.ProjectPackageId);
 
@@ -292,6 +304,9 @@ public partial class ProjectService
     {
         var entity = await GetProjectSiteInstructionEntityAsync(siteInstructionId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
+        if (string.Equals(entity.InstructionType, ProjectSiteInstructionTypes.EngineerInstruction, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(NormalizeProjectSiteInstructionType(dto.InstructionType), ProjectSiteInstructionTypes.EngineerInstruction, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Engineer Instructions are immutable through the generic editor; use governed Civil Engineering routing actions.");
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
 
@@ -323,6 +338,8 @@ public partial class ProjectService
     {
         var entity = await GetProjectSiteInstructionEntityAsync(siteInstructionId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageExecution);
+        if (string.Equals(entity.InstructionType, ProjectSiteInstructionTypes.EngineerInstruction, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Engineer Instructions cannot be deleted through the generic editor; use the governed Civil Engineering lifecycle.");
         await _unitOfWork.Repository<ProjectSiteInstruction>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }

@@ -47,6 +47,12 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
+        private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
+        private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
+        private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
+        private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
+        private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
@@ -121,7 +127,13 @@ namespace ErpSystem.Web.Services
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
-            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null)
+            QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
+            QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
+            QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
+            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null,
+            CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
+            CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
+            CivilEngineeringStatutoryReportSeeder? civilEngineeringStatutoryReportSeeder = null)
         {
             _context = context;
             _userManager = userManager;
@@ -133,6 +145,12 @@ namespace ErpSystem.Web.Services
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
+            _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
+            _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
+            _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
+            _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
+            _civilEngineeringStatutoryReportSeeder = civilEngineeringStatutoryReportSeeder;
             _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
@@ -210,6 +228,30 @@ namespace ErpSystem.Web.Services
                     await _procurementAccessControlSeeder.SeedAsync();
                 }
 
+                if (_civilEngineeringConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft Civil Engineering configuration profiles are seeded...");
+                    await _civilEngineeringConfigurationProfileSeeder.SeedAsync();
+                }
+
+                if (_civilEngineeringAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring Civil Engineering roles and permissions are seeded...");
+                    await _civilEngineeringAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey access roles, permissions, and workflow entity types are seeded...");
+                    await _quantitySurveyAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft TDC Quantity Survey configuration profiles are seeded...");
+                    await _quantitySurveyConfigurationProfileSeeder.SeedAsync();
+                }
+
                 if (_procurementStatutoryReportSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring TDC procurement statutory report catalogue is seeded...");
@@ -226,6 +268,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC audit and compliance report catalogue is seeded...");
                     await _auditComplianceReportSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey statutory report catalogue is seeded...");
+                    await _quantitySurveyStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_civilEngineeringStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Civil Engineering report catalogue is seeded...");
+                    await _civilEngineeringStatutoryReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
@@ -341,12 +395,29 @@ namespace ErpSystem.Web.Services
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
             await EnsureBusinessPartnerWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring procurement receipt-inspection workflow is seeded...");
+            await EnsureProcurementOperationalWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring project workflows are seeded...");
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
+
+            // Program.cs invokes this lightweight path during every permitted VPS
+            // startup. Keep the UAT PO route here so Draft templates are repaired and
+            // published before operators can submit purchase orders.
+            if (_procurementAccessControlSeeder is not null &&
+                StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+                    _environment.EnvironmentName,
+                    _allowDevelopmentDataSeedingOutsideDevelopment))
+            {
+                _logger.LogInformation(
+                    "Ensuring TDC Draft workflow templates and the UAT Purchase Order approval workflow are ready...");
+                await _procurementAccessControlSeeder.SeedAsync();
+                await _procurementAccessControlSeeder
+                    .EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync();
+            }
         }
 
         private async Task EnsureFinancePermissionAssignmentsAsync()
@@ -356,6 +427,77 @@ namespace ErpSystem.Web.Services
             // required by Finance authorization policies exists before those policies are enforced.
             await SeedRolesAsync();
             await SeedRolePermissionAssignmentsAsync();
+        }
+
+        private async Task EnsureProcurementOperationalWorkflowsSeededAsync()
+        {
+            try
+            {
+                const string entityCode = "PROCUREMENT_RECEIPT_INSPECTION";
+                const string definitionName = "Procurement Receipt Inspection Approval";
+                const string approverRole = "TDC_STORES_MANAGER";
+                var stages = new[]
+                {
+                    new WorkflowApprovalStageSeed(
+                        "PendingApproval",
+                        new[] { approverRole },
+                        "Independent Stores Manager approval of accepted, rejected, damaged, and short receipt quantities.")
+                };
+                var tenants = await _context.Tenants
+                    .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                foreach (var tenant in tenants)
+                {
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode,
+                        "Procurement Receipt Inspection",
+                        typeof(ProcurementReceiptInspectionCase).FullName,
+                        definitionName,
+                        "Stores maker-checker approval before accepted receipt quantities become stock and AP eligible.",
+                        stages);
+
+                    // Earlier system seed data assigned this step to Head of Procurement.
+                    // Pending approval rows contain no decision and are safe to realign to
+                    // the corrected Stores Manager workflow role. Completed rows remain immutable.
+                    var pendingApprovals = await _context.WorkflowApprovals
+                        .Include(approval => approval.StepInstance)
+                            .ThenInclude(instance => instance.WorkflowStep)
+                                .ThenInclude(step => step.WorkflowDefinition)
+                        .Where(approval =>
+                            approval.TenantId == tenant.Id &&
+                            !approval.IsDeleted &&
+                            approval.Status == WorkflowApprovalStatus.Pending &&
+                            approval.ApproverId == null &&
+                            approval.ApproverRole != approverRole &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.CreatedBy == "System" &&
+                            approval.StepInstance.WorkflowStep.WorkflowDefinition.Name.StartsWith(definitionName))
+                        .ToListAsync();
+
+                    if (pendingApprovals.Count == 0)
+                        continue;
+
+                    var repairedAt = DateTime.UtcNow;
+                    foreach (var approval in pendingApprovals)
+                    {
+                        approval.ApproverRole = approverRole;
+                        approval.UpdatedAt = repairedAt;
+                        approval.UpdatedBy = "System";
+                    }
+
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation(
+                        "Realigned {Count} pending receipt-inspection approval assignment(s) to {Role} for tenant {TenantId}",
+                        pendingApprovals.Count,
+                        approverRole,
+                        tenant.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed procurement operational workflows");
+            }
         }
 
         private async Task EnsureProjectWorkflowsSeededAsync()
@@ -821,6 +963,8 @@ namespace ErpSystem.Web.Services
                 var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
                 foreach (var tenant in tenants)
                 {
+                    var tenantId = tenant.Id;
+                    await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
@@ -868,6 +1012,62 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogError(ex, "Failed to seed finance workflows");
             }
+        }
+
+        private async Task RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(Guid tenantId)
+        {
+            // Finance owns SupplierDebitNote commercial/AP approval only. FIN-INT-012/013 remain
+            // quarantined, so historical SupplierReturn definitions must not authorize a Procurement/
+            // Inventory return dispatch or imply that Finance owns the producer transaction.
+            var activeDefinitions = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.IsActive)
+                .ToListAsync();
+
+            var retiredAt = DateTime.UtcNow;
+            var retiredCount = RetireQuarantinedSupplierReturnWorkflowDefinitions(activeDefinitions, retiredAt);
+            if (retiredCount == 0)
+                return;
+
+            await _context.SaveChangesAsync();
+            _logger.LogWarning(
+                "Retired {WorkflowDefinitionCount} active SupplierReturn workflow definition(s) for tenant {TenantId}; FIN-INT-012/013 remain quarantined.",
+                retiredCount,
+                tenantId);
+        }
+
+        private static int RetireQuarantinedSupplierReturnWorkflowDefinitions(
+            IEnumerable<WorkflowDefinition> definitions,
+            DateTime retiredAt)
+        {
+            var retiredCount = 0;
+            foreach (var definition in definitions.Where(item =>
+                         item.IsActive &&
+                         !item.IsDeleted &&
+                         item.EntityType != null &&
+                         item.EntityType.TenantId == item.TenantId &&
+                         !item.EntityType.IsDeleted &&
+                         (WorkflowEntityTypeKeyMatches(item.EntityType.Code, "SupplierReturn") ||
+                          WorkflowEntityTypeKeyMatches(item.EntityType.Name, "SupplierReturn") ||
+                          string.Equals(
+                              item.EntityType.EntityClassName,
+                              typeof(SupplierReturn).FullName,
+                              StringComparison.Ordinal))))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt = retiredAt;
+                definition.RetiredById = null;
+                definition.UpdatedAt = retiredAt;
+                definition.UpdatedBy = "System";
+                definition.LastModifiedById = null;
+                retiredCount++;
+            }
+
+            return retiredCount;
         }
 
         private async Task EnsureVendorPaymentControlWorkflowSeededAsync(Guid tenantId)
@@ -1166,8 +1366,11 @@ namespace ErpSystem.Web.Services
                     "Manual supplier payment authorization before posting, clearing, or settlement finalization."),
                 new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
                     "Bulk supplier payment batch approval before processing."),
-                new("SupplierReturn", "Supplier Return", typeof(SupplierReturn).FullName, "Supplier Return Approval",
-                    "Supplier return approval before goods are shipped back, debit notes are issued, or refunds are tracked."),
+                // Finance owns the buyer-side commercial credit/AP correction only. This does
+                // not lift the SupplierReturn integration quarantine or authorize stock dispatch.
+                new("SupplierDebitNote", "Supplier Debit Note", typeof(SupplierDebitNote).FullName,
+                    "Supplier Debit Note Approval",
+                    "Independent Finance approval of the buyer-side AP debit note before central posting and settlement application."),
 
                 // Accounts Receivable
                 new("Quote", "Quotation", typeof(Quote).FullName, "Quotation Approval",
@@ -1192,6 +1395,8 @@ namespace ErpSystem.Web.Services
                     "Budget scenario approval before locking, activation, or archival."),
                 new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
                     "Department budget worksheet approval workflow before consolidation."),
+                new("FinanceBudgetOverride", "Finance Budget Override", typeof(FinanceBudgetOverrideRequest).FullName, "Finance Budget Override Approval",
+                    "Independent Finance approval of a precise manual-journal budget shortfall. Approval is bound to the immutable evaluation hash and expires when the journal changes."),
                 new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",
                     "Unit accounting journal approval before posting quantity balances."),
                 new("UnitAccountBudget", "Unit Budget", typeof(UnitAccountBudget).FullName, "Unit Budget Approval",
@@ -8080,6 +8285,41 @@ namespace ErpSystem.Web.Services
                 },
                 new
                 {
+                    Name = FinancePermissions.ManageApSupplierDebitNotes,
+                    DisplayName = "Manage AP Supplier Debit Notes",
+                    Description = "Create, edit, and cancel controlled supplier debit notes",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.SubmitApSupplierDebitNotes,
+                    DisplayName = "Submit AP Supplier Debit Notes",
+                    Description = "Submit supplier debit notes for independent approval",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.ApproveApSupplierDebitNotes,
+                    DisplayName = "Approve AP Supplier Debit Notes",
+                    Description = "Approve or reject submitted supplier debit notes",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.PostApSupplierDebitNotes,
+                    DisplayName = "Post AP Supplier Debit Notes",
+                    Description = "Post approved supplier debit notes through the Finance engine",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
+                    Name = FinancePermissions.ReverseApSupplierDebitNotes,
+                    DisplayName = "Reverse AP Supplier Debit Notes",
+                    Description = "Reverse posted supplier debit notes with compensating evidence",
+                    Category = "Finance - Accounts Payable"
+                },
+                new
+                {
                     Name = "Finance.AR.Invoices.Create",
                     DisplayName = "Create AR Invoices",
                     Description = "Create customer invoices",
@@ -8325,6 +8565,10 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
                     "Finance.AR.Invoices.Write",
@@ -8360,6 +8604,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Process",
                     "Finance.CashBank.Documents.Issue",
                     "Finance.JournalEntries.Create",
@@ -8409,6 +8656,10 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Write",
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
+                    "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ManageApSupplierDebitNotes,
+                    FinancePermissions.SubmitApSupplierDebitNotes,
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Process",
                     "Finance.AR.Invoices.Create",
                     "Finance.AR.Invoices.Edit",
@@ -8451,6 +8702,7 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalBatches.Export",
                     "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Approve",
+                    FinancePermissions.ApproveApSupplierDebitNotes,
                     "Finance.AP.Payments.Approve",
                     "Finance.AR.Invoices.ApprovePost",
                     "Finance.AR.Invoices.Void",
@@ -8505,12 +8757,17 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodClose.Waivers.Approve",
                     "Finance.PeriodReopen.Approve",
                     "Finance.AP.Payments.Approve",
+                    FinancePermissions.PostApSupplierDebitNotes,
+                    FinancePermissions.ReverseApSupplierDebitNotes,
                     "Finance.Workflow.Submit",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
-                    "Finance.Reports.Run"
+                    "Finance.Reports.Run",
+                    // Chief Accountants own period-end review and controlled financial-report
+                    // distribution. Export remains separately permission-gated at the API/UI.
+                    "Finance.Reports.Export"
                 },
                 ["Managing Director"] = new[]
                 {
@@ -8966,6 +9223,15 @@ namespace ErpSystem.Web.Services
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();
+            services.AddScoped<ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ProcurementAccessControlSeeder>();
+            services.AddScoped<ProcurementStatutoryReportSeeder>();
+            services.AddScoped<InventoryStatutoryReportSeeder>();
+            services.AddScoped<AuditComplianceReportSeeder>();
+            services.AddScoped<QuantitySurveyAccessControlSeeder>();
+            services.AddScoped<QuantitySurveyConfigurationProfileSeeder>();
+            services.AddScoped<QuantitySurveyStatutoryReportSeeder>();
+            services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
             return services;
         }
 

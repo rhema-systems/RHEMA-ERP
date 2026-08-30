@@ -63,7 +63,16 @@ public sealed class PurchaseRequisitionSubmissionControlsControllerTests
         var requisition = new PurchaseRequisition
         {
             Id = id, TenantId = Guid.NewGuid(), RequisitionNumber = "PR-2026-104",
-            RequestedById = Guid.NewGuid(), Status = "Draft"
+            RequestedById = Guid.NewGuid(), Status = "Draft", TotalAmount = 100m,
+            Items =
+            [
+                new PurchaseRequisitionItem
+                {
+                    Quantity = 1m,
+                    EstimatedUnitPrice = 100m,
+                    LineTotal = 100m
+                }
+            ]
         };
         var repository = new Mock<IPurchaseRequisitionRepository>();
         repository.Setup(item => item.GetRequisitionByIdAsync(id)).ReturnsAsync(requisition);
@@ -91,6 +100,38 @@ public sealed class PurchaseRequisitionSubmissionControlsControllerTests
         problem.Extensions["submissionReadiness"].Should().BeSameAs(readiness);
         workflow.Verify(item => item.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
         repository.Verify(item => item.UpdateRequisitionAsync(It.IsAny<PurchaseRequisition>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UnpricedDraftCannotEnterApprovalWorkflow()
+    {
+        var id = Guid.NewGuid();
+        var requisition = new PurchaseRequisition
+        {
+            Id = id,
+            TenantId = Guid.NewGuid(),
+            RequisitionNumber = "PR-2026-UNPRICED",
+            RequestedById = Guid.NewGuid(),
+            Status = "Draft",
+            TotalAmount = 0
+        };
+        var repository = new Mock<IPurchaseRequisitionRepository>();
+        repository.Setup(item => item.GetRequisitionByIdAsync(id)).ReturnsAsync(requisition);
+        var currentUser = new Mock<ICurrentUserProvider>();
+        currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
+        currentUser.SetupGet(item => item.UserId).Returns(requisition.RequestedById);
+        var workflow = new Mock<IWorkflowIntegrationService>();
+        var submission = new Mock<IProcurementRequisitionSubmissionControlService>();
+        var controller = Controller(repository.Object, currentUser.Object, workflow.Object, submission.Object);
+
+        var result = (ObjectResult)await controller.SubmitPurchaseRequisition(id);
+
+        result.StatusCode.Should().Be(422);
+        result.Value.Should().BeAssignableTo<ProblemDetails>()
+            .Which.Extensions["code"].Should().Be("PR_ESTIMATE_REQUIRED");
+        submission.Verify(item => item.EnforceAsync(
+            It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        workflow.Verify(item => item.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

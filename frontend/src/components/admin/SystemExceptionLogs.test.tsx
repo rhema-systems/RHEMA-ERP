@@ -45,7 +45,7 @@ describe('SystemExceptionLogs detail UX', () => {
         .fn()
         .mockResolvedValueOnce({
           ok: true,
-          json: async () => ({ items: [logItem] }),
+          json: async () => ({ items: [logItem], totalCount: 1 }),
         })
         .mockResolvedValueOnce({
           ok: true,

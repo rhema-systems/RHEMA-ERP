@@ -632,6 +632,12 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                     x.PublishedAt.HasValue && x.FileUploadRecordId.HasValue, cancellationToken);
             if (version is null)
                 throw Validation("INV_RETURN_EVIDENCE_NOT_CURRENT", "Evidence must reference the current published version in central DMS.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(x => x.Id == version.FileUploadRecordId!.Value &&
+                    x.TenantId == _currentUser.TenantId && !x.IsDeleted &&
+                    x.VirusScanStatus == FileVirusScanStatus.Clean, cancellationToken);
+            if (!cleanUpload)
+                throw Validation("INV_RETURN_EVIDENCE_NOT_CLEAN", "Evidence must have a successful clean malware scan.");
             result.Add((version, reference));
         }
         return result;
@@ -652,6 +658,12 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                     x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && x.PublishedAt.HasValue,
                     cancellationToken);
             if (!current) throw Conflict("INV_RETURN_EVIDENCE_STALE", "Linked central-DMS evidence is no longer current and published.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(x => x.Id == evidence.FileUploadRecordId &&
+                    x.TenantId == voucher.TenantId && !x.IsDeleted &&
+                    x.VirusScanStatus == FileVirusScanStatus.Clean, cancellationToken);
+            if (!cleanUpload)
+                throw Conflict("INV_RETURN_EVIDENCE_NOT_CLEAN", "Linked central-DMS evidence no longer has a successful clean malware scan.");
         }
     }
 

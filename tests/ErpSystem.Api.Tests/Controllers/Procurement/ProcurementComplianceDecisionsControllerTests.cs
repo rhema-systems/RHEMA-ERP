@@ -24,11 +24,11 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementComplianceDecisionsControllerTests
 {
     [Fact]
-    public void ControllerRequiresTenantOrSuperAdministratorRole()
+    public void ControllerRequiresProcurementRecordReadPermission()
     {
         var authorize = typeof(ProcurementComplianceDecisionsController).GetCustomAttribute<AuthorizeAttribute>();
         authorize.Should().NotBeNull();
-        authorize!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+        authorize!.Policy.Should().Be("procurement.records.read");
         typeof(ProcurementComplianceDecisionsController).GetCustomAttribute<AllowAnonymousAttribute>().Should().BeNull();
     }
 

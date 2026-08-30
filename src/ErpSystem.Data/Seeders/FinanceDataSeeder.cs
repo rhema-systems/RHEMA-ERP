@@ -87,9 +87,9 @@ public class FinanceDataSeeder
             await SeedFixedAssetCategoriesAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
-            // 7.5 Seed Fixed Assets
-            await SeedFixedAssetsAsync(tenantId, baseDate);
-            await _context.SaveChangesAsync();
+            // Fixed-asset masters and their monetary values are deliberately not baseline seed data.
+            // They must enter through an explicit import/capitalization/opening workflow so every
+            // accounting-book value has source, journal, and posting-event lineage.
 
             // 8. Seed Tax Configuration
             await SeedTaxConfigurationAsync(tenantId, baseDate);
@@ -370,8 +370,10 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "USD",
-                Rate = 0.08m,
-                InverseRate = 12.5m, // 1 / 0.08
+                // ExchangeRate.Rate is functional/base currency per one target-currency unit:
+                // 1 USD = 12.50 GHS. AP, AR and governed openings freeze this carrying rate.
+                Rate = 12.5m,
+                InverseRate = 0.08m, // 1 / 12.5
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -394,8 +396,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "EUR",
-                Rate = 0.076m,
-                InverseRate = 13.1579m, // 1 / 0.076
+                Rate = 13.1579m,
+                InverseRate = 0.076m, // rounded 1 / 13.1579
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -418,8 +420,8 @@ public class FinanceDataSeeder
                 TenantId = tenantId,
                 BaseCurrencyCode = "GHS",
                 TargetCurrencyCode = "GBP",
-                Rate = 0.063m,
-                InverseRate = 15.873m, // 1 / 0.063
+                Rate = 15.873m,
+                InverseRate = 0.063m, // rounded 1 / 15.873
                 RateType = ExchangeRateType.Daily,
                 EffectiveDate = effectiveDate,
                 RateSource = "Bank of Ghana",
@@ -2426,146 +2428,6 @@ public class FinanceDataSeeder
 
         await _context.FixedAssetCategories.AddRangeAsync(categories);
         _logger.LogInformation($"Seeded {categories.Count} fixed asset categories");
-    }
-
-    #endregion
-
-    #region Fixed Assets Seeding
-
-    private async Task SeedFixedAssetsAsync(Guid tenantId, DateTime baseDate)
-    {
-        if (await _context.FixedAssets.AnyAsync(a => a.TenantId == tenantId))
-        {
-            _logger.LogInformation("Fixed assets already exist. Skipping.");
-            return;
-        }
-
-        // Get categories to link
-        var categories = await _context.FixedAssetCategories
-            .Where(c => c.TenantId == tenantId)
-            .ToDictionaryAsync(c => c.Code, c => c.Id);
-
-        if (!categories.Any())
-        {
-            _logger.LogWarning("No fixed asset categories found. Skipping fixed asset seeding.");
-            return;
-        }
-
-        var assets = new List<FixedAsset>();
-        var systemUser = "System";
-
-        // 1. Building Asset
-        if (categories.TryGetValue("FA-BLDG", out var buildingCategoryId))
-        {
-            assets.Add(new FixedAsset
-            {
-                TenantId = tenantId,
-                FixedAssetCategoryId = buildingCategoryId,
-                AssetCode = "FA-2024-BLDG-001",
-                Name = "Headquarters Building",
-                Description = "Main office building in Accra",
-                PurchaseDate = baseDate.AddYears(-2),
-                PlacedInServiceDate = baseDate.AddYears(-2).AddDays(30),
-                PurchasePrice = 1200000m,
-                InstallationCost = 50000m,
-                TaxAmount = 0m,
-                AcquisitionCost = 1250000m,
-                NetBookValue = 1125000m, // Roughly 2 years depreciation
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 240, // 20 years
-                ResidualValue = 50000m,
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
-        }
-
-        // 2. Equipment Asset
-        if (categories.TryGetValue("FA-EQP", out var equipmentCategoryId))
-        {
-            assets.Add(new FixedAsset
-            {
-                TenantId = tenantId,
-                FixedAssetCategoryId = equipmentCategoryId,
-                AssetCode = "FA-2024-EQP-001",
-                Name = "Industrial Generator",
-                Description = "Backup power generator 500kVA",
-                PurchaseDate = baseDate.AddMonths(-6),
-                PlacedInServiceDate = baseDate.AddMonths(-6).AddDays(5),
-                PurchasePrice = 150000m,
-                InstallationCost = 10000m,
-                TaxAmount = 0m,
-                AcquisitionCost = 160000m,
-                NetBookValue = 144000m,
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 60, // 5 years
-                ResidualValue = 10000m,
-                SerialNumber = "GEN-500K-9988",
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
-
-            assets.Add(new FixedAsset
-            {
-                TenantId = tenantId,
-                FixedAssetCategoryId = equipmentCategoryId,
-                AssetCode = "FA-2024-EQP-002",
-                Name = "Server Rack System",
-                Description = "Main datacenter server rack",
-                PurchaseDate = baseDate.AddMonths(-1),
-                PlacedInServiceDate = baseDate.AddMonths(-1).AddDays(2),
-                PurchasePrice = 45000m,
-                InstallationCost = 5000m,
-                TaxAmount = 0m,
-                AcquisitionCost = 50000m,
-                NetBookValue = 49166.67m,
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 60,
-                ResidualValue = 0m,
-                SerialNumber = "SRV-RCK-1122",
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
-        }
-
-        // 3. Vehicle Asset
-        if (categories.TryGetValue("FA-VEH", out var vehicleCategoryId))
-        {
-            assets.Add(new FixedAsset
-            {
-                TenantId = tenantId,
-                FixedAssetCategoryId = vehicleCategoryId,
-                AssetCode = "FA-2024-VEH-001",
-                Name = "Delivery Truck - Toyota Hilux",
-                Description = "Main operations delivery vehicle",
-                PurchaseDate = baseDate.AddYears(-1),
-                PlacedInServiceDate = baseDate.AddYears(-1).AddDays(14),
-                PurchasePrice = 250000m,
-                InstallationCost = 0m,
-                TaxAmount = 0m,
-                AcquisitionCost = 250000m,
-                NetBookValue = 187500m,
-                DepreciationMethod = DepreciationMethod.StraightLine,
-                DepreciationConvention = DepreciationConvention.FullMonth,
-                UsefulLifeMonths = 48, // 4 years
-                ResidualValue = 25000m,
-                SerialNumber = "VIN-TOY-HLX-4455",
-                Status = FixedAssetStatus.Active,
-                CreatedAt = baseDate,
-                CreatedBy = systemUser
-            });
-        }
-
-        if (assets.Any())
-        {
-            await _context.FixedAssets.AddRangeAsync(assets);
-            _logger.LogInformation($"Seeded {assets.Count} fixed assets");
-        }
     }
 
     #endregion

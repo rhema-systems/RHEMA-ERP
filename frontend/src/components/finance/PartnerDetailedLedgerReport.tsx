@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency, cn } from '@/lib/utils';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
 
 export interface LedgerPartnerOption {
     id: string;
@@ -54,6 +55,13 @@ export interface DetailedLedgerReport {
     totalDebits: number;
     totalCredits: number;
     totalClosingBalance: number;
+    currencyTotals?: Array<{
+        currencyCode: string;
+        openingBalance: number;
+        totalDebits: number;
+        totalCredits: number;
+        closingBalance: number;
+    }>;
     warnings: string[];
     accounts: DetailedLedgerAccount[];
 }
@@ -76,6 +84,9 @@ interface PartnerDetailedLedgerReportProps {
     partners: LedgerPartnerOption[];
     partnersLoading?: boolean;
     loadReport: (params: ReportParams) => Promise<DetailedLedgerReport>;
+    downloadPdf?: (params: ReportParams) => Promise<void>;
+    printPdf?: (params: ReportParams) => Promise<void>;
+    canExport?: boolean;
 }
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
@@ -116,6 +127,9 @@ export function PartnerDetailedLedgerReport({
     partners,
     partnersLoading = false,
     loadReport,
+    downloadPdf,
+    printPdf,
+    canExport = true,
 }: PartnerDetailedLedgerReportProps) {
     const [fromDate, setFromDate] = useState(() => isoDate(firstDayOfMonth()));
     const [toDate, setToDate] = useState(() => isoDate(new Date()));
@@ -262,10 +276,20 @@ export function PartnerDetailedLedgerReport({
                         <p className="text-muted-foreground mt-2">{description}</p>
                     </div>
                 </div>
-                <Button variant="outline" onClick={exportCsv} disabled={!report || report.accounts.length === 0}>
-                    <Download className="mr-2 h-4 w-4" />
-                    Export
-                </Button>
+                {canExport && <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={exportCsv} disabled={!report || report.accounts.length === 0}>
+                        <Download className="mr-2 h-4 w-4" />
+                        CSV
+                    </Button>
+                    {downloadPdf && printPdf && (
+                        <ReportPdfActions
+                            reportName={title.toLowerCase()}
+                            onDownloadPdf={() => downloadPdf({ fromDate, toDate, partnerIds: selectedPartnerIds, showPartnerCurrency })}
+                            onPrint={() => printPdf({ fromDate, toDate, partnerIds: selectedPartnerIds, showPartnerCurrency })}
+                            disabled={!report || report.accounts.length === 0}
+                        />
+                    )}
+                </div>}
             </div>
 
             <Card>

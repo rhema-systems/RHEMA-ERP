@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
+using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -746,10 +747,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/drawings")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectDrawingDto>>> GetProjectDrawings(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectDrawingsAsync(id), "Error loading project drawings");
 
     [HttpPost("{id:guid}/drawings")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.DesignManage)]
     public async Task<ActionResult<ProjectDrawingDto>> AddProjectDrawing(Guid id, [FromBody] CreateProjectDrawingDto dto)
     {
         try
@@ -767,6 +770,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("drawings/{drawingId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.DesignManage)]
     public async Task<ActionResult<ProjectDrawingDto>> UpdateProjectDrawing(Guid drawingId, [FromBody] UpdateProjectDrawingDto dto)
     {
         try
@@ -784,6 +788,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("drawings/{drawingId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.DesignManage)]
     public async Task<IActionResult> DeleteProjectDrawing(Guid drawingId)
     {
         try
@@ -802,10 +807,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/submittals")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectSubmittalDto>>> GetProjectSubmittals(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectSubmittalsAsync(id), "Error loading project submittals");
 
     [HttpPost("{id:guid}/submittals")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<ActionResult<ProjectSubmittalDto>> AddProjectSubmittal(Guid id, [FromBody] CreateProjectSubmittalDto dto)
     {
         try
@@ -823,6 +830,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("submittals/{submittalId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<ActionResult<ProjectSubmittalDto>> UpdateProjectSubmittal(Guid submittalId, [FromBody] UpdateProjectSubmittalDto dto)
     {
         try
@@ -840,6 +848,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("submittals/{submittalId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<IActionResult> DeleteProjectSubmittal(Guid submittalId)
     {
         try
@@ -858,10 +867,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/rfis")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectRfiDto>>> GetProjectRfis(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectRfisAsync(id), "Error loading project RFIs");
 
     [HttpPost("{id:guid}/rfis")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<ActionResult<ProjectRfiDto>> AddProjectRfi(Guid id, [FromBody] CreateProjectRfiDto dto)
     {
         try
@@ -879,6 +890,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("rfis/{rfiId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<ActionResult<ProjectRfiDto>> UpdateProjectRfi(Guid rfiId, [FromBody] UpdateProjectRfiDto dto)
     {
         try
@@ -896,6 +908,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("rfis/{rfiId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<IActionResult> DeleteProjectRfi(Guid rfiId)
     {
         try
@@ -914,10 +927,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/site-instructions")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectSiteInstructionDto>>> GetProjectSiteInstructions(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectSiteInstructionsAsync(id), "Error loading project site instructions");
 
     [HttpPost("{id:guid}/site-instructions")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<ActionResult<ProjectSiteInstructionDto>> AddProjectSiteInstruction(Guid id, [FromBody] CreateProjectSiteInstructionDto dto)
     {
         try
@@ -935,6 +950,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("site-instructions/{siteInstructionId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<ActionResult<ProjectSiteInstructionDto>> UpdateProjectSiteInstruction(Guid siteInstructionId, [FromBody] UpdateProjectSiteInstructionDto dto)
     {
         try
@@ -952,6 +968,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("site-instructions/{siteInstructionId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.SupervisionManage)]
     public async Task<IActionResult> DeleteProjectSiteInstruction(Guid siteInstructionId)
     {
         try
@@ -970,10 +987,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/variation-orders")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectVariationOrderDto>>> GetProjectVariationOrders(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectVariationOrdersAsync(id), "Error loading project variation orders");
 
     [HttpPost("{id:guid}/variation-orders")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.VariationsManage)]
     public async Task<ActionResult<ProjectVariationOrderDto>> AddProjectVariationOrder(Guid id, [FromBody] CreateProjectVariationOrderDto dto)
     {
         try
@@ -993,6 +1012,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("variation-orders/{variationOrderId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.VariationsManage)]
     public async Task<ActionResult<ProjectVariationOrderDto>> UpdateProjectVariationOrder(Guid variationOrderId, [FromBody] UpdateProjectVariationOrderDto dto)
     {
         try
@@ -1012,6 +1032,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("variation-orders/{variationOrderId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.VariationsManage)]
     public async Task<IActionResult> DeleteProjectVariationOrder(Guid variationOrderId)
     {
         try
@@ -1032,10 +1053,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/interim-valuations")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectInterimValuationDto>>> GetProjectInterimValuations(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectInterimValuationsAsync(id), "Error loading project interim valuations");
 
     [HttpPost("{id:guid}/interim-valuations")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
     public async Task<ActionResult<ProjectInterimValuationDto>> AddProjectInterimValuation(Guid id, [FromBody] CreateProjectInterimValuationDto dto)
     {
         try
@@ -1053,6 +1076,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("interim-valuations/{interimValuationId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
     public async Task<ActionResult<ProjectInterimValuationDto>> UpdateProjectInterimValuation(Guid interimValuationId, [FromBody] UpdateProjectInterimValuationDto dto)
     {
         try
@@ -1070,6 +1094,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("interim-valuations/{interimValuationId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
     public async Task<IActionResult> DeleteProjectInterimValuation(Guid interimValuationId)
     {
         try
@@ -1088,10 +1113,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/payment-certificates")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectPaymentCertificateDto>>> GetProjectPaymentCertificates(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectPaymentCertificatesAsync(id), "Error loading project payment certificates");
 
     [HttpPost("{id:guid}/payment-certificates")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public async Task<ActionResult<ProjectPaymentCertificateDto>> AddProjectPaymentCertificate(Guid id, [FromBody] CreateProjectPaymentCertificateDto dto)
     {
         try
@@ -1109,6 +1136,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("payment-certificates/{paymentCertificateId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public async Task<ActionResult<ProjectPaymentCertificateDto>> UpdateProjectPaymentCertificate(Guid paymentCertificateId, [FromBody] UpdateProjectPaymentCertificateDto dto)
     {
         try
@@ -1126,6 +1154,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("payment-certificates/{paymentCertificateId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public async Task<IActionResult> DeleteProjectPaymentCertificate(Guid paymentCertificateId)
     {
         try
@@ -1144,10 +1173,12 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/extension-of-time-requests")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectExtensionOfTimeDto>>> GetProjectExtensionOfTimeRequests(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectExtensionOfTimeRequestsAsync(id), "Error loading project extension of time requests");
 
     [HttpPost("{id:guid}/extension-of-time-requests")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.CommercialManage)]
     public async Task<ActionResult<ProjectExtensionOfTimeDto>> AddProjectExtensionOfTimeRequest(Guid id, [FromBody] CreateProjectExtensionOfTimeDto dto)
     {
         try
@@ -1165,6 +1196,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("extension-of-time-requests/{extensionOfTimeId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.CommercialManage)]
     public async Task<ActionResult<ProjectExtensionOfTimeDto>> UpdateProjectExtensionOfTimeRequest(Guid extensionOfTimeId, [FromBody] UpdateProjectExtensionOfTimeDto dto)
     {
         try
@@ -1182,6 +1214,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("extension-of-time-requests/{extensionOfTimeId:guid}")]
+    [Authorize(Policy = CivilEngineeringAccessControlRegistry.CommercialManage)]
     public async Task<IActionResult> DeleteProjectExtensionOfTimeRequest(Guid extensionOfTimeId)
     {
         try
@@ -1200,6 +1233,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/final-account")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<ProjectFinalAccountDto?>> GetProjectFinalAccount(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectFinalAccountAsync(id), "Error loading project final account");
 

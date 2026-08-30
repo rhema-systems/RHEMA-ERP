@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
+import { useAuth } from '@/hooks/use-auth';
 import type { ProcurementFinanceReconciliationReport } from '@/types/ap';
 
 function money(value: number, currency: string) {
@@ -22,6 +24,8 @@ function money(value: number, currency: string) {
 }
 
 export function ProcurementFinanceReconciliation({ initialData }: { initialData?: ProcurementFinanceReconciliationReport }) {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [purchaseOrderId, setPurchaseOrderId] = useState('');
     const [downloading, setDownloading] = useState(false);
@@ -106,10 +110,26 @@ export function ProcurementFinanceReconciliation({ initialData }: { initialData?
                                 value={purchaseOrderId}
                                 onChange={(event) => setPurchaseOrderId(event.target.value)}
                             />
-                            <Button variant="outline" disabled={downloading} onClick={download}>
-                                <Download className="mr-2 h-4 w-4" />
-                                {downloading ? 'Exporting…' : 'Export CSV'}
-                            </Button>
+                            {canExport && (
+                                <>
+                                    <Button variant="outline" disabled={downloading} onClick={download}>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        {downloading ? 'Exporting…' : 'Export CSV'}
+                                    </Button>
+                                    <ReportPdfActions
+                                        reportName="procurement and Finance reconciliation"
+                                        onDownloadPdf={() => accountsPayableService.downloadProcurementFinanceReconciliationPdf({
+                                            asOfDate,
+                                            purchaseOrderId: purchaseOrderId.trim() || undefined,
+                                        })}
+                                        onPrint={() => accountsPayableService.printProcurementFinanceReconciliation({
+                                            asOfDate,
+                                            purchaseOrderId: purchaseOrderId.trim() || undefined,
+                                        })}
+                                        disabled={!query.data}
+                                    />
+                                </>
+                            )}
                         </div>
                     </div>
                 </CardHeader>

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
@@ -45,7 +46,7 @@ public class RfqsController : ControllerBase
     // -----------------------------
 
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<PagedResult<RfqDto>>> GetRfqs(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
@@ -61,12 +62,12 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting RFQs");
-            return StatusCode(500, "An error occurred while retrieving RFQs");
+            throw;
         }
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<RfqDetailDto>> GetRfq(Guid id)
     {
         try
@@ -78,7 +79,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting RFQ {RfqId}", id);
-            return StatusCode(500, "An error occurred while retrieving the RFQ");
+            throw;
         }
     }
 
@@ -86,7 +87,7 @@ public class RfqsController : ControllerBase
     /// Generates an RFQ PDF (for printing / emailing) even before sending it to suppliers.
     /// </summary>
     [HttpGet("{id:guid}/pdf")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<IActionResult> GetRfqPdf(Guid id, CancellationToken cancellationToken)
     {
         try
@@ -101,12 +102,12 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating RFQ PDF for {RfqId}", id);
-            return StatusCode(500, "An error occurred while generating the RFQ PDF");
+            throw;
         }
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public async Task<ActionResult<RfqDetailDto>> UpdateRfq(Guid id, [FromBody] UpdateRfqDto dto)
     {
         try
@@ -121,7 +122,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating RFQ {RfqId}", id);
-            return StatusCode(500, "An error occurred while updating the RFQ");
+            throw;
         }
     }
 
@@ -194,6 +195,14 @@ public class RfqsController : ControllerBase
         {
             return UnprocessableEntity(AwardReadinessProblem(422, ex.Code, ex.Message));
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -206,7 +215,7 @@ public class RfqsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/send")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.sourcing.manage")]
     public async Task<IActionResult> SendRfq(Guid id, [FromBody] SendRfqDto dto)
     {
         try
@@ -262,6 +271,19 @@ public class RfqsController : ControllerBase
         {
             return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
         }
+        catch (SupplierEligibilityException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                status = 422,
+                title = "RFQ supplier is not eligible",
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = ex.Code,
+                correlationId = HttpContext.TraceIdentifier,
+                eligibility = ex.Result
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -294,30 +316,30 @@ public class RfqsController : ControllerBase
     };
 
     [HttpGet("{id:guid}/controls")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<ActionResult<ProcurementRfqControlDto>> GetControls(Guid id) =>
         ExecuteControlAsync(() => _rfqControlService.GetAsync(id));
 
     [HttpPost("{id:guid}/opening-register")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<ActionResult<ProcurementRfqOpeningRegisterDto>> CompleteOpening(
         Guid id, [FromBody] CompleteProcurementRfqOpeningRequest request) =>
         ExecuteControlAsync(() => _rfqControlService.CompleteOpeningAsync(id, request, HttpContext.TraceIdentifier));
 
     [HttpPut("{id:guid}/evaluation")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,TDC_EVALUATOR")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<ActionResult<ProcurementRfqEvaluationDto>> SaveEvaluation(
         Guid id, [FromBody] SaveProcurementRfqEvaluationRequest request) =>
         ExecuteControlAsync(() => _rfqControlService.SaveEvaluationAsync(id, request, HttpContext.TraceIdentifier));
 
     [HttpPost("{id:guid}/evaluation/submit")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,TDC_EVALUATOR")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<ActionResult<ProcurementRfqEvaluationDto>> SubmitEvaluation(
         Guid id, [FromBody] SubmitProcurementRfqEvaluationRequest request) =>
         ExecuteControlAsync(() => _rfqControlService.SubmitEvaluationAsync(id, request, HttpContext.TraceIdentifier));
 
     [HttpPost("{id:guid}/evaluation/decision")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,TDC_HEAD_OF_PROCUREMENT,TDC_ETC_MEMBER,TDC_CENTRAL_REVIEW_MEMBER,TDC_BOARD_APPROVER,TDC_MANAGING_DIRECTOR")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public Task<ActionResult<ProcurementRfqEvaluationDto>> DecideEvaluation(
         Guid id, [FromBody] DecideProcurementRfqEvaluationRequest request) =>
         ExecuteControlAsync(() => _rfqControlService.DecideEvaluationAsync(id, request, HttpContext.TraceIdentifier));
@@ -346,7 +368,7 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting supplier RFQs");
-            return StatusCode(500, "An error occurred while retrieving RFQs");
+            throw;
         }
     }
 
@@ -372,8 +394,26 @@ public class RfqsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting supplier RFQ detail {RfqId}", id);
-            return StatusCode(500, "An error occurred while retrieving the RFQ");
+            throw;
         }
+    }
+
+    [HttpPost("{id:guid}/my-view/opened")]
+    public async Task<ActionResult<RfqDetailDto>> RecordMyRfqOpened(Guid id)
+    {
+        if (!_currentUserProvider.IsExternalUser)
+            return Forbid();
+
+        var businessPartner = await ResolveCurrentBusinessPartnerAsync();
+        if (businessPartner == null)
+            return NotFound();
+
+        var detail = await _rfqService.RecordSupplierRfqOpenedAsync(
+            id,
+            businessPartner.Id,
+            _currentUserProvider.UserId,
+            _currentUserProvider.TenantId);
+        return detail is null ? NotFound() : Ok(detail);
     }
 
     [HttpPost("{id:guid}/quote")]

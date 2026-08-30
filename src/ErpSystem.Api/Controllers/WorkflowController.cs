@@ -754,10 +754,14 @@ public class WorkflowController : ControllerBase
                         EntityType = entityType,
                         EntityId = entityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = false,
                         CanCurrentUserApprove = false
                     }
                 });
             }
+
+            var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(
+                entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType);
 
             var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString());
             var activeInstance = instances
@@ -779,6 +783,7 @@ public class WorkflowController : ControllerBase
                         EntityType = entityTypeRecord.Code ?? entityTypeRecord.Name,
                         EntityId = entityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = approvalRequired,
                         CanCurrentUserApprove = false
                     }
                 });
@@ -835,6 +840,7 @@ public class WorkflowController : ControllerBase
                 EntityType = status.EntityType,
                 EntityId = entityId,
                 HasActiveInstance = true,
+                ApprovalRequired = true,
                 WorkflowInstanceId = status.WorkflowInstanceId,
                 WorkflowName = status.WorkflowName,
                 Status = status.Status,
@@ -917,6 +923,7 @@ public class WorkflowController : ControllerBase
                         EntityType = requestedEntityType ?? string.Empty,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = false,
                         CanCurrentUserApprove = false
                     };
                 }
@@ -936,9 +943,13 @@ public class WorkflowController : ControllerBase
                         EntityType = requestedEntityType,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = false,
                         CanCurrentUserApprove = false
                     };
                 }
+
+                var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType;
+                var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(canonicalEntityType);
 
                 var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, requestedEntityId.ToString());
                 var activeInstance = instances
@@ -957,6 +968,7 @@ public class WorkflowController : ControllerBase
                         EntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
+                        ApprovalRequired = approvalRequired,
                         CanCurrentUserApprove = false
                     };
                 }
@@ -964,7 +976,6 @@ public class WorkflowController : ControllerBase
                 var status = await _workflowEngine.GetWorkflowStatusAsync(activeInstance.Id);
 
                 // Use the canonical entity type string (code preferred) so workflow service lookups are consistent.
-                var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType;
                 var stepInfo = await _workflowService.GetCurrentWorkflowStepAsync(canonicalEntityType, requestedEntityId);
 
                 var currentStepName = stepInfo?.StepName;
@@ -1014,6 +1025,7 @@ public class WorkflowController : ControllerBase
                     EntityType = status.EntityType,
                     EntityId = requestedEntityId,
                     HasActiveInstance = true,
+                    ApprovalRequired = true,
                     WorkflowInstanceId = status.WorkflowInstanceId,
                     WorkflowName = status.WorkflowName,
                     Status = status.Status,
@@ -2448,6 +2460,30 @@ public class WorkflowController : ControllerBase
             if (approval == null)
             {
                 return NotFound();
+            }
+
+            var supplierDebitNoteWorkflow = await _db.WorkflowStepInstances
+                .AsNoTracking()
+                .Where(step => step.Id == approval.StepInstanceId && !step.IsDeleted)
+                .Select(step => new
+                {
+                    step.TenantId,
+                    step.WorkflowInstance.EntityId,
+                    EntityTypeCode = step.WorkflowInstance.EntityType.Code
+                })
+                .FirstOrDefaultAsync(HttpContext.RequestAborted);
+            if (supplierDebitNoteWorkflow != null &&
+                supplierDebitNoteWorkflow.TenantId == approval.TenantId &&
+                string.Equals(supplierDebitNoteWorkflow.EntityTypeCode, "SupplierDebitNote", StringComparison.OrdinalIgnoreCase))
+            {
+                // The shared workflow endpoint may advance steps but cannot update the AP
+                // document, enforce its purpose-specific permission, or post its audit outcome.
+                // Review this Finance-owned document through the canonical domain boundary.
+                return Conflict(new
+                {
+                    code = "FINANCE_DOMAIN_APPROVAL_REQUIRED",
+                    route = $"/api/ap/supplier-debit-notes/{supplierDebitNoteWorkflow.EntityId}/approval"
+                });
             }
 
             // Enforce that the current user can act on this approval (direct assignment or matching role).

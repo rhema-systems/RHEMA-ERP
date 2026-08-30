@@ -286,8 +286,9 @@ public class TenderService : ITenderService
                 }
             }
 
-            await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId, sourceType,
-                tender.Id, tender.TenderNumber, Guid.NewGuid().ToString("N"));
+            if (gate.SourcingCaseId.HasValue)
+                await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId.Value, sourceType,
+                    tender.Id, tender.TenderNumber, Guid.NewGuid().ToString("N"));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -538,17 +539,25 @@ public class TenderService : ITenderService
                     "Restricted Tendering, Single Source, and Petty Purchase cases must be prepared, approved, and released through the dedicated noncompetitive-sourcing control.");
             }
 
-            var documentCorrelationId = Guid.NewGuid().ToString("N");
-            await _tenderDocumentControlService.EnsurePublicationReadyAsync(
-                ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
-                documentCorrelationId);
-            await _tenderDocumentControlService.EnsureDispatchReadyAsync(
-                ProcurementTenderDocumentSourceType.Tender, tender.Id,
-                dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
-                dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
-                documentCorrelationId);
-            if (gate.SelectedMethod is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering or
-                ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection)
+            if (UsesAdvancedSourcingControls(gate))
+            {
+                var documentCorrelationId = Guid.NewGuid().ToString("N");
+                await _tenderDocumentControlService.EnsurePublicationReadyAsync(
+                    ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
+                    documentCorrelationId);
+                await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                    ProcurementTenderDocumentSourceType.Tender, tender.Id,
+                    dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
+                    dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                    documentCorrelationId);
+            }
+            else
+            {
+                ValidateReleaseOnlyPublication(tender, dto, DateTime.UtcNow);
+            }
+            if (UsesAdvancedSourcingControls(gate) &&
+                gate.SelectedMethod is (ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering or
+                    ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection))
             {
                 if (!dto.OpeningDate.HasValue)
                     throw new ProcurementTenderControlValidationException("TENDER_OPENING_REQUIRED", "Controlled tender publication requires an opening date.");
@@ -1065,7 +1074,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
-            await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender.Id);
+            await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender);
 
             var evaluatorIds = new List<Guid>();
 
@@ -1533,9 +1542,47 @@ public class TenderService : ITenderService
 
     private async Task EnsureStandaloneEvaluatorAssignmentMutableAsync(Guid tenderId)
     {
+        var tender = await _tenderRepository.GetByIdAsync(tenderId)
+            ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+        await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender);
+    }
+
+    private async Task EnsureStandaloneEvaluatorAssignmentMutableAsync(Tender tender)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_SOURCE_REQUISITION_REQUIRED",
+                "The tender must retain its approved purchase-requisition source before evaluators can be assigned.");
+
+        var requestForQuotation = IsRequestForQuotation(tender.TenderType);
+        var gate = await _sourcingCaseService.EnforceSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
+            requestForQuotation ? "RequestForQuotation" : "Tender",
+            tender.TenderNumber,
+            Guid.NewGuid().ToString("N"));
+        EnsureSourceLineage(tender.SourcingReleaseId, tender.SourcingCaseId, gate);
+
+        var lineageChanged = tender.SourcingReleaseId != gate.SourcingReleaseId ||
+                             tender.SourcingCaseId != gate.SourcingCaseId;
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        if (lineageChanged)
+        {
+            tender.UpdatedAt = DateTime.UtcNow;
+            await _tenderRepository.UpdateAsync(tender);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        // A current release is sufficient for the simplified approved-PR route. The
+        // source-specific committee is mandatory only when the tenant has explicitly
+        // created the advanced immutable sourcing case that owns that committee.
+        if (!UsesAdvancedSourcingControls(gate))
+            return;
+
         var readiness = await _evaluationCommittee.GetReadinessAsync(
             ProcurementEvaluationSourceType.Tender,
-            tenderId,
+            tender.Id,
             CancellationToken.None);
         if (readiness.HasControl)
         {
@@ -1547,6 +1594,28 @@ public class TenderService : ITenderService
 
     private static bool IsRequestForQuotation(string? tenderType) =>
         string.Equals(tenderType?.Trim(), "RFQ", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool UsesAdvancedSourcingControls(ProcurementSourcingCaseEntryGateDto gate) =>
+        gate.SourcingCaseId.HasValue && gate.SourcingCaseId.Value != Guid.Empty;
+
+    internal static void ValidateReleaseOnlyPublication(
+        Tender tender,
+        PublishTenderDto request,
+        DateTime nowUtc)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue || !tender.SourcingReleaseId.HasValue)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_SOURCE_LINEAGE_REQUIRED",
+                "The tender must retain its approved requisition and immutable sourcing-release lineage before publication.");
+        if (request.SubmissionDeadline <= nowUtc)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_DEADLINE_PASSED",
+                "The tender submission deadline must be in the future when it is published.");
+        if (request.OpeningDate.HasValue && request.OpeningDate.Value < request.SubmissionDeadline)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_OPENING_BEFORE_DEADLINE",
+                "The scheduled tender opening cannot be before the submission deadline.");
+    }
 
     private static void EnsureSourceLineage(Guid? releaseId, Guid? caseId, ProcurementSourcingCaseEntryGateDto gate)
     {

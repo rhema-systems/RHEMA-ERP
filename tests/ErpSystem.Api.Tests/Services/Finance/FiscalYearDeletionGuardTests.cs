@@ -17,6 +17,33 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FiscalYearDeletionGuardTests
 {
     [Fact]
+    [Trait("Category", "FiscalYearProjection")]
+    public async Task GetFiscalYearsAsync_ShouldReturnSelectionAndControlFields()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (year, _) = SeedFiscalYear(db, tenantId);
+        year.Status = "Open";
+        year.IsLocked = false;
+        year.ReportingFramework = "IFRS";
+        year.BaseCurrency = "GHS";
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+        var result = await service.GetFiscalYearsAsync();
+
+        var dto = result.Should().ContainSingle().Subject;
+        dto.Id.Should().Be(year.Id);
+        dto.Year.Should().Be(2026);
+        dto.Status.Should().Be("Open");
+        dto.IsActive.Should().BeTrue();
+        dto.IsClosed.Should().BeFalse();
+        dto.IsLocked.Should().BeFalse();
+        dto.NumberOfPeriods.Should().Be(1);
+        dto.BaseCurrency.Should().Be("GHS");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceReviewHardening")]
     [Trait("Category", "FiscalYearDeletion")]
     public async Task DeleteFiscalYearAsync_ShouldRejectOrphanedAccountTransactionLine()

@@ -11,9 +11,28 @@ public interface IProcurementRequisitionBudgetControlService
     Task<PurchaseRequisitionBudgetReadinessDto> GetLinkedControlReadinessAsync(
         Guid requisitionId,
         CancellationToken cancellationToken = default);
+    Task<PurchaseRequisitionBudgetReadinessDto> GetDownstreamReadinessAsync(
+        Guid requisitionId,
+        decimal requiredExposure,
+        string currencyCode,
+        CancellationToken cancellationToken = default);
 
     Task<PurchaseRequisitionBudgetReadinessDto> ReserveAsync(
         PurchaseRequisition requisition,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task<PurchaseRequisitionBudgetReadinessDto> ReserveForDownstreamAsync(
+        PurchaseRequisition requisition,
+        string requiredPermissionCode,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task<PurchaseRequisitionBudgetReadinessDto> ReserveForDownstreamAsync(
+        PurchaseRequisition requisition,
+        decimal requiredExposure,
+        string currencyCode,
+        string requiredPermissionCode,
         string correlationId,
         CancellationToken cancellationToken = default);
 

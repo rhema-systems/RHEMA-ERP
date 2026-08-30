@@ -111,7 +111,9 @@ public static class FinancePermissionPolicyMap
             "Allocation" => AllocationPolicy(action),
             "VendorInvoice" => VendorInvoicePolicy(action),
             "VendorPayment" => VendorPaymentPolicy(action),
+            "SupplierDebitNotes" => SupplierDebitNotesPolicy(action),
             "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
+            "FinanceDimensions" => ReadOrManage(action, methods, FinancePermissions.ManageCodingDimensions),
             "PaymentBatch" => PaymentBatchPolicy(action),
             "ApReports" => ReportPolicy(action),
             "Invoice" => ArInvoicePolicy(action),
@@ -222,6 +224,17 @@ public static class FinancePermissionPolicyMap
             // approval endpoint separately enforce who may perform the checker/MD decisions.
             "Create" or "Update" or "Submit" or "Allocate" or "Post" or "ReverseAllocation" or "ClearPayment" or "VoidPayment" => One(FinancePermissions.ProcessApPayments),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ProcessApPayments)
+        };
+
+    private static IReadOnlyList<string> SupplierDebitNotesPolicy(string action)
+        => action switch
+        {
+            "Create" or "Update" or "Cancel" => One(FinancePermissions.ManageApSupplierDebitNotes),
+            "Submit" => One(FinancePermissions.SubmitApSupplierDebitNotes),
+            "ProcessApproval" => One(FinancePermissions.ApproveApSupplierDebitNotes),
+            "Post" => One(FinancePermissions.PostApSupplierDebitNotes),
+            "Reverse" => One(FinancePermissions.ReverseApSupplierDebitNotes),
+            _ => One(FinancePermissions.ViewFinance)
         };
 
     private static IReadOnlyList<string> PaymentBatchPolicy(string action)
@@ -457,8 +470,9 @@ public static class FinancePermissionPolicyMap
             // Fixed-asset batches are another preparation route into the same maker-checker
             // opening-balance aggregate; they must not inherit the more powerful adjustment
             // permission merely because the action name differs from the original Create action.
-            "GetSpecializedOptions" => One(FinancePermissions.ViewFinance),
-            "Create" or "CreateFixedAssetBatch" or "CreateSupplierAdvance" or "CreateCustomerAdvance"
+            "GetSpecializedOptions" or "GetGovernedOptions" => One(FinancePermissions.ViewFinance),
+            "Create" or "CreateFixedAssetBatch" or "CreateBankAccountOpening"
+                or "CreateResidualGlEquityOpening" or "CreateSupplierAdvance" or "CreateCustomerAdvance"
                 or "CreateApWithholding" or "CreateArWithholding" or "Update" or "Validate"
                 => One(FinancePermissions.PrepareOpeningBalances),
             "Submit" => new[] { FinancePermissions.PrepareOpeningBalances, FinancePermissions.WorkflowSubmit },

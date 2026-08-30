@@ -84,6 +84,33 @@ public sealed class ProcurementPurchaseOrderAmendmentRulesTests
                 exception.Code == "PO_AMENDMENT_ITEM_DUPLICATE");
     }
 
+    [Fact]
+    public void ExistingDescriptionOnlySourceLineCanRetainPendingItemMapping()
+    {
+        var item = ValidItem(Guid.NewGuid());
+        item.InventoryItemId = null;
+
+        var action = () =>
+            ProcurementPurchaseOrderAmendmentRules.ValidateItems([item]);
+
+        action.Should().NotThrow();
+    }
+
+    [Fact]
+    public void NewLineWithoutInventoryItemIsRejected()
+    {
+        var item = ValidItem();
+        item.InventoryItemId = null;
+
+        var action = () =>
+            ProcurementPurchaseOrderAmendmentRules.ValidateItems([item]);
+
+        action.Should()
+            .Throw<ProcurementPurchaseOrderAmendmentValidationException>()
+            .Where(exception =>
+                exception.Code == "PO_AMENDMENT_ITEM_INVALID");
+    }
+
     [Theory]
     [InlineData(ProcurementPurchaseOrderAmendmentStatus.Rejected, true)]
     [InlineData(ProcurementPurchaseOrderAmendmentStatus.Cancelled, true)]

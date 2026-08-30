@@ -21,6 +21,12 @@ public static class ControlledFileUploadCategories
     public const string ProcurementReceiptSourceEvidence =
         "procurement-receipt-source-evidence";
 
+    public const string ProcurementAppExchange =
+        "procurement-app-exchange";
+
+    public const string InventoryStockTakingEvidence =
+        "inventory-stock-taking-evidence";
+
     public const string QuantitySurveyBoqImport =
         "quantity-survey-boq-import";
 
@@ -86,6 +92,8 @@ public static class ControlledFileUploadCategories
                 DocumentManagement,
                 FinanceCloseEvidence,
                 ProcurementReceiptSourceEvidence,
+                ProcurementAppExchange,
+                InventoryStockTakingEvidence,
                 QuantitySurveyBoqImport,
                 QuantitySurveyTenderBoqSubmission,
                 QuantitySurveyPriceIndexImport,

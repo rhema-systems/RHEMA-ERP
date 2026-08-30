@@ -67,6 +67,18 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
             .ToListAsync();
     }
 
+    public async Task<decimal> GetPlannedBudgetExposureAsync(Guid budgetId, Guid? excludePlanId = null)
+    {
+        return await GetTenantFilteredQuery()
+            .Where(plan =>
+                plan.BudgetId == budgetId &&
+                (!excludePlanId.HasValue || plan.Id != excludePlanId.Value) &&
+                plan.Status != "Rejected" &&
+                plan.Status != "Cancelled" &&
+                plan.Status != "Completed")
+            .SumAsync(plan => plan.TotalEstimatedBudget);
+    }
+
     public async Task<ProcurementPlan?> GetWithItemsAsync(Guid id)
     {
         return await GetTenantFilteredQuery()
@@ -88,6 +100,7 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
             .Include(p => p.Items.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                     .ThenInclude(s => s.BusinessPartner)
+            .Include(p => p.Budget)
             .Include(p => p.Budgets.Where(b => !b.IsDeleted))
             .Include(p => p.Schedules.Where(s => !s.IsDeleted))
             .Include(p => p.PreparedBy)
@@ -149,9 +162,28 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
 
     public async Task<string> GeneratePlanNumberAsync(int fiscalYear)
     {
-        var tenantId = _currentUserProvider.TenantId;
-        var count = await _dbSet.CountAsync(p => p.FiscalYear == fiscalYear && p.TenantId == tenantId);
-        return $"PP-{fiscalYear}-{(count + 1):D4}";
+        var prefix = $"PP-{fiscalYear}-";
+        var existingNumbers = await _dbSet
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(plan =>
+                plan.FiscalYear == fiscalYear &&
+                plan.PlanNumber.StartsWith(prefix))
+            .Select(plan => plan.PlanNumber)
+            .ToListAsync();
+
+        // PlanNumber is globally unique in the current schema. Count + 1 is
+        // unsafe when a record was soft deleted or a sequence has a gap, and
+        // tenant-local counting can collide with another tenant. Never reuse a
+        // number: retain deleted rows in the calculation and advance from the
+        // highest valid numeric suffix across the table.
+        var highestSequence = existingNumbers
+            .Select(number => number[prefix.Length..])
+            .Select(suffix => int.TryParse(suffix, out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{highestSequence + 1:D4}";
     }
 
     public async Task<bool> PlanNumberExistsAsync(string planNumber)
@@ -191,6 +223,20 @@ public class ProcurementPlanItemRepository : GenericRepository<ProcurementPlanIt
                 .ThenInclude(s => s.BusinessPartner)
             .OrderBy(i => i.RequiredDate)
             .ToListAsync();
+    }
+
+    public async Task<decimal> GetPlannedBudgetExposureByAllocationAsync(Guid allocationId, Guid? excludeItemId = null)
+    {
+        return await _dbSet
+            .Where(item =>
+                item.ProcurementBudgetAllocationId == allocationId &&
+                (!excludeItemId.HasValue || item.Id != excludeItemId.Value) &&
+                !item.IsDeleted &&
+                !item.ProcurementPlan.IsDeleted &&
+                item.ProcurementPlan.Status != "Rejected" &&
+                item.ProcurementPlan.Status != "Cancelled" &&
+                item.ProcurementPlan.Status != "Completed")
+            .SumAsync(item => item.ApprovedBudgetAmount ?? item.EstimatedTotalCost);
     }
 
     public async Task<IEnumerable<ProcurementPlanItem>> GetCriticalItemsAsync(Guid planId)
@@ -411,10 +457,25 @@ public class ProcurementBudgetRepository : GenericRepository<ProcurementBudget>,
         };
     }
 
-    public async Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid departmentId)
+    public async Task<string> GenerateBudgetCodeAsync(int fiscalYear, Guid tenantId)
     {
-        var count = await _dbSet.CountAsync(b => b.FiscalYear == fiscalYear && b.DepartmentId == departmentId);
-        return $"PB-{fiscalYear}-{(count + 1):D4}";
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("A tenant is required to generate a procurement budget code.");
+
+        var prefix = $"PB-{fiscalYear}-";
+        var existingCodes = await _dbSet
+            .IgnoreQueryFilters()
+            .Where(b => b.TenantId == tenantId && b.BudgetCode.StartsWith(prefix))
+            .Select(b => b.BudgetCode)
+            .ToListAsync();
+
+        var highestSequence = existingCodes
+            .Select(code => code[prefix.Length..])
+            .Select(value => int.TryParse(value, out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highestSequence + 1):D4}";
     }
 
     public async Task<bool> BudgetCodeExistsAsync(string budgetCode)

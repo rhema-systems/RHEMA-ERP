@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Plus, ArrowLeft, Save, Loader2, Eye, Layers, Wand2, Check, ChevronsUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { AccountType, AccountStatus, SegmentStructure, SegmentLookupValue, FinanceSettings } from '@/types/finance';
+import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructure, SegmentLookupValue, FinanceSettings } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -135,6 +135,7 @@ export default function NewAccountPage() {
         accountName: '',
         accountType: 'Asset' as AccountType,
         accountSubCategory: '', // Initial empty state
+        cashFlowClassification: '' as CashFlowClassification | '',
         description: '',
         currencyCode: 'GHS',
         isMultiCurrency: false,
@@ -371,6 +372,7 @@ export default function NewAccountPage() {
                 accountType: formData.accountType,
                 accountCategory: formData.accountSubCategory || undefined,
                 accountSubCategory: formData.accountSubCategory || undefined,
+                cashFlowClassification: formData.cashFlowClassification || null,
                 currencyCode: formData.currencyCode,
                 isMultiCurrency: formData.isMultiCurrency,
                 isIFRSClassified: formData.isIFRSClassified,
@@ -782,6 +784,31 @@ export default function NewAccountPage() {
                                 <CardTitle>Account Features</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-3">
+                                <div className="space-y-2 border-b pb-4">
+                                    <Label htmlFor="cashFlowClassification">Cash-flow statement section</Label>
+                                    <Select
+                                        value={formData.cashFlowClassification || 'Unclassified'}
+                                        onValueChange={(value) => setFormData({
+                                            ...formData,
+                                            cashFlowClassification: value === 'Unclassified'
+                                                ? ''
+                                                : value as CashFlowClassification,
+                                        })}
+                                    >
+                                        <SelectTrigger id="cashFlowClassification">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Unclassified">Not classified</SelectItem>
+                                            <SelectItem value="Operating">Operating</SelectItem>
+                                            <SelectItem value="Investing">Investing</SelectItem>
+                                            <SelectItem value="Financing">Financing</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Required when this account is the non-cash counterpart of a cash or bank posting.
+                                    </p>
+                                </div>
                                 <div className="flex items-center space-x-2">
                                     <Checkbox
                                         id="allowDirectPosting"

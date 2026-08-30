@@ -24,6 +24,13 @@ public class ProcurementPlanDto
     public int PlanDurationYears { get; set; }
     public string Status { get; set; } = "Draft";
     public decimal TotalEstimatedBudget { get; set; }
+
+    /// <summary>
+    /// Approved procurement budget selected by the planner.  The selection is
+    /// validated against the plan department and fiscal year before it is
+    /// linked; the system never guesses a budget at approval time.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
     public decimal ApprovedBudget { get; set; }
     public string Currency { get; set; } = "USD";
     public string? PreparedByName { get; set; }
@@ -93,6 +100,12 @@ public class CreateProcurementPlanDto
 
     public decimal TotalEstimatedBudget { get; set; }
 
+    /// <summary>
+    /// Optional while a plan remains Draft. Submission and final approval require
+    /// a tenant-safe, approved budget that matches the plan department and fiscal year.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
+
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
 
@@ -136,6 +149,12 @@ public class UpdateProcurementPlanDto
 
     public decimal TotalEstimatedBudget { get; set; }
 
+    /// <summary>
+    /// Approved procurement budget selected while a draft plan is being prepared.
+    /// An existing plan-level budget link is preserved when this value is omitted.
+    /// </summary>
+    public Guid? BudgetId { get; set; }
+
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
 
@@ -173,14 +192,27 @@ public class ApproveProcurementPlanDto
     public bool AutoGenerateSchedules { get; set; } = true;
 
     /// <summary>
-    /// Optional: Specific budget ID to link. If null, system auto-matches by department + fiscal year
+    /// The budget selection is made while the plan is being prepared. This
+    /// member is retained only for backwards-compatible API deserialization.
     /// </summary>
     public Guid? BudgetId { get; set; }
 
     /// <summary>
-    /// If true, automatically links to matching budget on approval
+    /// Retained for backwards-compatible API deserialization. Plans must not
+    /// auto-select an arbitrary matching budget at approval time.
     /// </summary>
-    public bool AutoLinkBudget { get; set; } = true;
+    public bool AutoLinkBudget { get; set; }
+}
+
+/// <summary>
+/// Shared-workflow decision for a procurement budget.
+/// </summary>
+public sealed class ApproveProcurementBudgetDto
+{
+    public bool IsApproved { get; set; } = true;
+
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 /// <summary>
@@ -685,6 +717,7 @@ public class ProcurementBudgetDto
     public decimal AllocatedAmount { get; set; }
     public decimal UtilizedAmount { get; set; }
     public decimal CommittedAmount { get; set; }
+    public decimal ReservedAmount { get; set; }
     public decimal RemainingAmount { get; set; }
     public string Currency { get; set; } = "USD";
     public string Status { get; set; } = "Draft";
@@ -797,6 +830,8 @@ public class ProcurementBudgetRevisionDto
     public decimal NewAmount { get; set; }
     public decimal ChangeAmount { get; set; }
     public string? Reason { get; set; }
+    public Guid? RequestedById { get; set; }
+    public string? RequestedByName { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public string Status { get; set; } = "Pending";
@@ -808,15 +843,17 @@ public class ProcurementBudgetRevisionDto
 /// </summary>
 public class CreateProcurementBudgetRevisionDto
 {
-    [Required]
     [MaxLength(30)]
-    public string RevisionType { get; set; } = "Increase";
+    public string? RevisionType { get; set; }
 
     [Required]
+    [Range(typeof(decimal), "0.01", "79228162514264337593543950335")]
     public decimal NewAmount { get; set; }
 
+    [Required]
+    [MinLength(3)]
     [MaxLength(2000)]
-    public string? Reason { get; set; }
+    public string Reason { get; set; } = string.Empty;
 }
 
 #endregion
