@@ -55,7 +55,9 @@ public static class ProcurementPurchaseOrderAmendmentRules
                 "PO_AMENDMENT_ITEMS_REQUIRED",
                 "At least one proposed purchase-order line is required.");
         if (items.Any(item =>
-                item.InventoryItemId == Guid.Empty ||
+                (!item.PurchaseOrderItemId.HasValue &&
+                 (!item.InventoryItemId.HasValue ||
+                  item.InventoryItemId.Value == Guid.Empty)) ||
                 item.OrderedQuantity <= 0 ||
                 item.UnitPrice < 0 ||
                 string.IsNullOrWhiteSpace(item.UnitOfMeasure) ||
@@ -63,7 +65,7 @@ public static class ProcurementPurchaseOrderAmendmentRules
         {
             throw new ProcurementPurchaseOrderAmendmentValidationException(
                 "PO_AMENDMENT_ITEM_INVALID",
-                "Every proposed line requires an inventory item, description, positive quantity, unit of measure, and non-negative price.");
+                "Every proposed line requires a description, positive quantity, unit of measure, and non-negative price. A new line must also reference an inventory item; an existing controlled source line may retain its pending item mapping.");
         }
 
         var duplicateExisting = items

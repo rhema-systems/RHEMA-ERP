@@ -28,13 +28,38 @@ export const printProcurementDocument = (element: HTMLElement, title: string) =>
   }, { once: true });
 };
 
-export const exportProcurementDocumentPdf = async (element: HTMLElement, fileName: string) => {
-  const canvas = await html2canvas(element, {
+const isUnsupportedModernColorError = (error: unknown) =>
+  error instanceof Error
+  && /unsupported color function\s+["']?(?:oklch|oklab|lab|lch|color)["']?/i.test(error.message);
+
+const renderProcurementDocumentCanvas = async (element: HTMLElement) => {
+  const options = {
     backgroundColor: '#ffffff',
     scale: 1.5,
     useCORS: true,
-    ignoreElements: (node) => node instanceof HTMLElement && node.dataset.documentExclude === 'true',
-  });
+    ignoreElements: (node: Element) =>
+      node instanceof HTMLElement && node.dataset.documentExclude === 'true',
+  };
+
+  try {
+    return await html2canvas(element, options);
+  } catch (error) {
+    if (!isUnsupportedModernColorError(error)) {
+      throw error;
+    }
+
+    // html2canvas's computed-style parser does not understand modern CSS colour
+    // functions such as oklch(). The browser-backed foreign-object renderer does,
+    // and retains the same document styles without replacing theme colours.
+    return html2canvas(element, {
+      ...options,
+      foreignObjectRendering: true,
+    });
+  }
+};
+
+export const exportProcurementDocumentPdf = async (element: HTMLElement, fileName: string) => {
+  const canvas = await renderProcurementDocumentCanvas(element);
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();

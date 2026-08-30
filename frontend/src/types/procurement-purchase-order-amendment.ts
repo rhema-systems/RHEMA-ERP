@@ -23,7 +23,7 @@ export type PurchaseOrderAcknowledgementOutcome =
 
 export interface PurchaseOrderAmendmentItemRequest {
   purchaseOrderItemId?: string;
-  inventoryItemId: string;
+  inventoryItemId?: string;
   supplierItemCode?: string;
   itemDescription: string;
   orderedQuantity: number;

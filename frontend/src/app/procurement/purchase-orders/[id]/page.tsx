@@ -36,6 +36,7 @@ import {
   AlertCircle,
   Loader2,
   Edit,
+  FilePenLine,
   AlertTriangle,
   MapPin,
   CreditCard
@@ -60,6 +61,11 @@ import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { useAuth } from '@/hooks/use-auth';
 import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
 import { exportProcurementDocumentPdf, printProcurementDocument } from '@/lib/procurement-document-output';
+import {
+  getPurchaseOrderStatusPresentation,
+  isPurchaseOrderStatus,
+  PurchaseOrderStatusKey,
+} from '@/lib/purchase-order-status';
 
 const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Freight / Shipping' },
@@ -74,16 +80,21 @@ const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
 const getLandedCostTypeLabel = (costType: number) =>
   LANDED_COST_TYPES.find(t => t.value === costType)?.label || 'Other';
 
-const POStatuses = [
-  { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800', icon: FileText },
-  { value: 'Pending Approval', label: 'Pending Approval', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
-  { value: 'Approved', label: 'Approved', color: 'bg-green-100 text-green-800', icon: CheckCircle },
-  { value: 'Sent', label: 'Sent', color: 'bg-blue-100 text-blue-800', icon: Send },
-  { value: 'Acknowledged', label: 'Acknowledged', color: 'bg-indigo-100 text-indigo-800', icon: CheckCircle },
-  { value: 'Partially Received', label: 'Partially Received', color: 'bg-purple-100 text-purple-800', icon: Package },
-  { value: 'Received', label: 'Received', color: 'bg-teal-100 text-teal-800', icon: TruckIcon },
-  { value: 'Cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-800', icon: XCircle }
-];
+const POStatusIcons: Partial<
+  Record<PurchaseOrderStatusKey, React.ComponentType<{ className?: string }>>
+> = {
+  Draft: FileText,
+  Submitted: Clock,
+  'Pending Approval': Clock,
+  Approved: CheckCircle,
+  Rejected: XCircle,
+  Sent,
+  Acknowledged: CheckCircle,
+  'Partially Received': Package,
+  Received: TruckIcon,
+  Cancelled: XCircle,
+  Closed: CheckCircle,
+};
 
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
@@ -100,6 +111,7 @@ export default function PurchaseOrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [amendmentEditorRequest, setAmendmentEditorRequest] = useState(0);
   const [documentAction, setDocumentAction] = useState<'print' | 'pdf' | null>(null);
   const documentRef = useRef<HTMLDivElement>(null);
   
@@ -132,12 +144,12 @@ export default function PurchaseOrderDetailPage() {
   }, [id]);
 
   const getStatusBadge = (status: string) => {
-    const statusConfig = POStatuses.find(s => s.value === status);
-    const Icon = statusConfig?.icon || FileText;
+    const statusConfig = getPurchaseOrderStatusPresentation(status);
+    const Icon = POStatusIcons[statusConfig.key] || FileText;
     return (
-      <Badge className={statusConfig?.color || 'bg-gray-100'}>
+      <Badge variant="outline" className={statusConfig.badgeClass}>
         <Icon className="h-3 w-3 mr-1" />
-        {statusConfig?.label || status}
+        {statusConfig.label}
       </Badge>
     );
   };
@@ -145,9 +157,7 @@ export default function PurchaseOrderDetailPage() {
   const complianceIsCurrent =
     complianceReadiness?.purchaseOrderId === id;
   const complianceForwardBlocked =
-    (order?.status === 'Draft' ||
-      order?.status === 'Pending Approval' ||
-      order?.status === 'Submitted') &&
+    isPurchaseOrderStatus(order?.status, 'Draft', 'Pending Approval', 'Submitted') &&
     (!complianceIsCurrent || complianceReadiness?.isCompliant !== true);
   const complianceBlockedReason = complianceIsCurrent
     ? complianceReadiness?.blockedReasons[0] ||
@@ -155,8 +165,7 @@ export default function PurchaseOrderDetailPage() {
     : 'Wait for the purchase-order compliance check to finish.';
   const sodIsCurrent = sodReadiness?.purchaseOrderId === id;
   const sodApprovalBlocked =
-    (order?.status === 'Pending Approval' ||
-      order?.status === 'Submitted') &&
+    isPurchaseOrderStatus(order?.status, 'Pending Approval', 'Submitted') &&
     (!sodIsCurrent || sodReadiness?.canApprove !== true);
   const sodApprovalBlockedReason = sodIsCurrent
     ? sodReadiness?.checks.find((check) => check.key === 'approval')?.message ||
@@ -267,8 +276,14 @@ export default function PurchaseOrderDetailPage() {
   }
 
   const canEdit = actionAccess.canEdit;
-  const canReceive = order.status === 'Approved' || order.status === 'Sent' || 
-                     order.status === 'Acknowledged' || order.status === 'Partially Received';
+  const canAmend = actionAccess.canAmend;
+  const canReceive = isPurchaseOrderStatus(
+    order.status,
+    'Approved',
+    'Sent',
+    'Acknowledged',
+    'Partially Received'
+  );
 
   return (
     <div ref={documentRef} className="space-y-6">
@@ -283,7 +298,7 @@ export default function PurchaseOrderDetailPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold">{order.orderNumber}</h1>
               {getStatusBadge(order.status)}
-              {(order.status === 'Pending Approval' || order.status === 'Submitted') && order.currentWorkflowStepName && (
+              {isPurchaseOrderStatus(order.status, 'Pending Approval', 'Submitted') && order.currentWorkflowStepName && (
                 <Badge variant="outline" className="text-xs">
                   Step: {order.currentWorkflowStepName}
                 </Badge>
@@ -301,6 +316,19 @@ export default function PurchaseOrderDetailPage() {
                 Edit
               </Button>
             </Link>
+          )}
+          {canAmend && (
+            <Button
+              variant="outline"
+              title="Change this approved purchase order through a controlled amendment"
+              onClick={() => {
+                setActiveTab('amendments');
+                setAmendmentEditorRequest((request) => request + 1);
+              }}
+            >
+              <FilePenLine className="h-4 w-4 mr-2" />
+              Amend PO
+            </Button>
           )}
           
           <WorkflowApprovalActions
@@ -967,6 +995,7 @@ export default function PurchaseOrderDetailPage() {
           <PurchaseOrderAmendmentWorkspace
             order={order}
             onApplied={fetchOrder}
+            editorRequestToken={amendmentEditorRequest}
           />
         </TabsContent>
 

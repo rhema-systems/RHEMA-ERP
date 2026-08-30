@@ -7,8 +7,7 @@ public sealed class ProcurementPurchaseOrderAmendmentItemRequest
 {
     public Guid? PurchaseOrderItemId { get; set; }
 
-    [Required]
-    public Guid InventoryItemId { get; set; }
+    public Guid? InventoryItemId { get; set; }
 
     [StringLength(100)]
     public string? SupplierItemCode { get; set; }
