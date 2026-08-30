@@ -332,7 +332,7 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     public void Controlled_adjustments_accept_inventory_held_fixed_assets_but_opening_stock_remains_stock_item_only()
     {
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
-            "StockAdjustmentService.cs"));
+            "StockAdjustmentService.cs")).Replace("\r\n", "\n");
         var repository = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Data", "Repositories", "Inventory",
             "StockAdjustmentRepositories.cs"));
         var buildStart = source.IndexOf("private async Task BuildLinesAsync", StringComparison.Ordinal);
@@ -367,7 +367,7 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         financePosting.Should().NotContain("Guid? expense = !isOpeningStock",
             "a positive adjustment must not require an unused expense account and vice versa");
         var requisitionService = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
-            "InventoryRequisitionService.cs"));
+            "InventoryRequisitionService.cs")).Replace("\r\n", "\n");
         requisitionService.Should().Contain("Flush the governed parent first inside this");
         requisitionService.Should().Contain("await _unitOfWork.SaveChangesAsync(cancellationToken);\n                await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Acknowledged",
             "the append-only action trigger must see the durable Acknowledged parent status");
