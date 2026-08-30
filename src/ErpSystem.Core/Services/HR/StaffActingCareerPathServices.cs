@@ -251,7 +251,10 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // EmployeeName, EmployeeNumber, ActingPositionTitle, ActingForEmployeeName and
+        // MovementNumber are all resolved off navigations GetOwnedAsync does not load, so the edit
+        // response named nobody and no position. GetWithDetailsAsync exists for exactly this.
+        return (await _repo.GetWithDetailsAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<bool> CompleteAsync(CompleteStaffActingAppointmentDto dto, Guid completedByUserId, CancellationToken cancellationToken = default)

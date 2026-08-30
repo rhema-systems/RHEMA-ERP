@@ -18,6 +18,7 @@ import { Loader2, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MyDemotionResponsePanel } from '@/components/hr/movements/MyDemotionResponsePanel';
 import {
   Dialog,
   DialogContent,
@@ -108,6 +109,13 @@ export default function MyMovementDetailPage() {
           </div>
         }
       />
+
+      {/*
+        ⚠ Only on a demotion, and only for the person demoted. The endpoint has always been
+        reachable by them and by nobody else; what was missing was any screen for it, so HR's
+        pending-appeals queue could never fill. The panel renders nothing for other movement types.
+      */}
+      {m.movementType === 'Demotion' && <MyDemotionResponsePanel movementId={id} />}
 
       <Card>
         <CardHeader>

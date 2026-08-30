@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { Loader2, Plus, CalendarClock, CheckCircle2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, CalendarClock, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -43,9 +44,15 @@ import { employeePositionService } from '@/services/hr/employee-position.service
 import { useToast } from '@/hooks/use-toast';
 import {
   ACTING_REASONS,
+  ALLOWANCE_CALCULATIONS,
   type StaffActingReason,
   type StaffActingAppointment,
+  type StaffActingStatus,
+  type HRAllowanceCalculationMethod,
 } from '@/types/hr/movement-subtypes';
+
+/** Radix needs a sentinel: an empty string is not a valid SelectItem value. */
+const NONE = '__none__';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const money = (v?: number | null) =>
@@ -79,6 +86,15 @@ export default function ActingAppointmentsPage() {
   const [creating, setCreating] = useState(false);
   const [completing, setCompleting] = useState<StaffActingAppointment | null>(null);
   const [completionNotes, setCompletionNotes] = useState('');
+  const [editing, setEditing] = useState<StaffActingAppointment | null>(null);
+  const [edit, setEdit] = useState({
+    endDate: '',
+    receivesActingAllowance: false,
+    actingAllowance: '',
+    allowanceCalculation: '' as HRAllowanceCalculationMethod | '',
+    status: 'Active' as StaffActingStatus,
+    notes: '',
+  });
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -116,6 +132,52 @@ export default function ActingAppointmentsPage() {
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'acting-appointments'] });
+
+  /**
+   * ⚠ The one movement sub-type where the EDIT was missing rather than the delete. Create,
+   * complete, extend, convert and delete were all wired and correcting an appointment was not —
+   * so an allowance typed wrongly could only be fixed by completing the appointment and raising
+   * another, which changes what the record says happened.
+   *
+   * ⚠ Seeded from the row, which is safe here only because the list read is the full record —
+   * `getAll` and friends return `StaffActingAppointmentDto`, not a summary. `allowanceCalculation`
+   * was missing from the TypeScript type until this slice, which is why section E listed it as
+   * settable by no form.
+   */
+  const openEdit = (a: StaffActingAppointment) => {
+    setEdit({
+      endDate: a.endDate ? a.endDate.slice(0, 10) : '',
+      receivesActingAllowance: a.receivesActingAllowance,
+      actingAllowance: a.actingAllowance == null ? '' : String(a.actingAllowance),
+      allowanceCalculation: a.allowanceCalculation ?? '',
+      status: a.status,
+      notes: a.notes ?? '',
+    });
+    setEditing(a);
+  };
+
+  const saveEdit = useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      actingAppointmentService.update(id, {
+        endDate: edit.endDate ? new Date(`${edit.endDate}T00:00:00`).toISOString() : null,
+        receivesActingAllowance: edit.receivesActingAllowance,
+        actingAllowance: edit.actingAllowance === '' ? null : Number(edit.actingAllowance),
+        allowanceCalculation: edit.allowanceCalculation || null,
+        status: edit.status,
+        notes: edit.notes.trim() || null,
+      }),
+    onSuccess: async () => {
+      await refresh();
+      toast({ title: 'Appointment updated' });
+      setEditing(null);
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'Could not update the appointment',
+        description: e?.response?.data?.message ?? e?.response?.data ?? e?.message,
+      }),
+  });
 
   const create = useMutation({
     mutationFn: (values: FormValues) =>
@@ -239,12 +301,22 @@ export default function ActingAppointmentsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {(a.status === 'Active' || a.status === 'Extended') && (
-                        <Button size="sm" variant="outline" onClick={() => setCompleting(a)}>
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Complete
-                        </Button>
-                      )}
+                      <div className="flex justify-end gap-2">
+                        {/* Completed is where an appointment's terms are fixed; the API refuses
+                            an edit after that, so the control is not offered. */}
+                        {a.status !== 'Completed' && (
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(a)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Button>
+                        )}
+                        {(a.status === 'Active' || a.status === 'Extended') && (
+                          <Button size="sm" variant="outline" onClick={() => setCompleting(a)}>
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Complete
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -369,6 +441,129 @@ export default function ActingAppointmentsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit ────────────────────────────────────────────────────────────── */}
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit {editing?.appointmentNumber}</DialogTitle>
+            <DialogDescription>
+              How long it runs, what it pays and where it has got to. Who is acting, in which post,
+              from when is what the appointment is — change those and it is a different one.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="ae-end">Ends</Label>
+                <Input
+                  id="ae-end"
+                  type="date"
+                  value={edit.endDate}
+                  onChange={(e) => setEdit((f) => ({ ...f, endDate: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ae-status">Status</Label>
+                <Select
+                  value={edit.status}
+                  onValueChange={(v) => setEdit((f) => ({ ...f, status: v as StaffActingStatus }))}
+                >
+                  <SelectTrigger id="ae-status"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(['Active', 'Extended', 'TerminatedEarly'] as StaffActingStatus[]).map((st) => (
+                      <SelectItem key={st} value={st}>
+                        {st.replace(/([a-z])([A-Z])/g, '$1 $2')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Completed and Converted are reached by their own actions, not by setting them
+                  here.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-md border p-3">
+              <Checkbox
+                id="ae-allowance"
+                checked={edit.receivesActingAllowance}
+                onCheckedChange={(v) =>
+                  setEdit((f) => ({ ...f, receivesActingAllowance: v === true }))
+                }
+              />
+              <Label htmlFor="ae-allowance" className="cursor-pointer">
+                Receives an acting allowance
+              </Label>
+            </div>
+
+            {edit.receivesActingAllowance && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="ae-amount">Amount</Label>
+                  <Input
+                    id="ae-amount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={edit.actingAllowance}
+                    onChange={(e) => setEdit((f) => ({ ...f, actingAllowance: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ae-calc">Worked out as</Label>
+                  <Select
+                    value={edit.allowanceCalculation || NONE}
+                    onValueChange={(v) =>
+                      setEdit((f) => ({
+                        ...f,
+                        allowanceCalculation: v === NONE ? '' : (v as HRAllowanceCalculationMethod),
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="ae-calc">
+                      <SelectValue placeholder="Not stated" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>Not stated</SelectItem>
+                      {ALLOWANCE_CALCULATIONS.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c.replace(/([a-z])([A-Z])/g, '$1 $2')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="ae-notes">Notes</Label>
+              <Textarea
+                id="ae-notes"
+                rows={3}
+                value={edit.notes}
+                onChange={(e) => setEdit((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)} disabled={saveEdit.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editing && saveEdit.mutate({ id: editing.id })}
+              disabled={saveEdit.isPending}
+            >
+              {saveEdit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

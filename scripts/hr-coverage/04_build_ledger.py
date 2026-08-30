@@ -121,7 +121,7 @@ DISPOSITIONS = {
     "NHISClaimsController.cs":
         ("DONE", "Built 2026-08-30 (slice 19). The claims list gained a Documents dialog at every status - the scheme's rejection letter arrives after the decision and the attendance record before it - driving the gated upload, the download and the Admin-tier delete. No backend change was needed: D-14 had already built and harness-verified the whole transport in the medical slice-5 run, and it had simply never had a caller. The one remaining flag is the metadata-only POST."),
     "StaffDemotionsController.cs":
-        ("BUILD", "Classified 2026-08-29: both real. No delete, and the employee's own response has no surface at all, so HR's wired pending-appeals queue cannot fill."),
+        ("DONE", "Built 2026-08-30 (slice 22). The Admin-tier delete is on the sub-type panel, and the employee's own response to a demotion notice is on /me/movements/{id} — which is what lets a demotion ever LEAVE HR's pending-appeals queue (that queue lists demotions awaiting an answer, not appeals filed; see D-37). ⚠ The respond endpoint needed no change: it holds no policy beyond InternalOnly by design and the service refuses anyone but the demoted employee, so unlike the travel acknowledgement its gate and its rule already agreed. What was missing was a screen for the one person allowed to use it."),
     "StaffTravelPoliciesController.cs":
         ("DONE", "Built 2026-08-30 (slice 20). ⚠ The queue flagged ONE endpoint here and the gap was the whole subsystem: policy create, edit and delete, the entire rules register and both halves of the exception flow had client methods and no screen calling any of them, so instrument 01 counted them wired. A service method is not a user being able to reach anything — the area-16 lesson, and the reason the earlier note was wrong to call the decide queue 'wired'. **Delivered: policy authoring** — /new and /[id] exist (the two routes the register linked to since it shipped, both 404s that slice 10 removed), and a policy is drafted, corrected, approved, withdrawn and deleted-while-draft from them. **Deliberately NOT delivered: rule authoring and the whole exception flow** — see D-29. Four backend defects cleared first: D-23, D-24, D-25, D-26."),
     "AppraisalCycleTargetController.cs":
@@ -153,13 +153,13 @@ DISPOSITIONS = {
     "LeaveTypesController.cs":
         ("BUILD", "Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either."),
     "StaffActingAppointmentsController.cs":
-        ("BUILD", "Classified 2026-08-29: real - the one movement sub-type where the edit rather than the delete is missing."),
+        ("DONE", "Built 2026-08-30 (slice 22). The edit is on /hr/movements/acting, offered on anything not yet Completed because the API refuses it after that. It carries allowanceCalculation, which section E listed as settable by no form — the TypeScript type had only the resolved NAME, so a control had nothing to bind to."),
     "StaffPromotionsController.cs":
-        ("BUILD", "Classified 2026-08-29: real - no movement sub-type wires its Admin delete."),
+        ("DONE", "Built 2026-08-30 (slice 22). The Admin-tier delete is on the movement's sub-type panel, so a detail recorded against the wrong movement is correctable at last. Two defects cleared first: D-34, where deleting a detail made its movement permanently unable to carry one again, and a write response that named neither the movement nor the employee."),
     "StaffTransfersController.cs":
-        ("BUILD", "Classified 2026-08-29: real - no movement sub-type wires its Admin delete."),
+        ("DONE", "Built 2026-08-30 (slice 22). The Admin-tier delete is on the movement's sub-type panel, so a detail recorded against the wrong movement is correctable at last. Two defects cleared first: D-34, where deleting a detail made its movement permanently unable to carry one again, and a write response that named neither the movement nor the employee."),
     "StaffSecondmentsController.cs":
-        ("BUILD", "Classified 2026-08-29: real - no movement sub-type wires its Admin delete."),
+        ("DONE", "Built 2026-08-30 (slice 22). The Admin-tier delete is on the movement's sub-type panel, so a detail recorded against the wrong movement is correctable at last. Two defects cleared first: D-34, where deleting a detail made its movement permanently unable to carry one again, and a write response that named neither the movement nor the employee."),
     "StaffTravelComplianceController.cs":
         ("DONE", "Built 2026-08-30 (slice 21). The destination-alert feed is authorable at /administration/hr/travel/alerts, alerts are sent to a named traveller from the trip's compliance tab, and the traveller reads and acknowledges them on /me/travel. Three defects cleared first - D-31, D-32 and the notification create response, which resolved none of its three names."),
     "TrainingCompletionsController.cs":
@@ -521,11 +521,16 @@ _d("StaffSecondmentsController.cs", [("DELETE", "api/staff-secondments/{}", _MOV
 _d("StaffDemotionsController.cs", [
     ("DELETE", "api/staff-demotions/{}", _MOVE_DEL),
     ("POST", "api/staff-demotions/{}/respond",
-     ("BUILD", "The employee's acceptance of, or appeal against, a demotion notice — the service "
-               "refuses anyone but the demoted employee, so HR cannot file it for them. HR's side "
-               "is wired (`pending-appeals` reads the queue); the employee has no surface at all, "
-               "so the queue can only ever be empty. Unlike the asset acknowledge/respond pair "
-               "there is no employee-portal route to fall back on: this one needs building on /me.")),
+     ("DONE", "Built 2026-08-30 (slice 22) on /me/movements/{id}. The employee's acceptance of, "
+              "or appeal against, a demotion notice — the service refuses anyone but the demoted "
+              "employee, so HR cannot file it for them, and unlike the asset acknowledge/respond "
+              "pair there was no employee-portal route to fall back on.\n\n"
+              "⚠ The old note here said HR's `pending-appeals` queue \"can only ever be empty\" "
+              "for want of this surface. That was backwards: the queue filters "
+              "`EmployeeResponse == null`, so it lists demotions AWAITING an answer and filled "
+              "with every demotion granting a right of appeal — what could never happen was a "
+              "demotion LEAVING it. Establishing that is what turned up D-37, the absence of any "
+              "read of appeals actually filed.")),
 ])
 _d("StaffActingAppointmentsController.cs", [
     ("PUT", "api/staff-acting-appointments/{}",
@@ -1256,6 +1261,79 @@ BLOCKERS = [
      "  The transferable point: a harness fixture pinned to an id from another module ages badly, "
      "and it fails in a direction that blames the module under test.",
      "Was hiding whether travel bookings work behind six false findings — cleared"),
+    ("D-34", "Deleting a movement's detail made that movement unable to carry one ever again", "DONE 2026-08-30",
+     "All four movement sub-types — `StaffPromotion`, `StaffTransfer`, `StaffDemotion`, "
+     "`StaffSecondment` — carry `HasIndex(MovementId).IsUnique()` with **no `IsDeleted` filter**, "
+     "while the delete is the generic soft delete. So a removed detail kept its movement's slot "
+     "and re-adding one violated the index, 500ing with a message naming neither the column nor "
+     "the constraint.\n\n"
+     "  ⚠ **The create guard knew about the case and handled it backwards.** "
+     "`GetOwnedParentMovementAsync(..., requireNoExistingDetail: true)` checks "
+     "`existing != null && !existing.IsDeleted` — it explicitly TOLERATES a tombstone and lets the "
+     "insert proceed into an index that counts it. Tolerating it is precisely what the index does "
+     "not do.\n\n"
+     "  Faces nine through twelve of this defect, all unreachable until this slice added the "
+     "delete affordance — the recurring lesson that giving a dormant path teeth turns its "
+     "neighbours into defects.\n\n"
+     "  **Fixed by HARD-deleting the tombstone on re-create, not by reviving it**, and the "
+     "divergence from D-21 and D-24 is deliberate. Those keep an identity across the gap — the "
+     "plan still requires that competency. A movement detail is 1:1 with its movement, invisible "
+     "to every read once soft-deleted, referenced by no foreign key anywhere, and removed *because "
+     "it was recorded in error*; the replacement is a different assertion and should not inherit "
+     "the old row's id or `CreatedAt`. The movement's own status history is the audit trail.\n\n"
+     "  ⚠ **The first attempt at the fix was itself broken, and only the run found it.** "
+     "`HardDeleteAsync` removes the row with raw SQL and does NOT detach the tracked entity, so "
+     "the tombstone stayed in the change tracker, the insert gave the movement a second detail as "
+     "far as EF was concerned, and — the relationship being a required 1:1 — `SaveChanges` threw "
+     "*\"the association has been severed\"* rather than anything about an index. `AsNoTracking()` "
+     "on the tombstone lookup; `HardDeleteAsync` only ever reads the id. **Needs a backend "
+     "rebuild.**",
+     "Was making the delete this slice adds a one-way door — cleared"),
+    ("D-35", "Four movement sub-type write responses named neither the movement nor the employee", "DONE 2026-08-30",
+     "`StaffTransfer`, `StaffSecondment`, `StaffDemotion` and `StaffActingAppointment` all mapped "
+     "the entity returned by their include-less `GetOwnedAsync`, so `movementNumber`, "
+     "`employeeName` and the position titles came back empty on both create and update — while "
+     "`GetByMovementIdAsync` (and `GetWithDetailsAsync` for acting) sat on the same repositories "
+     "with the full include graph, and the **promotion service two methods away already re-read "
+     "for exactly this reason**. Seventh occurrence of the stale-nav-on-a-write-response shape.\n\n"
+     "  Fixed in all four, on the creates as well as the updates, since those are the same "
+     "methods. **Needs a backend rebuild.**",
+     "Was going to blank three columns on every panel this slice touches — cleared"),
+    ("D-36", "A movement needing employee acceptance never records who authorised it", "DONE 2026-08-30",
+     "`ApproveAsync` stamps `AuthorizedById` inside `if (entity.Status == Approved)`. A movement "
+     "with `RequiresEmployeeAcceptance` does not reach `Approved` at final approval — the workflow "
+     "adapter puts it in `EmployeeAcceptancePending` — and `RespondAsync`, which later moves it to "
+     "`Approved`, stamps the acceptance flags and the status and **not this field**. So for that "
+     "entire class of movement the authoriser stayed null forever, on a field the DTO exposes and "
+     "the screens render.\n\n"
+     "  The condition now covers both statuses. ⚠ It stamps the approver who cleared the last "
+     "step, **not** the employee who subsequently accepted: accepting is not authorising, and "
+     "stamping the subject would make the record say the person being moved approved their own "
+     "move. **Needs a backend rebuild.**\n\n"
+     "  ⚠ **How it was nearly missed, which is the transferable part.** It surfaced as a failing "
+     "assertion in `hr-movements/run-slice2.mjs` during a no-regression run — alongside three "
+     "OTHER failures in the same suite that were all genuinely stale (deletes tightened to "
+     "`HR.Movements.Admin` by the W3 sweep after the file was written, and a refusal message "
+     "reworded). Three stale assertions in a row is exactly the conditioning that makes the fourth "
+     "look like more of the same. It was checked against the service rather than adjusted to "
+     "match observed behaviour, which is the only reason it was found.",
+     "Was leaving the authoriser blank on every movement that needs accepting — cleared"),
+    ("D-37", "A filed demotion appeal appears in no list", "OPEN",
+     "`staff-demotions/pending-appeals` filters `EmployeeResponse == null` — it lists demotions "
+     "still AWAITING an answer, not ones that have been appealed. So responding REMOVES a demotion "
+     "from it, and the controller's other four reads are by id, by movement, disciplinary and "
+     "performance-related. **There is no aggregated read of demotions that have actually been "
+     "appealed.** HR sees an appeal only by opening that demotion's own movement, where the "
+     "sub-type panel does render `employeeResponse`.\n\n"
+     "  ⚠ **This corrects the queue's entry in D2**, which said HR's queue \"can only ever be "
+     "empty\" for want of an employee surface. The opposite was true: it filled automatically with "
+     "every demotion granting a right of appeal, and nothing could ever leave it. Giving employees "
+     "a surface (slice 22) is what lets demotions leave — and is also what makes this gap start to "
+     "matter, because appeals can now actually be filed.\n\n"
+     "  A `filed-appeals` read would be a small addition. Not built here because it is a new "
+     "endpoint rather than a caller for an existing one, and the appeal is visible on the record "
+     "meanwhile.",
+     "Blocks nothing. HR has no worklist for appeals now that employees can file them"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "
@@ -1346,7 +1424,7 @@ w("| 2026-08-29 | **The section D hand-review queue is classified per endpoint, 
 w("| 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 are instrument artefacts — the endpoint is wired and 01 could not see it (31 through `hrDocumentService.upload`, 4 through `DocumentUploadField`, 18 through the `api/Pip` second-`[Route]` alias, 2 through the two-controllers-in-one-file bug fixed on 2026-08-30, 1 through an interpolated query string). 38 are `INTENTIONAL`: a duplicate route onto an operation that is already reachable, a raw-CRUD escape hatch superseded by a workflow, a replace-set parent that owns its children, or a boundary held on purpose. The remaining 65 are gaps with a screen to build. |")
 w("| 2026-08-29 | **The dominant real gap is the missing edit.** Assets, medical clinical records, medical expense claims and their items, travel policy rules, travel groups, and the four movement sub-types all wire create and (mostly) delete, and not the correction. A record raised wrongly can be destroyed but not fixed — which is the worse of the two on anything a person is charged, paid or moved by. |")
 w("| 2026-08-29 | **Two wired approval queues can never have anything in them.** `CreateExceptionAsync` (travel policy exceptions) and `CreateAlertNotificationAsync` (travel compliance alerts) each have exactly one caller — their own endpoint — and no screen calls either, while the pending-queue read and the decide/acknowledge action on both are wired. Nothing raises the thing the queue exists to work through. |")
-w("| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so HR's wired `pending-appeals` queue is unfillable and the employee surface has to be built. |")
+w("| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so the employee surface has to be built. ⚠ The reason given here — that HR's `pending-appeals` queue was unfillable — was wrong, and corrected on 2026-08-30: that queue lists demotions awaiting an answer, so it was always full and nothing could leave it. The conclusion stands; the reasoning did not. |")
 w("| 2026-08-29 | **Manpower budgets can be created and approved but not edited or deleted.** `PUT`/`DELETE api/JobAnalysis/budgets/{}` and `PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller — surfaced when the whole JobAnalysis controller was enumerated, and outside that slice's scope (its disposition named the twelve job-description child collections). Area 18, unscheduled. |")
 w("")
 

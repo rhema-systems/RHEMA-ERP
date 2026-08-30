@@ -6,6 +6,7 @@ import type {
   StaffSecondmentDetail,
   StaffActingAppointment,
   CreateStaffActingAppointmentRequest,
+  UpdateStaffActingAppointmentRequest,
   StaffActingStatus,
 } from '@/types/hr/movement-subtypes';
 
@@ -32,6 +33,17 @@ class MovementSubtypeService {
     return apiService.put<StaffPromotionDetail>(`/staff-promotions/${id}`, { id, ...request });
   }
 
+  /**
+   * `HR.Movements.Admin`. Removes the detail recorded against this movement.
+   *
+   * ⚠ Re-adding a detail afterwards works: the server clears the tombstone first, because
+   * `IX_StaffPromotions_MovementId` is unique and counts soft-deleted rows, so a plain insert would have
+   * violated it and the movement could never have carried a promotion detail again.
+   */
+  deletePromotion(id: string): Promise<void> {
+    return apiService.delete<void>(`/staff-promotions/${id}`);
+  }
+
   // ── Transfer ───────────────────────────────────────────────────────────────
 
   getTransferByMovement(movementId: string): Promise<StaffTransferDetail | null> {
@@ -44,6 +56,17 @@ class MovementSubtypeService {
 
   updateTransfer(id: string, request: Record<string, unknown>): Promise<StaffTransferDetail> {
     return apiService.put<StaffTransferDetail>(`/staff-transfers/${id}`, { id, ...request });
+  }
+
+  /**
+   * `HR.Movements.Admin`. Removes the detail recorded against this movement.
+   *
+   * ⚠ Re-adding a detail afterwards works: the server clears the tombstone first, because
+   * `IX_StaffTransfers_MovementId` is unique and counts soft-deleted rows, so a plain insert would have
+   * violated it and the movement could never have carried a transfer detail again.
+   */
+  deleteTransfer(id: string): Promise<void> {
+    return apiService.delete<void>(`/staff-transfers/${id}`);
   }
 
   getInterCompanyTransfers(): Promise<StaffTransferDetail[]> {
@@ -68,6 +91,30 @@ class MovementSubtypeService {
     return apiService.put<StaffDemotionDetail>(`/staff-demotions/${id}`, { id, ...request });
   }
 
+  /**
+   * `HR.Movements.Admin`. Removes the detail recorded against this movement.
+   *
+   * ⚠ Re-adding a detail afterwards works: the server clears the tombstone first, because
+   * `IX_StaffDemotions_MovementId` is unique and counts soft-deleted rows, so a plain insert would have
+   * violated it and the movement could never have carried a demotion detail again.
+   */
+  deleteDemotion(id: string): Promise<void> {
+    return apiService.delete<void>(`/staff-demotions/${id}`);
+  }
+
+  /**
+   * The employee's own acceptance of, or appeal against, a demotion notice.
+   *
+   * ⚠ **Only the demoted employee.** The endpoint holds no permission policy beyond
+   * `InternalOnly` — deliberately, so an ordinary employee can reach it — and the service refuses
+   * anyone else: an appeal filed in someone's name by someone else is worse than no appeal. Which
+   * is why this is called from `/me/movements` and not from the HR desk, whose `pending-appeals`
+   * queue could otherwise never fill.
+   */
+  respondToDemotion(id: string, response: string): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`/staff-demotions/${id}/respond`, { response });
+  }
+
   getPendingAppeals(): Promise<StaffDemotionDetail[]> {
     return apiService.get<StaffDemotionDetail[]>('/staff-demotions/pending-appeals');
   }
@@ -84,6 +131,17 @@ class MovementSubtypeService {
 
   updateSecondment(id: string, request: Record<string, unknown>): Promise<StaffSecondmentDetail> {
     return apiService.put<StaffSecondmentDetail>(`/staff-secondments/${id}`, { id, ...request });
+  }
+
+  /**
+   * `HR.Movements.Admin`. Removes the detail recorded against this movement.
+   *
+   * ⚠ Re-adding a detail afterwards works: the server clears the tombstone first, because
+   * `IX_StaffSecondments_MovementId` is unique and counts soft-deleted rows, so a plain insert would have
+   * violated it and the movement could never have carried a secondment detail again.
+   */
+  deleteSecondment(id: string): Promise<void> {
+    return apiService.delete<void>(`/staff-secondments/${id}`);
   }
 
   /**
@@ -163,6 +221,19 @@ class ActingAppointmentService {
       appointmentId: id,
       conversionMovementId,
     });
+  }
+
+  /**
+   * Corrects an appointment's end date, allowance and status.
+   *
+   * ⚠ Refused once the appointment is `Completed` — completing it is what fixes its terms in
+   * place, and re-opening one is not an edit.
+   *
+   * ⚠ `allowanceCalculation` is one of the fields the closure ledger's section E lists as settable
+   * by no form; it is on this payload for that reason.
+   */
+  update(id: string, request: UpdateStaffActingAppointmentRequest): Promise<StaffActingAppointment> {
+    return apiService.put<StaffActingAppointment>(`${this.baseUrl}/${id}`, { id, ...request });
   }
 
   /** Refused while the appointment is still active — complete or cancel it first. */

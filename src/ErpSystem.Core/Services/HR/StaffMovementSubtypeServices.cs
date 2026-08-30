@@ -164,6 +164,34 @@ public class StaffPromotionService : IStaffPromotionService
         var movement = await GetOwnedParentMovementAsync(
             createDto.MovementId, StaffMovementType.Promotion, requireNoExistingDetail: true);
 
+
+        // ⚠ Clear the tombstone before inserting. IX_StaffPromotions_MovementId is unique with NO
+        // IsDeleted filter while the delete is a soft delete, so a removed detail keeps the
+        // movement's slot and this insert would violate the index — the movement could never
+        // carry a promotion detail again, and the 500 names neither the column nor the constraint.
+        // Unreachable until a screen could delete one, which is what made it worth finding.
+        //
+        // ⚠ HARD delete, not the revive used for competency requirements and travel policy rules,
+        // and the difference is deliberate. Those keep an identity across the gap — the plan still
+        // requires that competency. This row is 1:1 with its movement, invisible to every read
+        // once soft-deleted, and referenced by nothing; a detail removed by an administrator was
+        // recorded in ERROR, so the replacement is a different assertion and should not inherit
+        // the old row's id or CreatedAt. The audit trail for the movement is the movement's own
+        // status history, not a tombstone no query can return.
+        //
+        // ⚠ AsNoTracking is load-bearing. HardDeleteAsync removes the row with raw SQL and does
+        // NOT detach it, so a tracked tombstone stays in the change tracker — and the insert below
+        // then gives the movement a second detail as far as EF is concerned. Because the
+        // Movement-to-detail relationship is a required 1:1, SaveChanges severs the first and
+        // throws "the association ... has been severed", not a unique-index error. Found by
+        // running it, not by reading it.
+        var tombstone = await _repo
+            .GetQueryableIncludingDeleted(x => x.MovementId == createDto.MovementId
+                                            && x.TenantId == tenantId && x.IsDeleted)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (tombstone != null) await _repo.HardDeleteAsync(tombstone);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.GradeLevelIncrease = await ComputeGradeBandChangeAsync(movement, cancellationToken);
 
@@ -172,7 +200,9 @@ public class StaffPromotionService : IStaffPromotionService
 
         _logger.LogInformation("Staff promotion detail created for movement {MovementId}", entity.MovementId);
 
-        return entity.ToDto();
+        // The DTO resolves MovementNumber and the employee's details off the Movement navigation,
+        // which a freshly added entity has never loaded.
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<StaffPromotionDto> UpdateAsync(UpdateStaffPromotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -361,6 +391,34 @@ public class StaffTransferService : IStaffTransferService
             createDto.MovementId, StaffMovementType.Transfer, requireNoExistingDetail: true);
         await ValidateReplacementAsync(createDto.ReplacementEmployeeId);
 
+
+        // ⚠ Clear the tombstone before inserting. IX_StaffTransfers_MovementId is unique with NO
+        // IsDeleted filter while the delete is a soft delete, so a removed detail keeps the
+        // movement's slot and this insert would violate the index — the movement could never
+        // carry a transfer detail again, and the 500 names neither the column nor the constraint.
+        // Unreachable until a screen could delete one, which is what made it worth finding.
+        //
+        // ⚠ HARD delete, not the revive used for competency requirements and travel policy rules,
+        // and the difference is deliberate. Those keep an identity across the gap — the plan still
+        // requires that competency. This row is 1:1 with its movement, invisible to every read
+        // once soft-deleted, and referenced by nothing; a detail removed by an administrator was
+        // recorded in ERROR, so the replacement is a different assertion and should not inherit
+        // the old row's id or CreatedAt. The audit trail for the movement is the movement's own
+        // status history, not a tombstone no query can return.
+        //
+        // ⚠ AsNoTracking is load-bearing. HardDeleteAsync removes the row with raw SQL and does
+        // NOT detach it, so a tracked tombstone stays in the change tracker — and the insert below
+        // then gives the movement a second detail as far as EF is concerned. Because the
+        // Movement-to-detail relationship is a required 1:1, SaveChanges severs the first and
+        // throws "the association ... has been severed", not a unique-index error. Found by
+        // running it, not by reading it.
+        var tombstone = await _repo
+            .GetQueryableIncludingDeleted(x => x.MovementId == createDto.MovementId
+                                            && x.TenantId == tenantId && x.IsDeleted)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (tombstone != null) await _repo.HardDeleteAsync(tombstone);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _repo.AddAsync(entity);
@@ -368,7 +426,7 @@ public class StaffTransferService : IStaffTransferService
 
         _logger.LogInformation("Staff transfer detail created for movement {MovementId}", entity.MovementId);
 
-        return entity.ToDto();
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<StaffTransferDto> UpdateAsync(UpdateStaffTransferDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -381,7 +439,11 @@ public class StaffTransferService : IStaffTransferService
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // MovementNumber and the employee's details are resolved off the Movement
+        // navigation, which GetOwnedAsync does not load. The promotion service re-reads for
+        // exactly this reason; these three did not, so the edit response came back naming
+        // no movement and no employee.
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -575,6 +637,34 @@ public class StaffDemotionService : IStaffDemotionService
             createDto.MovementId, StaffMovementType.Demotion, requireNoExistingDetail: true);
         await ValidateCausesAsync(createDto.DisciplinaryActionId, createDto.PerformanceImprovementPlanId);
 
+
+        // ⚠ Clear the tombstone before inserting. IX_StaffDemotions_MovementId is unique with NO
+        // IsDeleted filter while the delete is a soft delete, so a removed detail keeps the
+        // movement's slot and this insert would violate the index — the movement could never
+        // carry a demotion detail again, and the 500 names neither the column nor the constraint.
+        // Unreachable until a screen could delete one, which is what made it worth finding.
+        //
+        // ⚠ HARD delete, not the revive used for competency requirements and travel policy rules,
+        // and the difference is deliberate. Those keep an identity across the gap — the plan still
+        // requires that competency. This row is 1:1 with its movement, invisible to every read
+        // once soft-deleted, and referenced by nothing; a detail removed by an administrator was
+        // recorded in ERROR, so the replacement is a different assertion and should not inherit
+        // the old row's id or CreatedAt. The audit trail for the movement is the movement's own
+        // status history, not a tombstone no query can return.
+        //
+        // ⚠ AsNoTracking is load-bearing. HardDeleteAsync removes the row with raw SQL and does
+        // NOT detach it, so a tracked tombstone stays in the change tracker — and the insert below
+        // then gives the movement a second detail as far as EF is concerned. Because the
+        // Movement-to-detail relationship is a required 1:1, SaveChanges severs the first and
+        // throws "the association ... has been severed", not a unique-index error. Found by
+        // running it, not by reading it.
+        var tombstone = await _repo
+            .GetQueryableIncludingDeleted(x => x.MovementId == createDto.MovementId
+                                            && x.TenantId == tenantId && x.IsDeleted)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (tombstone != null) await _repo.HardDeleteAsync(tombstone);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.GradeLevelDecrease = await ComputeGradeBandChangeAsync(movement, cancellationToken);
 
@@ -583,7 +673,7 @@ public class StaffDemotionService : IStaffDemotionService
 
         _logger.LogInformation("Staff demotion detail created for movement {MovementId}", entity.MovementId);
 
-        return entity.ToDto();
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<StaffDemotionDto> UpdateAsync(UpdateStaffDemotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -601,7 +691,11 @@ public class StaffDemotionService : IStaffDemotionService
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // MovementNumber and the employee's details are resolved off the Movement
+        // navigation, which GetOwnedAsync does not load. The promotion service re-reads for
+        // exactly this reason; these three did not, so the edit response came back naming
+        // no movement and no employee.
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, Guid respondingEmployeeId, CancellationToken cancellationToken = default)
@@ -786,6 +880,34 @@ public class StaffSecondmentService : IStaffSecondmentService
         if (createDto.EndDate.Date <= createDto.StartDate.Date)
             throw new InvalidOperationException("A secondment must end after it starts.");
 
+
+        // ⚠ Clear the tombstone before inserting. IX_StaffSecondments_MovementId is unique with NO
+        // IsDeleted filter while the delete is a soft delete, so a removed detail keeps the
+        // movement's slot and this insert would violate the index — the movement could never
+        // carry a secondment detail again, and the 500 names neither the column nor the constraint.
+        // Unreachable until a screen could delete one, which is what made it worth finding.
+        //
+        // ⚠ HARD delete, not the revive used for competency requirements and travel policy rules,
+        // and the difference is deliberate. Those keep an identity across the gap — the plan still
+        // requires that competency. This row is 1:1 with its movement, invisible to every read
+        // once soft-deleted, and referenced by nothing; a detail removed by an administrator was
+        // recorded in ERROR, so the replacement is a different assertion and should not inherit
+        // the old row's id or CreatedAt. The audit trail for the movement is the movement's own
+        // status history, not a tombstone no query can return.
+        //
+        // ⚠ AsNoTracking is load-bearing. HardDeleteAsync removes the row with raw SQL and does
+        // NOT detach it, so a tracked tombstone stays in the change tracker — and the insert below
+        // then gives the movement a second detail as far as EF is concerned. Because the
+        // Movement-to-detail relationship is a required 1:1, SaveChanges severs the first and
+        // throws "the association ... has been severed", not a unique-index error. Found by
+        // running it, not by reading it.
+        var tombstone = await _repo
+            .GetQueryableIncludingDeleted(x => x.MovementId == createDto.MovementId
+                                            && x.TenantId == tenantId && x.IsDeleted)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (tombstone != null) await _repo.HardDeleteAsync(tombstone);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _repo.AddAsync(entity);
@@ -793,7 +915,7 @@ public class StaffSecondmentService : IStaffSecondmentService
 
         _logger.LogInformation("Staff secondment detail created for movement {MovementId}", entity.MovementId);
 
-        return entity.ToDto();
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<StaffSecondmentDto> UpdateAsync(UpdateStaffSecondmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -805,7 +927,11 @@ public class StaffSecondmentService : IStaffSecondmentService
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // MovementNumber and the employee's details are resolved off the Movement
+        // navigation, which GetOwnedAsync does not load. The promotion service re-reads for
+        // exactly this reason; these three did not, so the edit response came back naming
+        // no movement and no employee.
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<StaffSecondmentDto> ExtendAsync(ExtendStaffSecondmentDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)

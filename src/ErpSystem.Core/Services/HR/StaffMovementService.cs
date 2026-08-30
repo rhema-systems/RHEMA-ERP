@@ -546,7 +546,18 @@ public class StaffMovementService : IStaffMovementService
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
 
-        if (entity.Status == StaffMovementStatus.Approved)
+        // ⚠ EmployeeAcceptancePending counts as cleared, and leaving it out meant a movement that
+        // requires employee acceptance NEVER recorded who authorised it. This condition read
+        // `== Approved` only; an acceptance-requiring movement goes to EmployeeAcceptancePending
+        // at final approval instead, and `RespondAsync` — which moves it on to Approved — stamps
+        // the flags and the status and not this. So AuthorizedById stayed null for the whole class,
+        // permanently, on a field the DTO exposes and screens render.
+        //
+        // The authoriser is the approver who cleared the last step, not the employee who then
+        // accepted: accepting is not authorising, and stamping the subject here would say the
+        // person moved approved their own move.
+        if (entity.Status is StaffMovementStatus.Approved
+                          or StaffMovementStatus.EmployeeAcceptancePending)
             entity.AuthorizedById = approvingEmployeeId;
 
         await _movementRepo.UpdateAsync(entity);

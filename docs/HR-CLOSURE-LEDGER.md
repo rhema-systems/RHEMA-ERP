@@ -13,10 +13,10 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2136 |
-| Wired to a screen | 1794 |
-| No caller found (instrument 01) | 342 |
+| Wired to a screen | 1800 |
+| No caller found (instrument 01) | 336 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
-| Write-DTO fields no form can set | 79 across 33 DTOs |
+| Write-DTO fields no form can set | 77 across 31 DTOs |
 
 ## A. Decisions taken
 
@@ -60,7 +60,7 @@ yet classified.
 | 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 are instrument artefacts — the endpoint is wired and 01 could not see it (31 through `hrDocumentService.upload`, 4 through `DocumentUploadField`, 18 through the `api/Pip` second-`[Route]` alias, 2 through the two-controllers-in-one-file bug fixed on 2026-08-30, 1 through an interpolated query string). 38 are `INTENTIONAL`: a duplicate route onto an operation that is already reachable, a raw-CRUD escape hatch superseded by a workflow, a replace-set parent that owns its children, or a boundary held on purpose. The remaining 65 are gaps with a screen to build. |
 | 2026-08-29 | **The dominant real gap is the missing edit.** Assets, medical clinical records, medical expense claims and their items, travel policy rules, travel groups, and the four movement sub-types all wire create and (mostly) delete, and not the correction. A record raised wrongly can be destroyed but not fixed — which is the worse of the two on anything a person is charged, paid or moved by. |
 | 2026-08-29 | **Two wired approval queues can never have anything in them.** `CreateExceptionAsync` (travel policy exceptions) and `CreateAlertNotificationAsync` (travel compliance alerts) each have exactly one caller — their own endpoint — and no screen calls either, while the pending-queue read and the decide/acknowledge action on both are wired. Nothing raises the thing the queue exists to work through. |
-| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so HR's wired `pending-appeals` queue is unfillable and the employee surface has to be built. |
+| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so the employee surface has to be built. ⚠ The reason given here — that HR's `pending-appeals` queue was unfillable — was wrong, and corrected on 2026-08-30: that queue lists demotions awaiting an answer, so it was always full and nothing could leave it. The conclusion stands; the reasoning did not. |
 | 2026-08-29 | **Manpower budgets can be created and approved but not edited or deleted.** `PUT`/`DELETE api/JobAnalysis/budgets/{}` and `PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller — surfaced when the whole JobAnalysis controller was enumerated, and outside that slice's scope (its disposition named the twelve job-description child collections). Area 18, unscheduled. |
 
 ## B. Blockers — must clear before the dependent build starts
@@ -324,6 +324,48 @@ yet classified.
   The transferable point: a harness fixture pinned to an id from another module ages badly, and it fails in a direction that blames the module under test.
 
   _Was hiding whether travel bookings work behind six false findings — cleared_
+
+- [x] **D-34 — Deleting a movement's detail made that movement unable to carry one ever again** · `DONE 2026-08-30`
+
+  All four movement sub-types — `StaffPromotion`, `StaffTransfer`, `StaffDemotion`, `StaffSecondment` — carry `HasIndex(MovementId).IsUnique()` with **no `IsDeleted` filter**, while the delete is the generic soft delete. So a removed detail kept its movement's slot and re-adding one violated the index, 500ing with a message naming neither the column nor the constraint.
+
+  ⚠ **The create guard knew about the case and handled it backwards.** `GetOwnedParentMovementAsync(..., requireNoExistingDetail: true)` checks `existing != null && !existing.IsDeleted` — it explicitly TOLERATES a tombstone and lets the insert proceed into an index that counts it. Tolerating it is precisely what the index does not do.
+
+  Faces nine through twelve of this defect, all unreachable until this slice added the delete affordance — the recurring lesson that giving a dormant path teeth turns its neighbours into defects.
+
+  **Fixed by HARD-deleting the tombstone on re-create, not by reviving it**, and the divergence from D-21 and D-24 is deliberate. Those keep an identity across the gap — the plan still requires that competency. A movement detail is 1:1 with its movement, invisible to every read once soft-deleted, referenced by no foreign key anywhere, and removed *because it was recorded in error*; the replacement is a different assertion and should not inherit the old row's id or `CreatedAt`. The movement's own status history is the audit trail.
+
+  ⚠ **The first attempt at the fix was itself broken, and only the run found it.** `HardDeleteAsync` removes the row with raw SQL and does NOT detach the tracked entity, so the tombstone stayed in the change tracker, the insert gave the movement a second detail as far as EF was concerned, and — the relationship being a required 1:1 — `SaveChanges` threw *"the association has been severed"* rather than anything about an index. `AsNoTracking()` on the tombstone lookup; `HardDeleteAsync` only ever reads the id. **Needs a backend rebuild.**
+
+  _Was making the delete this slice adds a one-way door — cleared_
+
+- [x] **D-35 — Four movement sub-type write responses named neither the movement nor the employee** · `DONE 2026-08-30`
+
+  `StaffTransfer`, `StaffSecondment`, `StaffDemotion` and `StaffActingAppointment` all mapped the entity returned by their include-less `GetOwnedAsync`, so `movementNumber`, `employeeName` and the position titles came back empty on both create and update — while `GetByMovementIdAsync` (and `GetWithDetailsAsync` for acting) sat on the same repositories with the full include graph, and the **promotion service two methods away already re-read for exactly this reason**. Seventh occurrence of the stale-nav-on-a-write-response shape.
+
+  Fixed in all four, on the creates as well as the updates, since those are the same methods. **Needs a backend rebuild.**
+
+  _Was going to blank three columns on every panel this slice touches — cleared_
+
+- [x] **D-36 — A movement needing employee acceptance never records who authorised it** · `DONE 2026-08-30`
+
+  `ApproveAsync` stamps `AuthorizedById` inside `if (entity.Status == Approved)`. A movement with `RequiresEmployeeAcceptance` does not reach `Approved` at final approval — the workflow adapter puts it in `EmployeeAcceptancePending` — and `RespondAsync`, which later moves it to `Approved`, stamps the acceptance flags and the status and **not this field**. So for that entire class of movement the authoriser stayed null forever, on a field the DTO exposes and the screens render.
+
+  The condition now covers both statuses. ⚠ It stamps the approver who cleared the last step, **not** the employee who subsequently accepted: accepting is not authorising, and stamping the subject would make the record say the person being moved approved their own move. **Needs a backend rebuild.**
+
+  ⚠ **How it was nearly missed, which is the transferable part.** It surfaced as a failing assertion in `hr-movements/run-slice2.mjs` during a no-regression run — alongside three OTHER failures in the same suite that were all genuinely stale (deletes tightened to `HR.Movements.Admin` by the W3 sweep after the file was written, and a refusal message reworded). Three stale assertions in a row is exactly the conditioning that makes the fourth look like more of the same. It was checked against the service rather than adjusted to match observed behaviour, which is the only reason it was found.
+
+  _Was leaving the authoriser blank on every movement that needs accepting — cleared_
+
+- [ ] **D-37 — A filed demotion appeal appears in no list** · `OPEN`
+
+  `staff-demotions/pending-appeals` filters `EmployeeResponse == null` — it lists demotions still AWAITING an answer, not ones that have been appealed. So responding REMOVES a demotion from it, and the controller's other four reads are by id, by movement, disciplinary and performance-related. **There is no aggregated read of demotions that have actually been appealed.** HR sees an appeal only by opening that demotion's own movement, where the sub-type panel does render `employeeResponse`.
+
+  ⚠ **This corrects the queue's entry in D2**, which said HR's queue "can only ever be empty" for want of an employee surface. The opposite was true: it filled automatically with every demotion granting a right of appeal, and nothing could ever leave it. Giving employees a surface (slice 22) is what lets demotions leave — and is also what makes this gap start to matter, because appeals can now actually be filed.
+
+  A `filed-appeals` read would be a small addition. Not built here because it is a new endpoint rather than a caller for an existing one, and the appeal is visible on the record meanwhile.
+
+  _Blocks nothing. HR has no worklist for appeals now that employees can file them_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -904,7 +946,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | PreEmploymentCheck | 2 | 11 | `FALSE` | hrDocumentService.upload artefact (both document routes). |
 | PublicRecruitment | 2 | 3 | `BUILD` | Public job board / anonymous apply. |
 | Separations | 2 | 31 | `BUILD` | Clearance — refresh assets. |
-| StaffDemotions | 2 | 4 | `BUILD` | Classified 2026-08-29: both real. No delete, and the employee's own response has no surface at all, so HR's wired pending-appeals queue cannot fill. |
 | StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
 | StaffTravelRequests | 2 | 18 | `FALSE` | Built 2026-08-30 (slice 21). ⚠ The queue said a group 'cannot be edited, deleted, or have a participant removed'; in fact group travel had NO screen of any kind - it could not be created, listed or opened either, and the reads are invisible to instrument 01 while the writes had client methods. /hr/travel/groups and /[id] exist now. One defect cleared first: UpdateGroupTravelAsync mapped an include-less entity, so the edit response reported ZERO participants on a group that has them. |
@@ -933,11 +974,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | SalaryNotches | 1 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SheControlledDocument | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
 | SheEnvironmentalCompliance | 1 | 20 | `FALSE` | hrDocumentService.upload artefact. |
-| StaffActingAppointments | 1 | 6 | `BUILD` | Classified 2026-08-29: real - the one movement sub-type where the edit rather than the delete is missing. |
-| StaffPromotions | 1 | 3 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
 | StaffRequisitions | 1 | 19 | `FALSE` | hrDocumentService.upload artefact. |
-| StaffSecondments | 1 | 4 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
-| StaffTransfers | 1 | 3 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
 | SuccessionDocuments | 1 | 1 | `DONE` | Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. It still reads as flagged because the client calls it through hrDocumentService.upload(endpoint, file, fields) - the helper-indirection artefact, the single largest false-positive source in this queue - and its download sibling is a GET, which instrument 01 skips outright. |
 | SuccessionPlan | 1 | 14 | `INTENTIONAL` | Built 2026-08-30 (slice 19). The plan's actions and competency requirements are authorable from the detail screen, and the documents tab drives the gated upload, the token-bearing download and the Admin-tier delete. Three backend defects had to clear first, all found by the standing checks and none by a probe failing: the per-plan actions read was a summary missing nine of the update payload's thirteen fields (D-19), the assigner was assertable by the request body (D-20), and removing a competency requirement made it permanently unrequirable (D-21). The one remaining flag is the metadata-only document POST, deliberately unwired. |
 | TrainingCompletions | 1 | 6 | `BUILD` | Classified 2026-08-29: real, and already in section F - bulk completion has no UI. |
@@ -951,7 +988,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**124 of the 315 queued endpoints are classified here — 35 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**118 of the 309 queued endpoints are classified here — 29 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -1179,13 +1216,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/pre-employment-checks/reference-responses/{}/document` — **FALSE**
   <br>_As `POST api/pre-employment-checks/items/{}/document`._
 
-### StaffDemotions — 2 BUILD
-
-- `DELETE api/staff-demotions/{}` — **BUILD**
-  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
-- `POST   api/staff-demotions/{}/respond` — **BUILD**
-  <br>The employee's acceptance of, or appeal against, a demotion notice — the service refuses anyone but the demoted employee, so HR cannot file it for them. HR's side is wired (`pending-appeals` reads the queue); the employee has no surface at all, so the queue can only ever be empty. Unlike the asset acknowledge/respond pair there is no employee-portal route to fall back on: this one needs building on /me.
-
 ### StaffMovements — 1 INTENTIONAL · 1 FALSE
 
 - `POST   api/staff-movements/{}/attachments/upload` — **FALSE**
@@ -1307,30 +1337,10 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/safety/environmental/permits/{}/document` — **FALSE**
   <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
 
-### StaffActingAppointments — 1 BUILD
-
-- `PUT    api/staff-acting-appointments/{}` — **BUILD**
-  <br>Create, complete, extend, convert and delete are wired; the plain edit is not. The one sub-type where update rather than delete is the missing half.
-
-### StaffPromotions — 1 BUILD
-
-- `DELETE api/staff-promotions/{}` — **BUILD**
-  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
-
 ### StaffRequisitions — 1 FALSE
 
 - `POST   api/StaffRequisitions/{}/attachments` — **FALSE**
   <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
-
-### StaffSecondments — 1 BUILD
-
-- `DELETE api/staff-secondments/{}` — **BUILD**
-  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
-
-### StaffTransfers — 1 BUILD
-
-- `DELETE api/staff-transfers/{}` — **BUILD**
-  <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
 
 ### SuccessionDocuments — 1 DONE
 
@@ -1393,8 +1403,6 @@ missing — the class an endpoint audit cannot see.
 | `UpdateEmployeeMedicalExamDto` | 1 of 16 | BMIRecorded |
 | `CreateNHISClaimDto` | 1 of 16 | LinkedMedicalClaimId |
 | `UpdateNHISClaimDto` | 1 of 13 | LinkedMedicalClaimId |
-| `CreateStaffActingAppointmentDto` | 1 of 11 | AllowanceCalculation |
-| `UpdateStaffActingAppointmentDto` | 1 of 6 | AllowanceCalculation |
 | `CreateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
 | `UpdateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
 

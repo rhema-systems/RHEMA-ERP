@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { HR_ADMIN_ROLES } from '@/components/hr/common/PermissionGate';
 import { movementSubtypeService } from '@/services/hr/movement-subtype.service';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { SUBTYPE_FOR_MOVEMENT } from '@/types/hr/movement-subtypes';
 import type {
@@ -56,7 +59,13 @@ export function MovementSubtypePanel({
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
   const [creating, setCreating] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Every movement delete is Admin-tier, consistently across the four sub-types.
+  const canDelete =
+    hasAnyPermission(['HR.Movements.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const kind = SUBTYPE_FOR_MOVEMENT[movementType];
 
@@ -116,6 +125,47 @@ export function MovementSubtypePanel({
     onSettled: () => setCreating(false),
   });
 
+  /**
+   * ⚠ Removing the detail does NOT remove the movement — the movement carries the employee, the
+   * dates and the approval trail, and this row is only its type-specific half. It exists for a
+   * detail recorded against the wrong movement, which was otherwise permanent.
+   *
+   * ⚠ A detail can be added again afterwards. That was not true until the server learned to clear
+   * the tombstone first: the unique index on MovementId counts soft-deleted rows, so the re-add
+   * violated it and the movement could never carry a detail again.
+   */
+  const deleteDetail = useMutation({
+    mutationFn: (): Promise<void> => {
+      const id = (detail as any)?.id as string;
+      switch (kind) {
+        case 'promotion':
+          return movementSubtypeService.deletePromotion(id);
+        case 'transfer':
+          return movementSubtypeService.deleteTransfer(id);
+        case 'demotion':
+          return movementSubtypeService.deleteDemotion(id);
+        case 'secondment':
+          return movementSubtypeService.deleteSecondment(id);
+        default:
+          throw new Error('This movement type carries no detail record.');
+      }
+    },
+    onSuccess: async () => {
+      toast({
+        title: 'Detail removed',
+        description: 'The movement itself is untouched. A new detail can be added to it.',
+      });
+      setConfirmingDelete(false);
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'movement', movementId] });
+    },
+    onError: (error: any) =>
+      toast({
+        title: 'Could not remove the detail',
+        description: error?.response?.data?.message ?? error?.message,
+        variant: 'destructive',
+      }),
+  });
+
   if (!kind) {
     return (
       <Card>
@@ -166,8 +216,19 @@ export function MovementSubtypePanel({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base capitalize">{kind} detail</CardTitle>
+        {canDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-600"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Remove
+          </Button>
+        )}
       </CardHeader>
       <CardContent>
         <dl className="grid gap-x-8 text-sm sm:grid-cols-2">
@@ -263,6 +324,16 @@ export function MovementSubtypePanel({
           </p>
         )}
       </CardContent>
+      <ConfirmationDialog
+        open={confirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title={`Remove this ${kind} detail?`}
+        description={`The ${kind} detail comes off this movement. The movement itself - the employee, the dates and its approval trail - is untouched, and a new ${kind} detail can be added to it afterwards.`}
+        confirmText="Remove"
+        variant="destructive"
+        isLoading={deleteDetail.isPending}
+        onConfirm={async () => { await deleteDetail.mutateAsync(); }}
+      />
     </Card>
   );
 }

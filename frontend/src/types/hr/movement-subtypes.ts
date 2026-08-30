@@ -45,6 +45,13 @@ export type StaffActingReason =
   | 'SpecialProject'
   | 'DevelopmentOpportunity';
 
+/** How an acting allowance is worked out. Written from the enum. */
+export type HRAllowanceCalculationMethod =
+  | 'FixedAmount'
+  | 'PercentageOfNewSalary'
+  | 'DifferenceBetweenSalaries'
+  | 'PercentageOfCurrentSalary';
+
 export type StaffActingStatus =
   | 'Active'
   | 'Completed'
@@ -161,6 +168,12 @@ export interface StaffActingAppointment {
   actingForEmployeeName?: string | null;
   receivesActingAllowance: boolean;
   actingAllowance?: number | null;
+  /**
+   * ⚠ The id was missing here while only its resolved NAME was present, so an edit form had
+   * nothing to seed the control from — which is why `AllowanceCalculation` is one of the fields
+   * the closure ledger's section E lists as settable by no form.
+   */
+  allowanceCalculation?: HRAllowanceCalculationMethod | null;
   allowanceCalculationName?: string | null;
   movementId?: string | null;
   movementNumber?: string | null;
@@ -185,6 +198,27 @@ export interface CreateStaffActingAppointmentRequest {
   movementId?: string | null;
   notes?: string | null;
 }
+
+/**
+ * ⚠ Narrower than the create, and deliberately: the employee, the acting position and the start
+ * date are what the appointment IS, and changing them makes it a different appointment. What an
+ * edit corrects is how long it runs, what it pays and where it has got to.
+ */
+export interface UpdateStaffActingAppointmentRequest {
+  endDate?: string | null;
+  receivesActingAllowance: boolean;
+  actingAllowance?: number | null;
+  allowanceCalculation?: HRAllowanceCalculationMethod | null;
+  status: StaffActingStatus;
+  notes?: string | null;
+}
+
+export const ALLOWANCE_CALCULATIONS: HRAllowanceCalculationMethod[] = [
+  'FixedAmount',
+  'PercentageOfNewSalary',
+  'DifferenceBetweenSalaries',
+  'PercentageOfCurrentSalary',
+];
 
 export const ACTING_REASONS: StaffActingReason[] = [
   'IncumbentOnLeave',
