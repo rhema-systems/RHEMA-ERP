@@ -377,6 +377,141 @@ public class BudgetServiceHardeningTests
     }
 
     [Fact]
+    public async Task GetConsolidatedViewAsync_ReturnsExactDimensionCellPositionAndActiveReservation()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        period.PeriodCode = "2026-09";
+        period.PeriodName = "September 2026";
+        period.PeriodNumber = 9;
+        period.StartDate = new DateTime(2026, 9, 1);
+        period.EndDate = new DateTime(2026, 9, 30);
+        var scenario = CreateScenario("Approved");
+        scenario.FiscalYearId = fiscalYear.Id;
+        scenario.IsActive = true;
+        var budgetReturn = CreateReturn(scenario.Id, CurrentUserId);
+        budgetReturn.Status = "Approved";
+        var account = CreateAccount(AccountType.Expense);
+        var definition = CreateDimensionDefinition();
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "FIN", Name = "Finance",
+            EffectiveDate = fiscalYear.StartDate, IsActive = true
+        };
+        var dimensionSet = new FinanceDimensionSet
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            CombinationHash = "FIN-HASH", DisplayValue = "DEPT: FIN — Finance"
+        };
+        dimensionSet.Items.Add(new FinanceDimensionSetItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionSetId = dimensionSet.Id,
+            FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionValueId = value.Id,
+            DimensionCodeSnapshot = "DEPT",
+            DimensionValueCodeSnapshot = "FIN",
+            DimensionValueNameSnapshot = "Finance"
+        });
+        var entry = CreateEntry(budgetReturn.Id, account.Id, period.Id, 10_000m);
+        entry.FinanceDimensionSetId = dimensionSet.Id;
+        var journal = new JournalEntry
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            JournalEntryNumber = "JE-2026-TEST",
+            JournalType = "General",
+            EntryDate = new DateTime(2026, 9, 15),
+            Description = "Dimension-cell position test",
+            PostingStatus = "Posted",
+            ApprovalStatus = "Approved",
+            FiscalPeriodId = period.Id,
+            TotalDebitAmount = 500m,
+            TotalCreditAmount = 500m
+        };
+        var transaction = new AccountTransaction
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            JournalEntryId = journal.Id,
+            AccountId = account.Id,
+            FiscalPeriodId = period.Id,
+            FinanceDimensionSetId = dimensionSet.Id,
+            TransactionDate = journal.EntryDate,
+            DebitAmount = 500m,
+            FunctionalCurrencyCode = "GHS",
+            BookClassification = "IFRS",
+            PostingStatus = "Posted"
+        };
+        var activeReservation = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            BudgetScenarioId = scenario.Id,
+            BudgetReturnId = budgetReturn.Id,
+            BudgetEntryId = entry.Id,
+            AccountId = account.Id,
+            FiscalPeriodId = period.Id,
+            FinanceDimensionSetId = dimensionSet.Id,
+            CurrencyCode = "GHS",
+            SourceDocumentType = "JournalEntry",
+            SourceDocumentId = Guid.NewGuid(),
+            BudgetDate = journal.EntryDate,
+            TransactionCurrencyCode = "GHS",
+            TransactionAmount = 300m,
+            ReservedAmount = 300m,
+            Status = "Reserved",
+            EvaluationHash = "ACTIVE-HASH",
+            ReservedByUserId = CurrentUserId,
+            ReservedAt = DateTime.UtcNow
+        };
+        var consumedReservation = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            BudgetScenarioId = scenario.Id,
+            BudgetReturnId = budgetReturn.Id,
+            BudgetEntryId = entry.Id,
+            AccountId = account.Id,
+            FiscalPeriodId = period.Id,
+            FinanceDimensionSetId = dimensionSet.Id,
+            CurrencyCode = "GHS",
+            SourceDocumentType = "JournalEntry",
+            SourceDocumentId = journal.Id,
+            BudgetDate = journal.EntryDate,
+            TransactionCurrencyCode = "GHS",
+            TransactionAmount = 500m,
+            ReservedAmount = 500m,
+            Status = "Consumed",
+            EvaluationHash = "CONSUMED-HASH",
+            ReservedByUserId = CurrentUserId,
+            ReservedAt = DateTime.UtcNow,
+            ConsumedByUserId = CurrentUserId,
+            ConsumedAt = DateTime.UtcNow,
+            JournalEntryId = journal.Id
+        };
+
+        db.AddRange(fiscalYear, period, scenario, budgetReturn, account, definition, value,
+            dimensionSet, entry, journal, transaction, activeReservation, consumedReservation);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).GetConsolidatedViewAsync(scenario.Id, approvedOnly: true);
+
+        var cell = result.Lines.Should().ContainSingle().Subject.DimensionCells
+            .Should().ContainSingle().Subject;
+        cell.FinanceDimensionSetId.Should().Be(dimensionSet.Id);
+        cell.DimensionDisplayValue.Should().Be("DEPT: FIN — Finance");
+        cell.DimensionAssignments.Should().ContainSingle(assignment =>
+            assignment.DimensionCode == "DEPT"
+            && assignment.DimensionName == "Department"
+            && assignment.ValueCode == "FIN"
+            && assignment.ValueName == "Finance");
+        cell.BudgetAmount.Should().Be(10_000m);
+        cell.ActualAmount.Should().Be(500m);
+        cell.ReservedAmount.Should().Be(300m);
+        cell.AvailableAmount.Should().Be(9_200m);
+    }
+
+    [Fact]
     public async Task GetActiveBudgetVsActualAsync_UsesOnlyTheExplicitlyAdoptedScenario()
     {
         await using var db = CreateContext();
