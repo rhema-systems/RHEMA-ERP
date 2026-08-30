@@ -829,7 +829,10 @@ public class PurchaseRequisitionsController : ControllerBase
                         // and formal commitment, but an approver must not approve
                         // against a budget that became ineffective or insufficient
                         // after submission.
-                        approvalBudgetReadiness = await _budgetControlService.GetReadinessAsync(
+                        // The workflow service has already confirmed that this actor is the
+                        // assigned approver. Revalidate the tenant-scoped linked budget without
+                        // imposing the separate procurement-dashboard reader-role requirement.
+                        approvalBudgetReadiness = await _budgetControlService.GetLinkedControlReadinessAsync(
                             requisition.Id,
                             HttpContext.RequestAborted);
                         if (!approvalBudgetReadiness.CanReserve)
