@@ -114,7 +114,18 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     await assigner.page.getByTestId('civil-task-instructions').fill(
       'Inspect the controlled test location and submit a concise completion result for independent review.',
     );
-    await assigner.page.getByTestId('civil-task-assign').click();
+    const [uiCreateResponse] = await Promise.all([
+      assigner.page.waitForResponse(response =>
+        response.request().method() === 'POST'
+        && response.url() === `${api}/api/projects/${projectId}/civil-engineering/direct-tasks`,
+      ),
+      assigner.page.getByTestId('civil-task-assign').click(),
+    ]);
+    const uiCreateBody = await uiCreateResponse.text();
+    expect(
+      uiCreateResponse.status(),
+      `Civil browser assignment returned ${uiCreateResponse.status()}: ${uiCreateBody}`,
+    ).toBe(200);
     await expect(assigner.page.getByText(title, { exact: true })).toBeVisible({ timeout: 60_000 });
 
     const assignedResponse = await assigner.context.request.get(
