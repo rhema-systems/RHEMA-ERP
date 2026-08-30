@@ -37,7 +37,10 @@ public sealed class QuantitySurveyPaymentCertificateSecurityTests
             .Should().Be("api/quantity-survey/payment-certificates");
         var controller = Source("src", "ErpSystem.Api", "Controllers", "QuantitySurvey", "QuantitySurveyPaymentCertificatesController.cs");
         var service = Source("src", "ErpSystem.Api", "Services", "QuantitySurvey", "QuantitySurveyPaymentCertificateService.cs");
-        controller.Should().Contain("correlationId").And.NotContain("catch (Exception");
+        controller.Should().Contain("correlationId")
+            .And.Contain("catch (ProcurementBudgetCommitmentLifecycleException exception)")
+            .And.Contain("exception.Code")
+            .And.NotContain("catch (Exception");
         service.Should().Contain("value.TenantId == TenantId")
             .And.Contain("IVendorInvoiceService")
             .And.Contain("IWorkflowIntegrationService")
@@ -57,13 +60,17 @@ public sealed class QuantitySurveyPaymentCertificateSecurityTests
     }
 
     [Fact]
-    public void Approval_automatically_hands_off_to_finance_and_reads_live_finance_state()
+    public void Approval_issues_governed_evidence_before_finance_handoff_and_reads_live_finance_state()
     {
         var service = Source("src", "ErpSystem.Api", "Services", "QuantitySurvey",
             "QuantitySurveyPaymentCertificateService.cs");
 
         service.Should().Contain("if (approve)")
-            .And.Contain("await CreateApInvoiceAsync(entity, correlationId, token)")
+            .And.Contain("resumesCommittedApproval")
+            .And.Contain("await RenderAsync(id, correlationId, token)")
+            .And.Contain("return await HandoffToApAsync(id")
+            .And.Contain("AccessProfile = metadataAccessProfile")
+            .And.NotContain("AccessProfile = \"Module restricted\", VersionStatus = \"Approved\"")
             .And.Contain("Reference = $\"QS-CERT:{entity.Id:N}\"")
             .And.Contain("QuantitySurveyPaymentCertificateReconciliationRules.Evaluate")
             .And.Contain("invoice?.JournalEntryId.HasValue == true")

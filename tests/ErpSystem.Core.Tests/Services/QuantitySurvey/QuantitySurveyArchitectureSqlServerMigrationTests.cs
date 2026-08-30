@@ -15,10 +15,12 @@ namespace ErpSystem.Core.Tests.Services.QuantitySurvey;
 /// </summary>
 public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
 {
-    [FullSqlServerFact]
+    private const string InitialBaselineMigrationId = "20260313114533_InitialBaseline";
+
+    [SqlServerFact]
     [Trait("Category", "SqlServerIntegration")]
     [Trait("Batch", "TDC-QS-ARCHITECTURE")]
-    public async Task Production_migrations_create_a_trusted_complete_quantity_survey_schema()
+    public async Task Supported_initial_baseline_materializes_before_forward_production_migrations()
     {
         await using var database = await DisposableSqlDatabase.CreateAsync();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -26,6 +28,43 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
             .Options;
         await using var context = new ApplicationDbContext(options, Guid.NewGuid());
 
+        await ApplySupportedInitialBaselineAsync(context, database);
+
+        var expectedBaselineHistory = context.Database.GetMigrations()
+            .Where(id => string.CompareOrdinal(id, InitialBaselineMigrationId) <= 0)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+        (await context.Database.GetAppliedMigrationsAsync()).Should().Equal(expectedBaselineHistory);
+        (await context.Database.GetPendingMigrationsAsync()).Should().NotBeEmpty()
+            .And.OnlyContain(id => string.CompareOrdinal(id, InitialBaselineMigrationId) > 0);
+
+        var baselineTables = await database.QueryNamesAsync("""
+            SELECT [name]
+            FROM sys.tables
+            WHERE [name] IN (N'AspNetRoles', N'Projects', N'Accounts', N'BusinessPartners')
+            ORDER BY [name];
+            """);
+        baselineTables.Should().BeEquivalentTo([
+            "Accounts", "AspNetRoles", "BusinessPartners", "Projects"
+        ]);
+
+        var untrustedForeignKeys = await database.QueryNamesAsync(
+            "SELECT [name] FROM sys.foreign_keys WHERE is_disabled=1 OR is_not_trusted=1 ORDER BY [name];");
+        untrustedForeignKeys.Should().BeEmpty();
+    }
+
+    [FullSqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    [Trait("Batch", "TDC-QS-ARCHITECTURE")]
+    public async Task Production_migrations_from_supported_initial_baseline_create_a_trusted_complete_quantity_survey_schema()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer(database.ConnectionString, sql => sql.CommandTimeout(600))
+            .Options;
+        await using var context = new ApplicationDbContext(options, Guid.NewGuid());
+
+        await ApplySupportedInitialBaselineAsync(context, database);
         await context.Database.MigrateAsync();
 
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -76,6 +115,39 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
         estimateColumns.Should().Contain([
             "FundingSourceSnapshot", "PropertyReferenceSnapshot", "SourceSnapshotSchemaVersion"
         ]);
+    }
+
+    private static async Task ApplySupportedInitialBaselineAsync(
+        ApplicationDbContext context,
+        DisposableSqlDatabase database)
+    {
+        // Four legacy migrations pre-date the repository's consolidated InitialBaseline.
+        // They are upgrade-only deltas against schemas that already existed and cannot be
+        // executed against an empty database. A supported fresh-chain probe must therefore
+        // materialize InitialBaseline first, then stamp it and its superseded predecessors
+        // before applying every forward production migration through normal EF migration APIs.
+        var sqlGenerator = context.GetService<IMigrationsSqlGenerator>();
+        var baseline = new InitialBaseline();
+        // Fast Debug builds intentionally omit historical target models. The
+        // migration operations already carry their DDL types; the finalized
+        // current model supplies mappings needed only by seed-data operations.
+        var commands = sqlGenerator.Generate(baseline.UpOperations, context.Model);
+
+        foreach (var command in commands)
+            await database.ExecuteSqlAsync(command.CommandText);
+
+        var historyRepository = context.GetService<IHistoryRepository>();
+        await database.ExecuteSqlAsync(historyRepository.GetCreateIfNotExistsScript());
+
+        var productVersion = typeof(DbContext).Assembly.GetName().Version?.ToString(3) ?? "8.0.0";
+        var migrationsAssembly = context.GetService<IMigrationsAssembly>();
+        foreach (var migrationId in migrationsAssembly.Migrations.Keys
+                     .Where(id => string.CompareOrdinal(id, InitialBaselineMigrationId) <= 0)
+                     .OrderBy(id => id, StringComparer.Ordinal))
+        {
+            await database.ExecuteSqlAsync(
+                historyRepository.GetInsertScript(new HistoryRow(migrationId, productVersion)));
+        }
     }
 
     [SqlServerFact]

@@ -35,6 +35,8 @@ public sealed class QuantitySurveyMeasurementGuardTests
         var service = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api", "Services",
             "QuantitySurvey", "QuantitySurveyMeasurementService.cs"));
         service.Should().Contain("IProjectService");
+        service.Should().Contain("projectService.HasProjectAccessAsync(projectId)");
+        service.Should().NotContain("projectService.GetProjectByIdAsync(projectId)");
         service.Should().Contain("IControlledFileUploadService");
         service.Should().Contain("ICentralDocumentRepositoryFileService");
         service.Should().Contain("IsolationLevel.Serializable");
@@ -50,6 +52,84 @@ public sealed class QuantitySurveyMeasurementGuardTests
         service.Should().NotContain("new Project(");
         service.Should().NotContain("new ProjectBoqVersion");
         service.Should().NotContain("new CentralDocumentRecord");
+    }
+
+    [Fact]
+    public void Project_access_only_checks_use_the_central_lightweight_authorization_boundary()
+    {
+        var root = FindRepositoryRoot();
+        var interfaceSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Interfaces", "Projects", "IProjectServices.cs"));
+        var authorizationSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Projects", "ProjectService.Authorization.cs"));
+        interfaceSource.Should().Contain("Task<bool> HasProjectAccessAsync(Guid projectId)");
+        authorizationSource.Should().Contain("GetProjectForOperationAsync(projectId, ProjectAccessOperation.View)")
+            .And.Contain("catch (UnauthorizedAccessException)")
+            .And.Contain("project.TenantId != _currentUserProvider.TenantId");
+
+        var accessOnlyFiles = new[]
+        {
+            "QuantitySurveyAdvanceRecoveryService.cs",
+            "QuantitySurveyContractClaimService.cs",
+            "QuantitySurveyContractCommercialTermsService.cs",
+            "QuantitySurveyDayworkService.cs",
+            "QuantitySurveyDesignRevisionImpactService.cs",
+            "QuantitySurveyEscalationCalculationService.cs",
+            "QuantitySurveyEscalationDisputeService.cs",
+            "QuantitySurveyFinalAccountService.cs",
+            "QuantitySurveyJointMeasurementService.cs",
+            "QuantitySurveyMaterialReconciliationService.cs",
+            "QuantitySurveyMeasurementService.cs",
+            "QuantitySurveyPaymentCertificateService.cs",
+            "QuantitySurveySubcontractChargeService.cs",
+            "QuantitySurveySubcontractService.cs",
+            "QuantitySurveyValuationWorksheetService.cs",
+            "QuantitySurveyVariationService.cs"
+        };
+        foreach (var file in accessOnlyFiles)
+        {
+            var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "QuantitySurvey", file));
+            source.Should().Contain("HasProjectAccessAsync", $"{file} must keep project authorization without materializing the project aggregate")
+                .And.NotContain("GetProjectByIdAsync", $"{file} must not materialize the complete project just to authorize access");
+        }
+
+        foreach (var path in new[]
+                 {
+                     Path.Combine(root, "src", "ErpSystem.Data", "Services", "QuantitySurveyEscalationFormulaService.cs"),
+                     Path.Combine(root, "src", "ErpSystem.Api", "Services", "Documents", "QuantitySurvey", "QuantitySurveyPaymentCertificateDocumentBuilder.cs"),
+                     Path.Combine(root, "src", "ErpSystem.Api", "Services", "Documents", "QuantitySurvey", "QuantitySurveyEscalationDisputeAuditPackDocumentBuilder.cs")
+                 })
+        {
+            var source = File.ReadAllText(path);
+            source.Should().Contain("HasProjectAccessAsync")
+                .And.NotContain("GetProjectByIdAsync");
+        }
+    }
+
+    [Fact]
+    public void QuantitySurvey_acceptance_runner_consumes_validated_current_fixture_identifiers()
+    {
+        var root = FindRepositoryRoot();
+        var runner = File.ReadAllText(Path.Combine(root, "e2e-tests", ".qs-assurance-runner.mjs"));
+        var seedInvoker = File.ReadAllText(Path.Combine(
+            root, "scripts", "quantity-survey", "Invoke-QuantitySurveyE2ESeed.ps1"));
+        var seedSql = File.ReadAllText(Path.Combine(
+            root, "scripts", "quantity-survey", "seed-quantity-survey-e2e.sql"));
+
+        runner.Should().Contain("Invoke-QuantitySurveyE2ESeed.ps1")
+            .And.Contain("ConnectionStrings__DefaultConnection")
+            .And.Contain("RhemaQsUatAssurance_[0-9]{8}")
+            .And.Contain("fixture.ProjectId")
+            .And.Contain("fixture.InterimValuationId")
+            .And.Contain("fixture.ApprovedBoqVersionId")
+            .And.Contain("fixture.ContractorBusinessPartnerId")
+            .And.Contain("fixture.ConsultantBusinessPartnerId");
+        runner.Should().NotMatchRegex(
+            "QS_ACCEPTANCE_(?:PROJECT|VALUATION|BOQ_VERSION|CONTRACTOR|CONSULTANT)_ID:\\s*'[0-9a-f-]{36}'",
+            "acceptance IDs must come from the fixture applied to the current database");
+        seedInvoker.Should().Contain("OutputJsonPath")
+            .And.Contain("QS-E2E-READY|*");
+        seedSql.Should().Contain("QS E2E output validation failed for the fixture project.")
+            .And.Contain("QS E2E output validation failed for the approved BoQ version.")
+            .And.Contain("QS E2E output validation failed for one or more acceptance actors.");
     }
 
     [Fact]

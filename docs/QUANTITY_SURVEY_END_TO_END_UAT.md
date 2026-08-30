@@ -38,6 +38,28 @@ The values selected for UAT must be recorded in the execution evidence. They are
 7. Retry tests must reuse the same business request or idempotency key where supported. A retry must not create a second governed outcome.
 8. Negative tests must prove that rejected requests do not mutate business, financial, document, workflow, or audit state beyond the authorized security or exception event.
 
+## Automated harness boundary and actor matrix
+
+The supported non-production automation is deliberately narrower than this complete UAT script. Run `rebuild-db` against a uniquely named disposable SQL Server database, run `seed-hr-all` for the controlled location master, then run `scripts/quantity-survey/Invoke-QuantitySurveyE2ESeed.ps1` with `ConnectionStrings__DefaultConnection` scoped to that same database. The launcher refuses system and non-local databases. Do not point it at production or treat a persistent development fixture as a fresh UAT case.
+
+Use `e2e-tests/.qs-assurance-runner.mjs` for the governed automated run. After Chromium succeeds, it runs `scripts/quantity-survey/Invoke-QuantitySurveyE2EVerification.ps1`, which fails unless SQL Server proves the unique recorded measurement, approved valuation and certificate, four distinct valuation and certificate workflow performers, one budget-utilization ledger entry, matching formal commitment utilization, central DMS lineage, and one Finance AP handoff. The runner also supports an identical replay against the same disposable records to prove idempotency.
+
+`e2e-tests/tests/qs-phases-0-6-lifecycle.spec.ts` must use separate authenticated actors for every positive approval stage:
+
+| Automated responsibility | Acceptance environment | Separation proved by the lifecycle spec |
+| --- | --- | --- |
+| QS maker | `QS_ACCEPTANCE_MAKER_*` | Creates the measurement, submits the governed records, and is denied direct self-approval. |
+| QS reviewer | `QS_ACCEPTANCE_REVIEWER_*` | Records the independent QS assessment, vets it, and completes only the QS-review workflow stage. |
+| Engineer or Project confirmer | `QS_ACCEPTANCE_ENGINEER_*` | Completes only the engineering/project-confirmation workflow stage. |
+| Finance validator | `QS_ACCEPTANCE_FINANCE_VALIDATOR_*` | Completes only the budget, commitment, tax, retention, and AP-readiness workflow stage. |
+| Independent approving authority | `QS_ACCEPTANCE_CHECKER_*` | Completes the final valuation and certificate approval stages and must differ from the maker, reviewer, Engineer, and Finance validator. |
+| Contractor representative | `QS_ACCEPTANCE_CONTRACTOR_*` | Creates and submits the external valuation claim for the assigned project and partner. |
+| Consultant representative | `QS_ACCEPTANCE_CONSULTANT_*` | Independently endorses the QS-vetted claim for the assigned project and partner. |
+
+`e2e-tests/tests/qs-final-finance-security-acceptance.spec.ts` then uses separate AP and Finance approval identities for posting, payment, reversal, and the direct-API denial matrix. Its non-QS Finance actor is unauthorized for QS operations even though that actor is authorized for the separate Finance-owned AP responsibility.
+
+On a new disposable database, the fixture's project, procurement source, Works contract, and approved BOQ are fresh prerequisite records, and the lifecycle spec creates the measurement, worksheet, certificate, AP linkage, and follow-on Finance records through authenticated APIs. This is not evidence that the automated spec created and approved the estimate, rate build-up, tender, contract, or BOQ through their complete business screens. It also does not close the positive variation, Maintenance, Inventory, retention/final-account, report/export, backup/restore, or owner sign-off cases below. Record those cases separately and leave their checklist rows open until their own fresh browser, API, document, audit, and SQL evidence exists.
+
 ## Required UAT users
 
 Map each responsibility to a different active tenant user unless the approved tenant workflow explicitly allows a compatible combination.

@@ -541,7 +541,7 @@ public sealed class QuantitySurveyFinalAccountService(
 
     private async Task RequireProjectAsync(Guid projectId)
     {
-        if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null)
+        if (!await projectService.HasProjectAccessAsync(projectId))
             throw new UnauthorizedAccessException("You are not permitted to access this project.");
     }
 

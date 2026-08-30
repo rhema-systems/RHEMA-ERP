@@ -4039,6 +4039,80 @@ public class ProjectServiceTests
     }
 
     [Fact]
+    public async Task HasProjectAccessAsync_ShouldAuthorizeThroughTheLightweightProjectBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-ACCESS-1",
+            Title = "QS access boundary"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.Add(project);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = userId,
+            Role = "QuantitySurveyor",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var result = await fixture.CreateService().HasProjectAccessAsync(project.Id);
+
+        result.Should().BeTrue();
+        fixture.ProjectRepository.Verify(repository => repository.GetByIdAsync(project.Id), Times.Once);
+        fixture.ProjectRepository.Verify(repository => repository.GetDetailByIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HasProjectAccessAsync_ShouldReturnFalseForDeniedOrCrossTenantProjects()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var deniedProject = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-DENIED",
+            Title = "Denied project"
+        };
+        var crossTenantProject = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            ProjectCode = "PRJ-QS-CROSS-TENANT",
+            Title = "Cross tenant project"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.AddRange([deniedProject, crossTenantProject]);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = crossTenantProject.TenantId,
+            ProjectId = crossTenantProject.Id,
+            UserId = userId,
+            Role = "QuantitySurveyor",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var service = fixture.CreateService();
+
+        (await service.HasProjectAccessAsync(deniedProject.Id)).Should().BeFalse();
+        (await service.HasProjectAccessAsync(crossTenantProject.Id)).Should().BeFalse();
+        (await service.HasProjectAccessAsync(Guid.Empty)).Should().BeFalse();
+        fixture.ProjectRepository.Verify(repository => repository.GetDetailByIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GetProjectByIdAsync_ShouldPopulateUserDisplayNamesForProjectWorkspace()
     {
         var tenantId = Guid.NewGuid();
