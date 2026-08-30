@@ -241,7 +241,9 @@ public partial class ProjectService
             || project.SponsorId == _currentUserProvider.UserId
             || project.CreatedById == _currentUserProvider.UserId;
 
-    private static bool IsManagementProjectRole(string? role) => ManagementProjectRoles.Contains(NormalizeProjectRole(role));
+    private static bool IsManagementProjectRole(string? role)
+        => ManagementProjectRoles.Contains(NormalizeProjectRole(role))
+            || CivilEngineeringAccessControlRegistry.IsManagementProjectRole(role);
 
     private static bool IsFinancialProjectRole(string? role)
     {
@@ -252,13 +254,15 @@ public partial class ProjectService
     private static bool IsGovernanceProjectRole(string? role)
     {
         var normalized = NormalizeProjectRole(role);
-        return GovernanceProjectRoles.Contains(normalized) || ManagementProjectRoles.Contains(normalized);
+        return GovernanceProjectRoles.Contains(normalized) || IsManagementProjectRole(role);
     }
 
     private static bool IsExecutionProjectRole(string? role)
     {
         var normalized = NormalizeProjectRole(role);
-        return ExecutionProjectRoles.Contains(normalized) || ManagementProjectRoles.Contains(normalized);
+        return ExecutionProjectRoles.Contains(normalized)
+            || IsManagementProjectRole(role)
+            || CivilEngineeringAccessControlRegistry.IsExecutionProjectRole(role);
     }
 
     private static string NormalizeProjectRole(string? role)

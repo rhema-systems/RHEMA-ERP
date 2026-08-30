@@ -621,6 +621,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyStatutoryReportService>());
             services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
                 provider.GetRequiredService<ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyStatutoryReportService>());
+            services.AddScoped<ErpSystem.Api.Services.Projects.CivilEngineeringStatutoryReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringStatutoryReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Projects.CivilEngineeringStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Projects.CivilEngineeringStatutoryReportService>());
             services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
             services.AddScoped<IReportTemplateLifecycleService, ErpSystem.Data.Services.ReportTemplateLifecycleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentOutputService, ErpSystem.Api.Services.Documents.DocumentOutputService>();
@@ -1081,6 +1086,28 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSettingsService, ErpSystem.Core.Services.Procurement.ProcurementSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementConfigurationService, ErpSystem.Core.Services.Procurement.ProcurementConfigurationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyConfigurationService, ErpSystem.Data.Services.QuantitySurveyConfigurationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringConfigurationService, ErpSystem.Data.Services.CivilEngineeringConfigurationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringDesignService, ErpSystem.Data.Services.CivilEngineeringDesignService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringSupervisionService, ErpSystem.Data.Services.CivilEngineeringSupervisionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringSiteInstructionService, ErpSystem.Data.Services.CivilEngineeringSiteInstructionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringRfiService, ErpSystem.Data.Services.CivilEngineeringRfiService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringQualityTestService, ErpSystem.Data.Services.CivilEngineeringQualityTestService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringInspectionControlService, ErpSystem.Data.Services.CivilEngineeringInspectionControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringIpcEndorsementService, ErpSystem.Data.Services.CivilEngineeringIpcEndorsementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringWeeklySupervisionService, ErpSystem.Data.Services.CivilEngineeringWeeklySupervisionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringExtensionOfTimeService, ErpSystem.Data.Services.CivilEngineeringExtensionOfTimeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringMaintenanceIntakeService, ErpSystem.Data.Services.CivilEngineeringMaintenanceIntakeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringDevelopmentApprovalFileService, ErpSystem.Data.Services.CivilEngineeringDevelopmentApprovalFileService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringDevelopmentApprovalFileHandoffService, ErpSystem.Data.Services.CivilEngineeringDevelopmentApprovalFileHandoffService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringPermittingEngineeringReviewService, ErpSystem.Data.Services.CivilEngineeringPermittingEngineeringReviewService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringPermittingHodDecisionService, ErpSystem.Data.Services.CivilEngineeringPermittingHodDecisionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringDirectTaskService, ErpSystem.Data.Services.CivilEngineeringDirectTaskService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringMigrationService, ErpSystem.Data.Services.CivilEngineeringMigrationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringMaintenanceAssessmentService, ErpSystem.Data.Services.CivilEngineeringMaintenanceAssessmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringMaintenanceCostingHandoffService, ErpSystem.Data.Services.CivilEngineeringMaintenanceCostingHandoffService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringMaintenanceExecutionLinkService, ErpSystem.Data.Services.CivilEngineeringMaintenanceExecutionLinkService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringMaintenanceCompletionControlService, ErpSystem.Data.Services.CivilEngineeringMaintenanceCompletionControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.ICivilEngineeringComplaintResolutionService, ErpSystem.Data.Services.CivilEngineeringComplaintResolutionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyBoqSpreadsheetService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyBoqSpreadsheetService>();
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyTenderBoqSubmissionService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyTenderBoqSubmissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyRateLibraryService, ErpSystem.Data.Services.QuantitySurveyRateLibraryService>();
@@ -1112,6 +1139,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditGovernanceService, ErpSystem.Core.Services.Audit.AuditGovernanceService>();
             services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageContributor, ErpSystem.Core.Services.Audit.ProcurementInventoryAuditEventCoverageContributor>();
             services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageContributor, ErpSystem.Core.Services.QuantitySurvey.QuantitySurveyAuditEventCoverageContributor>();
+            services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageContributor, ErpSystem.Core.Services.Projects.CivilEngineeringAuditEventCoverageContributor>();
             services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageService, ErpSystem.Core.Services.Audit.AuditEventCoverageService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAppSubmissionService, ErpSystem.Core.Services.Procurement.ProcurementAppSubmissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSpecificationTemplateService, ErpSystem.Core.Services.Procurement.ProcurementSpecificationTemplateService>();
@@ -1170,12 +1198,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyConfigurationProfileSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyAccessControlSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringConfigurationProfileSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringAccessControlSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementSupplierOnboardingTestSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
@@ -1415,6 +1446,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             }
 
             foreach (var permission in ErpSystem.Core.Services.QuantitySurvey.QuantitySurveyAccessControlRegistry.Permissions)
+            {
+                authorizationBuilder.AddPolicy(permission.Code, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Code)));
+            }
+
+            foreach (var permission in ErpSystem.Core.Services.Projects.CivilEngineeringAccessControlRegistry.Permissions)
             {
                 authorizationBuilder.AddPolicy(permission.Code, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Code)));

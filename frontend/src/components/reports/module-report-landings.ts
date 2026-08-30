@@ -113,6 +113,7 @@ export const moduleReportLandings = {
       items: [
         { title: 'Project reports', href: '/development/project-reports', icon: FileText },
         { title: 'Project analytics', href: '/development/project-analytics', icon: TrendingUp },
+        { title: 'Civil Engineering reports', href: '/reports/civil-engineering', icon: Building2 },
       ],
     }],
   },

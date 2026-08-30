@@ -130,6 +130,20 @@ const formatWeight = (value?: number) =>
 const normalizeId = (value?: string | null) =>
   (value || '').trim().toLowerCase();
 
+export const usesCivilWorksEotWorkflow = (
+  contracts: ContractDto[],
+  contractId?: string | null
+) => {
+  const normalizedContractId = normalizeId(contractId);
+  if (!normalizedContractId) return false;
+
+  return contracts.some(
+    contract =>
+      normalizeId(contract.id) === normalizedContractId &&
+      contract.contractType?.trim().toLowerCase() === 'works'
+  );
+};
+
 export function ProjectCommercialAdminTab(props: Props) {
   const { hasPermission } = useAuth();
   const { canManageValuations, canManageVariations } =
@@ -184,6 +198,14 @@ export function ProjectCommercialAdminTab(props: Props) {
         (contract) => contract.contractType?.toLowerCase() === 'works'
       ),
     [activeContracts]
+  );
+  const selectedExtensionUsesCivilWorkflow = useMemo(
+    () =>
+      usesCivilWorksEotWorkflow(
+        activeContracts,
+        extensionOfTimeDraft.contractId
+      ),
+    [activeContracts, extensionOfTimeDraft.contractId]
   );
   const milestoneOptions = useMemo(
     () =>
@@ -1679,6 +1701,44 @@ export function ProjectCommercialAdminTab(props: Props) {
           </CardHeader>
           <CardContent className="space-y-4">
             {canManageVariations ? (
+              <div className="grid gap-2">
+                <Label>Contract</Label>
+                <Select
+                  value={extensionOfTimeDraft.contractId || '__unlinked__'}
+                  onValueChange={value =>
+                    setExtensionOfTimeDraft(current => ({
+                      ...current,
+                      contractId: value === '__unlinked__' ? undefined : value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select contract" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__unlinked__">No linked contract</SelectItem>
+                    {activeContracts.map(contract => (
+                      <SelectItem key={contract.id} value={contract.id}>
+                        {contractLabel(contract)} ·{' '}
+                        {contract.contractType || 'Unspecified type'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            {selectedExtensionUsesCivilWorkflow ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                Works extensions of time are governed in{' '}
+                <span className="font-medium">
+                  Site controls → Civil variation and extension of time
+                </span>
+                . That workspace selects the active Works contract, an applied
+                QS variation where there is cost impact, current central-DMS
+                evidence, and the configured workflow. Historical EOT records
+                remain visible below.
+              </div>
+            ) : canManageVariations ? (
               <>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="grid gap-2 md:col-span-2">
@@ -1870,7 +1930,11 @@ export function ProjectCommercialAdminTab(props: Props) {
                           </div>
                         ) : null}
                       </div>
-                      {canManageVariations ? (
+                      {canManageVariations &&
+                      !usesCivilWorksEotWorkflow(
+                        activeContracts,
+                        item.contractId
+                      ) ? (
                         <div className="flex items-center gap-2">
                           <Button
                             variant="outline"

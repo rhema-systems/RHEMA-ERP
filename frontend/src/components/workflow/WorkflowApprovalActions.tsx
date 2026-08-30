@@ -67,6 +67,8 @@ export interface WorkflowApprovalActionsProps {
   hideSatisfiedTaskDocumentUploads?: boolean;
   hideSatisfiedTaskDocumentSection?: boolean;
   hideDocumentChecklistItems?: boolean;
+  approveLabel?: string;
+  rejectLabel?: string;
 
   // UI tuning
   size?: 'sm' | 'default' | 'lg' | 'icon';
@@ -107,6 +109,8 @@ export function WorkflowApprovalActions({
   hideSatisfiedTaskDocumentUploads = false,
   hideSatisfiedTaskDocumentSection = false,
   hideDocumentChecklistItems = false,
+  approveLabel = 'Approve',
+  rejectLabel = 'Reject',
   size = 'sm',
   iconOnly = false,
   renderMode = 'buttons',
@@ -838,7 +842,7 @@ export function WorkflowApprovalActions({
               title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined}
             >
               <CheckCircle className="mr-2 h-4 w-4" />
-              Approve
+              {approveLabel}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-red-600 focus:text-red-700"
@@ -849,7 +853,7 @@ export function WorkflowApprovalActions({
               disabled={!effectiveCanApprove || processing || summaryLoading}
             >
               <XCircle className="mr-2 h-4 w-4" />
-              Reject
+              {rejectLabel}
             </DropdownMenuItem>
           </>
         )}
@@ -1211,7 +1215,7 @@ export function WorkflowApprovalActions({
               aria-label={iconOnly ? `Approve ${entityLabel}` : undefined}
             >
               <CheckCircle className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
-              {!iconOnly && 'Approve'}
+              {!iconOnly && approveLabel}
             </Button>
             <Button
               size={size}
@@ -1223,7 +1227,7 @@ export function WorkflowApprovalActions({
               aria-label={iconOnly ? `Reject ${entityLabel}` : undefined}
             >
               <XCircle className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
-              {!iconOnly && 'Reject'}
+              {!iconOnly && rejectLabel}
             </Button>
           </>
         )}

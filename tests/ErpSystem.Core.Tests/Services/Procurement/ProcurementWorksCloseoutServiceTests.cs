@@ -19,6 +19,21 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementWorksCloseoutServiceTests
 {
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    public void Civil_completion_inspection_applies_only_to_configured_Civil_works(
+        bool hasCivilDesignCase,
+        bool hasCivilInspection,
+        bool expected)
+    {
+        ProcurementWorksCloseoutService.RequiresCivilCompletionInspection(
+                hasCivilDesignCase,
+                hasCivilInspection)
+            .Should().Be(expected);
+    }
+
     [Fact]
     public async Task OverviewIsTenantSafeAndExposesCompleteDecisionRegister()
     {

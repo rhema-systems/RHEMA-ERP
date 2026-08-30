@@ -2407,6 +2407,7 @@ public class ProjectAssetLinkDto
     public Guid Id { get; set; }
     public Guid ProjectId { get; set; }
     public Guid? MaintenanceAssetId { get; set; }
+    public Guid? FixedAssetId { get; set; }
     public Guid? CompanyAssetId { get; set; }
     public Guid? JobCardId { get; set; }
     public string LinkType { get; set; } = string.Empty;
@@ -2419,6 +2420,7 @@ public class ProjectAssetLinkDto
 public class CreateProjectAssetLinkDto
 {
     public Guid? MaintenanceAssetId { get; set; }
+    public Guid? FixedAssetId { get; set; }
     public Guid? CompanyAssetId { get; set; }
     public Guid? JobCardId { get; set; }
     public string LinkType { get; set; } = "Asset";
@@ -2662,6 +2664,9 @@ public class ProjectMobileAssignmentDto
     public string Status { get; set; } = string.Empty;
     public decimal PercentComplete { get; set; }
     public DateTime? PlannedEndDate { get; set; }
+    public Guid? CivilDirectTaskId { get; set; }
+    public string? CivilDirectTaskStatus { get; set; }
+    public string? CivilDirectTaskRowVersion { get; set; }
 }
 
 public class ProjectMobileSummaryDto

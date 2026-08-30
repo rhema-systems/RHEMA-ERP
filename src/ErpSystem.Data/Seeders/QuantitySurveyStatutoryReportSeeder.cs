@@ -23,16 +23,22 @@ public sealed class QuantitySurveyStatutoryReportSeeder(
     public async Task<int> SeedTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         if (tenantId == Guid.Empty) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
-        var moduleId = await context.TenantModules.IgnoreQueryFilters().AsNoTracking()
-            .Where(value => value.TenantId == tenantId && !value.IsDeleted &&
-                (value.ModuleName == "Project Management" || value.ModuleName == "Development" || value.ModuleName == "Projects"))
-            .OrderBy(value => value.ModuleName == "Project Management" ? 0 : value.ModuleName == "Development" ? 1 : 2)
-            .Select(value => (Guid?)value.Id).FirstOrDefaultAsync(cancellationToken);
         var queries = QuantitySurveyStatutoryReportCatalogue.Definitions.Select(value => value.Query).ToList();
+        var moduleId = await ProjectReportModuleSeederSupport.ResolveModuleIdAsync(context, tenantId, cancellationToken);
+        var now = DateTime.UtcNow;
+        if (!moduleId.HasValue)
+        {
+            var retired = await ProjectReportModuleSeederSupport.RetireUnassignedCatalogueAsync(
+                context, tenantId, queries, now, cancellationToken);
+            logger.LogWarning(
+                "Skipped Quantity Survey report catalogue for tenant {TenantId}: Project Management is not enabled; retired {ReportCount} unassigned rows.",
+                tenantId, retired);
+            return retired;
+        }
+
         var existing = await context.Reports.IgnoreQueryFilters()
             .Where(value => value.TenantId == tenantId && value.Query != null && queries.Contains(value.Query))
             .ToDictionaryAsync(value => value.Query!, StringComparer.OrdinalIgnoreCase, cancellationToken);
-        var now = DateTime.UtcNow;
         var changed = 0;
 
         foreach (var definition in QuantitySurveyStatutoryReportCatalogue.Definitions)
