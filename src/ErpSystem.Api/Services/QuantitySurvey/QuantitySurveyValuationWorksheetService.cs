@@ -492,7 +492,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
 
     private async Task RequireProjectAccessAsync(Guid projectId)
     {
-        if (await projectService.GetProjectByIdAsync(projectId) is null)
+        if (!await projectService.HasProjectAccessAsync(projectId))
             throw new UnauthorizedAccessException("You are not permitted to access the selected project.");
     }
     private void ApplyRowVersion(QuantitySurveyValuationWorksheet entity, string? value)

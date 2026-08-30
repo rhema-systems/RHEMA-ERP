@@ -58,10 +58,37 @@ public partial class ProjectService
         "resourcemanager"
     ];
 
+    public async Task<bool> HasProjectAccessAsync(Guid projectId)
+    {
+        if (projectId == Guid.Empty)
+        {
+            return false;
+        }
+
+        try
+        {
+            await GetProjectForOperationAsync(projectId, ProjectAccessOperation.View);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.StartsWith("Project with ID ", StringComparison.Ordinal) &&
+            exception.Message.EndsWith(" not found", StringComparison.Ordinal))
+        {
+            return false;
+        }
+    }
+
     private async Task<Project> GetProjectForOperationAsync(Guid projectId, ProjectAccessOperation operation)
     {
-        var project = await _projectRepository.GetByIdAsync(projectId)
-            ?? throw new InvalidOperationException($"Project with ID {projectId} not found");
+        var project = await _projectRepository.GetByIdAsync(projectId);
+        if (project is null || project.IsDeleted || project.TenantId != _currentUserProvider.TenantId)
+        {
+            throw new InvalidOperationException($"Project with ID {projectId} not found");
+        }
 
         await EnsureProjectAccessAsync(project, operation);
         return project;

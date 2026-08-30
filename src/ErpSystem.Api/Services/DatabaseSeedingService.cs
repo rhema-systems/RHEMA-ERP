@@ -47,6 +47,8 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
+        private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
         private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
         private readonly CivilEngineeringConfigurationProfileSeeder? _civilEngineeringConfigurationProfileSeeder;
         private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
@@ -125,6 +127,8 @@ namespace ErpSystem.Web.Services
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
+            QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
+            QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
             QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
             ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null,
             CivilEngineeringConfigurationProfileSeeder? civilEngineeringConfigurationProfileSeeder = null,
@@ -141,6 +145,8 @@ namespace ErpSystem.Web.Services
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
+            _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
             _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
             _civilEngineeringConfigurationProfileSeeder = civilEngineeringConfigurationProfileSeeder;
             _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
@@ -232,6 +238,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring Civil Engineering roles and permissions are seeded...");
                     await _civilEngineeringAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC Quantity Survey access roles, permissions, and workflow entity types are seeded...");
+                    await _quantitySurveyAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft TDC Quantity Survey configuration profiles are seeded...");
+                    await _quantitySurveyConfigurationProfileSeeder.SeedAsync();
                 }
 
                 if (_procurementStatutoryReportSeeder is not null)
@@ -9205,6 +9223,15 @@ namespace ErpSystem.Web.Services
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();
+            services.AddScoped<ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ProcurementAccessControlSeeder>();
+            services.AddScoped<ProcurementStatutoryReportSeeder>();
+            services.AddScoped<InventoryStatutoryReportSeeder>();
+            services.AddScoped<AuditComplianceReportSeeder>();
+            services.AddScoped<QuantitySurveyAccessControlSeeder>();
+            services.AddScoped<QuantitySurveyConfigurationProfileSeeder>();
+            services.AddScoped<QuantitySurveyStatutoryReportSeeder>();
+            services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
             return services;
         }
 

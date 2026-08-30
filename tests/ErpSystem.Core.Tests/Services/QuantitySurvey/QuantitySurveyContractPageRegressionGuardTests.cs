@@ -81,10 +81,90 @@ public sealed class QuantitySurveyContractPageRegressionGuardTests
             .And.Contain("N'Procurement contract review'")
             .And.Contain("N'Finance budget validation'")
             .And.Contain("N'Final authority approval'")
-            .And.Contain("It is fixture configuration, not a runtime role name")
+            .And.Contain("They are fixture configuration")
+            .And.Contain("N'TDC_QS_REVIEWER'")
             .And.Contain("N'TDC_PROJECT_ENGINEER'")
             .And.Contain("N'TDC_FINANCE_REVIEWER'")
             .And.Contain("N'TDC_HEAD_OF_PROCUREMENT'");
+    }
+
+    [Fact]
+    public void E2e_fixture_preserves_the_formal_works_contract_budget_lifecycle_before_qs_certification()
+    {
+        var source = Source("scripts", "quantity-survey", "seed-quantity-survey-e2e.sql");
+
+        source.Should().Contain("N'QS-E2E-BUDGET-001'")
+            .And.Contain("N'QS-E2E-PR-001'")
+            .And.Contain("N'QS-E2E-RES-001'")
+            .And.Contain("N'QS-E2E-SRL-001'")
+            .And.Contain("INSERT dbo.ProcurementBudgetCommitments")
+            .And.Contain("INSERT dbo.ProcurementBudgetCommitmentLedgerEntries")
+            .And.Contain("N'Contract',@ContractId,N'QS-E2E-WORKS-001'")
+            .And.Contain("SourcePurchaseRequisitionId=@SourceRequisitionId")
+            .And.Contain("SourcingReleaseId=@SourcingReleaseId")
+            .And.Contain("DECLARE @TenderGuardWasEnabled bit=CASE WHEN EXISTS")
+            .And.Contain("IF @TenderGuardWasEnabled=1")
+            .And.Contain("The QS E2E formal contract commitment lineage is inconsistent.");
+    }
+
+    [Fact]
+    public void E2e_bootstrap_uses_the_explicit_disposable_connection_and_tenant_scoped_actor_meaning()
+    {
+        var launcher = Source("scripts", "quantity-survey", "Invoke-QuantitySurveyE2ESeed.ps1");
+        launcher.Should().Contain("ConnectionStrings__DefaultConnection")
+            .And.Contain("ConnectionStrings:DefaultConnection is not configured in the environment or API user-secrets");
+
+        var fixture = Source("scripts", "quantity-survey", "seed-quantity-survey-e2e.sql");
+        fixture.Should().Contain("TenantId = @TenantId AND UserName = N'admin' AND IsActive = 1")
+            .And.Contain("TenantId = @TenantId AND UserName = N'employee' AND IsActive = 1")
+            .And.Contain("TenantId = @TenantId AND UserName = N'manager' AND IsActive = 1")
+            .And.Contain("TenantId = @TenantId AND UserName = N'helpdesk.supervisor' AND IsActive = 1")
+            .And.Contain("TenantId = @TenantId AND UserName = N'helpdesk.manager' AND IsActive = 1")
+            .And.Contain("TenantId = @TenantId AND UserName = N'finance.manager' AND IsActive = 1")
+            .And.NotContain("58cafd8b-42ce-4f67-0dbb-08de862e82ee")
+            .And.NotContain("77af28cf-66d3-49c0-0dbd-08de862e82ee")
+            .And.NotContain("9e475ce9-34ad-4a6d-0dbc-08de862e82ee");
+
+        var apiProgram = Source("src", "ErpSystem.Api", "Program.cs");
+        apiProgram.Should().Contain("args[0] == \"seed-hr-all\"")
+            .And.Contain("tempBuilder.Services.AddHttpContextAccessor();")
+            .And.Contain("tempBuilder.Services.AddErpSystemIdentity();");
+
+        var sharedSeeder = Source("src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs");
+        sharedSeeder.Should().Contain("await _quantitySurveyAccessControlSeeder.SeedAsync();")
+            .And.Contain("await _quantitySurveyConfigurationProfileSeeder.SeedAsync();");
+    }
+
+    [Fact]
+    public void Authenticated_lifecycle_keeps_every_architecture_approval_actor_distinct()
+    {
+        var source = Source("e2e-tests", "tests", "qs-phases-0-6-lifecycle.spec.ts");
+        foreach (var variable in new[]
+                 {
+                     "QS_ACCEPTANCE_MAKER_USERNAME",
+                     "QS_ACCEPTANCE_REVIEWER_USERNAME",
+                     "QS_ACCEPTANCE_ENGINEER_USERNAME",
+                     "QS_ACCEPTANCE_FINANCE_VALIDATOR_USERNAME",
+                     "QS_ACCEPTANCE_CHECKER_USERNAME"
+                 })
+            source.Should().Contain(variable);
+
+        source.Should().Contain("headers: reviewer.headers")
+            .And.Contain("'QS vetting'")
+            .And.Contain("actor: workflowReviewer")
+            .And.Contain("actor: engineer")
+            .And.Contain("actor: financeValidator")
+            .And.Contain("actor: approver")
+            .And.Contain("complete valuation ${stage.label}")
+            .And.Contain("complete payment-certificate ${stage.label}")
+            .And.NotContain("actor: reviewer")
+            .And.NotContain("ids.worksheetApprove1")
+            .And.NotContain("ids.certificateApprove1");
+
+        var uat = Source("docs", "QUANTITY_SURVEY_END_TO_END_UAT.md");
+        uat.Should().Contain("Automated harness boundary and actor matrix")
+            .And.Contain("This is not evidence that the automated spec created and approved the estimate")
+            .And.Contain("leave their checklist rows open");
     }
 
     private static string Source(params string[] path) =>

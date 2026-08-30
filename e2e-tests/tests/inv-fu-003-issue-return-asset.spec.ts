@@ -9,6 +9,10 @@ const required = (name: string): string => {
 test('INV-REQ-FU-003 renders the governed reversed fixed-asset return', async ({ browser }) => {
   test.setTimeout(3 * 60_000);
   const api = process.env.E2E_API_URL?.trim() || 'http://127.0.0.1:5100';
+  const requisitionNumber = required('INV_FU003_REQUISITION_NUMBER');
+  const returnVoucherNumber = required('INV_FU003_RETURN_VOUCHER_NUMBER');
+  const expectedValue = required('INV_FU003_EXPECTED_VALUE');
+  const tenantCode = process.env.INV_FU003_TENANT_CODE?.trim() || 'DEFAULT';
   const context = await browser.newContext({
     baseURL: process.env.E2E_BASE_URL?.trim() || 'http://127.0.0.1:3001',
   });
@@ -34,7 +38,7 @@ test('INV-REQ-FU-003 renders the governed reversed fixed-asset return', async ({
     data: {
       username: required('INV_FU003_USERNAME'),
       password: required('INV_FU003_PASSWORD'),
-      tenantCode: 'DEFAULT',
+      tenantCode,
       rememberMe: false,
     },
   });
@@ -52,18 +56,34 @@ test('INV-REQ-FU-003 renders the governed reversed fixed-asset return', async ({
     { token: login.token!, refreshToken: login.refreshToken },
   );
 
+  const voucherResponse = await context.request.get(
+    `${api}/api/inventory/requisitions/return-vouchers`,
+    { headers: { Authorization: `Bearer ${login.token}` } },
+  );
+  const voucherBody = await voucherResponse.text();
+  expect(voucherResponse.status(), voucherBody).toBe(200);
+  const vouchers = JSON.parse(voucherBody) as Array<{
+    voucherNumber?: string;
+    requisitionNumber?: string;
+    status?: string;
+    totalValue?: number;
+  }>;
+  const expectedVoucher = vouchers.find(voucher => voucher.voucherNumber === returnVoucherNumber);
+  expect(expectedVoucher).toMatchObject({ requisitionNumber, status: 'Reversed' });
+  expect(Number(expectedVoucher?.totalValue).toFixed(2)).toBe(Number(expectedValue).toFixed(2));
+
   await page.goto('/inventory/requisitions');
   await expect(page.getByRole('heading', { name: 'Inventory Requisitions', exact: true })).toBeVisible({ timeout: 90_000 });
-  await page.getByPlaceholder('Search requisitions...', { exact: true }).fill('REQ-20260813-0004');
-  const row = page.getByRole('row').filter({ hasText: 'REQ-20260813-0004' });
+  await page.getByPlaceholder('Search requisitions...', { exact: true }).fill(requisitionNumber);
+  const row = page.getByRole('row').filter({ hasText: requisitionNumber });
   await expect(row).toContainText('Issued', { timeout: 30_000 });
   await row.getByRole('button', { name: 'Return Items', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Return Issued Items#REQ-20260813-0004', exact: true })).toBeVisible({ timeout: 30_000 });
-  const voucher = page.getByText('SRV-20260813142746-5099F81', { exact: true });
+  await expect(page.getByRole('heading', { name: `Return Issued Items#${requisitionNumber}`, exact: true })).toBeVisible({ timeout: 30_000 });
+  const voucher = page.getByText(returnVoucherNumber, { exact: true });
   await expect(voucher).toBeVisible();
   const voucherCard = voucher.locator('..').locator('..');
   await expect(voucherCard).toContainText('Reversed');
-  await expect(voucherCard).toContainText('595.00');
+  await expect(voucherCard).toContainText(expectedValue);
   expect(materialErrors, materialErrors.join('\n')).toEqual([]);
 
   await context.close();
