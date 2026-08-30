@@ -495,6 +495,18 @@ public class TenderEvaluatorDto
 }
 
 /// <summary>
+/// Active, tenant-scoped user who is authorised to evaluate tenders.
+/// </summary>
+public class TenderEvaluatorCandidateDto
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public List<string> RoleNames { get; set; } = new();
+}
+
+/// <summary>
 /// Assign evaluators DTO
 /// </summary>
 public class AssignEvaluatorsDto

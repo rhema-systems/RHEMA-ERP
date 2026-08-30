@@ -48,6 +48,7 @@ public interface ITenderService
     
     // Tender Evaluators
     Task AssignEvaluatorsAsync(Guid tenderId, AssignEvaluatorsDto dto);
+    Task<IEnumerable<TenderEvaluatorCandidateDto>> GetEvaluatorCandidatesAsync(Guid tenderId);
     Task<IEnumerable<TenderEvaluatorDto>> GetTenderEvaluatorsAsync(Guid tenderId);
     Task RemoveEvaluatorAsync(Guid evaluatorId);
     Task<IEnumerable<TenderDto>> GetMyAssignedTendersAsync();
@@ -87,6 +88,7 @@ public interface ITenderBidService
     Task<IEnumerable<TenderBidSummaryDto>> GetBidsByTenderIdAsync(Guid tenderId);
     Task<IEnumerable<TenderBidSummaryDto>> GetMyBidsAsync(Guid businessPartnerId);
     Task<TenderBidDetailDto?> GetMyDraftBidByTenderIdAsync(Guid tenderId);
+    Task<TenderBidInitiationStatusDto> GetInitiationStatusAsync(Guid tenderId);
     Task<TenderBidDetailDto> CreateBidAsync(CreateTenderBidDto dto);
     Task<TenderBidDetailDto> UpdateBidAsync(Guid id, UpdateTenderBidDto dto);
     Task<TenderBidDetailDto> SubmitBidAsync(Guid id, SubmitTenderBidDto dto);
@@ -127,6 +129,12 @@ public interface ITenderBidService
     Task<TenderBidLotDto?> GetBidLotByIdAsync(Guid bidLotId);
     Task AssignBidItemToLotAsync(Guid bidItemId, Guid bidLotId);
     Task RemoveBidItemFromLotAsync(Guid bidItemId);
+}
+
+public sealed class TenderBidInitiationValidationException(string code, string message)
+    : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
 }
 
 /// <summary>

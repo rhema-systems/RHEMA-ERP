@@ -34,6 +34,7 @@
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
     <Compile Include="Middleware\GlobalExceptionHandlingMiddlewareTests.cs" />
+    <Compile Include="Middleware\ExternalUserAccessMiddlewareTenderBidTests.cs" />
     <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
@@ -118,6 +119,7 @@
     <Compile Include="Controllers\Procurement\SupplierApplicantLifecycleControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderPublicationContractControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderBidsOwnershipControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />

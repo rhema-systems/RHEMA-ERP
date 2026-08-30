@@ -206,33 +206,25 @@ public class TenderBidsController : ControllerBase
     /// Check bid initiation status (assignment and payment) for a tender
     /// </summary>
     [HttpGet("initiation-status/{tenderId}")]
-    public async Task<ActionResult<object>> GetInitiationStatus(Guid tenderId)
+    public async Task<ActionResult<TenderBidInitiationStatusDto>> GetInitiationStatus(Guid tenderId)
     {
         try
         {
-            // Get the business partner for the current user
-            var businessPartner = await _businessPartnerRepository.GetByUserIdAsync(_currentUserProvider.UserId);
-            if (businessPartner == null)
+            return Ok(await _bidService.GetInitiationStatusAsync(tenderId));
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
             {
-                return NotFound("Business partner not found");
-            }
-
-            // Check if assignment exists
-            var assignments = await _assignmentRepository.GetByTenderAndBusinessPartnerAsync(tenderId, businessPartner.Id);
-            var hasAssignment = assignments.Any();
-            var assignmentType = assignments.FirstOrDefault()?.AssignmentType;
-
-            // Check if payment has been made
-            var payments = await _paymentRepository.GetByBusinessPartnerIdAsync(businessPartner.Id);
-            var tenderPayments = payments.Where(p => p.TenderFee != null && p.TenderFee.TenderId == tenderId);
-            var hasPayment = tenderPayments.Any(p => p.Status == "Completed" || p.Status == "Verified");
-
-            return Ok(new
-            {
-                hasAssignment,
-                assignmentType,
-                hasPayment,
-                canProceed = hasAssignment && hasPayment
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
             });
         }
         catch (Exception ex)
@@ -311,6 +303,21 @@ public class TenderBidsController : ControllerBase
         {
             var bid = await _bidService.SubmitBidAsync(id, dto);
             return Ok(bid);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -798,6 +805,21 @@ public class TenderBidsController : ControllerBase
 
             var payment = await _bidService.RecordPaymentAsync(createDto);
             return Ok(payment);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
         }
         catch (InvalidOperationException ex)
         {

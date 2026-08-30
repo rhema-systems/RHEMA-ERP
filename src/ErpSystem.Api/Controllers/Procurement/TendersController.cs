@@ -797,6 +797,29 @@ public class TendersController : ControllerBase
     }
 
     /// <summary>
+    /// Get active evaluator candidates for this tenant and tender.
+    /// </summary>
+    [HttpGet("{id}/evaluator-candidates")]
+    [Authorize(Policy = "procurement.tender.administer")]
+    public async Task<ActionResult<IEnumerable<TenderEvaluatorCandidateDto>>> GetEvaluatorCandidates(Guid id)
+    {
+        try
+        {
+            var candidates = await _tenderService.GetEvaluatorCandidatesAsync(id);
+            return Ok(candidates);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving evaluator candidates for tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while retrieving evaluator candidates");
+        }
+    }
+
+    /// <summary>
     /// Assign evaluators
     /// </summary>
     [HttpPost("{id}/evaluators")]

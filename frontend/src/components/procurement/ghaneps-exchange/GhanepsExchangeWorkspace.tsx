@@ -34,11 +34,9 @@ import {
   ghanepsSourceLabel,
   isGhanepsProfileFailClosed,
 } from '@/lib/procurement-ghaneps-exchange';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementGhanepsExchangeService as service } from '@/services/procurement-ghaneps-exchange.service';
 import type { ProcurementGhanepsSourceType } from '@/types/procurement-ghaneps-exchange';
-
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'The request could not be completed.';
 
 const errorStatus = (error: unknown) =>
   typeof error === 'object' && error !== null && 'status' in error
@@ -102,10 +100,7 @@ export function GhanepsExchangeWorkspace({
   const firstError =
     overview.error ?? options.error ?? status.error ?? history.error;
   const failed =
-    overview.isError ||
-    options.isError ||
-    status.isError ||
-    history.isError;
+    overview.isError || options.isError || status.isError || history.isError;
   const backHref = ghanepsBackHref(sourceType, sourceId);
   const sourceLabel = ghanepsSourceLabel(sourceType);
 
@@ -319,9 +314,7 @@ function Unavailable({
     <div
       className="space-y-4 p-4 md:p-6"
       data-testid={
-        conflict
-          ? 'ghaneps-exchange-conflict'
-          : 'ghaneps-exchange-unavailable'
+        conflict ? 'ghaneps-exchange-conflict' : 'ghaneps-exchange-unavailable'
       }
     >
       <Button asChild variant="ghost" size="sm">
@@ -338,9 +331,9 @@ function Unavailable({
             : 'GHANEPS exchange is unavailable'}
         </AlertTitle>
         <AlertDescription>
-          {errorMessage(error)} Access remains fail closed. Confirm one exact
-          Published/effective DEC-009 profile and mapping exists for this
-          source before retrying.
+          {getProcurementProblemMessage(error)} Access remains fail closed.
+          Confirm one exact Published/effective DEC-009 profile and mapping
+          exists for this source before retrying.
         </AlertDescription>
       </Alert>
     </div>

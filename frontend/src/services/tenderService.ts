@@ -3,6 +3,8 @@
  * Main API service for Tender management
  */
 
+import type { ProcurementMethodType } from '@/types/procurement-policy';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
@@ -34,7 +36,7 @@ export interface TenderDto {
   sourcePurchaseRequisitionId?: string;
   sourcingReleaseId?: string;
   sourcingCaseId?: string;
-  sourcingMethod?: number;
+  sourcingMethod?: ProcurementMethodType;
   bidCount: number;
   invitationCount: number;
   createdAt: string;
@@ -298,6 +300,14 @@ export interface TenderEvaluatorDto {
   completedDate?: string;
   weightagePercentage?: number;
   evaluationCount?: number;
+}
+
+export interface TenderEvaluatorCandidateDto {
+  userId: string;
+  userName: string;
+  fullName: string;
+  email: string;
+  roleNames: string[];
 }
 
 export interface TenderClarificationDto {
@@ -1068,6 +1078,41 @@ class TenderService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to get evaluators');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get active users in the current tenant whose Security role grants tender evaluation.
+   */
+  async getEvaluatorCandidates(
+    tenderId: string
+  ): Promise<TenderEvaluatorCandidateDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluator-candidates`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      let message = 'Failed to load authorised tender evaluators';
+      try {
+        const problem = JSON.parse(body) as {
+          detail?: string;
+          code?: string;
+          extensions?: { code?: string };
+        };
+        const code = problem.code || problem.extensions?.code;
+        message = problem.detail || message;
+        if (code) message = `${message} (${code})`;
+      } catch {
+        if (body) message = body;
+      }
+      throw new Error(message);
     }
 
     return response.json();
