@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Entities.Procurement;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
@@ -1104,6 +1104,18 @@ public class StaffTravelPolicyException : TenantEntity
     public Guid? ApprovedById { get; set; }                         // FK -> Employee
 
     public DateTime? DecidedAt { get; set; }
+
+    /// <summary>
+    /// Why the decision went the way it did.
+    /// </summary>
+    /// <remarks>
+    /// The requester's side was always recorded (<see cref="ExceptionReason"/>); the decider's was
+    /// not, and granting an exception is an authority to spend above a cap that HR deliberately
+    /// does not hold. The client was already sending a <c>notes</c> field that the model binder
+    /// dropped on the floor, because no such column existed.
+    /// </remarks>
+    [MaxLength(2000)]
+    public string? DecisionNotes { get; set; }
 
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;

@@ -14,7 +14,23 @@
 
 import type { AuditFields } from './common';
 
-export type StaffTravelType = 'Domestic' | 'International' | 'CrossBorder' | 'Regional';
+/**
+ * ⚠ This union had four members and `StaffTravelType` in C# has ten. The six missing ones —
+ * every value from `OverseasAssignment` down — are states the API returns and TypeScript said
+ * could not exist, so a `switch` over this type looked exhaustive and was not. Written from four
+ * examples rather than from the enum; corrected 2026-08-30 by reading it.
+ */
+export type StaffTravelType =
+  | 'Domestic'
+  | 'International'
+  | 'CrossBorder'
+  | 'Regional'
+  | 'OverseasAssignment'
+  | 'FieldVisit'
+  | 'Training'
+  | 'Conference'
+  | 'ClientVisit'
+  | 'GovernmentDuty';
 
 export type StaffTravelPurpose =
   | 'BusinessDevelopment'

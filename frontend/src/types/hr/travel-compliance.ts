@@ -18,6 +18,8 @@
  */
 
 import type { AuditFields } from './common';
+import type { StaffTravelType } from './travel';
+import type { TravelExpenseCategory } from './travel-finance';
 
 // ── Travel documents ─────────────────────────────────────────────────────────
 
@@ -395,23 +397,78 @@ export type TravelPolicyRuleType =
   | 'Preferred'
   | 'Prohibited';
 
+/** What happens when a rule is breached. */
+export type TravelPolicyViolationAction =
+  | 'Block'
+  | 'Warn'
+  | 'FlagForReview'
+  | 'RequireJustification'
+  | 'EscalateToApprover';
+
+/**
+ * A rule on a travel policy.
+ *
+ * ⚠ **Recorded, not enforced.** `StaffTravelPolicyService` is the only consumer of the rules
+ * table anywhere in the codebase: `StaffTravelPolicyGuard` refuses bookings on the policy's own
+ * scalar caps (`maxFlightClass*`, `maxHotelRate*`) and never reads a rule. So `ruleType`,
+ * `limitValue`, `violationAction` and the two exception flags describe an enforcement mechanism
+ * that does not currently run, and the screen says so rather than implying otherwise.
+ *
+ * ⚠ This interface was six fields short of the DTO — `expenseCategory`, `travelType`, `limitUnit`
+ * and `violationAction` with their resolved names — which is why `limitUnit` and `violationAction`
+ * are two of the fields the closure ledger's section E lists as settable by no form.
+ */
 export interface StaffTravelPolicyRule extends AuditFields {
   policyId: string;
   ruleCode: string;
   ruleName: string;
   ruleType: TravelPolicyRuleType;
   ruleTypeName: string;
+  expenseCategory?: TravelExpenseCategory | null;
+  expenseCategoryName?: string | null;
+  travelType?: StaffTravelType | null;
+  travelTypeName?: string | null;
   limitValue?: number | null;
+  /** Free text on the API — 'GHS per night', 'days', 'percent'. */
+  limitUnit?: string | null;
   exceptionAllowed: boolean;
   exceptionRequiresApproval: boolean;
+  violationAction: TravelPolicyViolationAction;
+  violationActionName: string;
   isActive: boolean;
 }
+
+/**
+ * ⚠ The client typed this as `Omit<StaffTravelPolicyRule, keyof StaffTravelPolicy>` — subtracting
+ * a policy's keys from a rule, which is a guess that compiles and describes nothing. Written from
+ * `CreateStaffTravelPolicyRuleDto`.
+ *
+ * ⚠ `ruleCode` is unique per policy, and re-using the code of a rule that was removed **revives
+ * that row** rather than creating a second one, because the unique index counts soft-deleted rows.
+ */
+export interface CreateStaffTravelPolicyRule {
+  policyId?: string;
+  ruleCode: string;
+  ruleName: string;
+  ruleType: TravelPolicyRuleType;
+  expenseCategory?: TravelExpenseCategory | null;
+  travelType?: StaffTravelType | null;
+  limitValue?: number | null;
+  limitUnit?: string | null;
+  exceptionAllowed: boolean;
+  exceptionRequiresApproval: boolean;
+  violationAction: TravelPolicyViolationAction;
+  isActive: boolean;
+}
+
+export type UpdateStaffTravelPolicyRule = CreateStaffTravelPolicyRule & { id: string };
 
 export type TravelPolicyExceptionStatus = 'Pending' | 'Approved' | 'Rejected' | 'Expired';
 
 export interface StaffTravelPolicyException extends AuditFields {
   staffTravelRequestId: string;
   policyRuleId: string;
+  policyRuleName?: string | null;
   exceptionReason?: string | null;
   requestedValue?: number | null;
   policyLimit?: number | null;
@@ -420,4 +477,19 @@ export interface StaffTravelPolicyException extends AuditFields {
   approvedById?: string | null;
   approvedByName?: string | null;
   decidedAt?: string | null;
+  /**
+   * Why the decision went the way it did. The client had been sending a `notes` field since the
+   * service layer was written and no such column existed, so every decision's reasoning was
+   * dropped by the model binder — a matched route says nothing about the body.
+   */
+  decisionNotes?: string | null;
+}
+
+/** The requester's side of an exception: what they want, against which rule, and why. */
+export interface CreateStaffTravelPolicyException {
+  staffTravelRequestId: string;
+  policyRuleId: string;
+  exceptionReason?: string | null;
+  requestedValue?: number | null;
+  policyLimit?: number | null;
 }

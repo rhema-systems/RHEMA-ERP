@@ -441,10 +441,41 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
         return true;
     }
 
+    /// <remarks>
+    /// ⚠ <b>This counted LIVE rows against an index that counts deleted ones.</b>
+    /// <c>IX_RemoteWorkRequests_TenantId_RequestNumber</c> is unique with no <c>IsDeleted</c> filter while the delete is a soft delete,
+    /// so removing one row dropped the count and the next create re-issued a number the removed
+    /// row still holds — and every later create in that tenant failed with the generic handler's
+    /// 500, naming neither the column nor the constraint.
+    ///
+    /// <para>Reads the highest number ever issued, deleted rows included, rather than counting: a
+    /// count is also wrong the moment the sequence has a gap, and the maximum is the only value
+    /// the unique index cares about. Same shape and same fix as the overtime, letter-request, SHE,
+    /// movement, grievance, disciplinary, profile-change and travel-request generators.</para>
+    ///
+    /// <para><c>GetQueryableIncludingDeleted</c>, not <c>GetQueryable().IgnoreQueryFilters()</c> —
+    /// a repository that applies its soft-delete filter as a plain <c>Where</c> is not affected by
+    /// <c>IgnoreQueryFilters</c>.</para>
+    ///
+    /// <para>⚠ Still not atomic under concurrent creates. <c>INumberSequenceService</c> is the
+    /// platform mechanism for that; moving these onto it needs each sequence seeded from the
+    /// table's current maximum so it keeps issuing after the numbers already in the wild.</para>
+    /// </remarks>
     private async Task<string> GenerateRequestNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(r => r.TenantId == tenantId, ct);
-        return $"RWR-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
+        var prefix = $"RWR-{DateTime.UtcNow:yyyyMMdd}-";
+
+        var issued = await _repository
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.RequestNumber.StartsWith(prefix))
+            .Select(r => r.RequestNumber)
+            .ToListAsync(ct);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 }
 

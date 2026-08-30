@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -2409,6 +2409,7 @@ public class StaffTravelPolicyExceptionDto : BaseDto
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? DecidedAt { get; set; }
+    public string? DecisionNotes { get; set; }
 }
 
 public class CreateStaffTravelPolicyExceptionDto : CreateDtoBase
@@ -2439,6 +2440,18 @@ public class DecideStaffTravelPolicyExceptionDto
     public TravelPolicyExceptionStatus Status { get; set; }
 
     public DateTime DecidedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Why the exception was granted or refused.
+    /// </summary>
+    /// <remarks>
+    /// The client had been sending this as <c>notes</c> since the service layer was written and
+    /// the DTO had no such property, so every decision's reasoning was silently discarded by the
+    /// model binder — the shape a matched route cannot reveal, because the path resolves and the
+    /// body does not.
+    /// </remarks>
+    [MaxLength(2000)]
+    public string? DecisionNotes { get; set; }
 }
 
 #endregion

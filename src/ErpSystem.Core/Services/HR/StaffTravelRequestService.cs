@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR.StaffTravel;
@@ -946,12 +946,47 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     // ---- Helpers -----------------------------------------------------------
 
+    /// <summary>Mints the next travel-request number for the tenant and year.</summary>
+    /// <remarks>
+    /// ⚠ <b>This counted LIVE rows against an index that counts deleted ones, so a single delete
+    /// broke every later create — permanently.</b> <c>IX_StaffTravelRequests_TenantId_RequestNumber</c>
+    /// is unique with no <c>IsDeleted</c> filter, while the delete is a soft delete: remove
+    /// <c>TR-2026-00001</c> and the live count drops back to zero, the next create mints
+    /// <c>TR-2026-00001</c> again, and it collides with the row still sitting there. Every travel
+    /// request in that tenant then fails with the generic handler's 500, naming nothing.
+    ///
+    /// <para>Eighth face of the soft-delete/unique-index defect across HR, and the same shape area
+    /// 13 recorded as its worst instance — a document-number generator counting rows the schema
+    /// does not agree are gone. Found on 2026-08-30 when a harness cleanup deleted its own fixture
+    /// and the next run could not create one. It is live: this is the shipped create path, and any
+    /// tenant that has ever deleted a travel request is already in this state.</para>
+    ///
+    /// <para><b>The fix reads the highest number ever issued, deleted rows included</b>, rather
+    /// than counting — a count is also wrong the moment the sequence has a gap, and the maximum is
+    /// the only value the unique index actually cares about.</para>
+    ///
+    /// <para>⚠ Still not atomic under concurrent creates. The platform has
+    /// <c>INumberSequenceService</c> for exactly this — the training area uses it — and moving
+    /// travel onto it is the right long-term answer; it is not done here because the existing rows
+    /// carry numbers this format has to keep issuing after, so the sequence needs seeding from the
+    /// current maximum as part of that change.</para>
+    /// </remarks>
     private async Task<string> GenerateRequestNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var year = DateTime.UtcNow.Year;
-        var count = await _requestRepository.GetQueryable()
-            .CountAsync(r => r.TenantId == tenantId && r.CreatedAt.Year == year, cancellationToken);
-        return $"TR-{year}-{(count + 1):D5}";
+        var prefix = $"TR-{year}-";
+
+        var issued = await _requestRepository
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.RequestNumber.StartsWith(prefix))
+            .Select(r => r.RequestNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 }
 

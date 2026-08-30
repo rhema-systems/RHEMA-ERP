@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -20,6 +20,9 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
     private readonly IStaffTravelPolicyRepository _policyRepository;
     private readonly IStaffTravelPolicyRuleRepository _ruleRepository;
     private readonly IStaffTravelPolicyExceptionRepository _exceptionRepository;
+    // Injected so an exception can verify the travel request it is raised against is this
+    // tenant's — the foreign key alone was deciding, and it accepts any valid id.
+    private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelPolicyService> _logger;
@@ -28,6 +31,7 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         IStaffTravelPolicyRepository policyRepository,
         IStaffTravelPolicyRuleRepository ruleRepository,
         IStaffTravelPolicyExceptionRepository exceptionRepository,
+        IStaffTravelRequestRepository requestRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelPolicyService> logger)
@@ -35,6 +39,7 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         _policyRepository = policyRepository;
         _ruleRepository = ruleRepository;
         _exceptionRepository = exceptionRepository;
+        _requestRepository = requestRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -149,7 +154,13 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         await _policyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Travel policy drafted: {PolicyName} v{Version}", entity.PolicyName, entity.VersionNumber);
-        return entity.ToDto();
+
+        // Re-read before mapping. The DTO resolves three scope names off navigations the freshly
+        // added entity has never loaded, so the row came back naming no staff-level band and no
+        // organisation unit — blank on the screen that had just set them, correct after a refetch.
+        // Update, approve and withdraw all re-read already; create was the one that did not.
+        var refreshed = await _policyRepository.GetWithRulesAsync(entity.Id);
+        return (refreshed ?? entity).ToDto();
     }
 
     /// <summary>
@@ -278,9 +289,24 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         return (refreshed ?? entity).ToDto();
     }
 
+    /// <summary>Removes a draft policy.</summary>
+    /// <remarks>
+    /// <b>An approved policy cannot be deleted.</b> <see cref="UpdatePolicyAsync"/> refuses to edit
+    /// one because that would change what everyone may spend without anyone approving the change —
+    /// and deleting it does exactly that, more completely, while also erasing the record of a rule
+    /// that really did govern spending for a period. The guard existed on the sibling and not on
+    /// this one. <see cref="WithdrawPolicyAsync"/> is the verb for standing a policy down; it keeps
+    /// the approval as the fact about the past that it is.
+    /// </remarks>
     public async Task<bool> DeletePolicyAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPolicyAsync(id);
+
+        if (entity.ApprovedById is not null)
+            throw new InvalidOperationException(
+                "An approved policy cannot be deleted. Withdraw it instead — that stops it capping " +
+                "bookings while keeping the record that it once did.");
+
         await _policyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -288,10 +314,59 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
 
     // ---- Policy rules ------------------------------------------------------
 
+    /// <summary>Adds a rule to a policy, or revives one whose code was used and removed.</summary>
+    /// <remarks>
+    /// ⚠ <b>Re-using a rule code REVIVES the removed row; it does not insert a second one.</b>
+    /// <c>IX_StaffTravelPolicyRules_TenantId_PolicyId_RuleCode</c> is unique with no
+    /// <c>IsDeleted</c> filter while <c>DeleteRuleAsync</c> is a soft delete, so a removed rule
+    /// went on occupying its code and adding it back hit the index and 500'd naming nothing —
+    /// <b>a rule code could be used once per policy, ever</b>. Unreachable until a screen could
+    /// delete a rule, which is the recurring shape: giving a dormant path teeth turns its
+    /// neighbours into defects. Seventh face of this defect across HR, and fixed the way the
+    /// others were — reviving keeps the row's history instead of pretending this is the first time.
+    /// </remarks>
     public async Task<StaffTravelPolicyRuleDto> AddRuleAsync(CreateStaffTravelPolicyRuleDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedPolicyAsync(createDto.PolicyId);
+
+        // IgnoreQueryFilters drops the tenant filter along with the soft-delete one, so the tenant
+        // is re-applied by hand: reviving another tenant's row would be worse than the 500.
+        var existing = await _ruleRepository
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId
+                                            && r.PolicyId == createDto.PolicyId
+                                            && r.RuleCode == createDto.RuleCode)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existing != null)
+        {
+            if (!existing.IsDeleted)
+                throw new InvalidOperationException(
+                    $"This policy already has a rule with the code '{createDto.RuleCode}'.");
+
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.DeletedBy = null;
+            existing.UpdateEntity(new UpdateStaffTravelPolicyRuleDto
+            {
+                Id                        = existing.Id,
+                RuleCode                  = createDto.RuleCode,
+                RuleName                  = createDto.RuleName,
+                RuleType                  = createDto.RuleType,
+                ExpenseCategory           = createDto.ExpenseCategory,
+                TravelType                = createDto.TravelType,
+                LimitValue                = createDto.LimitValue,
+                LimitUnit                 = createDto.LimitUnit,
+                ExceptionAllowed          = createDto.ExceptionAllowed,
+                ExceptionRequiresApproval = createDto.ExceptionRequiresApproval,
+                ViolationAction           = createDto.ViolationAction,
+                IsActive                  = createDto.IsActive,
+            }, createdByUserId);
+
+            await _ruleRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return existing.ToDto();
+        }
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _ruleRepository.AddAsync(entity);
@@ -338,12 +413,36 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
 
     // ---- Policy exceptions -------------------------------------------------
 
+    /// <summary>Raises a request for permission to breach one of a policy's rules.</summary>
+    /// <remarks>
+    /// ⚠ <b>Both parents are real records, and neither was checked.</b> The travel request id and
+    /// the policy rule id went straight from the request body onto the row, so a caller could
+    /// attach an exception to another tenant's trip — the foreign key accepts it, because the id
+    /// is perfectly valid, it just is not theirs — and it would then appear on this tenant's
+    /// pending queue. The sibling <c>CreateAlertNotificationAsync</c> checks both of its parents
+    /// and says why; this one did not follow it.
+    /// </remarks>
     public async Task<StaffTravelPolicyExceptionDto> CreateExceptionAsync(CreateStaffTravelPolicyExceptionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        var request = await _requestRepository.GetByIdAsync(createDto.StaffTravelRequestId);
+        if (request == null || request.TenantId != tenantId)
+            throw new ArgumentException(
+                $"Travel request with ID '{createDto.StaffTravelRequestId}' not found.");
+
+        var rule = await _ruleRepository.GetByIdAsync(createDto.PolicyRuleId);
+        if (rule == null || rule.TenantId != tenantId)
+            throw new ArgumentException(
+                $"Policy rule with ID '{createDto.PolicyRuleId}' not found.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _exceptionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The panel binds policyRuleName; the freshly added entity has no PolicyRule loaded, so
+        // mapping it here returned the row with a blank rule name.
+        entity.PolicyRule = rule;
         return entity.ToDto();
     }
 
@@ -375,6 +474,7 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         entity.Status = decideDto.Status;
         entity.ApprovedById = deciderEmployeeId;   // the caller, not a payload value
         entity.DecidedAt = decideDto.DecidedAt;
+        entity.DecisionNotes = decideDto.DecisionNotes;
         // Audit field: the USER id, not the Employee FK stamped above.
         entity.UpdatedBy = _currentUserProvider.UserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;

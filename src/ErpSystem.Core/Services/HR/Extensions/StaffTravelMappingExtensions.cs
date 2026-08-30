@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 
@@ -1650,6 +1650,7 @@ public static class StaffTravelMappingExtensions
             ApprovedById = entity.ApprovedById,
             ApprovedByName = entity.ApprovedBy?.FullName,
             DecidedAt = entity.DecidedAt,
+            DecisionNotes = entity.DecisionNotes,
         };
     }
 

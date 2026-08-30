@@ -26,7 +26,24 @@ import { organizationUnitService } from '@/services/hr/organization-unit.service
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 
-const TRAVEL_TYPES = ['Domestic', 'International', 'CrossBorder', 'Regional'] as const;
+/**
+ * ⚠ All ten, not the four this list used to carry. `StaffTravelType` in C# has ten members and
+ * the TypeScript union had four, so the form offered four kinds of trip, the zod enum refused the
+ * other six, and a request created elsewhere with one of them could not be edited here. The union
+ * was written from examples; this is written from the enum.
+ */
+const TRAVEL_TYPES = [
+  'Domestic',
+  'International',
+  'CrossBorder',
+  'Regional',
+  'OverseasAssignment',
+  'FieldVisit',
+  'Training',
+  'Conference',
+  'ClientVisit',
+  'GovernmentDuty',
+] as const;
 const PURPOSES = [
   'BusinessDevelopment',
   'ClientMeeting',

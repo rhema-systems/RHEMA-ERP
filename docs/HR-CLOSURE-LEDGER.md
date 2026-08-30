@@ -13,10 +13,10 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2135 |
-| Wired to a screen | 1787 |
-| No caller found (instrument 01) | 348 |
+| Wired to a screen | 1789 |
+| No caller found (instrument 01) | 346 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
-| Write-DTO fields no form can set | 83 across 35 DTOs |
+| Write-DTO fields no form can set | 79 across 33 DTOs |
 
 ## A. Decisions taken
 
@@ -39,6 +39,7 @@ yet classified.
 | 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
 | 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
 | 2026-08-30 | **The investigation and the hearing are recordable** (area 9 slice 11, 29 assertions). Both were read-only for no reason beyond nobody having built the editors — neither imposes a penalty, so FR-HR-080 never governed them. Five endpoints, and the panel is built around three traps: `complete` takes a bare JSON string, recording findings does NOT complete the investigation, and clearing the accompaniment must clear every representative field with it. |
+| 2026-08-30 | **A control that cannot enforce does not get an editor.** Travel policy RULES are read by nothing — the booking guard uses the policy's own scalar caps — so the rules register ships read-only and the policy-exception flow does not ship at all. An editable control that enforces nothing creates false assurance, which is worse than no control: a rule set to `Block` is a promise to whoever configures it, and hand-raised exceptions would manufacture audit records implying a control was in force and waived. The write paths exist and stay harness-covered, so enforcement is a screen change. |
 | 2026-08-30 | **Succession documents get one panel, not three.** A `SuccessionDocument` hangs off a plan, a plan candidate or a talent-pool member, and one table, one DTO and one upload route already served all three — so one frontend component takes the owner as a discriminated union and is mounted from the plan detail, the successors tab and the pool members table. The alternative was three near-identical panels drifting apart. |
 | 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** The recorded reason ("blocked on FR-HR-080") was imprecise — the rule exists — but the substance holds: no actor reaches the rule, and a warning can be recorded against a case nobody has decided. Tested rather than assumed; `probe-authority-gate.mjs` keeps both findings as passing assertions, so the day one fails is the day the gap closed. |
 | 2026-08-30 | **Stale-navigation-on-a-write-response, fourth instance.** `investigatorName`, `hearingOfficerName` and `representativeEmployeeName` all came back null from the create and update responses while the detail and queue reads resolved them. Four writers now re-read before mapping, the same fix the succession document uploader got. Every instance so far has been found by a harness assertion, never by reading the code. |
@@ -220,6 +221,78 @@ yet classified.
 
   _Blocks nothing. Recorded because the project-wide type-check is silently dead_
 
+- [x] **D-23 — A travel policy could be DELETED after approval, though it could not be edited** · `DONE 2026-08-30`
+
+  `UpdatePolicyAsync` refuses to edit an approved policy, and says why: it would change what everyone may spend with nobody approving the change. `DeletePolicyAsync` did the same thing more completely and was unguarded — and it also erases the record of a rule that really did govern spending for a period, which is the opposite of what an audit trail is for. `WithdrawPolicyAsync` already existed as the correct verb for standing a policy down. The guard was on the sibling and not on this one, which is the recurring shape: **audit the neighbourhood, not just the field.** Delete now refuses an approved policy and names withdraw in the message. ⚠ It reads the APPROVAL, not the in-force flag, so a withdrawn policy is still undeletable — withdrawing does not turn it back into a draft.
+
+  _Was letting an Admin silently un-cap everyone's travel — cleared_
+
+- [x] **D-24 — A travel policy rule code could be used once per policy, ever** · `DONE 2026-08-30`
+
+  `IX_StaffTravelPolicyRules_TenantId_PolicyId_RuleCode` is unique with no `IsDeleted` filter while `DeleteRuleAsync` is a soft delete, so a removed rule went on occupying its code and re-adding it hit the index and 500'd naming nothing. **Seventh face** of the soft-delete/unique-index defect across HR, one week after the sixth (D-21, competency requirements). Unreachable until a screen could delete a rule — the recurring lesson that giving a dormant path teeth turns its neighbours into defects. Fixed the way the fifth and sixth were: re-using a removed code revives that row and overwrites its fields, while re-using a LIVE code is refused with a message naming the code.
+
+  _Was going to make the rules panel's own delete/re-add path 500 — cleared_
+
+- [x] **D-25 — A travel policy exception validated neither of its parents** · `DONE 2026-08-30`
+
+  `CreateExceptionAsync` copied `StaffTravelRequestId` and `PolicyRuleId` from the body onto the row without checking either existed or belonged to the tenant, so an exception could be attached to **another tenant's travel request** — the foreign key accepts the id because it is perfectly valid, it simply is not yours — and it would then appear on this tenant's pending queue. `CreateAlertNotificationAsync` in the sibling service checks both of its parents and carries a comment saying why; this one had not followed it. Both are checked now and answer 404 naming the id. The create response also re-reads the rule, because the panel binds `policyRuleName` and a freshly added entity has no `PolicyRule` loaded.
+
+  _Was a cross-tenant write on the endpoint this slice was about to give a caller — cleared_
+
+- [x] **D-26 — The exception decision's reasoning was discarded by the model binder** · `DONE 2026-08-30`
+
+  `decidePolicyException` posted a `notes` field for as long as it has existed and `DecideStaffTravelPolicyExceptionDto` had no such property, so every explanation was dropped while the screen reported success. Granting an exception authorises spend above a cap — an authority HR deliberately does not hold — so *why* is exactly what an auditor asks, and the row could not answer. **The shape a matched route cannot reveal**: the path resolves either way, instrument 01 counts the endpoint wired, and only reading the DTO or running the call finds it. `DecisionNotes` added (migration `AddTravelPolicyExceptionDecisionNotes`, COL_LENGTH-guarded and listed in `FastBuildMigrationMetadata`), and the client now sends `decisionNotes`.
+
+  _Was losing the justification for every travel-policy exception ever granted — cleared_
+
+- [x] **D-27 — Deleting one travel request breaks every later create, permanently** · `DONE 2026-08-30`
+
+  `GenerateRequestNumberAsync` counted LIVE rows and formatted `TR-{year}-{count+1:D5}`, while `IX_StaffTravelRequests_TenantId_RequestNumber` is unique with **no `IsDeleted` filter** and the delete is soft. So deleting `TR-2026-00001` drops the live count to zero, the next create mints `TR-2026-00001` again, and it collides with the row still sitting there — every subsequent travel request in that tenant fails with the generic handler's 500, naming nothing.
+
+  **The first face of this defect found LIVE on a shipped path** — and by no means the eighth, which is what this entry first claimed. D-28 establishes that HR had already fixed it at least seven times (overtime, letter requests, SHE, movements, grievance, discipline, profile changes) with the same idiom. This is the same shape area 13 recorded as its worst instance — a document-number generator counting rows the schema does not agree are gone. Any tenant that has ever deleted a travel request is already in this state. Found on 2026-08-30 because a harness cleanup deleted its own fixture and the next run could not create one; confirmed in SQL (one row, `IsDeleted=1`, live count 0, unfiltered unique index) rather than inferred.
+
+  Fixed by reading the highest number ever issued, deleted rows included, instead of counting — a count is also wrong the moment the sequence has a gap, and the maximum is the only value the unique index cares about. ⚠ Still not atomic under concurrent creates; see D-28 for the mechanism that is.
+
+  _Was breaking travel request creation outright for any tenant that had deleted one — cleared_
+
+- [x] **D-28 — Count-based document numbers: three more fixed, and my own first list was wrong** · `DONE 2026-08-30`
+
+  D-27 was not a one-off. **Twelve tables carry an unfiltered unique index on a number column AND a soft delete**, established from `sys.indexes` rather than by grep.
+
+  ⚠ **The first pass at classifying them was wrong, and wrong in the predicted way.** I sorted the generators by whether their FILE imports `INumberSequenceService` and named five HR tables as latent. Reading each generator instead: `StaffOvertimeRequests` and `HrLetterRequests` were **already fixed** — and their own remarks name the SHE, movement, grievance, disciplinary and profile-change generators as earlier fixes for the identical shape, with `GetQueryableIncludingDeleted` and a prefix scan. So this defect has been found and fixed at least seven times across HR before travel, the established idiom was already in the codebase, and the count of "faces" in D-27 understated it. **Every static instrument in this programme has cried wolf on its first pass, including this one, including when the instrument was my own reasoning.**
+
+  **Three were genuinely live, and all three are fixed 2026-08-30**: `RemoteWorkRequests` (`RWR-`), `ConsultantTimesheets` (`TS-`) and `TimesheetInvoices` (`INV-`) — each counted live rows against an unfiltered unique index, so one delete would have broken every later create in that tenant, silently and permanently. All three now read the highest number issued, deleted rows included.
+
+  **Confirmed harmless, so a future sweep does not spend time on them**: the appraisal `APR-`, company-schedule `EVT-` and `BK-`, job-analysis `MPB-` and consultant-engagement `ENG-` generators all count live rows, and none of their number columns carries a unique index. Counting is only a defect where the schema disagrees.
+
+  **Not ours**: `ProcurementMasterDataChangeRequests`, `ProjectInvoiceRequests` and `QuantitySurveyJointMeasurementRequests` have the index shape; whether their generators count was not checked, because that is the owning teams' code. Recorded as cross-module #22.
+
+  ⚠ **None of these is atomic under concurrent creates**, including the fixes. `INumberSequenceService` is the platform's answer and the training area uses it; moving the rest across needs each sequence seeded from its table's current maximum so it keeps issuing after the numbers already in the wild. That is the real end state, and it is not done.
+
+  _Was three silent, permanent breakages waiting on the first delete — cleared_
+
+- [ ] **D-29 — Travel policy rules are enforced by nothing, so their editor and the exception flow are withheld** · `OPEN`
+
+  `StaffTravelPolicyService` is the only consumer of the rules table anywhere in the codebase. `StaffTravelPolicyGuard` refuses a booking on the policy's own scalar caps — `MaxFlightClass*`, `MaxHotelRate*` — and never reads a rule, so `RuleType`, `LimitValue`, `ViolationAction`, `ExceptionAllowed` and `ExceptionRequiresApproval` describe a mechanism that does not run. **And that is why nothing raises a policy exception**: its producer was never built, so the queue was unreachable and unfillable at the same time.
+
+  **Decided 2026-08-30, after first building the editor and then withdrawing it.** The rules register ships **read-only** and the exception flow does **not ship**. An editable control that enforces nothing creates false assurance, and that is worse than no control: a rule set to `Block` is a promise to the person configuring it, a warning banner is a weak defence to an auditor looking at a screenshot, and hand-raised exceptions would manufacture audit records implying a control was in force and consciously waived. Checked before deciding: **every rule and exception row in the database was created by the harness** — there is no ported or seeded data, so a read-only register has no existing data to expose either.
+
+  `POST policies/{}/rules`, `PUT policies/rules/{}`, `DELETE policies/rules/{}`, `POST policies/exceptions` and `POST policies/exceptions/{}/decide` are therefore **INTENTIONAL, not gaps** — all five are implemented, harness-covered by `run-slice12-policy-authoring.mjs`, and waiting on enforcement rather than on a screen.
+
+  ⚠ **The queue cannot show this, and that is the blind spot itself.** The client methods stay in `travel-compliance.service.ts` so enforcement is a screen change — and instrument 01 matches the service layer, so it now counts all five as *wired to a screen* and `StaffTravelPolicies` has dropped out of section D altogether. The Position table above therefore over-counts by at least these five. This entry is where they are recorded, because the machine-derived sections structurally cannot hold them.
+
+  **Three things belong in the enforcement change**, recorded so they are not rediscovered: rule writes need the approval guard `UpdatePolicyAsync` has, because an approved policy's rules are part of the approved document; `(TenantId, PolicyId, RuleCode)` uniqueness should become a filtered index rather than the revive-on-re-add the service does today, because a rule code is a label rather than an identity and reviving keeps the previous rule's `CreatedAt`/`CreatedBy`; and mapping `RuleType` × `ExpenseCategory` onto real booking and claim fields is a product decision, not a coding one — what exactly does "Meals / HardLimit / 50 per day" compare against?
+
+  _Blocks nothing. It withholds 5 endpoints from the UI on purpose, and they will not re-read as gaps_
+
+- [ ] **D-30 — Authorising a booking above a travel cap records no reason** · `OPEN`
+
+  Found while deciding D-29, and it is the real version of the gap the exception flow was pretending to fill. A booking that breaches the policy's cap is refused unless the caller holds `HR.Travel.Admin` and sets the exception flag — which makes Travel.Admin a financial authority — and **nothing anywhere records why they allowed it**. The booking carries the flag and no justification field. So the one spend-authorisation that genuinely happens in this module is the one with no audit reasoning, while the elaborate exception entity that does have `ExceptionReason` and now `DecisionNotes` governs a mechanism nobody runs.
+
+  A reason column on the breach flag would be a small change and worth more than the whole rules subsystem in its current state.
+
+  _Blocks nothing built. Every cap breach ever authorised is unexplained_
+
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
   events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write policy, so today it means 'HR records the response'. That is correct for the HR screens being built now. Before any /me surface offers 'accept this invitation', it needs a self-or-permission check against the participant's own employee id.
@@ -271,9 +344,9 @@ Decided 2026-08-28: read-only by intent — payroll owns the grade master.
 - [ ] `PUT    api/hr/salary-notches/{}`
 - [ ] `DELETE api/hr/salary-notches/{}`
 
-### Awards — `BUILD`
+### Awards — `REVIEW`
 
-Nomination attachments — edit and delete.
+⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.**
 
 - [ ] `PUT    api/Awards/nomination-attachments/{}`
 - [ ] `DELETE api/Awards/nomination-attachments/{}`
@@ -766,10 +839,10 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
 | PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
 | PerformanceAppraisals | 15 | 29 | `BUILD` 5 · `INTENTIONAL` 10 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
-| Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
+| Awards | 13 | 56 | `REVIEW` | ⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.** |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
 | StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
-| MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
+| MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
 | StaffTravelRequests | 5 | 18 | `BUILD` 3 · `FALSE` 2 | Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed. |
@@ -803,7 +876,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffDemotions | 2 | 4 | `BUILD` | Classified 2026-08-29: both real. No delete, and the employee's own response has no surface at all, so HR's wired pending-appeals queue cannot fill. |
 | StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
-| StaffTravelPolicies | 2 | 10 | `BUILD` | Classified 2026-08-29: both real. A rule cannot be edited, and nothing raises the policy exception the wired decide queue exists to rule on. |
 | TalentPools | 2 | 9 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A pool member's documents open from the members table on /hr/succession/pools/{id}, on the shared succession-document panel. The remaining flags are the metadata-only POST and the development-activity duplicate. |
 | AppraisalNotifications | 1 | 3 | `INTENTIONAL` | Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant. |
 | AppraisalReviewEvents | 1 | 9 | `FALSE` | hrDocumentService.upload artefact. |
@@ -848,7 +920,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**130 of the 321 queued endpoints are classified here — 41 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**128 of the 319 queued endpoints are classified here — 39 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -1103,13 +1175,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/staff-movements/{}/attachments` — **INTENTIONAL**
   <br>The metadata-only route, deliberately unwired. It rejects FilePath, FileUploadRecordId, DocumentRecordId and DocumentVersionId outright and says so in its 400, exactly as the discipline document route does, so through the API it can only mint a row naming no file. The upload route beside it is the supported way in.
 
-### StaffTravelPolicies — 2 BUILD
-
-- `POST   api/staff-travel/policies/exceptions` — **BUILD**
-  <br>Nothing raises a policy exception. `CreateExceptionAsync` has exactly one caller — this endpoint — and no compliance sweep creates one, so the wired `exceptions/pending` queue and its wired `exceptions/{}/decide` action can never have anything to work on.
-- `PUT    api/staff-travel/policies/rules/{}` — **BUILD**
-  <br>Rules can be added and deleted but not edited — a threshold correction means destroying the rule and its history and re-typing it.
-
 ### TalentPools — 2 INTENTIONAL
 
 - `POST   api/talent-pools/members/{}/development-activities` — **INTENTIONAL**
@@ -1296,8 +1361,6 @@ missing — the class an endpoint audit cannot see.
 | `CreateEmployeeDependentDto` | 2 of 16 | IsStudentDependent, IsEmergencyContact |
 | `CreateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
 | `UpdateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
-| `CreateStaffTravelPolicyRuleDto` | 2 of 12 | LimitUnit, ViolationAction |
-| `UpdateStaffTravelPolicyRuleDto` | 2 of 11 | LimitUnit, ViolationAction |
 | `CreateEvaluatorEvaluationDto` | 1 of 7 | IsAuthoritative |
 | `UpdateEvaluatorEvaluationDto` | 1 of 7 | IsAuthoritative |
 | `CreateLongServiceAwardDto` | 1 of 10 | EmployeeAwardId |
@@ -1371,6 +1434,7 @@ Closed decisions. Listed so a future sweep does not re-open them.
 - **InterviewQuestionPreset** — Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows.
 - **Leaves** — Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route.
 - **Location** — Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync.
+- **MedicalInsurance** — ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here.
 - **PayComponents** — The endpoint's own summary says it: create the component in Payroll, then sync.
 - **Payroll** — Another team's module; HR integrates read-only.
 - **PeerNomination** — Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation.

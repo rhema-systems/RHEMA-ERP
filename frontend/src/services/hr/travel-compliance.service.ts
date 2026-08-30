@@ -25,7 +25,10 @@ import type {
   CreateStaffTravelPolicy,
   UpdateStaffTravelPolicy,
   StaffTravelPolicyRule,
+  CreateStaffTravelPolicyRule,
+  UpdateStaffTravelPolicyRule,
   StaffTravelPolicyException,
+  CreateStaffTravelPolicyException,
 } from '@/types/hr/travel-compliance';
 
 /**
@@ -363,11 +366,32 @@ class TravelComplianceService {
     return apiService.get<StaffTravelPolicyRule[]>(`${this.policiesUrl}/${policyId}/rules`);
   }
 
-  addPolicyRule(policyId: string, payload: Omit<StaffTravelPolicyRule, keyof StaffTravelPolicy>) {
+  /**
+   * ⚠ **Deliberately unwired.** The rules register is read-only until rule evaluation exists —
+   * an editable control that enforces nothing creates false assurance. Kept, and covered by
+   * `hr-travel/run-slice12-policy-authoring.mjs`, so enforcement is a screen change rather than
+   * a rebuild.
+   *
+   * ⚠ **Re-using the code of a rule that was removed REVIVES that row**, overwriting its fields,
+   * rather than creating a second one — the unique index on (policy, code) counts soft-deleted
+   * rows. Re-using the code of a LIVE rule is refused. When rules become authorable this should
+   * become a filtered unique index instead: a rule code is a label, not an identity, and reviving
+   * keeps the previous rule's `createdAt`/`createdBy` on what is really a new rule.
+   *
+   * The payload used to be typed `Omit<StaffTravelPolicyRule, keyof StaffTravelPolicy>`, which
+   * subtracts a policy's keys from a rule and describes nothing.
+   */
+  addPolicyRule(policyId: string, payload: CreateStaffTravelPolicyRule) {
     return apiService.post<StaffTravelPolicyRule>(
       `${this.policiesUrl}/${policyId}/rules`, { ...payload, policyId });
   }
 
+  updatePolicyRule(payload: UpdateStaffTravelPolicyRule) {
+    return apiService.put<StaffTravelPolicyRule>(
+      `${this.policiesUrl}/rules/${payload.id}`, payload);
+  }
+
+  /** `HR.Travel.Admin`. */
   deletePolicyRule(ruleId: string) {
     return apiService.delete<void>(`${this.policiesUrl}/rules/${ruleId}`);
   }
@@ -381,11 +405,35 @@ class TravelComplianceService {
     return apiService.get<StaffTravelPolicyException[]>(`${this.policiesUrl}/exceptions/pending`);
   }
 
-  /** The decider is the token's. */
-  decidePolicyException(id: string, approve: boolean, notes?: string) {
+  /**
+   * ⚠ **Deliberately unwired, along with the whole exception flow.** A `StaffTravelPolicyException`
+   * is the artefact of the rules mechanism, and nothing evaluates a rule — so an exception can only
+   * be raised by hand against a rule that never fires, manufacturing an audit record that implies a
+   * control was in force and waived. A breach of the policy's own caps is a separate thing,
+   * authorised inline on the booking by an `HR.Travel.Admin` holder.
+   *
+   * Kept and harness-covered so this ships with rule enforcement.
+   */
+  createPolicyException(payload: CreateStaffTravelPolicyException) {
+    return apiService.post<StaffTravelPolicyException>(
+      `${this.policiesUrl}/exceptions`, payload);
+  }
+
+  /**
+   * ⚠ The decider is the token's, and only a Pending exception can be decided.
+   *
+   * `decisionNotes`, not `notes` — this method sent `notes` for as long as it has existed and the
+   * DTO had no such property, so the model binder dropped every decision's reasoning on the floor.
+   * The column exists now.
+   */
+  decidePolicyException(id: string, approve: boolean, decisionNotes?: string | null) {
     return apiService.post<{ message: string }>(
       `${this.policiesUrl}/exceptions/${id}/decide`,
-      { exceptionId: id, status: approve ? 'Approved' : 'Rejected', notes });
+      {
+        exceptionId: id,
+        status: approve ? 'Approved' : 'Rejected',
+        decisionNotes: decisionNotes?.trim() || null,
+      });
   }
 }
 

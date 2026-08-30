@@ -1317,6 +1317,47 @@ databases, and only one of them can run the chain.
 
 ---
 
+## 22. Procurement / Projects / Quantity Survey — a soft-deleted document keeps its number, so deleting one request can break every later create
+
+**What is broken.** Three tables outside HR carry a **unique index on their request number with no
+`IsDeleted` filter**, while their delete is a soft delete:
+
+| Table | Index |
+|---|---|
+| `ProcurementMasterDataChangeRequests` | `IX_ProcurementMasterDataChangeRequests_TenantId_RequestNumber` |
+| `ProjectInvoiceRequests` | `IX_ProjectInvoiceRequests_TenantId_RequestNumber` |
+| `QuantitySurveyJointMeasurementRequests` | `IX_QuantitySurveyJointMeasurementRequests_TenantId_RequestNumber` |
+
+A soft-deleted row therefore goes on owning its number. Whether that is *live* depends on how each
+module mints the next one: a generator that **counts live rows** will re-issue a number the index
+still holds, and the insert then fails for good. A generator that reads a max, or uses the
+platform's `INumberSequenceService`, is safe.
+
+**What was proven.** The index shape is established, not guessed — from `sys.indexes` on
+`ErpSystemDB`, filtering unique non-primary indexes over columns named `RequestNumber` and
+friends. What was **not** checked is which of these three generators is count-based; that is the
+owning teams' code and the one-line difference between latent and live.
+
+**Proven live in HR, on the identical shape.** `StaffTravelRequests` had exactly this index and a
+count-based generator. Deleting a single travel request dropped the live count to zero, the next
+create re-minted `TR-2026-00001`, and it collided with the soft-deleted row — **every subsequent
+travel request in that tenant failed with a 500 naming nothing**. Fixed in HR on 2026-08-30
+(closure ledger D-27); five more HR tables are latent and tracked as D-28. The failure is
+completely silent until someone deletes one document, which is why it survived a shipped area.
+
+**What it blocks.** Nothing today. It blocks document creation permanently, per tenant, from the
+first deletion onwards — and the error names neither the column nor the constraint, so it will be
+diagnosed as "the module is broken" rather than as one stale row.
+
+**What a fix needs.** For each of the three, read the generator first: if it counts, either take
+the maximum already issued (including soft-deleted rows) or move it onto
+`INumberSequenceService`, seeding the sequence from the table's current maximum so it keeps issuing
+after the numbers already in the wild. Filtering the unique index on `IsDeleted = 0` is the other
+option and needs a migration; HR has consistently chosen not to, because reusing a retired
+document's number is worse than the collision it prevents.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, ShieldCheck, FileWarning } from 'lucide-react';
+import { Loader2, Plus, ShieldCheck, FileWarning } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,16 +24,14 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
 /**
  * Travel policies — the spend rules that actually refuse bookings.
  *
- * ⚠ **This register can list, and it can approve. It cannot create or edit.** It shipped with a
- * "Draft a policy" button and a per-row link to a detail screen, and neither route was ever
- * built — both were a 404 to anyone who reached them, which until slice 10's route sweep nothing
- * in the app did: this screen was itself an orphan, linked from nowhere. It is in the sidebar now,
- * so the two dead controls are gone rather than reachable.
+ * ⚠ **The two controls this screen lost have come back.** It shipped with a "Draft a policy"
+ * button and a per-row link to a detail screen and neither route existed, so both were a 404;
+ * slice 10 removed them rather than leave dead controls, recording that the editor was an area-12
+ * job. `/new` and `/[id]` exist now, so the button and the link are real.
  *
- * The API is not the gap. `StaffTravelPoliciesController` carries create, update, approve,
- * withdraw, rules CRUD and exceptions. What is missing is the editor, and building it is an area
- * 12 job rather than something to improvise here — recorded in the slice 10 entry of
- * `plans/HR-Area-19-23-Tier-B-Tail-Build-Plan.md`.
+ * The API never was the gap — `StaffTravelPoliciesController` has carried create, update,
+ * approve, withdraw, rules CRUD and exceptions throughout. The client methods existed too, which
+ * is why the coverage instrument counted them wired: a service method is not a screen.
  *
  * ⚠ **A policy is a draft until it is approved, and a draft caps nothing.** That distinction is the
  * whole point of this screen, so it is shown as a badge on every row rather than buried in a detail
@@ -85,6 +84,21 @@ export default function TravelPoliciesPage() {
         title="Travel policies"
         description="What staff may spend on travel, and what the caps refuse."
         backHref="/administration/hr"
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {/*
+              No exceptions queue. Exceptions belong to the rules mechanism, which is recorded and
+              not enforced, so the queue could only ever hold records raised by hand against a rule
+              that never fires. It ships with rule enforcement or not at all.
+            */}
+            <Button asChild>
+              <Link href="/administration/hr/travel/policies/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Draft a policy
+              </Link>
+            </Button>
+          </div>
+        }
       />
 
       {drafts.length > 0 && (
@@ -129,8 +143,14 @@ export default function TravelPoliciesPage() {
               <TableBody>
                 {items.map((p) => (
                   <TableRow key={p.id}>
-                    {/* Not a link. See the note above the component. */}
-                    <TableCell className="font-medium">{p.policyName}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/administration/hr/travel/policies/${p.id}`}
+                        className="hover:underline"
+                      >
+                        {p.policyName}
+                      </Link>
+                    </TableCell>
                     <TableCell>v{p.versionNumber}</TableCell>
                     <TableCell className="whitespace-nowrap">
                       {fmtDate(p.effectiveFrom)}
