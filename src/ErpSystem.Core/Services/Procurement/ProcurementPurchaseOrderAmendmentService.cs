@@ -1781,8 +1781,7 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
                 .Select(item => new PurchaseOrderSnapshotItem
                 {
                     PurchaseOrderItemId = item.Id,
-                    InventoryItemId =
-                        item.InventoryItemId ?? Guid.Empty,
+                    InventoryItemId = item.InventoryItemId,
                     SupplierItemCode =
                         item.BusinessPartnerItemCode,
                     ItemDescription =
@@ -2756,7 +2755,7 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
     private sealed class PurchaseOrderSnapshotItem
     {
         public Guid? PurchaseOrderItemId { get; set; }
-        public Guid InventoryItemId { get; set; }
+        public Guid? InventoryItemId { get; set; }
         public string? SupplierItemCode { get; set; }
         public string ItemDescription { get; set; } = string.Empty;
         public decimal OrderedQuantity { get; set; }

@@ -26,6 +26,11 @@ public sealed class ProcurementPlanNumberReservationTests
         _unitOfWork.SetupGet(value => value.HasActiveTransaction)
             .Returns(() => _transactionActive);
         _unitOfWork
+            .Setup(value => value.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<ProcurementPlan>>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((Func<Task<ProcurementPlan>> operation, CancellationToken _) => operation());
+        _unitOfWork
             .Setup(value => value.BeginTransactionAsync(
                 It.IsAny<IsolationLevel>(),
                 It.IsAny<CancellationToken>()))
@@ -75,10 +80,115 @@ public sealed class ProcurementPlanNumberReservationTests
         _unitOfWork.Verify(value => value.BeginTransactionAsync(
             IsolationLevel.Serializable,
             It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(value => value.ExecuteInStrategyAsync(
+            It.IsAny<Func<Task<ProcurementPlan>>>(),
+            It.IsAny<CancellationToken>()), Times.Once);
         _unitOfWork.Verify(value => value.AcquireTransactionLockAsync(
             "PROCUREMENT_PLAN_NUMBER:2026",
             It.IsAny<CancellationToken>()), Times.Once);
         _unitOfWork.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExistingCallerTransactionIsJoinedWithoutStartingRetryStrategy()
+    {
+        _transactionActive = true;
+
+        var result = await CreateService().CreateAsync(new CreateProcurementPlanDto
+        {
+            Title = "Caller-owned transaction plan",
+            DepartmentId = Guid.NewGuid(),
+            FiscalYear = 2026,
+            PlanningCycle = "Annual",
+            PlanStartDate = new DateTime(2026, 1, 1),
+            PlanEndDate = new DateTime(2026, 12, 31),
+            PlanDurationYears = 1,
+            Currency = "GHS"
+        });
+
+        result.PlanNumber.Should().Be("PP-2026-0010");
+        _unitOfWork.Verify(value => value.ExecuteInStrategyAsync(
+            It.IsAny<Func<Task<ProcurementPlan>>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _unitOfWork.Verify(value => value.BeginTransactionAsync(
+            It.IsAny<IsolationLevel>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _unitOfWork.Verify(value => value.AcquireTransactionLockAsync(
+            "PROCUREMENT_PLAN_NUMBER:2026",
+            It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(value => value.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(value => value.CommitAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UncertainCommitRetryReturnsFirstCommittedPlanWithoutDuplicateInsert()
+    {
+        var commitAttempts = 0;
+        var strategyAttempts = 0;
+        var firstCommitReachedDatabase = false;
+
+        _plans.Setup(value => value.GetByIdAsync(It.IsAny<Guid>()))
+            .ReturnsAsync((Guid id) =>
+                firstCommitReachedDatabase && _createdPlan?.Id == id
+                    ? _createdPlan
+                    : null);
+        _unitOfWork
+            .Setup(value => value.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<ProcurementPlan>>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (Func<Task<ProcurementPlan>> operation, CancellationToken _) =>
+            {
+                try
+                {
+                    strategyAttempts++;
+                    return await operation();
+                }
+                catch (TimeoutException)
+                {
+                    strategyAttempts++;
+                    return await operation();
+                }
+            });
+        _unitOfWork
+            .Setup(value => value.CommitAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                commitAttempts++;
+                _transactionActive = false;
+                if (commitAttempts == 1)
+                {
+                    firstCommitReachedDatabase = true;
+                    throw new TimeoutException("Commit acknowledgement was lost.");
+                }
+
+                return Task.CompletedTask;
+            });
+
+        var result = await CreateService().CreateAsync(new CreateProcurementPlanDto
+        {
+            Title = "Retry-safe annual plan",
+            DepartmentId = Guid.NewGuid(),
+            FiscalYear = 2026,
+            PlanningCycle = "Annual",
+            PlanStartDate = new DateTime(2026, 1, 1),
+            PlanEndDate = new DateTime(2026, 12, 31),
+            PlanDurationYears = 1,
+            Currency = "GHS"
+        });
+
+        result.PlanNumber.Should().Be("PP-2026-0010");
+        strategyAttempts.Should().Be(2);
+        commitAttempts.Should().Be(2);
+        _plans.Verify(value => value.AddAsync(It.IsAny<ProcurementPlan>()), Times.Once);
+        _unitOfWork.Verify(value => value.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _unitOfWork.Verify(value => value.AcquireTransactionLockAsync(
+            "PROCUREMENT_PLAN_NUMBER:2026",
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _unitOfWork.Verify(value => value.ClearTrackedChanges(), Times.Once);
     }
 
     [Fact]
@@ -113,6 +223,9 @@ public sealed class ProcurementPlanNumberReservationTests
             "PROCUREMENT_PLAN_NUMBER:2026",
             It.IsAny<CancellationToken>()), Times.Once);
         _unitOfWork.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(value => value.ExecuteInStrategyAsync(
+            It.IsAny<Func<Task<ProcurementPlan>>>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private ProcurementPlanService CreateService()

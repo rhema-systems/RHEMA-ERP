@@ -55,6 +55,50 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
     }
 
     [Fact]
+    public async Task AppliesAmendmentWithoutInventingInventoryIdForExistingSourceLine()
+    {
+        await using var fixture = new Fixture();
+        fixture.IsAdministrator = false;
+        fixture.PurchaseOrder.Items.Single().InventoryItemId = null;
+        await fixture.Context.SaveChangesAsync();
+
+        var created = await fixture.Service.CreateAsync(
+            fixture.PurchaseOrder.Id,
+            fixture.Request(quantity: 3m),
+            "corr-description-only-create");
+        var submitted = await fixture.Service.SubmitAsync(
+            created.Id,
+            new ProcurementPurchaseOrderAmendmentLifecycleRequest
+            {
+                Comment = "Submit the description-only source-line amendment.",
+                RowVersion = created.RowVersion,
+                EvidenceReference = "DMS-DESCRIPTION-ONLY-SUBMIT"
+            },
+            "corr-description-only-submit");
+
+        fixture.ActorUserId = fixture.ApproverUserId;
+        var applied = await fixture.Service.DecideAsync(
+            submitted.Id,
+            new DecideProcurementPurchaseOrderAmendmentRequest
+            {
+                Approved = true,
+                Comment = "Approve the controlled description-only line amendment.",
+                RowVersion = submitted.RowVersion,
+                EvidenceReference = "DMS-DESCRIPTION-ONLY-APPROVE"
+            },
+            "corr-description-only-approve");
+
+        applied.Status.Should().Be(
+            ProcurementPurchaseOrderAmendmentStatus.Applied);
+        var line = await fixture.Context.PurchaseOrderItems
+            .SingleAsync(item =>
+                item.PurchaseOrderId == fixture.PurchaseOrder.Id &&
+                !item.IsDeleted);
+        line.InventoryItemId.Should().BeNull();
+        line.OrderedQuantity.Should().Be(3m);
+    }
+
+    [Fact]
     public async Task IdempotentRetryReturnsSameDraftWithoutDuplicateAudit()
     {
         await using var fixture = new Fixture();
@@ -854,7 +898,7 @@ public sealed class ProcurementPurchaseOrderAmendmentServiceTests
                             PurchaseOrder.Items.Single().Id,
                         InventoryItemId =
                             PurchaseOrder.Items.Single()
-                                .InventoryItemId!.Value,
+                                .InventoryItemId,
                         ItemDescription = "Controlled item",
                         OrderedQuantity = quantity,
                         UnitOfMeasure = "EA",

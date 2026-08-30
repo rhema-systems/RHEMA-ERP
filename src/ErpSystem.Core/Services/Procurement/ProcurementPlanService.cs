@@ -141,16 +141,22 @@ public class ProcurementPlanService : IProcurementPlanService
             await EnsureBudgetPlanningCapacityAsync(selectedBudget, dto.TotalEstimatedBudget);
         }
 
-        var ownsNumberReservation = await BeginPlanNumberReservationAsync(dto.FiscalYear);
-        ProcurementPlan plan;
-        try
+        // Keep the aggregate identity stable if SQL Server asks the execution strategy
+        // to replay an attempt after an uncertain commit result.
+        var planId = Guid.NewGuid();
+        var plan = await ExecutePlanNumberReservationAsync(dto.FiscalYear, async () =>
         {
+            var committedAttempt = await _planRepository.GetByIdAsync(planId);
+            if (committedAttempt != null)
+                return committedAttempt;
+
             var planNumber = await _planRepository.GeneratePlanNumberAsync(dto.FiscalYear);
             var currentUserId = _currentUserProvider.UserId;
             var resolvedCurrency = selectedBudget?.Currency ?? dto.Currency;
 
-            plan = new ProcurementPlan
+            var newPlan = new ProcurementPlan
             {
+                Id = planId,
                 PlanNumber = planNumber,
                 Title = dto.Title,
                 Description = dto.Description,
@@ -172,25 +178,20 @@ public class ProcurementPlanService : IProcurementPlanService
                 TenantId = _currentUserProvider.TenantId
             };
 
-            await _planRepository.AddAsync(plan);
+            await _planRepository.AddAsync(newPlan);
 
             // Add items if provided
             if (dto.Items.Any())
             {
                 foreach (var itemDto in dto.Items)
                 {
-                    var item = CreatePlanItem(plan.Id, itemDto, plan.Currency, selectedBudget?.Id);
+                    var item = CreatePlanItem(newPlan.Id, itemDto, newPlan.Currency, selectedBudget?.Id);
                     await _itemRepository.AddAsync(item);
                 }
             }
 
-            await SavePlanNumberReservationAsync(ownsNumberReservation);
-        }
-        catch
-        {
-            await RollbackPlanNumberReservationAsync(ownsNumberReservation);
-            throw;
-        }
+            return newPlan;
+        });
 
         _logger.LogInformation("Created procurement plan {PlanNumber} for department {DepartmentId}", plan.PlanNumber, dto.DepartmentId);
 
@@ -522,13 +523,19 @@ public class ProcurementPlanService : IProcurementPlanService
         if (sourcePlan.Status is not ("Approved" or "Active" or "Completed"))
             throw new InvalidOperationException("Only approved, active, or completed plans can be amended");
 
-        var ownsNumberReservation = await BeginPlanNumberReservationAsync(sourcePlan.FiscalYear);
-        ProcurementPlan amendment;
-        try
+        // A stable identity makes a transient retry converge on the first committed
+        // amendment instead of creating a second version.
+        var amendmentId = Guid.NewGuid();
+        var amendment = await ExecutePlanNumberReservationAsync(sourcePlan.FiscalYear, async () =>
         {
+            var committedAttempt = await _planRepository.GetByIdAsync(amendmentId);
+            if (committedAttempt != null)
+                return committedAttempt;
+
             var currentUserId = _currentUserProvider.UserId;
-            amendment = new ProcurementPlan
+            var newAmendment = new ProcurementPlan
             {
+                Id = amendmentId,
                 PlanNumber = await _planRepository.GeneratePlanNumberAsync(sourcePlan.FiscalYear),
                 Title = string.IsNullOrWhiteSpace(dto.Title) ? $"{sourcePlan.Title} - Amendment {sourcePlan.RevisionNumber + 1}" : dto.Title.Trim(),
                 Description = string.IsNullOrWhiteSpace(dto.Description) ? sourcePlan.Description : dto.Description,
@@ -551,13 +558,13 @@ public class ProcurementPlanService : IProcurementPlanService
                 TenantId = _currentUserProvider.TenantId
             };
 
-            await _planRepository.AddAsync(amendment);
+            await _planRepository.AddAsync(newAmendment);
 
             foreach (var sourceItem in sourcePlan.Items.Where(i => !i.IsDeleted))
             {
                 var item = new ProcurementPlanItem
                 {
-                    ProcurementPlanId = amendment.Id,
+                    ProcurementPlanId = newAmendment.Id,
                     InventoryItemId = sourceItem.InventoryItemId,
                     ProcurementBudgetId = sourceItem.ProcurementBudgetId,
                     ProcurementBudgetAllocationId = sourceItem.ProcurementBudgetAllocationId,
@@ -573,7 +580,7 @@ public class ProcurementPlanService : IProcurementPlanService
                     UnitOfMeasure = sourceItem.UnitOfMeasure,
                     EstimatedUnitPrice = sourceItem.EstimatedUnitPrice,
                     EstimatedTotalCost = sourceItem.EstimatedTotalCost,
-                    Currency = amendment.Currency,
+                    Currency = newAmendment.Currency,
                     Priority = sourceItem.Priority,
                     IsCritical = sourceItem.IsCritical,
                     RequiredDate = sourceItem.RequiredDate,
@@ -592,13 +599,8 @@ public class ProcurementPlanService : IProcurementPlanService
                 await _itemRepository.AddAsync(item);
             }
 
-            await SavePlanNumberReservationAsync(ownsNumberReservation);
-        }
-        catch
-        {
-            await RollbackPlanNumberReservationAsync(ownsNumberReservation);
-            throw;
-        }
+            return newAmendment;
+        });
         _logger.LogInformation("Created amendment {AmendmentPlanNumber} from procurement plan {SourcePlanNumber}", amendment.PlanNumber, sourcePlan.PlanNumber);
 
         return await GetByIdAsync(amendment.Id) ?? throw new InvalidOperationException("Failed to retrieve created amendment");
@@ -627,6 +629,38 @@ public class ProcurementPlanService : IProcurementPlanService
         }
     }
 
+    private async Task<T> ExecutePlanNumberReservationAsync<T>(
+        int fiscalYear,
+        Func<Task<T>> operation)
+    {
+        if (_unitOfWork.HasActiveTransaction)
+            return await ExecutePlanNumberReservationAttemptAsync(fiscalYear, operation);
+
+        // SQL Server's retrying execution strategy must own the entire transaction.
+        // Keeping the lock, number generation, inserts, and commit inside this delegate
+        // lets EF safely replay a rolled-back transient attempt as one unit.
+        return await _unitOfWork.ExecuteInStrategyAsync(
+            () => ExecutePlanNumberReservationAttemptAsync(fiscalYear, operation));
+    }
+
+    private async Task<T> ExecutePlanNumberReservationAttemptAsync<T>(
+        int fiscalYear,
+        Func<Task<T>> operation)
+    {
+        var ownsNumberReservation = await BeginPlanNumberReservationAsync(fiscalYear);
+        try
+        {
+            var result = await operation();
+            await SavePlanNumberReservationAsync(ownsNumberReservation);
+            return result;
+        }
+        catch
+        {
+            await RollbackPlanNumberReservationAsync(ownsNumberReservation);
+            throw;
+        }
+    }
+
     private async Task SavePlanNumberReservationAsync(bool ownsTransaction)
     {
         if (ownsTransaction)
@@ -640,7 +674,11 @@ public class ProcurementPlanService : IProcurementPlanService
         if (!ownsTransaction)
             return;
 
-        await _unitOfWork.RollbackAsync();
+        // CommitAsync can already have rolled back and cleared its transaction before
+        // rethrowing. Do not mask the original transient exception with a second
+        // "No transaction to rollback" failure, or EF cannot classify and retry it.
+        if (_unitOfWork.HasActiveTransaction)
+            await _unitOfWork.RollbackAsync();
         _unitOfWork.ClearTrackedChanges();
     }
 
