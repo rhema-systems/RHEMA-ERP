@@ -256,7 +256,7 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
                     WorkflowInstanceId = Guid.NewGuid()
                 },
                 WorkflowOutcome.Approved));
-        fixture.Budget.Setup(item => item.GetReadinessAsync(
+        fixture.Budget.Setup(item => item.GetLinkedControlReadinessAsync(
                 fixture.Requisition.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(fixture.BudgetReadiness(canReserve: true, "PR_BUDGET_AVAILABLE"));
 
@@ -266,8 +266,10 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
 
         result.Should().BeOfType<OkObjectResult>();
         fixture.Requisition.Status.Should().Be("Approved");
-        fixture.Budget.Verify(item => item.GetReadinessAsync(
+        fixture.Budget.Verify(item => item.GetLinkedControlReadinessAsync(
             fixture.Requisition.Id, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Budget.Verify(item => item.GetReadinessAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.Budget.Verify(item => item.ReserveAsync(
             It.IsAny<PurchaseRequisition>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.UnitOfWork.Verify(item => item.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -281,7 +283,7 @@ public sealed class PurchaseRequisitionBudgetControlsControllerTests
         fixture.Workflow.Setup(item => item.CanUserApproveAsync(
                 "PurchaseRequisition", fixture.Requisition.Id, fixture.UserId))
             .ReturnsAsync(true);
-        fixture.Budget.Setup(item => item.GetReadinessAsync(
+        fixture.Budget.Setup(item => item.GetLinkedControlReadinessAsync(
                 fixture.Requisition.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(fixture.BudgetReadiness(canReserve: false, "PR_BUDGET_INSUFFICIENT"));
 
