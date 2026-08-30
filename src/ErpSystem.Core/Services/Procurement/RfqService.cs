@@ -17,6 +17,7 @@ public class RfqService : IRfqService
     private const string QuoteSubmittedAuditAction = "RFQ_QUOTE_SUBMITTED";
     private const string QuoteRevisedAuditAction = "RFQ_QUOTE_REVISED";
     private const string QuoteLateRejectedAuditAction = "RFQ_QUOTE_LATE_REJECTED";
+    private const string InvitationOpenedAuditAction = "RFQ_INVITATION_OPENED";
 
     private readonly IRequestForQuotationRepository _rfqRepository;
     private readonly IRequestForQuotationItemRepository _rfqItemRepository;
@@ -308,20 +309,24 @@ public class RfqService : IRfqService
     public async Task<List<RfqDto>> GetSupplierRfqsAsync(Guid businessPartnerId, Guid tenantId)
     {
         var invitations = await _invitationRepository.GetForSupplierAsync(businessPartnerId, tenantId);
+        var result = new List<RfqDto>();
+        foreach (var invitation in invitations
+                     .Where(item => item.Rfq is not null && !item.Rfq.IsDeleted)
+                     .OrderByDescending(item => item.Rfq.SentAt ?? item.Rfq.CreatedAt))
+        {
+            var dto = MapToDto(invitation.Rfq);
+            await ApplySupplierLifecycleAsync(dto, invitation, tenantId);
+            result.Add(dto);
+        }
 
-        return invitations
-            .Select(i => i.Rfq)
-            .Where(r => r != null && !r.IsDeleted)
-            .OrderByDescending(r => r.SentAt ?? r.CreatedAt)
-            .Select(MapToDto)
-            .ToList();
+        return result;
     }
 
     public async Task<RfqDetailDto?> GetSupplierRfqDetailAsync(Guid rfqId, Guid businessPartnerId, Guid tenantId)
     {
         var invitations = await _invitationRepository.GetForSupplierAsync(businessPartnerId, tenantId);
-        var allowed = invitations.Any(i => i.RfqId == rfqId);
-        if (!allowed) return null;
+        var invitation = invitations.FirstOrDefault(i => i.RfqId == rfqId);
+        if (invitation is null) return null;
 
         var rfq = await _rfqRepository.GetWithDetailsAsync(rfqId);
         if (rfq == null) return null;
@@ -342,7 +347,59 @@ public class RfqService : IRfqService
                 : supplierQuote.History.Max(entry => entry.RevisionNumber);
         }
 
+        await ApplySupplierLifecycleAsync(detail, invitation, tenantId, detail.Quotes.FirstOrDefault());
+
         return detail;
+    }
+
+    public async Task<RfqDetailDto?> RecordSupplierRfqOpenedAsync(
+        Guid rfqId,
+        Guid businessPartnerId,
+        Guid openedByUserId,
+        Guid tenantId)
+    {
+        var invitations = await _invitationRepository.GetForSupplierAsync(businessPartnerId, tenantId);
+        var invitation = invitations.FirstOrDefault(item => item.RfqId == rfqId);
+        if (invitation is null || invitation.Rfq is null || invitation.Rfq.IsDeleted)
+            return null;
+
+        if (string.Equals(invitation.Status, "Invited", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(invitation.Rfq.Status, "Sent", StringComparison.OrdinalIgnoreCase))
+        {
+            var openedAtUtc = DateTime.UtcNow;
+            invitation.Status = "Opened";
+            invitation.OpenedAt ??= openedAtUtc;
+            invitation.UpdatedAt = openedAtUtc;
+            invitation.LastModifiedById = openedByUserId;
+            await _invitationRepository.UpdateAsync(invitation);
+            await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+            {
+                TenantId = tenantId,
+                UserId = openedByUserId,
+                Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username)
+                    ? "Supplier user"
+                    : _currentUserProvider.Username,
+                Action = InvitationOpenedAuditAction,
+                Resource = nameof(RequestForQuotationInvitation),
+                ResourceId = invitation.Id.ToString(),
+                NewValues = JsonSerializer.Serialize(new
+                {
+                    invitation.RfqId,
+                    invitation.BusinessPartnerId,
+                    OpenedAtUtc = invitation.OpenedAt,
+                    Status = invitation.Status
+                }),
+                IpAddress = "SupplierPortal",
+                UserAgent = "Supplier RFQ invitation opened",
+                Timestamp = openedAtUtc,
+                CreatedAt = openedAtUtc,
+                CreatedBy = _currentUserProvider.Username,
+                CreatedById = openedByUserId
+            });
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        return await GetSupplierRfqDetailAsync(rfqId, businessPartnerId, tenantId);
     }
 
     public async Task<RfqQuoteDto> SubmitQuoteAsync(Guid rfqId, Guid businessPartnerId, Guid submittedByUserId, Guid tenantId, SubmitRfqQuoteDto dto)
@@ -506,7 +563,7 @@ public class RfqService : IRfqService
 
                 await _quoteRepository.UpdateAsync(quote);
 
-                invitation.Status = isLate ? "LateRejected" : "Responded";
+                invitation.Status = isLate ? "LateRejected" : wasRevision ? "Revised" : "Responded";
                 invitation.RespondedAt = receivedAtUtc;
                 await _invitationRepository.UpdateAsync(invitation);
 
@@ -1236,6 +1293,8 @@ public class RfqService : IRfqService
                 {
                     inv.Status = "Invited";
                     inv.InvitedAt = DateTime.UtcNow;
+                    inv.OpenedAt = null;
+                    inv.RespondedAt = null;
                 }
 
                 await _invitationRepository.UpdateAsync(inv);
@@ -1459,6 +1518,67 @@ public class RfqService : IRfqService
             throw new ProcurementRequisitionSourcingValidationException("RFQ_CASE_LINEAGE_MISMATCH", "RFQ sourcing-case lineage cannot be replaced.");
     }
 
+    private async Task ApplySupplierLifecycleAsync(
+        RfqDto dto,
+        RequestForQuotationInvitation invitation,
+        Guid tenantId,
+        RfqQuoteDto? mappedQuote = null)
+    {
+        var quote = mappedQuote;
+        if (quote is null)
+        {
+            var quoteEntity = invitation.Rfq.Quotes?
+                .Where(item => !item.IsDeleted && item.BusinessPartnerId == invitation.BusinessPartnerId)
+                .OrderByDescending(item => item.SubmittedAt ?? item.CreatedAt)
+                .FirstOrDefault();
+            if (quoteEntity is not null)
+                quote = MapToQuoteDto(quoteEntity, null);
+        }
+
+        var revisionNumber = 0;
+        if (quote is not null)
+        {
+            if (quote.History.Count == 0)
+                quote.History = await GetQuoteHistoryAsync(quote, tenantId);
+            revisionNumber = quote.History.Count == 0
+                ? (quote.SubmittedAt.HasValue ? 1 : 0)
+                : quote.History.Max(item => item.RevisionNumber);
+        }
+
+        dto.SupplierQuoteRevisionNumber = revisionNumber;
+        dto.SupplierStatus = ResolveSupplierPortalStatus(
+            invitation.Status,
+            quote?.Status,
+            revisionNumber);
+        dto.SupplierStatusChangedAt = quote?.SubmittedAt ??
+            invitation.RespondedAt ??
+            invitation.OpenedAt ??
+            invitation.InvitedAt;
+    }
+
+    internal static string ResolveSupplierPortalStatus(
+        string? invitationStatus,
+        string? quoteStatus,
+        int quoteRevisionNumber)
+    {
+        if (string.Equals(quoteStatus, "LateRejected", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(invitationStatus, "LateRejected", StringComparison.OrdinalIgnoreCase))
+            return "Late submission rejected";
+        if (string.Equals(quoteStatus, "Submitted", StringComparison.OrdinalIgnoreCase))
+            return quoteRevisionNumber > 1 ? "Updated submission" : "Submitted";
+
+        return invitationStatus?.Trim().ToLowerInvariant() switch
+        {
+            "selected" => "Not sent",
+            "invited" => "Sent",
+            "opened" => "Opened",
+            "responded" => "Submitted",
+            "revised" => "Updated submission",
+            "declined" => "Declined",
+            _ => "Not sent"
+        };
+    }
+
     private static RfqDto MapToDto(RequestForQuotation rfq)
     {
         return new RfqDto
@@ -1534,7 +1654,9 @@ public class RfqService : IRfqService
                     PartnerName = i.BusinessPartner?.PartnerName ?? string.Empty,
                     PrimaryEmail = i.BusinessPartner?.PrimaryEmail,
                     Status = i.Status,
-                    InvitedAt = i.InvitedAt
+                    InvitedAt = i.InvitedAt,
+                    OpenedAt = i.OpenedAt,
+                    RespondedAt = i.RespondedAt
                 })
                 .ToList(),
             Quotes = (rfq.Quotes ?? new List<RequestForQuotationQuote>())

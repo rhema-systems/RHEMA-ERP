@@ -48,7 +48,7 @@ export default function SupplierRfqDetailPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const data = await rfqService.getMyRfqDetail(rfqId);
+        const data = await rfqService.openMyRfq(rfqId);
         setRfq(data);
 
         // If supplier already submitted a quote, prefill their last values (supplier portal endpoint returns only their quote).
@@ -161,7 +161,7 @@ export default function SupplierRfqDetailPage() {
             <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 text-muted-foreground" />
               <h1 className="text-xl font-semibold truncate">{rfq.rfqNumber}</h1>
-              <Badge variant="outline">{rfq.status}</Badge>
+              <Badge variant="outline">{rfq.supplierStatus || rfq.status}</Badge>
             </div>
             <div className="text-sm text-muted-foreground truncate">{rfq.title}</div>
           </div>

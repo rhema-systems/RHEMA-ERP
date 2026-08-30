@@ -112,9 +112,10 @@ public class RequestForQuotationInvitation : TenantEntity
     public Guid BusinessPartnerId { get; set; }
 
     [MaxLength(30)]
-    public string Status { get; set; } = "Invited"; // Invited, Responded, Declined
+    public string Status { get; set; } = "Invited"; // Selected, Invited, Opened, Responded, Revised, LateRejected, Declined
 
     public DateTime InvitedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? OpenedAt { get; set; }
     public DateTime? RespondedAt { get; set; }
 
     // Navigation

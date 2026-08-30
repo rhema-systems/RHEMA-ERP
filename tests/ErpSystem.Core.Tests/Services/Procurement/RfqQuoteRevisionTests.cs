@@ -7,6 +7,28 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class RfqQuoteRevisionTests
 {
+    [Theory]
+    [InlineData("Selected", null, 0, "Not sent")]
+    [InlineData("Invited", null, 0, "Sent")]
+    [InlineData("Opened", null, 0, "Opened")]
+    [InlineData("Responded", "Submitted", 1, "Submitted")]
+    [InlineData("Revised", "Submitted", 2, "Updated submission")]
+    [InlineData("Invited", "LateRejected", 1, "Late submission rejected")]
+    [InlineData("Declined", null, 0, "Declined")]
+    public void SupplierPortalStatusReflectsInvitationAndQuoteLifecycle(
+        string invitationStatus,
+        string? quoteStatus,
+        int revisionNumber,
+        string expectedStatus)
+    {
+        var status = RfqService.ResolveSupplierPortalStatus(
+            invitationStatus,
+            quoteStatus,
+            revisionNumber);
+
+        status.Should().Be(expectedStatus);
+    }
+
     [Fact]
     public void RevisionIsAllowedBeforeSubmissionDeadline()
     {

@@ -124,6 +124,12 @@ public class RequestForQuotationInvitationRepository : GenericRepository<Request
                 i.TenantId == tenantId &&
                 !i.IsDeleted)
             .Include(i => i.Rfq)
+            .ThenInclude(r => r.Quotes.Where(q =>
+                q.BusinessPartnerId == businessPartnerId &&
+                q.TenantId == tenantId &&
+                !q.IsDeleted))
+            .Include(i => i.Rfq)
+            .ThenInclude(r => r.Invitations)
             .OrderByDescending(i => i.InvitedAt)
             .ToListAsync();
     }

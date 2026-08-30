@@ -162,9 +162,28 @@ public class ProcurementPlanRepository : GenericRepository<ProcurementPlan>, IPr
 
     public async Task<string> GeneratePlanNumberAsync(int fiscalYear)
     {
-        var tenantId = _currentUserProvider.TenantId;
-        var count = await _dbSet.CountAsync(p => p.FiscalYear == fiscalYear && p.TenantId == tenantId);
-        return $"PP-{fiscalYear}-{(count + 1):D4}";
+        var prefix = $"PP-{fiscalYear}-";
+        var existingNumbers = await _dbSet
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(plan =>
+                plan.FiscalYear == fiscalYear &&
+                plan.PlanNumber.StartsWith(prefix))
+            .Select(plan => plan.PlanNumber)
+            .ToListAsync();
+
+        // PlanNumber is globally unique in the current schema. Count + 1 is
+        // unsafe when a record was soft deleted or a sequence has a gap, and
+        // tenant-local counting can collide with another tenant. Never reuse a
+        // number: retain deleted rows in the calculation and advance from the
+        // highest valid numeric suffix across the table.
+        var highestSequence = existingNumbers
+            .Select(number => number[prefix.Length..])
+            .Select(suffix => int.TryParse(suffix, out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{highestSequence + 1:D4}";
     }
 
     public async Task<bool> PlanNumberExistsAsync(string planNumber)
