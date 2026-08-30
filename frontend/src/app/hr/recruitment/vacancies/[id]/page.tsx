@@ -26,6 +26,8 @@ import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { VacancyPostingsPanel } from '@/components/hr/recruitment/VacancyPostingsPanel';
 import { VacancyCriteriaPanel } from '@/components/hr/recruitment/VacancyCriteriaPanel';
+import { VacancyStageOwnersPanel } from '@/components/hr/recruitment/VacancyStageOwnersPanel';
+import { TalentPoolMatchesPanel } from '@/components/hr/recruitment/TalentPoolMatchesPanel';
 import { EeoReportPanel } from '@/components/hr/recruitment/EeoReportPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
@@ -262,6 +264,8 @@ export default function VacancyDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="adverts">Adverts</TabsTrigger>
           <TabsTrigger value="criteria">Shortlisting criteria</TabsTrigger>
+          <TabsTrigger value="stage-owners">Stage owners</TabsTrigger>
+          <TabsTrigger value="pool-matches">Pool matches</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
           {isHr && <TabsTrigger value="eeo">EEO report</TabsTrigger>}
           <TabsTrigger value="history">History</TabsTrigger>
@@ -354,6 +358,20 @@ export default function VacancyDetailPage() {
 
         <TabsContent value="criteria" className="pt-4">
           <VacancyCriteriaPanel vacancyId={id} canManage={isHr} />
+        </TabsContent>
+
+        {/* ⚠ Stage OWNERS, not the application board — /pipeline moves applications between
+            stages; this assigns who is responsible for each stage of this vacancy. */}
+        <TabsContent value="stage-owners" className="pt-4">
+          <VacancyStageOwnersPanel
+            vacancyId={id}
+            pipelineId={v.recruitmentPipelineId}
+            canManage={isHr}
+          />
+        </TabsContent>
+
+        <TabsContent value="pool-matches" className="pt-4">
+          <TalentPoolMatchesPanel vacancyId={id} />
         </TabsContent>
 
         <TabsContent value="attachments" className="pt-4">

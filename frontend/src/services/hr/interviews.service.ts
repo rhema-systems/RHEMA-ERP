@@ -40,6 +40,7 @@ import type {
   UpdateInterviewQuestionPreset,
   UpdateInterviewQuestionType,
   UpdateJobInterview,
+  UpdateJobInterviewExternalPanelist,
   UpdateJobInterviewPanelist,
   UpdateJobInterviewQuestionPlan,
 } from '@/types/hr/interviews';
@@ -183,6 +184,16 @@ class JobInterviewService {
       ...payload,
       jobInterviewId: interviewId,
     });
+  }
+
+  updateExternalPanelist(
+    externalPanelistId: string,
+    payload: UpdateJobInterviewExternalPanelist,
+  ): Promise<JobInterviewExternalPanelist> {
+    return apiService.put<JobInterviewExternalPanelist>(
+      `${this.baseUrl}/external-panelists/${externalPanelistId}`,
+      { ...payload, id: externalPanelistId },
+    );
   }
 
   removeExternalPanelist(externalPanelistId: string): Promise<void> {

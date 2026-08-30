@@ -415,7 +415,6 @@ const interestSchema = z.object({
 });
 type InterestForm = z.infer<typeof interestSchema>;
 
-/** ⚠ No update endpoint — interests are added and removed, never edited in place. */
 export function CandidateInterestsTab({ candidateId }: { candidateId: string }) {
   return (
     <ResourceCollectionTab<CandidateInterest, InterestForm>
@@ -426,8 +425,7 @@ export function CandidateInterestsTab({ candidateId }: { candidateId: string }) 
       invalidateKeys={[['hr', 'candidate-detail', candidateId]]}
       list={(id) => jobCandidateService.getInterests(id)}
       create={(id, values) => jobCandidateService.addInterest(id, values.detail)}
-      update={async () => undefined}
-      allowUpdate={false}
+      update={(id, iid, values) => jobCandidateService.updateInterest(id, iid, values.detail)}
       remove={(_id, iid) => jobCandidateService.deleteInterest(iid)}
       getId={(i) => i.id}
       columns={[{ header: 'Interest', cell: (i) => i.detail }]}

@@ -1303,6 +1303,10 @@ public static class RecruitmentMappingExtensions
 
     #region Talent Pool
 
+    // Every JobCandidateDto field must be populated here, not just the ones the first screen
+    // happened to bind — this DTO *is* the per-candidate read the pool panels edit from. The
+    // first cut mapped 21 of ~40 and silently served no CV link, city, country, salary
+    // expectations or work authorisation (the D-09 per-parent-read shape).
     public static TalentPoolCandidateDto ToTalentPoolDto(this JobCandidate entity)
     {
         var now = DateTime.UtcNow;
@@ -1320,21 +1324,44 @@ public static class RecruitmentMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             CandidateNumber = entity.CandidateNumber,
             FirstName = entity.FirstName,
+            MiddleName = entity.MiddleName,
             LastName = entity.LastName,
+            DateOfBirth = entity.DateOfBirth,
+            Gender = entity.Gender,
             Email = entity.Email,
             Phone = entity.Phone,
+            AlternatePhone = entity.AlternatePhone,
+            PostalAddress = entity.PostalAddress,
+            DigitalAddress = entity.DigitalAddress,
+            City = entity.City,
+            Nationality = entity.Nationality,
+            CountryId = entity.CountryId,
+            CountryName = entity.Country?.Name ?? string.Empty,
+            LinkedInProfile = entity.LinkedInProfile,
+            PortfolioUrl = entity.PortfolioUrl,
+            GitHubUrl = entity.GitHubUrl,
             Headline = entity.Headline,
+            ProfessionalSummary = entity.ProfessionalSummary,
             CurrentJobTitle = entity.CurrentJobTitle,
             CurrentEmployer = entity.CurrentEmployer,
             TotalYearsExperience = entity.TotalYearsExperience,
+            NoticePeriodDays = entity.NoticePeriodDays,
             AvailableFrom = entity.AvailableFrom,
             PreferredWorkArrangement = entity.PreferredWorkArrangement,
+            ExpectedSalaryMin = entity.ExpectedSalaryMin,
+            ExpectedSalaryMax = entity.ExpectedSalaryMax,
+            ExpectedSalaryCurrency = entity.ExpectedSalaryCurrency,
+            WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
+            CvFilePath = entity.CvFilePath,
+            ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            ApplicationCount = entity.Applications?.Count ?? 0,
             IsInTalentPool = entity.IsInTalentPool,
             TalentPoolAddedDate = entity.TalentPoolAddedDate,
             TalentPoolSource = entity.TalentPoolSource,
             TalentPoolStatus = entity.TalentPoolStatus,
             TalentPoolNotes = entity.TalentPoolNotes,
             TalentPoolReviewDate = entity.TalentPoolReviewDate,
+            TalentPoolRemovalReason = entity.TalentPoolRemovalReason,
             LastEngagedDate = entity.LastEngagedDate,
             DaysInPool = daysInPool,
             EngagementCount = entity.EngagementEvents?.Count(e => !e.IsDeleted) ?? 0,
@@ -1373,6 +1400,7 @@ public static class RecruitmentMappingExtensions
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
             UpdatedBy = entity.UpdatedBy,
+            JobCandidateId = entity.JobCandidateId,
             SegmentId = entity.SegmentId,
             SegmentName = entity.Segment?.Name ?? string.Empty,
             SegmentColor = entity.Segment?.Color,
@@ -1381,7 +1409,11 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static CandidateEngagementEventDto ToEngagementEventDto(this CandidateEngagementEvent entity)
+    // RecordedByEmployeeId has no Employee navigation, so the names arrive as parameters the
+    // service resolves — a mapper defaulting them to blank is how the timeline shipped unable
+    // to say who logged a contact.
+    public static CandidateEngagementEventDto ToEngagementEventDto(
+        this CandidateEngagementEvent entity, string? candidateName = null, string? recordedByName = null)
     {
         return new CandidateEngagementEventDto
         {
@@ -1392,11 +1424,12 @@ public static class RecruitmentMappingExtensions
             UpdatedAt = entity.UpdatedAt,
             UpdatedBy = entity.UpdatedBy,
             JobCandidateId = entity.JobCandidateId,
+            CandidateName = candidateName ?? entity.JobCandidate?.FullName ?? string.Empty,
             EventType = entity.EventType,
             EventDate = entity.EventDate,
             Subject = entity.Subject,
             Notes = entity.Notes,
-            RecordedByName = null, // populated by service layer if needed
+            RecordedByName = recordedByName,
             IsInternal = entity.IsInternal
         };
     }

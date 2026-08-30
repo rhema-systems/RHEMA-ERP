@@ -478,6 +478,56 @@ export interface ShortlistingCriteriaForm {
   displayOrder?: number | null;
 }
 
+// ── pipeline stage assignments (stage owners) ──────────────────────────────
+// Who owns each pipeline stage of THIS vacancy — not the application board, which moves
+// applications between stages. VacancyStageAssignmentStatus — HREnums.cs (NotStarted=1 … Skipped=6).
+
+export const STAGE_ASSIGNMENT_STATUSES = [
+  'NotStarted',
+  'InProgress',
+  'Completed',
+  'Overdue',
+  'Escalated',
+  'Skipped',
+] as const;
+export type StageAssignmentStatus = (typeof STAGE_ASSIGNMENT_STATUSES)[number];
+
+export interface VacancyStageAssignment {
+  id: string;
+  jobVacancyId: string;
+  pipelineStageId: string;
+  stageName: string;
+  stageOrder: number;
+  stageType: string;
+  stageTypeName: string;
+  assignedToId: string;
+  assignedToName: string;
+  assignedById: string;
+  assignedByName: string;
+  assignedAt: string;
+  dueDate?: string | null;
+  status: StageAssignmentStatus;
+  statusName: string;
+  completedAt?: string | null;
+  completedById?: string | null;
+  completedByName?: string | null;
+  completionNotes?: string | null;
+  escalationEnabled: boolean;
+  escalationDaysAfterDue?: number | null;
+  escalateToId?: string | null;
+  escalateToName?: string | null;
+  escalatedAt?: string | null;
+  escalationNotes?: string | null;
+}
+
+export interface VacancyStageAssignmentForm {
+  assignedToId: string;
+  dueDate?: string | null;
+  escalationEnabled: boolean;
+  escalationDaysAfterDue?: number | null;
+  escalateToId?: string | null;
+}
+
 // ── job posting ────────────────────────────────────────────────────────────
 
 export interface JobPosting {

@@ -4744,6 +4744,9 @@ public class RecruitmentBulkOperationResultDto
 public class RecruitmentBulkOperationItemResult
 {
     public Guid ApplicationId { get; set; }
+    /// <summary>Set by talent-pool bulk operations, whose subject is a candidate, not an application.
+    /// Additive rather than a rename — the shortlist/reject callers key on ApplicationId.</summary>
+    public Guid? CandidateId { get; set; }
     public bool Success { get; set; }
     public string? Message { get; set; }
 }
@@ -5713,6 +5716,7 @@ public class UpdateCandidateTalentSegmentDto
 public class CandidateSegmentMembershipDto : BaseDto
 {
     public Guid    TenantId    { get; set; }
+    public Guid    JobCandidateId { get; set; }
     public Guid    SegmentId   { get; set; }
     public string  SegmentName { get; set; } = string.Empty;
     public string? SegmentColor { get; set; }
@@ -5777,6 +5781,8 @@ public class TalentPoolCandidateDto : JobCandidateDto
     public string   TalentPoolStatusName  => TalentPoolStatus.ToString();
     public string?  TalentPoolNotes       { get; set; }
     public DateTime? TalentPoolReviewDate { get; set; }
+    /// <summary>Why they last left the pool — shown when a removed candidate is looked up again.</summary>
+    public string?  TalentPoolRemovalReason { get; set; }
     public DateTime? LastEngagedDate      { get; set; }
     public int      DaysInPool            { get; set; }
     public int      EngagementCount       { get; set; }
@@ -5850,6 +5856,23 @@ public class RemoveFromTalentPoolDto
     public string? Reason { get; set; }
     [MaxLength(2000)]
     public string? Notes  { get; set; }
+}
+
+/// <summary>
+/// Wrapped body for the pool-status PATCH. A raw JSON enum scalar worked but was easy to get
+/// wrong from a typed client and left nowhere to hang a future reason field.
+/// </summary>
+public class UpdateTalentPoolStatusDto
+{
+    [Required]
+    public ErpSystem.Core.Enums.TalentPoolCandidateStatus Status { get; set; }
+}
+
+/// <summary>Wrapped body for the review-date PATCH; same reasoning as the status wrapper.</summary>
+public class UpdateTalentPoolReviewDateDto
+{
+    [Required]
+    public DateTime ReviewDate { get; set; }
 }
 
 /// <summary>Bulk operation against multiple talent pool candidates.</summary>

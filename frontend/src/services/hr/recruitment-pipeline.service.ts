@@ -293,6 +293,14 @@ class JobCandidateService {
     return apiService.post<CandidateInterest>(`${this.baseUrl}/${candidateId}/interests`, { detail });
   }
 
+  // PUT is candidate-scoped while DELETE is not — the same asymmetry as referees above.
+  updateInterest(candidateId: string, interestId: string, detail: string): Promise<CandidateInterest> {
+    return apiService.put<CandidateInterest>(`${this.baseUrl}/${candidateId}/interests/${interestId}`, {
+      id: interestId,
+      detail,
+    });
+  }
+
   deleteInterest(interestId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/interests/${interestId}`);
   }

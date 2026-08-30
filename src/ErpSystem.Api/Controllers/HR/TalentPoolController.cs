@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -24,6 +25,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/talent-pool")]
 [Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules] // without it the services' ArgumentException "not found" answered as a generic 400/500 instead of 404
 public class TalentPoolController : ControllerBase
 {
     private readonly IJobCandidateService _candidateService;
@@ -55,9 +57,7 @@ public class TalentPoolController : ControllerBase
         if (tenantId == null)
             return BadRequest("Tenant context could not be resolved.");
 
-        // Inject tenant context into filter via a thin wrapper approach
-        var result = await _candidateService.GetTalentPoolFilteredAsync(filter);
-        return Ok(result);
+        return Ok(await _candidateService.GetTalentPoolFilteredAsync(filter));
     }
 
     [HttpGet("candidates/{id:guid}")]
@@ -90,24 +90,24 @@ public class TalentPoolController : ControllerBase
 
     [HttpPatch("candidates/{id:guid}/status")]
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
-    public async Task<ActionResult<bool>> UpdateStatus(Guid id, [FromBody] TalentPoolCandidateStatus status)
+    public async Task<ActionResult<bool>> UpdateStatus(Guid id, [FromBody] UpdateTalentPoolStatusDto dto)
     {
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
             return BadRequest("Tenant context could not be resolved.");
 
-        return Ok(await _candidateService.UpdateTalentPoolStatusAsync(id, status, employeeId.Value));
+        return Ok(await _candidateService.UpdateTalentPoolStatusAsync(id, dto.Status, employeeId.Value));
     }
 
     [HttpPatch("candidates/{id:guid}/review-date")]
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
-    public async Task<ActionResult<bool>> UpdateReviewDate(Guid id, [FromBody] DateTime reviewDate)
+    public async Task<ActionResult<bool>> UpdateReviewDate(Guid id, [FromBody] UpdateTalentPoolReviewDateDto dto)
     {
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
             return BadRequest("Tenant context could not be resolved.");
 
-        return Ok(await _candidateService.UpdateTalentPoolReviewDateAsync(id, reviewDate, employeeId.Value));
+        return Ok(await _candidateService.UpdateTalentPoolReviewDateAsync(id, dto.ReviewDate, employeeId.Value));
     }
 
     // =========================================================================

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, Mail, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Mail, Pencil, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -54,6 +55,13 @@ export function InterviewPanelPanel({
   const [newEmployees, setNewEmployees] = useState<PanelSelection[]>([]);
   const [newExternals, setNewExternals] = useState<PanelSelection[]>([]);
   const [newRole, setNewRole] = useState<JobInterviewPanelistRole>('Member');
+  const [editing, setEditing] = useState<{
+    id: string;
+    external: boolean;
+    name: string;
+    role: JobInterviewPanelistRole;
+    isRequired: boolean;
+  } | null>(null);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ['hr', 'interview', interview.id] });
@@ -90,6 +98,23 @@ export function InterviewPanelPanel({
         description: error?.message ?? 'Someone already on the panel cannot be added twice.',
         variant: 'destructive',
       }),
+  });
+
+  const saveEdit = useMutation({
+    mutationFn: () => {
+      if (!editing) return Promise.resolve(undefined as unknown);
+      const payload = { id: editing.id, role: editing.role, isRequired: editing.isRequired };
+      return editing.external
+        ? jobInterviewService.updateExternalPanelist(editing.id, payload)
+        : jobInterviewService.updatePanelist(editing.id, payload);
+    },
+    onSuccess: () => {
+      toast({ title: 'Panelist updated' });
+      setEditing(null);
+      invalidate();
+    },
+    onError: (error: any) =>
+      toast({ title: 'Could not update the panelist', description: error?.message, variant: 'destructive' }),
   });
 
   const removeInternal = useMutation({
@@ -241,14 +266,32 @@ export function InterviewPanelPanel({
                   </TableCell>
                   {canManage && (
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Remove ${member.employeeName}`}
-                        onClick={() => removeInternal.mutate(member.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit ${member.employeeName}'s role`}
+                          onClick={() =>
+                            setEditing({
+                              id: member.id,
+                              external: false,
+                              name: member.employeeName,
+                              role: member.role,
+                              isRequired: member.isRequired,
+                            })
+                          }
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Remove ${member.employeeName}`}
+                          onClick={() => removeInternal.mutate(member.id)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
@@ -303,14 +346,32 @@ export function InterviewPanelPanel({
                   </TableCell>
                   {canManage && (
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Remove ${member.associateName}`}
-                        onClick={() => removeExternal.mutate(member.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit ${member.associateName}'s role`}
+                          onClick={() =>
+                            setEditing({
+                              id: member.id,
+                              external: true,
+                              name: member.associateName,
+                              role: member.role,
+                              isRequired: member.isRequired,
+                            })
+                          }
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Remove ${member.associateName}`}
+                          onClick={() => removeExternal.mutate(member.id)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
@@ -319,6 +380,58 @@ export function InterviewPanelPanel({
           </Table>
         )}
       </CardContent>
+
+      {/* edit a panelist's role — one dialog for internal and external rows */}
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit panelist</DialogTitle>
+            <DialogDescription>{editing?.name}</DialogDescription>
+          </DialogHeader>
+          {editing && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Role on the panel</Label>
+                <Select
+                  value={editing.role}
+                  onValueChange={(v) =>
+                    setEditing((e) => (e ? { ...e, role: v as JobInterviewPanelistRole } : e))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PANELIST_ROLES.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {humanizeEnum(role)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={editing.isRequired}
+                  onCheckedChange={(v) =>
+                    setEditing((e) => (e ? { ...e, isRequired: v === true } : e))
+                  }
+                />
+                Attendance required for the interview to proceed
+              </label>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button disabled={saveEdit.isPending} onClick={() => saveEdit.mutate()}>
+              {saveEdit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-lg">

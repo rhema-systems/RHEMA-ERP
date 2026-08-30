@@ -34,6 +34,8 @@ import type {
   UpdateStaffRequisition,
   VacancyAttachment,
   VacancyClosureReason,
+  VacancyStageAssignment,
+  VacancyStageAssignmentForm,
 } from '@/types/hr/recruitment';
 
 /**
@@ -341,6 +343,52 @@ class JobVacancyService {
 
   deleteCriteria(criteriaId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/criteria/${criteriaId}`);
+  }
+
+  // ── pipeline stage assignments (stage owners) ────────────────────────────
+  // POST upserts by (vacancy, stage): posting an already-assigned stage reassigns it, and
+  // re-assigning a previously deleted one revives the old row server-side.
+
+  getStageAssignments(vacancyId: string): Promise<VacancyStageAssignment[]> {
+    return apiService.get<VacancyStageAssignment[]>(`${this.baseUrl}/${vacancyId}/stage-assignments`);
+  }
+
+  upsertStageAssignment(
+    vacancyId: string,
+    pipelineStageId: string,
+    payload: VacancyStageAssignmentForm,
+  ): Promise<VacancyStageAssignment> {
+    return apiService.post<VacancyStageAssignment>(`${this.baseUrl}/${vacancyId}/stage-assignments`, {
+      ...payload,
+      jobVacancyId: vacancyId,
+      pipelineStageId,
+    });
+  }
+
+  updateStageAssignment(assignmentId: string, payload: VacancyStageAssignmentForm): Promise<VacancyStageAssignment> {
+    return apiService.put<VacancyStageAssignment>(`${this.baseUrl}/stage-assignments/${assignmentId}`, {
+      ...payload,
+      id: assignmentId,
+    });
+  }
+
+  /** The assignee's or assigner's own act (or HR) — the server checks per record, not by role. */
+  completeStageAssignment(assignmentId: string, completionNotes?: string | null): Promise<VacancyStageAssignment> {
+    return apiService.patch<VacancyStageAssignment>(`${this.baseUrl}/stage-assignments/${assignmentId}/complete`, {
+      id: assignmentId,
+      completionNotes: completionNotes ?? null,
+    });
+  }
+
+  skipStageAssignment(assignmentId: string, reason?: string | null): Promise<VacancyStageAssignment> {
+    return apiService.patch<VacancyStageAssignment>(`${this.baseUrl}/stage-assignments/${assignmentId}/skip`, {
+      id: assignmentId,
+      reason: reason ?? null,
+    });
+  }
+
+  deleteStageAssignment(assignmentId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/stage-assignments/${assignmentId}`);
   }
 
   // ── attachments ──────────────────────────────────────────────────────────

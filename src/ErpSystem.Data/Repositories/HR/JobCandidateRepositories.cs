@@ -51,11 +51,12 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 
-    public async Task<IEnumerable<JobCandidate>> GetTalentPoolCandidatesAsync()
+    public async Task<IEnumerable<JobCandidate>> GetTalentPoolCandidatesAsync(Guid tenantId)
     {
         return await _dbSet
             .Include(c => c.Country)
-            .Where(c => c.IsInTalentPool && !c.IsDeleted)
+            .Include(c => c.SegmentMemberships).ThenInclude(m => m.Segment)
+            .Where(c => c.TenantId == tenantId && c.IsInTalentPool && !c.IsDeleted)
             .OrderBy(c => c.LastName)
             .ThenBy(c => c.FirstName)
             .ToListAsync();
@@ -89,13 +90,14 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 
     public async Task<(List<JobCandidate> Items, int TotalCount)> GetTalentPoolFilteredAsync(
         TalentPoolFilterDto filter,
+        Guid tenantId,
         CancellationToken cancellationToken = default)
     {
         var query = _dbSet
             .Include(c => c.Country)
             .Include(c => c.SegmentMemberships).ThenInclude(m => m.Segment)
             .Include(c => c.EngagementEvents)
-            .Where(c => c.IsInTalentPool && !c.IsDeleted);
+            .Where(c => c.TenantId == tenantId && c.IsInTalentPool && !c.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
@@ -267,7 +269,10 @@ public class CandidateSegmentMembershipRepository
 
     public async Task<CandidateSegmentMembership?> GetByCandidateAndSegmentAsync(Guid candidateId, Guid segmentId)
     {
+        // Segment is included so the write paths can map SegmentName on the row they just
+        // created — without it the add-to-segment response returned a nameless membership.
         return await _dbSet
+            .Include(m => m.Segment)
             .FirstOrDefaultAsync(m =>
                 m.JobCandidateId == candidateId &&
                 m.SegmentId == segmentId &&

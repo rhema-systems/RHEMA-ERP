@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Loader2, Pencil, Star, StarOff } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Download, Loader2, Pencil, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -13,6 +14,8 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { CandidateDocumentsPanel } from '@/components/hr/recruitment/CandidateDocumentsPanel';
 import { CandidateNotesPanel } from '@/components/hr/recruitment/CandidateNotesPanel';
+import { EngagementTimelinePanel } from '@/components/hr/recruitment/EngagementTimelinePanel';
+import { TalentPoolPanel } from '@/components/hr/recruitment/TalentPoolPanel';
 import {
   CandidateInterestsTab,
   CandidateQualificationsTab,
@@ -38,26 +41,17 @@ function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
 export default function CandidateDetailPage() {
   const params = useParams();
   const id = (params?.id as string) ?? '';
-  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyRole } = useAuth();
+  const { hasAnyRole, hasAnyPermission, hasPermission } = useAuth();
   const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  const canRecruit = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
+  const canRecruitAdmin = hasPermission('HR.Recruitment.Admin');
+  const [tab, setTab] = useState('overview');
 
   const { data: c, isLoading, isError } = useQuery({
     queryKey: ['hr', 'candidate-detail', id],
     queryFn: () => jobCandidateService.getDetail(id),
     enabled: !!id,
-  });
-
-  const togglePool = useMutation({
-    mutationFn: (next: boolean) =>
-      next ? jobCandidateService.addToTalentPool(id) : jobCandidateService.removeFromTalentPool(id),
-    onSuccess: async (_r, next) => {
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'candidate-detail', id] });
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'candidates'] });
-      toast({ title: next ? 'Added to the talent pool' : 'Removed from the talent pool' });
-    },
-    onError: (e: any) => toast({ title: 'Could not update', description: e?.message, variant: 'destructive' }),
   });
 
   const downloadCv = async () => {
@@ -101,20 +95,12 @@ export default function CandidateDetailPage() {
               <Download className="mr-2 h-4 w-4" />
               CV
             </Button>
-            {isHr && (
-              <Button
-                variant="outline"
-                onClick={() => togglePool.mutate(!c.isInTalentPool)}
-                disabled={togglePool.isPending}
-              >
-                {c.isInTalentPool ? (
-                  <StarOff className="mr-2 h-4 w-4" />
-                ) : (
-                  <Star className="mr-2 h-4 w-4" />
-                )}
-                {c.isInTalentPool ? 'Remove from pool' : 'Add to pool'}
-              </Button>
-            )}
+            {/* Pool membership is managed on its own tab — the rich endpoints record the
+                source, reason and review date the old one-click toggle silently dropped. */}
+            <Button variant="outline" onClick={() => setTab('talent-pool')}>
+              <Star className="mr-2 h-4 w-4" />
+              Talent pool
+            </Button>
             {isHr && (
               <Button asChild>
                 <Link href={`/hr/recruitment/candidates/${id}/edit`}>
@@ -127,10 +113,12 @@ export default function CandidateDetailPage() {
         }
       />
 
-      <Tabs defaultValue="overview">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="applications">Applications ({c.applications.length})</TabsTrigger>
+          <TabsTrigger value="talent-pool">Talent pool</TabsTrigger>
+          <TabsTrigger value="engagement">Engagement</TabsTrigger>
           <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
           <TabsTrigger value="work">Work history</TabsTrigger>
           <TabsTrigger value="referees">Referees</TabsTrigger>
@@ -275,6 +263,12 @@ export default function CandidateDetailPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="talent-pool" className="mt-4">
+          <TalentPoolPanel candidateId={id} canManage={canRecruit} />
+        </TabsContent>
+        <TabsContent value="engagement" className="mt-4">
+          <EngagementTimelinePanel candidateId={id} canManage={canRecruit} canAdmin={canRecruitAdmin} />
+        </TabsContent>
         <TabsContent value="qualifications" className="mt-4">
           <CandidateQualificationsTab candidateId={id} />
         </TabsContent>

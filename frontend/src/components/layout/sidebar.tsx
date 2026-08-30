@@ -1139,6 +1139,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase, permissions: ['HR.Recruitment.Read'] },
           { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone, permissions: ['HR.Recruitment.Read'] },
           { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users, permissions: ['HR.Recruitment.Read'] },
+          { title: 'Talent Pool', href: '/hr/recruitment/talent-pool', icon: Star, permissions: ['HR.Recruitment.Read'] },
           { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText, permissions: ['HR.Recruitment.Read'] },
           { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock, permissions: ['HR.Recruitment.Read'] },
           // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The

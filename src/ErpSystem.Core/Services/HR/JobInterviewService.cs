@@ -1154,6 +1154,8 @@ public class JobInterviewService : IJobInterviewService
 
         entity.Role       = updateDto.Role;
         entity.IsRequired = updateDto.IsRequired;
+        entity.UpdatedAt  = DateTime.UtcNow;
+        entity.UpdatedBy  = updatedByUserId.ToString();
 
         await _externalPanelistRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1175,6 +1177,8 @@ public class JobInterviewService : IJobInterviewService
 
         entity.Attended     = attended;
         entity.NoShowReason = attended == false ? noShowReason : null;
+        entity.UpdatedAt    = DateTime.UtcNow;
+        entity.UpdatedBy    = updatedByUserId.ToString();
 
         await _externalPanelistRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

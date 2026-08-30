@@ -378,6 +378,12 @@ export interface UpdateJobInterviewPanelist {
   isRequired: boolean;
 }
 
+export interface UpdateJobInterviewExternalPanelist {
+  id: string;
+  role: JobInterviewPanelistRole;
+  isRequired: boolean;
+}
+
 // ── candidates in the session ──────────────────────────────────────────────
 
 export interface JobInterviewee {

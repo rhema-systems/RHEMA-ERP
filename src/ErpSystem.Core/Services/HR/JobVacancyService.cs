@@ -934,6 +934,21 @@ public class JobVacancyService : IJobVacancyService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
+    /// <summary>
+    /// [Required] on a non-nullable Guid is inert — Guid.Empty passes model validation and dies
+    /// at the FK with a 500 that names neither the field nor the constraint. Reject it here with
+    /// the field's name (the D-17 recipe).
+    /// </summary>
+    private static void RequireStageAssignmentIds(Guid pipelineStageId, Guid assignedToId, Guid? escalateToId)
+    {
+        if (pipelineStageId == Guid.Empty)
+            throw new InvalidOperationException("pipelineStageId is required and cannot be empty.");
+        if (assignedToId == Guid.Empty)
+            throw new InvalidOperationException("assignedToId is required and cannot be empty.");
+        if (escalateToId == Guid.Empty)
+            throw new InvalidOperationException("escalateToId cannot be an empty id; omit it instead.");
+    }
+
     public async Task<VacancyPipelineStageAssignmentDto> UpsertStageAssignmentAsync(
         CreateVacancyPipelineStageAssignmentDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
@@ -941,11 +956,42 @@ public class JobVacancyService : IJobVacancyService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        RequireStageAssignmentIds(dto.PipelineStageId, dto.AssignedToId, dto.EscalateToId);
         await GetOwnedAsync(dto.JobVacancyId);
 
         var existing = await _stageAssignmentRepository.GetByVacancyAndStageAsync(dto.JobVacancyId, dto.PipelineStageId);
         if (existing != null && existing.TenantId != current)
             existing = null;
+
+        // IX_VacancyStageAssignment_Vacancy_Stage is unique with NO IsDeleted filter while the
+        // delete is soft, so a removed assignment keeps occupying its (vacancy, stage) slot and
+        // a plain re-add 500s on the index — remove-then-reassign a stage owner would be a
+        // one-click path to it. Revive the soft-deleted row instead (the D-21/D-24 idiom); the
+        // tenant predicate is re-applied by hand because IgnoreQueryFilters drops that too.
+        if (existing == null)
+        {
+            var buried = await _stageAssignmentRepository
+                .GetQueryableIncludingDeleted(a => a.JobVacancyId == dto.JobVacancyId &&
+                                                   a.PipelineStageId == dto.PipelineStageId &&
+                                                   a.TenantId == current)
+                .FirstOrDefaultAsync(ct);
+            if (buried != null)
+            {
+                buried.IsDeleted = false;
+                buried.DeletedAt = null;
+                buried.DeletedBy = null;
+                buried.Status          = VacancyStageAssignmentStatus.NotStarted;
+                buried.CompletedAt     = null;
+                buried.CompletedById   = null;
+                buried.CompletionNotes = null;
+                buried.EscalatedAt     = null;
+                buried.EscalationNotes = null;
+                buried.AssignedById    = userId;
+                buried.AssignedAt      = DateTime.UtcNow;
+                existing = buried;
+            }
+        }
+
         if (existing != null)
         {
             existing.AssignedToId             = dto.AssignedToId;
@@ -989,6 +1035,7 @@ public class JobVacancyService : IJobVacancyService
         UpdateVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedStageAssignmentAsync(dto.Id);
+        RequireStageAssignmentIds(entity.PipelineStageId, dto.AssignedToId, dto.EscalateToId);
 
         entity.AssignedToId           = dto.AssignedToId;
         entity.DueDate                = dto.DueDate;

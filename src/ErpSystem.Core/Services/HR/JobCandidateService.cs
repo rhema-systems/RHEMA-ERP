@@ -22,6 +22,7 @@ public class JobCandidateService : IJobCandidateService
     private readonly IJobCandidateNoteRepository _noteRepository;
     private readonly IJobVacancyRepository _vacancyRepository;
     private readonly ICandidateSegmentMembershipRepository _segmentMembershipRepository;
+    private readonly ICandidateTalentSegmentRepository _segmentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobCandidateService> _logger;
@@ -37,6 +38,7 @@ public class JobCandidateService : IJobCandidateService
         IJobCandidateNoteRepository noteRepository,
         IJobVacancyRepository vacancyRepository,
         ICandidateSegmentMembershipRepository segmentMembershipRepository,
+        ICandidateTalentSegmentRepository segmentRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobCandidateService> logger)
@@ -51,6 +53,7 @@ public class JobCandidateService : IJobCandidateService
         _noteRepository = noteRepository;
         _vacancyRepository = vacancyRepository;
         _segmentMembershipRepository = segmentMembershipRepository;
+        _segmentRepository = segmentRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -197,9 +200,8 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateSummaryDto>> GetTalentPoolAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = await _candidateRepository.GetTalentPoolCandidatesAsync();
-        return entities.Where(c => c.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _candidateRepository.GetTalentPoolCandidatesAsync(GetTenantId());
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobCandidateSummaryDto>> GetByVacancyIdAsync(Guid vacancyId, CancellationToken cancellationToken = default)
@@ -261,14 +263,14 @@ public class JobCandidateService : IJobCandidateService
 
     // ── Talent pool ───────────────────────────────────────────────────────────
 
+    // The flat add/remove pair and the rich pair are two doors onto the same state and must
+    // write it identically — the flat remove used to leave the status Active on a candidate no
+    // longer in the pool, so the old screen and the pool screen disagreed about the same row.
+
     public async Task<bool> AddToTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(candidateId);
-        entity.IsInTalentPool = true;
-        entity.TalentPoolAddedDate = DateTime.UtcNow;
-        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = updatedByUserId.ToString();
+        ApplyPoolEntry(entity, updatedByUserId);
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -277,9 +279,7 @@ public class JobCandidateService : IJobCandidateService
     public async Task<bool> RemoveFromTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(candidateId);
-        entity.IsInTalentPool = false;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = updatedByUserId.ToString();
+        ApplyPoolExit(entity, reason: null, updatedByUserId);
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -288,17 +288,37 @@ public class JobCandidateService : IJobCandidateService
     public async Task<bool> AddToTalentPoolRichAsync(Guid candidateId, AddToTalentPoolDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
 
-        entity.IsInTalentPool = true;
-        entity.TalentPoolAddedDate = DateTime.UtcNow;
-        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active;
+        ApplyPoolEntry(entity, updatedByUserId);
         entity.TalentPoolSource = dto.Source;
         entity.TalentPoolNotes = dto.Notes;
         entity.TalentPoolReviewDate = dto.ReviewDate;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = updatedByUserId.ToString();
-
         await _candidateRepository.UpdateAsync(entity);
+
+        // SegmentIds was declared on this DTO from the start and silently dropped; a UI that
+        // sent segments on add lost them without an error.
+        foreach (var segmentId in dto.SegmentIds.Distinct())
+        {
+            var segment = await _segmentRepository.GetByIdAsync(segmentId);
+            if (segment == null || segment.TenantId != tenantId || segment.IsDeleted)
+                throw new ArgumentException($"Talent segment '{segmentId}' not found.");
+
+            var existing = await _segmentMembershipRepository.GetByCandidateAndSegmentAsync(candidateId, segmentId);
+            if (existing != null) continue;
+
+            await _segmentMembershipRepository.AddAsync(new CandidateSegmentMembership
+            {
+                TenantId          = tenantId,
+                JobCandidateId    = candidateId,
+                SegmentId         = segmentId,
+                AddedByEmployeeId = updatedByUserId,
+                AddedDate         = DateTime.UtcNow,
+                CreatedAt         = DateTime.UtcNow,
+                CreatedBy         = updatedByUserId.ToString()
+            });
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -307,23 +327,39 @@ public class JobCandidateService : IJobCandidateService
     {
         var entity = await GetOwnedCandidateAsync(candidateId);
 
-        entity.IsInTalentPool = false;
-        entity.TalentPoolRemovalReason = dto.Reason;
-        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Expired;
+        ApplyPoolExit(entity, dto.Reason, updatedByUserId);
         entity.TalentPoolNotes = string.IsNullOrWhiteSpace(dto.Notes) ? entity.TalentPoolNotes : dto.Notes;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = updatedByUserId.ToString();
 
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
 
+    private static void ApplyPoolEntry(JobCandidate entity, Guid updatedByUserId)
+    {
+        entity.IsInTalentPool = true;
+        entity.TalentPoolAddedDate = DateTime.UtcNow;
+        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active;
+        // A re-added candidate is not still carrying the record of their removal.
+        entity.TalentPoolRemovedDate = null;
+        entity.TalentPoolRemovalReason = null;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = updatedByUserId.ToString();
+    }
+
+    private static void ApplyPoolExit(JobCandidate entity, string? reason, Guid updatedByUserId)
+    {
+        entity.IsInTalentPool = false;
+        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Expired;
+        entity.TalentPoolRemovedDate = DateTime.UtcNow;
+        entity.TalentPoolRemovalReason = reason;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = updatedByUserId.ToString();
+    }
+
     public async Task<TalentPoolPagedResultDto> GetTalentPoolFilteredAsync(TalentPoolFilterDto filter, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var (items, total) = await _candidateRepository.GetTalentPoolFilteredAsync(filter, cancellationToken);
-        items = items.Where(c => c.TenantId == tenantId).ToList();
+        var (items, total) = await _candidateRepository.GetTalentPoolFilteredAsync(filter, GetTenantId(), cancellationToken);
         return new TalentPoolPagedResultDto
         {
             Items = items.Select(c => c.ToTalentPoolDto()).ToList(),
@@ -364,8 +400,11 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<TalentPoolAnalyticsDto> GetTalentPoolAnalyticsAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        var pool = await _candidateRepository.GetTalentPoolCandidatesAsync();
-        var candidates = pool.Where(c => c.TenantId == tenantId).ToList();
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var candidates = (await _candidateRepository.GetTalentPoolCandidatesAsync(current)).ToList();
         var now = DateTime.UtcNow;
         var startOfYear = new DateTime(now.Year, 1, 1);
         var startOfMonth = new DateTime(now.Year, now.Month, 1);
@@ -391,26 +430,68 @@ public class JobCandidateService : IJobCandidateService
             .OrderByDescending(x => x.Count)
             .ToList();
 
+        // BySegment was declared on the DTO and never populated — the dashboard's segment
+        // chart rendered empty for as long as this endpoint has existed.
+        analytics.BySegment = candidates
+            .SelectMany(c => c.SegmentMemberships ?? Enumerable.Empty<CandidateSegmentMembership>())
+            .Where(m => !m.IsDeleted && m.Segment != null)
+            .GroupBy(m => m.SegmentId)
+            .Select(g => new TalentPoolSegmentBreakdownDto
+            {
+                SegmentId    = g.Key,
+                SegmentName  = g.First().Segment.Name,
+                SegmentColor = g.First().Segment.Color,
+                Count        = g.Count()
+            })
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
         return analytics;
     }
 
     public async Task<RecruitmentBulkOperationResultDto> BulkTalentPoolOperationAsync(BulkTalentPoolOperationDto dto, Guid tenantId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        // A malformed operation refuses the whole request rather than reporting per-row success
+        // on a switch that matched nothing — the first cut counted `Succeeded` for every row of
+        // an AssignSegment with no SegmentId, having assigned nothing.
+        var needsSegment = dto.Operation is ErpSystem.Core.Enums.BulkTalentPoolOperation.AssignSegment
+                                          or ErpSystem.Core.Enums.BulkTalentPoolOperation.RemoveSegment;
+        if (needsSegment && !dto.SegmentId.HasValue)
+            throw new InvalidOperationException($"Operation '{dto.Operation}' requires a segmentId.");
+        if (dto.Operation == ErpSystem.Core.Enums.BulkTalentPoolOperation.SetStatus && !dto.Status.HasValue)
+            throw new InvalidOperationException("Operation 'SetStatus' requires a status.");
+
+        if (needsSegment)
+        {
+            var segment = await _segmentRepository.GetByIdAsync(dto.SegmentId!.Value);
+            if (segment == null || segment.TenantId != current || segment.IsDeleted)
+                throw new ArgumentException($"Talent segment '{dto.SegmentId}' not found.");
+        }
+
         var result = new RecruitmentBulkOperationResultDto();
         foreach (var id in dto.CandidateIds)
         {
             try
             {
                 var entity = await _candidateRepository.GetByIdAsync(id);
-                if (entity == null || entity.TenantId != tenantId) { result.Skipped++; continue; }
+                if (entity == null || entity.TenantId != current)
+                {
+                    result.Skipped++;
+                    result.Results.Add(new RecruitmentBulkOperationItemResult
+                        { CandidateId = id, Success = false, Message = "Candidate not found." });
+                    continue;
+                }
 
                 switch (dto.Operation)
                 {
-                    case ErpSystem.Core.Enums.BulkTalentPoolOperation.AssignSegment
-                        when dto.SegmentId.HasValue:
+                    case ErpSystem.Core.Enums.BulkTalentPoolOperation.AssignSegment:
                     {
                         var existing = await _segmentMembershipRepository
-                            .GetByCandidateAndSegmentAsync(id, dto.SegmentId.Value);
+                            .GetByCandidateAndSegmentAsync(id, dto.SegmentId!.Value);
                         if (existing is null)
                         {
                             var membership = new CandidateSegmentMembership
@@ -418,30 +499,30 @@ public class JobCandidateService : IJobCandidateService
                                 Id                 = Guid.NewGuid(),
                                 JobCandidateId     = id,
                                 SegmentId          = dto.SegmentId.Value,
-                                TenantId           = tenantId,
+                                TenantId           = current,
                                 AddedByEmployeeId  = updatedByUserId,
                                 AddedDate          = DateTime.UtcNow,
-                                Notes              = dto.Notes
+                                Notes              = dto.Notes,
+                                CreatedAt          = DateTime.UtcNow,
+                                CreatedBy          = updatedByUserId.ToString()
                             };
                             await _segmentMembershipRepository.AddAsync(membership);
                         }
                         break;
                     }
-                    case ErpSystem.Core.Enums.BulkTalentPoolOperation.RemoveSegment
-                        when dto.SegmentId.HasValue:
+                    case ErpSystem.Core.Enums.BulkTalentPoolOperation.RemoveSegment:
                     {
                         var existing = await _segmentMembershipRepository
-                            .GetByCandidateAndSegmentAsync(id, dto.SegmentId.Value);
+                            .GetByCandidateAndSegmentAsync(id, dto.SegmentId!.Value);
                         if (existing is not null)
                             await _segmentMembershipRepository.DeleteAsync(existing);
                         break;
                     }
-                    case ErpSystem.Core.Enums.BulkTalentPoolOperation.SetStatus when dto.Status.HasValue:
-                        entity.TalentPoolStatus = dto.Status.Value;
+                    case ErpSystem.Core.Enums.BulkTalentPoolOperation.SetStatus:
+                        entity.TalentPoolStatus = dto.Status!.Value;
                         break;
                     case ErpSystem.Core.Enums.BulkTalentPoolOperation.RemoveFromPool:
-                        entity.IsInTalentPool = false;
-                        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Expired;
+                        ApplyPoolExit(entity, dto.Notes, updatedByUserId);
                         break;
                 }
 
@@ -449,8 +530,15 @@ public class JobCandidateService : IJobCandidateService
                 entity.UpdatedBy = updatedByUserId.ToString();
                 await _candidateRepository.UpdateAsync(entity);
                 result.Succeeded++;
+                result.Results.Add(new RecruitmentBulkOperationItemResult
+                    { CandidateId = id, Success = true });
             }
-            catch { result.Skipped++; }
+            catch (Exception ex)
+            {
+                result.Skipped++;
+                result.Results.Add(new RecruitmentBulkOperationItemResult
+                    { CandidateId = id, Success = false, Message = ex.Message });
+            }
         }
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return result;
@@ -458,14 +546,56 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<List<TalentPoolVacancyMatchResultDto>> MatchToVacancyAsync(Guid vacancyId, int topN, CancellationToken cancellationToken = default)
     {
-        await GetOwnedVacancyAsync(vacancyId);
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
         var tenantId = GetTenantId();
-        // Simple scoring: returns active pool candidates ordered by experience, vacancy-specific scoring done in service layer or UI
-        var candidates = (await _candidateRepository.GetTalentPoolCandidatesAsync())
-            .Where(c => c.TenantId == tenantId && c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active)
-            .OrderByDescending(c => c.TotalYearsExperience)
-            .Take(topN)
-            .Select(c => new TalentPoolVacancyMatchResultDto
+        var now = DateTime.UtcNow;
+
+        // The same 40/30/20 rubric MatchCandidateToVacanciesAsync runs in the other direction —
+        // this used to be a stub returning MatchScore 0 for everyone, which is worse than no
+        // score because a column of zeros reads as "nobody fits".
+        var results = new List<TalentPoolVacancyMatchResultDto>();
+        foreach (var c in (await _candidateRepository.GetTalentPoolCandidatesAsync(tenantId))
+                     .Where(c => c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active))
+        {
+            var score   = 0;
+            var reasons = new List<string>();
+
+            // Experience match (+40)
+            if (vacancy.RequiredMinExperienceYears is null ||
+                (c.TotalYearsExperience.HasValue &&
+                 c.TotalYearsExperience.Value >= vacancy.RequiredMinExperienceYears.Value))
+            {
+                score += 40;
+                reasons.Add(vacancy.RequiredMinExperienceYears is null
+                    ? "No minimum experience required"
+                    : $"Meets experience requirement ({vacancy.RequiredMinExperienceYears} yr)");
+            }
+
+            // Work mode match (+30) — PreferredWorkArrangement.Any always matches
+            if (c.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any ||
+                c.PreferredWorkArrangement.ToString() == vacancy.WorkMode.ToString())
+            {
+                score += 30;
+                reasons.Add(c.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any
+                    ? "Open to any work arrangement"
+                    : $"Work mode match ({vacancy.WorkMode})");
+            }
+
+            // Availability (+20)
+            if (c.AvailableFrom is null || c.AvailableFrom.Value <= now)
+            {
+                score += 20;
+                reasons.Add("Available now");
+            }
+            else
+            {
+                reasons.Add($"Available from {c.AvailableFrom.Value:dd MMM yyyy}");
+            }
+
+            if (reasons.Count == 0)
+                reasons.Add("Active pool member");
+
+            results.Add(new TalentPoolVacancyMatchResultDto
             {
                 CandidateId = c.Id,
                 CandidateName = c.FullName,
@@ -474,12 +604,16 @@ public class JobCandidateService : IJobCandidateService
                 TotalYearsExperience = c.TotalYearsExperience,
                 PreferredWorkArrangementName = c.PreferredWorkArrangement.ToString(),
                 AvailableFrom = c.AvailableFrom,
-                MatchScore = 0,
-                MatchReasons = new List<string> { "Active pool member" }
-            })
-            .ToList();
+                MatchScore = score,
+                MatchReasons = reasons
+            });
+        }
 
-        return candidates;
+        return results
+            .OrderByDescending(r => r.MatchScore)
+            .ThenByDescending(r => r.TotalYearsExperience)
+            .Take(topN)
+            .ToList();
     }
 
     public async Task<List<CandidateVacancyMatchResultDto>> MatchCandidateToVacanciesAsync(
