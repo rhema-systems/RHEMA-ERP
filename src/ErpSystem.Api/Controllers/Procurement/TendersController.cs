@@ -817,6 +817,15 @@ public class TendersController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden,
                 EvaluationCommitteeProblem("EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -848,6 +857,15 @@ public class TendersController : ControllerBase
         {
             return StatusCode(StatusCodes.Status403Forbidden,
                 EvaluationCommitteeProblem("EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
         catch (InvalidOperationException ex)
         {

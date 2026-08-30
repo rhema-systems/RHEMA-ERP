@@ -558,7 +558,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
     {
         EnsureAuthenticatedTenant();
         var registration = await LoadRegistrationAsync(registrationId, cancellationToken);
-        EnsureRegistrationReader(registration);
+        await EnsureRegistrationReaderAsync(registration, cancellationToken);
         return await EvaluateRegistrationAsync(registration, cancellationToken);
     }
 
@@ -574,7 +574,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
                 "The authenticated actor must submit the supplier registration.");
         var correlation = NormalizeCorrelation(correlationId);
         var registration = await LoadRegistrationAsync(registrationId, cancellationToken);
-        EnsureRegistrationReader(registration);
+        await EnsureRegistrationReaderAsync(registration, cancellationToken);
         var readiness = await EvaluateRegistrationAsync(registration, cancellationToken);
         if (!readiness.IsReady)
             throw Validation("SUPPLIER_REGISTRATION_EVIDENCE_INCOMPLETE",
@@ -1276,12 +1276,37 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
             "The procurement records read permission is required.");
     }
 
-    private void EnsureRegistrationReader(BusinessPartnerRegistration registration)
+    private async Task EnsureRegistrationReaderAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
     {
         if (!_currentUser.IsExternalUser) return;
-        if (registration.CreatedById != _currentUser.UserId)
-            throw new ProcurementSupplierEvidencePackAuthorizationException(
-                "Supplier applicants can access only their own registration evidence status.");
+        if (registration.CreatedById == _currentUser.UserId) return;
+
+        // Approval replaces the temporary applicant identity with the supplier account.
+        // The approved supplier owner and its active delegated users must therefore be
+        // able to read the evidence lineage that now governs their eligibility.
+        if (registration.BusinessPartnerId.HasValue)
+        {
+            var businessPartnerId = registration.BusinessPartnerId.Value;
+            var ownsPartner = await _unitOfWork.Repository<BusinessPartner>()
+                .ExistsAsync(item => item.Id == businessPartnerId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    item.UserId == _currentUser.UserId &&
+                    !item.IsDeleted);
+            if (ownsPartner) return;
+
+            var isActiveDelegate = await _unitOfWork.Repository<BusinessPartnerUser>()
+                .ExistsAsync(item => item.BusinessPartnerId == businessPartnerId &&
+                    item.TenantId == _currentUser.TenantId &&
+                    item.UserId == _currentUser.UserId &&
+                    item.IsActive &&
+                    !item.IsDeleted);
+            if (isActiveDelegate) return;
+        }
+
+        throw new ProcurementSupplierEvidencePackAuthorizationException(
+            "Supplier applicants can access only their own or linked approved supplier registration evidence status.");
     }
 
     private void EnsureAuthenticatedTenant()

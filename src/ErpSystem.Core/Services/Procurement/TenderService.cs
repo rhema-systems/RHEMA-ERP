@@ -1074,7 +1074,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
-            await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender.Id);
+            await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender);
 
             var evaluatorIds = new List<Guid>();
 
@@ -1542,9 +1542,47 @@ public class TenderService : ITenderService
 
     private async Task EnsureStandaloneEvaluatorAssignmentMutableAsync(Guid tenderId)
     {
+        var tender = await _tenderRepository.GetByIdAsync(tenderId)
+            ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+        await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender);
+    }
+
+    private async Task EnsureStandaloneEvaluatorAssignmentMutableAsync(Tender tender)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_SOURCE_REQUISITION_REQUIRED",
+                "The tender must retain its approved purchase-requisition source before evaluators can be assigned.");
+
+        var requestForQuotation = IsRequestForQuotation(tender.TenderType);
+        var gate = await _sourcingCaseService.EnforceSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
+            requestForQuotation ? "RequestForQuotation" : "Tender",
+            tender.TenderNumber,
+            Guid.NewGuid().ToString("N"));
+        EnsureSourceLineage(tender.SourcingReleaseId, tender.SourcingCaseId, gate);
+
+        var lineageChanged = tender.SourcingReleaseId != gate.SourcingReleaseId ||
+                             tender.SourcingCaseId != gate.SourcingCaseId;
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        if (lineageChanged)
+        {
+            tender.UpdatedAt = DateTime.UtcNow;
+            await _tenderRepository.UpdateAsync(tender);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        // A current release is sufficient for the simplified approved-PR route. The
+        // source-specific committee is mandatory only when the tenant has explicitly
+        // created the advanced immutable sourcing case that owns that committee.
+        if (!UsesAdvancedSourcingControls(gate))
+            return;
+
         var readiness = await _evaluationCommittee.GetReadinessAsync(
             ProcurementEvaluationSourceType.Tender,
-            tenderId,
+            tender.Id,
             CancellationToken.None);
         if (readiness.HasControl)
         {

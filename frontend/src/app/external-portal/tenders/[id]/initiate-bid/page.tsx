@@ -308,7 +308,9 @@ export default function InitiateBidPage() {
               warrantyTerms: '',
               technicalProposal: '',
               commercialProposal: '',
+              associationType,
               acceptedDeclaration: true,
+              selectedLotIds: [],
               items: [], // Empty items for now, will be added when lots are selected
             });
           }

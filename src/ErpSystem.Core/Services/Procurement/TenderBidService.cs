@@ -307,6 +307,42 @@ public class TenderBidService : ITenderBidService
                 throw new InvalidOperationException($"You are not eligible to bid on this tender. {errorMessage}");
             }
 
+            var selectedLotIds = (dto.SelectedLotIds ?? new List<Guid>())
+                .Distinct()
+                .ToHashSet();
+            var selectedLots = tender.Lots
+                .Where(lot => selectedLotIds.Contains(lot.Id))
+                .ToList();
+            if (selectedLots.Count != selectedLotIds.Count)
+            {
+                throw new InvalidOperationException(
+                    "One or more selected lots do not belong to this tender.");
+            }
+
+            if (selectedLots.Any(lot => string.Equals(
+                    lot.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException("Cancelled tender lots cannot be selected for a bid.");
+            }
+
+            var selectedTenderItems = selectedLots
+                .SelectMany(lot => lot.Items)
+                .ToDictionary(item => item.Id);
+            var suppliedItemIds = (dto.Items ?? new List<CreateTenderBidItemDto>())
+                .Select(item => item.TenderItemId)
+                .ToList();
+            if (suppliedItemIds.Count != suppliedItemIds.Distinct().Count())
+            {
+                throw new InvalidOperationException("A tender item can appear only once in a bid draft.");
+            }
+            if (selectedLotIds.Count > 0 &&
+                (suppliedItemIds.Any(id => !selectedTenderItems.ContainsKey(id)) ||
+                 selectedTenderItems.Keys.Any(id => !suppliedItemIds.Contains(id))))
+            {
+                throw new InvalidOperationException(
+                    "A bid draft must include every item, and only items, from its selected lots.");
+            }
+
             // Generate bid number
             var bidNumber = await GenerateBidNumberAsync(tender.TenderNumber);
 
@@ -324,6 +360,9 @@ public class TenderBidService : ITenderBidService
                 WarrantyTerms = dto.WarrantyTerms,
                 TechnicalProposal = dto.TechnicalProposal,
                 CommercialProposal = dto.CommercialProposal,
+                AssociationType = dto.AssociationType,
+                AcceptedDeclaration = dto.AcceptedDeclaration,
+                DeclarationAcceptedAt = dto.AcceptedDeclaration ? DateTime.UtcNow : null,
                 Currency = tender.Currency,
                 CreatedAt = DateTime.UtcNow
             };
@@ -333,6 +372,29 @@ public class TenderBidService : ITenderBidService
             // Save the bid first to satisfy foreign key constraint
             await _unitOfWork.SaveChangesAsync();
 
+            var bidLots = new List<TenderBidLot>();
+            var bidLotByTenderLotId = new Dictionary<Guid, TenderBidLot>();
+            foreach (var selectedLot in selectedLots)
+            {
+                var bidLot = new TenderBidLot
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = _currentUserProvider.TenantId,
+                    TenderBidId = bid.Id,
+                    LotId = selectedLot.Id,
+                    TotalLotAmount = 0m,
+                    Currency = tender.Currency,
+                    Status = "Draft",
+                    CreatedAt = DateTime.UtcNow,
+                    Lot = selectedLot,
+                    TenderBid = bid
+                };
+                bidLots.Add(bidLot);
+                bidLotByTenderLotId[selectedLot.Id] = bidLot;
+                bid.BidLots.Add(bidLot);
+                await _bidLotRepository.CreateAsync(bidLot);
+            }
+
             // Add bid items
             var items = new List<TenderBidItem>();
             if (dto.Items != null && dto.Items.Any())
@@ -341,11 +403,18 @@ public class TenderBidService : ITenderBidService
 
                 foreach (var itemDto in dto.Items)
                 {
+                    selectedTenderItems.TryGetValue(itemDto.TenderItemId, out var tenderItem);
+                    TenderBidLot? bidLot = null;
+                    if (tenderItem?.LotId is Guid tenderLotId)
+                    {
+                        bidLotByTenderLotId.TryGetValue(tenderLotId, out bidLot);
+                    }
                     var item = new TenderBidItem
                     {
                         Id = Guid.NewGuid(),
                         TenantId = _currentUserProvider.TenantId,
                         TenderBidId = bid.Id,
+                        BidLotId = bidLot?.Id,
                         TenderItemId = itemDto.TenderItemId,
                         OfferedQuantity = itemDto.OfferedQuantity,
                         UnitPrice = itemDto.UnitPrice,
@@ -355,10 +424,17 @@ public class TenderBidService : ITenderBidService
                         Brand = itemDto.Brand,
                         Model = itemDto.Model,
                         TechnicalDetails = itemDto.TechnicalDetails,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.UtcNow,
+                        TenderBid = bid,
+                        TenderItem = tenderItem!
                     };
 
                     totalBidAmount += item.TotalPrice;
+                    if (bidLot != null)
+                    {
+                        bidLot.TotalLotAmount += item.TotalPrice;
+                        bidLot.Items.Add(item);
+                    }
                     await _bidItemRepository.CreateAsync(item);
                     items.Add(item);
                 }
@@ -435,11 +511,88 @@ public class TenderBidService : ITenderBidService
                 throw new InvalidOperationException("Only draft bids can be updated");
             }
 
+            var tender = await _tenderRepository.GetByIdAsync(bid.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
+
+            var selectedTenderItems = new Dictionary<Guid, TenderItem>();
+            if (dto.SelectedLotIds != null)
+            {
+                var selectedLotIds = dto.SelectedLotIds.Distinct().ToHashSet();
+                var selectedLots = tender.Lots
+                    .Where(lot => selectedLotIds.Contains(lot.Id))
+                    .ToList();
+                if (selectedLots.Count != selectedLotIds.Count)
+                {
+                    throw new InvalidOperationException(
+                        "One or more selected lots do not belong to this tender.");
+                }
+                if (selectedLots.Any(lot => string.Equals(
+                        lot.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new InvalidOperationException("Cancelled tender lots cannot be selected for a bid.");
+                }
+
+                selectedTenderItems = selectedLots
+                    .SelectMany(lot => lot.Items)
+                    .ToDictionary(item => item.Id);
+                var suppliedItemIds = (dto.Items ?? new List<UpdateTenderBidItemDto>())
+                    .Select(item => item.TenderItemId)
+                    .ToList();
+                if (suppliedItemIds.Count != suppliedItemIds.Distinct().Count())
+                {
+                    throw new InvalidOperationException("A tender item can appear only once in a bid draft.");
+                }
+                if (selectedLotIds.Count > 0 &&
+                    (suppliedItemIds.Any(id => !selectedTenderItems.ContainsKey(id)) ||
+                     selectedTenderItems.Keys.Any(id => !suppliedItemIds.Contains(id))))
+                {
+                    throw new InvalidOperationException(
+                        "A bid draft must include every item, and only items, from its selected lots.");
+                }
+
+                var persistedLotIds = bid.BidLots.Select(item => item.LotId).ToHashSet();
+                if (persistedLotIds.Count > 0 && !persistedLotIds.SetEquals(selectedLotIds))
+                {
+                    throw new InvalidOperationException(
+                        "Selected lots cannot be changed after their draft lineage has been saved.");
+                }
+                if (persistedLotIds.Count == 0)
+                {
+                    foreach (var selectedLot in selectedLots)
+                    {
+                        var bidLot = new TenderBidLot
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = _currentUserProvider.TenantId,
+                            TenderBidId = bid.Id,
+                            LotId = selectedLot.Id,
+                            TotalLotAmount = 0m,
+                            Currency = tender.Currency,
+                            Status = "Draft",
+                            CreatedAt = DateTime.UtcNow,
+                            Lot = selectedLot,
+                            TenderBid = bid
+                        };
+                        bid.BidLots.Add(bidLot);
+                        await _bidLotRepository.CreateAsync(bidLot);
+                    }
+                }
+            }
+
             bid.DeliveryDays = dto.DeliveryDays;
             bid.PaymentTerms = dto.PaymentTerms;
             bid.WarrantyTerms = dto.WarrantyTerms;
             bid.TechnicalProposal = dto.TechnicalProposal;
             bid.CommercialProposal = dto.CommercialProposal;
+            if (dto.AssociationType != null)
+                bid.AssociationType = dto.AssociationType;
+            if (dto.AcceptedDeclaration.HasValue)
+            {
+                bid.AcceptedDeclaration = dto.AcceptedDeclaration.Value;
+                bid.DeclarationAcceptedAt = dto.AcceptedDeclaration.Value
+                    ? bid.DeclarationAcceptedAt ?? DateTime.UtcNow
+                    : null;
+            }
             bid.UpdatedAt = DateTime.UtcNow;
 
             await _bidRepository.UpdateAsync(bid);
@@ -448,7 +601,8 @@ public class TenderBidService : ITenderBidService
             if (dto.Items != null && dto.Items.Any())
             {
                 // Get existing items
-                var existingItems = await _bidItemRepository.GetByBidIdAsync(id);
+                var existingItems = (await _bidItemRepository.GetByBidIdAsync(id)).ToList();
+                var bidLotByTenderLotId = bid.BidLots.ToDictionary(item => item.LotId);
 
                 decimal totalBidAmount = 0;
 
@@ -468,18 +622,29 @@ public class TenderBidService : ITenderBidService
                         existingItem.Brand = itemDto.Brand;
                         existingItem.Model = itemDto.Model;
                         existingItem.TechnicalDetails = itemDto.TechnicalDetails;
+                        if (selectedTenderItems.TryGetValue(itemDto.TenderItemId, out var tenderItem) &&
+                            tenderItem.LotId is Guid tenderLotId &&
+                            bidLotByTenderLotId.TryGetValue(tenderLotId, out var bidLot))
+                        {
+                            existingItem.BidLotId = bidLot.Id;
+                        }
                         existingItem.UpdatedAt = DateTime.UtcNow;
 
                         await _bidItemRepository.UpdateAsync(existingItem);
                     }
                     else
                     {
+                        selectedTenderItems.TryGetValue(itemDto.TenderItemId, out var tenderItem);
+                        TenderBidLot? bidLot = null;
+                        if (tenderItem?.LotId is Guid tenderLotId)
+                            bidLotByTenderLotId.TryGetValue(tenderLotId, out bidLot);
                         // Create new item
                         var newItem = new TenderBidItem
                         {
                             Id = Guid.NewGuid(),
                             TenantId = _currentUserProvider.TenantId,
                             TenderBidId = bid.Id,
+                            BidLotId = bidLot?.Id,
                             TenderItemId = itemDto.TenderItemId,
                             OfferedQuantity = itemDto.OfferedQuantity,
                             UnitPrice = itemDto.UnitPrice,
@@ -489,10 +654,14 @@ public class TenderBidService : ITenderBidService
                             Brand = itemDto.Brand,
                             Model = itemDto.Model,
                             TechnicalDetails = itemDto.TechnicalDetails,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTime.UtcNow,
+                            TenderBid = bid,
+                            TenderItem = tenderItem!
                         };
 
                         await _bidItemRepository.CreateAsync(newItem);
+                        existingItems.Add(newItem);
+                        bidLot?.Items.Add(newItem);
                     }
 
                     totalBidAmount += itemDto.OfferedQuantity * itemDto.UnitPrice;
@@ -501,13 +670,21 @@ public class TenderBidService : ITenderBidService
                 // Update total bid amount
                 bid.TotalBidAmount = totalBidAmount;
                 await _bidRepository.UpdateAsync(bid);
+
+                foreach (var bidLot in bid.BidLots)
+                {
+                    bidLot.TotalLotAmount = existingItems
+                        .Where(item => item.BidLotId == bidLot.Id)
+                        .Sum(item => item.TotalPrice);
+                    bidLot.UpdatedAt = DateTime.UtcNow;
+                    await _bidLotRepository.UpdateAsync(bidLot);
+                }
             }
 
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Updated bid {BidId}", id);
 
-            var tender = await _tenderRepository.GetByIdAsync(bid.TenderId);
             var items = await _bidItemRepository.GetByBidIdAsync(id);
             var documents = await _bidDocumentRepository.GetByBidIdAsync(id);
 
@@ -1311,6 +1488,9 @@ public class TenderBidService : ITenderBidService
             WarrantyTerms = bid.WarrantyTerms,
             TechnicalProposal = bid.TechnicalProposal,
             CommercialProposal = bid.CommercialProposal,
+            AssociationType = bid.AssociationType,
+            AcceptedDeclaration = bid.AcceptedDeclaration,
+            DeclarationAcceptedAt = bid.DeclarationAcceptedAt,
             IsCompliant = bid.IsCompliant,
             NonComplianceReasons = bid.NonComplianceReasons,
             EvaluationTemplateId = tender?.EvaluationTemplateId,
@@ -1333,6 +1513,8 @@ public class TenderBidService : ITenderBidService
             RejectionReason = bid.RejectionReason,
             CreatedAt = bid.CreatedAt,
             UpdatedAt = bid.UpdatedAt ?? bid.CreatedAt,
+            BidLots = bid.BidLots?.Select(MapToBidLotDto).ToList() ?? new(),
+            BidLotCount = bid.BidLots?.Count ?? 0,
             Items = items.Select(MapBidItemToDto).ToList(),
             Documents = documents.Select(MapBidDocumentToDto).ToList(),
             Evaluations = bid.Evaluations?.Select(MapEvaluationToDto).ToList() ?? new(),

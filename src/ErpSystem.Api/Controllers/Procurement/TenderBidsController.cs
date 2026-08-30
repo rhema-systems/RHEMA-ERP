@@ -253,6 +253,21 @@ public class TenderBidsController : ControllerBase
             var bid = await _bidService.CreateBidAsync(dto);
             return CreatedAtAction(nameof(GetBid), new { id = bid.Id }, bid);
         }
+        catch (ProcurementSupplierEvidencePackAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Supplier bid evidence access forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "SUPPLIER_BID_EVIDENCE_ACCESS_FORBIDDEN",
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
