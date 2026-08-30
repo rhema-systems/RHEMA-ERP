@@ -105,7 +105,7 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     sessions.push(assigner);
 
     await openTaskBoard(assigner.page, projectLabel);
-    await expect(assigner.page.getByText('Assign Civil work', { exact: true })).toBeVisible();
+    await expect(assigner.page.getByText('Assign Civil work', { exact: true })).toBeVisible({ timeout: 60_000 });
     await selectOption(assigner.page, 'civil-task-assignee-select', assigneeLabel, false);
     await selectOption(assigner.page, 'civil-task-urgency-select', 'Routine');
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -133,9 +133,10 @@ test('Civil direct task is visibly assigned, completed and independently accepte
       { headers: authorization(assigner) },
     );
     expect(assignedResponse.status()).toBe(200);
-    const assignedTasks = (await assignedResponse.json()) as Array<{ id: string; title: string; status: string }>;
+    const assignedTasks = (await assignedResponse.json()) as Array<{ id: string; title: string; status: string; rowVersion: string }>;
     const assignedTask = assignedTasks.find(item => item.title === title);
     expect(assignedTask).toMatchObject({ title, status: 'Assigned' });
+    expect(Buffer.from(assignedTask!.rowVersion, 'base64')).toHaveLength(8);
 
     const assignmentLookupsResponse = await assigner.context.request.get(
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks/lookups`,
@@ -230,11 +231,39 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     );
     sessions.push(assignee);
     await openTaskBoard(assignee.page, projectLabel);
-    let taskCard = assignee.page.locator('article').filter({ hasText: title });
+    let taskCard = assignee.page.locator('article').filter({ has: assignee.page.getByText(title, { exact: true }) });
     await expect(taskCard).toHaveCount(1);
+    const currentBeforeAcknowledgeResponse = await assignee.context.request.get(
+      `${api}/api/projects/${projectId}/civil-engineering/direct-tasks`,
+      { headers: authorization(assignee) },
+    );
+    expect(currentBeforeAcknowledgeResponse.status()).toBe(200);
+    const currentBeforeAcknowledge = ((await currentBeforeAcknowledgeResponse.json()) as Array<{ id: string; rowVersion: string }>)
+      .find(item => item.id === assignedTask!.id);
+    expect(currentBeforeAcknowledge).toBeTruthy();
     await taskCard.getByRole('button', { name: 'Feedback', exact: true }).click();
     await selectOption(assignee.page, 'civil-task-feedback-action', 'Acknowledge');
-    await assignee.page.getByTestId('civil-task-save-feedback').click();
+    const [acknowledgeRequest, acknowledgeResponse] = await Promise.all([
+      assignee.page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith(`/api/projects/${projectId}/civil-engineering/direct-tasks/${assignedTask!.id}/feedback/assignee`)),
+      assignee.page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(`/api/projects/${projectId}/civil-engineering/direct-tasks/${assignedTask!.id}/feedback/assignee`)),
+      assignee.page.getByTestId('civil-task-save-feedback').click(),
+    ]);
+    const acknowledgeRequestBody = acknowledgeRequest.postDataJSON() as { rowVersion?: string };
+    expect(
+      acknowledgeRequestBody.rowVersion,
+      `Civil UI submitted stale row version ${acknowledgeRequestBody.rowVersion}; current API row version is ${currentBeforeAcknowledge!.rowVersion}.`,
+    ).toBe(currentBeforeAcknowledge!.rowVersion);
+    const acknowledgeBody = await acknowledgeResponse.text();
+    const currentAfterAcknowledgeResponse = acknowledgeResponse.status() === 200
+      ? undefined
+      : await assignee.context.request.get(`${api}/api/projects/${projectId}/civil-engineering/direct-tasks`, { headers: authorization(assignee) });
+    const currentAfterAcknowledge = currentAfterAcknowledgeResponse
+      ? ((await currentAfterAcknowledgeResponse.json()) as Array<{ id: string; rowVersion: string }>).find(item => item.id === assignedTask!.id)
+      : undefined;
+    expect(
+      acknowledgeResponse.status(),
+      `Civil acknowledge returned ${acknowledgeResponse.status()}: ${acknowledgeBody}; submitted row version ${acknowledgeRequestBody.rowVersion}; current row version ${currentAfterAcknowledge?.rowVersion}.`,
+    ).toBe(200);
     await expect(taskCard.getByText('InProgress', { exact: true })).toBeVisible({ timeout: 30_000 });
     const acknowledgedResponse = await assignee.context.request.get(
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks`,
@@ -250,7 +279,12 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     await assignee.page.getByTestId('civil-task-feedback-message').fill(
       'The controlled test inspection is complete and ready for independent acceptance.',
     );
-    await assignee.page.getByTestId('civil-task-save-feedback').click();
+    const [completeResponse] = await Promise.all([
+      assignee.page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(`/api/projects/${projectId}/civil-engineering/direct-tasks/${assignedTask!.id}/feedback/assignee`)),
+      assignee.page.getByTestId('civil-task-save-feedback').click(),
+    ]);
+    const completeBody = await completeResponse.text();
+    expect(completeResponse.status(), `Civil completion returned ${completeResponse.status()}: ${completeBody}`).toBe(200);
     await expect(taskCard.getByText('PendingAcceptance', { exact: true })).toBeVisible({ timeout: 45_000 });
     const completedResponse = await assignee.context.request.get(
       `${api}/api/projects/${projectId}/civil-engineering/direct-tasks`,
@@ -268,14 +302,19 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     );
     sessions.push(reviewer);
     await openTaskBoard(reviewer.page, projectLabel);
-    taskCard = reviewer.page.locator('article').filter({ hasText: title });
+    taskCard = reviewer.page.locator('article').filter({ has: reviewer.page.getByText(title, { exact: true }) });
     await expect(taskCard).toHaveCount(1);
     await taskCard.getByRole('button', { name: 'Feedback', exact: true }).click();
     await selectOption(reviewer.page, 'civil-task-feedback-action', 'Accept');
     await reviewer.page.getByTestId('civil-task-feedback-message').fill(
       'Independent Civil review confirms the submitted task outcome.',
     );
-    await reviewer.page.getByTestId('civil-task-save-feedback').click();
+    const [reviewResponse] = await Promise.all([
+      reviewer.page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(`/api/projects/${projectId}/civil-engineering/direct-tasks/${assignedTask!.id}/feedback/review`)),
+      reviewer.page.getByTestId('civil-task-save-feedback').click(),
+    ]);
+    const reviewBody = await reviewResponse.text();
+    expect(reviewResponse.status(), `Civil independent review returned ${reviewResponse.status()}: ${reviewBody}`).toBe(200);
     await expect(taskCard.getByText('Accepted', { exact: true })).toBeVisible({ timeout: 45_000 });
 
     const finalResponse = await assigner.context.request.get(
@@ -298,8 +337,8 @@ test('Civil direct task is visibly assigned, completed and independently accepte
     expect(finalTasks.find(item => item.id === assignedTask!.id)?.acceptedAt).toBeTruthy();
 
     await assigner.page.reload();
-    await selectOption(assigner.page, 'civil-task-project-select', projectLabel);
-    const finalCard = assigner.page.locator('article').filter({ hasText: title });
+    await selectOption(assigner.page, 'civil-task-project-select', projectLabel, false);
+    const finalCard = assigner.page.locator('article').filter({ has: assigner.page.getByText(title, { exact: true }) });
     await expect(finalCard).toHaveCount(1);
     await expect(finalCard.getByText('Accepted', { exact: true })).toBeVisible({ timeout: 30_000 });
     expect(browserErrors, browserErrors.join('\n')).toEqual([]);

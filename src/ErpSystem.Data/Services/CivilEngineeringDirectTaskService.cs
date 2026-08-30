@@ -359,7 +359,7 @@ public sealed class CivilEngineeringDirectTaskService(
             };
 
             db.ProjectCivilDirectTaskFeedbackEntries.Add(feedback);
-            await SaveAsync(token);
+            await SaveAsync(token, "feedback event");
 
             task.LastFeedbackClientRequestId = request.ClientRequestId;
             task.LastFeedbackRequestHash = requestHash;
@@ -379,7 +379,7 @@ public sealed class CivilEngineeringDirectTaskService(
             var after = new { task = Snapshot(task, workItem), feedback = FeedbackSnapshot(feedback) };
             AddRevision(task, auditAction, before, after, Clean(request.Message, 2000), correlationId);
             AddAudit(task, auditAction, before, after, correlationId);
-            await SaveAsync(token);
+            await SaveAsync(token, "lifecycle mutation");
             await transaction.CommitAsync(token);
             result = (await MapAsync([task], token)).Single();
         });
@@ -820,7 +820,7 @@ public sealed class CivilEngineeringDirectTaskService(
     private void AddRevision(ProjectCivilDirectTaskControl task, string action, object? before, object after, string? reason, string correlationId)
     {
         CivilEngineeringAuditEventMap.GetRequired(action);
-        task.Revisions.Add(new ProjectCivilDirectTaskRevision { Id = Guid.NewGuid(), TenantId = TenantId, DirectTaskControlId = task.Id, Action = action, ActorUserId = UserId, ActorName = UserName, ActorRoles = ActorRoles, CorrelationId = Correlation(correlationId), Reason = Clean(reason, 2000), BeforeJson = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), AfterJson = JsonSerializer.Serialize(after, JsonOptions), CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId });
+        db.ProjectCivilDirectTaskRevisions.Add(new ProjectCivilDirectTaskRevision { Id = Guid.NewGuid(), TenantId = TenantId, DirectTaskControlId = task.Id, Action = action, ActorUserId = UserId, ActorName = UserName, ActorRoles = ActorRoles, CorrelationId = Correlation(correlationId), Reason = Clean(reason, 2000), BeforeJson = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), AfterJson = JsonSerializer.Serialize(after, JsonOptions), CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId });
     }
 
     private void AddAudit(ProjectCivilDirectTaskControl task, string action, object? before, object after, string correlationId) => db.AuditLogs.Add(new AuditLog
@@ -841,10 +841,10 @@ public sealed class CivilEngineeringDirectTaskService(
         CreatedById = UserId
     });
 
-    private async Task SaveAsync(CancellationToken token)
+    private async Task SaveAsync(CancellationToken token, string? operation = null)
     {
         try { await db.SaveChangesAsync(token); }
-        catch (DbUpdateConcurrencyException) { throw Conflict("The Civil direct task changed concurrently. Refresh and retry."); }
+        catch (DbUpdateConcurrencyException) { throw Conflict($"The Civil direct task {operation ?? "record"} changed concurrently. Refresh and retry."); }
         catch (DbUpdateException exception) when (exception.InnerException is SqlException sql && sql.Number is >= 52280 and <= 52291) { throw Conflict(sql.Message); }
         catch (DbUpdateException exception) when (exception.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true) { throw Conflict("A duplicate or conflicting Civil direct task was detected. Refresh and retry."); }
     }
