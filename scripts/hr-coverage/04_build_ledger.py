@@ -383,38 +383,22 @@ _d("TalentPoolsController.cs", [
     ("DELETE", "api/talent-pools/documents/{}", _SUCC_DOC_DELETE),
 ])
 
-# ── MedicalClinical — 7 flagged, all real ────────────────────────────────────
-_CLIN = ("BUILD", "Create and the lifecycle transitions are wired; edit and delete are not. Every "
-                  "one of the three clinical entities has the same hole, so a pre-authorization, "
-                  "referral or appointment entered wrongly can only be cancelled, never corrected. "
-                  "The per-record reads already return the full DTO (the list reads are the "
-                  "summaries), so an edit panel has the fields it needs — but see D-16 before "
-                  "building: the status transitions stamp no actor at all.")
+# ── MedicalClinical — built 2026-08-29 (slice 6) ────────────────────────────
+# The six edit/delete endpoints resolve to a caller now and have left the queue by themselves.
+# What remains is the one route the screen deliberately does not call.
 _d("MedicalClinicalController.cs", [
-    ("PUT", "api/medical-clinical/pre-authorizations/{}", _CLIN),
-    ("DELETE", "api/medical-clinical/pre-authorizations/{}", _CLIN),
-    ("PUT", "api/medical-clinical/referrals/{}", _CLIN),
-    ("DELETE", "api/medical-clinical/referrals/{}", _CLIN),
-    ("PUT", "api/medical-clinical/appointments/{}", _CLIN),
     ("PUT", "api/medical-clinical/appointments/{}/status",
-     ("BUILD", "A free status set, distinct from cancel / check-in / check-out. See D-16: it takes "
-               "no actor and the service records none, not even `UpdatedBy`.")),
-    ("DELETE", "api/medical-clinical/appointments/{}", _CLIN),
+     ("INTENTIONAL", "The free status set, deliberately unwired. The screen moves an appointment "
+                     "through check-in, check-out and cancel — each carrying its own preconditions "
+                     "and its own fields — and a control assigning any status at will would let a "
+                     "visit be marked Completed with no check-out time. Same call as "
+                     "`PATCH PerformanceAppraisals/{}/status`.")),
 ])
 
-# ── MedicalExpenseClaims — 6 flagged: 1 artefact, 5 real ────────────────────
-_MEC = ("BUILD", "The claim ladder wires create, approval, payment, flag, unflag, items and notes — "
-                 "but neither the claim nor its items can be edited or removed. A claim captured "
-                 "with the wrong amount has no correction path short of approving and paying it.")
+# ── MedicalExpenseClaims — built 2026-08-29 (slice 6) ───────────────────────
+# The claim edit/delete, the line edit/delete and the document delete all resolve to a caller now.
 _d("MedicalExpenseClaimsController.cs", [
     ("POST", "api/medical-expense-claims/{}/documents", _HELPER),
-    ("PUT", "api/medical-expense-claims/{}", _MEC),
-    ("DELETE", "api/medical-expense-claims/{}", _MEC),
-    ("PUT", "api/medical-expense-claims/items/{}", _MEC),
-    ("DELETE", "api/medical-expense-claims/items/{}", _MEC),
-    ("DELETE", "api/medical-expense-claims/documents/{}",
-     ("BUILD", "The upload is wired and the download is wired; removing a receipt attached in "
-               "error is not.")),
 ])
 
 # ── NHISClaims — 2 flagged, both real and both blocked ──────────────────────
@@ -620,11 +604,10 @@ _d("PayComponentsController.cs", [
      ("INTENTIONAL", "The endpoint's own summary reads 'Not supported — create the component in "
                      "Payroll, then sync.' Payroll owns the component master.")),
 ])
-_d("CompetencyController.cs", [
-    ("POST", "api/competency-skill-indicators", _ALIAS("`api/competencies`")),
-    ("POST", "api/competency-skill-indicators/{}/skill-indicators",
-     _ALIAS("`api/competencies/{}/skill-indicators`")),
-])
+# ── Competency — nothing left to classify ───────────────────────────────────
+# Its two flags were phantoms: `CompetencyController.cs` holds two routed controllers, and
+# instrument 01 used to cross every [Route] in a FILE with every action in it. Fixed at the
+# instrument on 2026-08-30, so those rows no longer exist and need no disposition.
 
 # ── Single real gaps ────────────────────────────────────────────────────────
 _d("JobCandidateController.cs", [
@@ -1014,6 +997,9 @@ w("| 2026-08-29 | Medical insurance: network facilities, provider documents and 
 w("| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |")
 w("| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |")
 w("| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |")
+w("| 2026-08-30 | **The discipline catalogue is authorable** (area 9 slice 10, 43 assertions). Offences, their procedure ladders and the sanction catalogue can all be created, corrected, reordered and retired from `/administration/hr/discipline/catalogue`. A client was previously stuck with whatever the seed shipped — unable to name an offence it had not anticipated, or fix a typo in one it had. |")
+w("| 2026-08-30 | ⚠ **Instrument 01 invented a phantom route for every real one in a file holding two controllers.** It crossed every `[Route]` in a FILE with every `[Http*]` in it, so `StaffDisciplineLookup` read as 20 writes when it has 10, and `Competency` as 12 when it has 6. `api/discipline/action-types/{}/procedures` was reported for months and answers 404 — slice 10 proves it. **Fixed at the instrument**: routes are now attributed per class. 16 phantom endpoints left the backend count (2151 → 2135). |")
+w("| 2026-08-30 | **A TypeScript type can be fiction nothing has caught yet.** `StaffOffense.offenseProcedures` never existed — the DTO field is `Procedures` — but no screen had read it, so nothing failed. The first screen to use it would have rendered an empty ladder with no error and no clue. Corrected, and the harness now pins the real name. Fourth instance of this shape. |")
 w("| 2026-08-30 | **The Assets missing-edit family is built** (slice 18, 43 assertions). All eight endpoints wired; eight left the coverage queue on their own. Unlike medical this needed **no backend change** — every endpoint already stamped its actor (five through `UpdateEntity(dto, userId)`, surcharges through a `Stamp(entity)` helper) and every screen already fetched its record by id, so both standing checks passed before any UI was written. |")
 w("| 2026-08-30 | **A wired endpoint can still be unreachable through a misspelled payload key.** `submitSurcharge` sent `proceededWithoutResponseReason` while the DTO declares `ProceedWithoutResponseReason` — \"proceeded\" against \"proceed\" — so a submit without an employee response was refused however carefully the reason was typed. Instrument 01 counts the endpoint as wired, because it is: the ROUTE matched and the BODY did not. Slice 18 asserts both spellings. |")
 w("| 2026-08-30 | ⚠ **A full-project `tsc --noEmit` crashes on this repo** (TypeScript 5.9.2, \"Debug Failure. No error for last overload signature\"), and `incremental: true` with a stale `tsconfig.tsbuildinfo` had been hiding it — earlier clean runs were partial, checking only changed files. Reproduced on a clean tree with no local changes, so it predates this work. Slices are type-checked against a scoped `tsconfig` until someone finds the offending file. |")
@@ -1025,7 +1011,7 @@ w("| 2026-08-29 | **The succession, talent-pool and NHIS document families now g
 w("| 2026-08-29 | **Succession document uploaders are stamped from the token** (D-15). `UploadedById` is an explicit service parameter, not a DTO field, so it cannot be asserted by a caller. Fifth instance of the D-05 shape. |")
 w("| 2026-08-29 | **Medical clinical transitions stamp an actor** (D-16). Eight helpers now set `UpdatedAt`/`UpdatedBy`. Not just a blocker — cancel, check-in and check-out were wired and shipped, so the defect was live. Neither the appointment nor the referral carries a domain actor FK, so the audit column is the only place an actor can go without a schema change. |")
 w("| 2026-08-29 | **The section D hand-review queue is classified per endpoint, not per controller.** A controller is rarely one verdict: `Assets` is two path-builder artefacts, two employee-portal duplicates and eight genuine gaps. `ENDPOINT_DISPOSITIONS` in the generator keys on `(file, VERB, route)` so the mix survives a regeneration, and section D2 carries the reason for every line. |")
-w("| 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 are instrument artefacts — the endpoint is wired and 01 could not see it (31 through `hrDocumentService.upload`, 4 through `<DocumentUploadField>`, 20 through a second `[Route]` alias, 1 through an interpolated query string). 38 are `INTENTIONAL`: a duplicate route onto an operation that is already reachable, a raw-CRUD escape hatch superseded by a workflow, a replace-set parent that owns its children, or a boundary held on purpose. The remaining 65 are gaps with a screen to build. |")
+w("| 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 are instrument artefacts — the endpoint is wired and 01 could not see it (31 through `hrDocumentService.upload`, 4 through `DocumentUploadField`, 18 through the `api/Pip` second-`[Route]` alias, 2 through the two-controllers-in-one-file bug fixed on 2026-08-30, 1 through an interpolated query string). 38 are `INTENTIONAL`: a duplicate route onto an operation that is already reachable, a raw-CRUD escape hatch superseded by a workflow, a replace-set parent that owns its children, or a boundary held on purpose. The remaining 65 are gaps with a screen to build. |")
 w("| 2026-08-29 | **The dominant real gap is the missing edit.** Assets, medical clinical records, medical expense claims and their items, travel policy rules, travel groups, and the four movement sub-types all wire create and (mostly) delete, and not the correction. A record raised wrongly can be destroyed but not fixed — which is the worse of the two on anything a person is charged, paid or moved by. |")
 w("| 2026-08-29 | **Two wired approval queues can never have anything in them.** `CreateExceptionAsync` (travel policy exceptions) and `CreateAlertNotificationAsync` (travel compliance alerts) each have exactly one caller — their own endpoint — and no screen calls either, while the pending-queue read and the decide/acknowledge action on both are wired. Nothing raises the thing the queue exists to work through. |")
 w("| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so HR's wired `pending-appeals` queue is unfillable and the employee surface has to be built. |")

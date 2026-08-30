@@ -209,7 +209,43 @@ export interface StaffOffenseProcedure {
 
 export interface StaffOffense extends StaffOffenseSummary {
   offenseDescription: string;
-  offenseProcedures: StaffOffenseProcedure[];
+  /**
+   * ⚠ `procedures`, not `offenseProcedures`. The type declared the latter until slice 10, which was
+   * fiction that type-checked: `StaffOffenseDto.Procedures` is what the API returns, so anything
+   * reading the old name got `undefined`. Nothing had read it, so nothing had failed — the first
+   * screen to use it would have rendered an empty ladder with no error.
+   */
+  procedures: StaffOffenseProcedure[];
+}
+
+/**
+ * ⚠ **An edit form must not bind to {@link StaffOffenseSummary}** — it has no
+ * `offenseDescription`, which the update writes, so a dialog seeded from a list row would show it
+ * blank and blank it on save. Load `offenses/{id}/with-procedures` instead. Third module in a row
+ * where the list read is a projection the update outruns; see the closure ledger's D-09/D-12.
+ */
+export interface CreateStaffOffenseRequest {
+  offenseCode: string;
+  offenseName: string;
+  offenseDescription: string;
+  isActive: boolean;
+}
+
+export interface UpdateStaffOffenseRequest extends CreateStaffOffenseRequest {
+  id: string;
+}
+
+export interface CreateStaffOffenseProcedureRequest {
+  offenseId: string;
+  stepName: string;
+  stepDescription: string;
+  /** 1-based, and unique within the offence — the reorder endpoint is what renumbers a whole set. */
+  sequence: number;
+  expectedCompletionDays?: number | null;
+}
+
+export interface UpdateStaffOffenseProcedureRequest extends CreateStaffOffenseProcedureRequest {
+  id: string;
 }
 
 /**
@@ -243,6 +279,36 @@ export interface DisciplinaryActionTypeSummary {
   isActive: boolean;
   minimumAuthority: DisciplinaryActionAuthority;
   minimumAuthorityName: string;
+}
+
+/**
+ * The whole action type.
+ *
+ * ⚠ The summary above carries neither `description` nor either default, and the update writes all
+ * three — so an edit dialog loads this by id rather than binding to the row it was opened from.
+ */
+export interface DisciplinaryActionType extends DisciplinaryActionTypeSummary {
+  description: string;
+  defaultSuspensionDays?: number | null;
+  defaultFineAmount?: number | null;
+}
+
+export interface CreateDisciplinaryActionTypeRequest {
+  code: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  defaultSuspensionDays?: number | null;
+  defaultFineAmount?: number | null;
+  /**
+   * ⚠ The NAME, not a number — this enum serialises as its member name here, unlike the asset
+   * module's numeric enums. Pick from {@link ACTION_AUTHORITY_OPTIONS}.
+   */
+  minimumAuthority: DisciplinaryActionAuthority;
+}
+
+export interface UpdateDisciplinaryActionTypeRequest extends CreateDisciplinaryActionTypeRequest {
+  id: string;
 }
 
 // ── Case ─────────────────────────────────────────────────────────────────────

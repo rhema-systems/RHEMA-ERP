@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Gavel,
   Building2,
   MapPin,
   Users,
@@ -234,6 +235,13 @@ export default function HrAdministrationPage() {
                 'Award catalogue, levels, budgets, committees and the long-service milestone ladder.',
               href: '/administration/hr/awards',
               icon: Medal,
+            },
+            {
+              title: 'Discipline Catalogue',
+              description:
+                'What counts as misconduct, the procedure each offence must follow, and the sanctions available.',
+              href: '/administration/hr/discipline/catalogue',
+              icon: Gavel,
             },
             {
               title: 'Orientation & Onboarding Setup',

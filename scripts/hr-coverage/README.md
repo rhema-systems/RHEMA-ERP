@@ -32,6 +32,20 @@ hand-verify the rest. 02 alone is conservative; 01 alone over-reports.
 - **Alias routes.** A controller with two `[Route]` attributes yields two route rows per action;
   the unused alias always reads as unwired. `PerformanceImprovementPlansController` carries both
   `api/PerformanceImprovementPlans` and `api/Pip` — 18 of its 22 "gaps" are that alias.
+- **Two controllers in one file** — *fixed at the instrument on 2026-08-30, kept here because the
+  shape recurs.* 01 used to cross every `[Route]` in a FILE with every `[Http*]` in it, so a file
+  holding two routed controllers invented a phantom route for each real one.
+  `StaffDisciplineLookupController.cs` read as 20 writes when it has 10, and
+  `api/discipline/action-types/{id}/procedures` — reported for months — answers 404. Routes are now
+  attributed per class. If you add a second controller to an existing file, check the counts.
+- **Helper-wrapped uploads.** `hrDocumentService.upload(endpoint, file, fields)` and
+  `DocumentUploadField`'s `endpoint` prop hide the URL from 01 the same way `employeeService.sub`
+  does — 35 of the 149 hand-reviewed rows in August 2026 were this.
+- **Interpolated query strings.** `${baseUrl}/${id}/reject${query}` folds the query into the last
+  path segment, so the route stops matching. One instance found.
+- ⚠ **A matched route says nothing about the BODY.** `submitSurcharge` sent
+  `proceededWithoutResponseReason` where the DTO declares `ProceedWithoutResponseReason`; 01
+  counted it wired and was right to. Only a harness finds that class of defect.
 - **Server-written entities.** Some writes are meant to have no UI caller because a service writes
   them (`EmployeeCareerPath` is written by the movement engine).
 - **Other teams' modules.** `PayrollController` is not HR's to wire.

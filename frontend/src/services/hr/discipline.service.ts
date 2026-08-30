@@ -20,7 +20,15 @@ import type {
   DisciplineHearing,
   StaffOffense,
   StaffOffenseSummary,
+  StaffOffenseProcedure,
+  CreateStaffOffenseRequest,
+  UpdateStaffOffenseRequest,
+  CreateStaffOffenseProcedureRequest,
+  UpdateStaffOffenseProcedureRequest,
   DisciplinaryActionTypeSummary,
+  DisciplinaryActionType,
+  CreateDisciplinaryActionTypeRequest,
+  UpdateDisciplinaryActionTypeRequest,
   DisciplineActionStep,
   UpdateDisciplineActionStep,
   DisciplineLegalReview,
@@ -346,6 +354,89 @@ class DisciplineLookupService {
 
   getActiveActionTypes(): Promise<DisciplinaryActionTypeSummary[]> {
     return apiService.get<DisciplinaryActionTypeSummary[]>('/discipline/action-types/active');
+  }
+
+  /**
+   * The whole action type. ⚠ Load this before editing — the list read carries neither the
+   * description nor either default, and the update writes all three.
+   */
+  getActionType(id: string): Promise<DisciplinaryActionType> {
+    return apiService.get<DisciplinaryActionType>(`/discipline/action-types/${id}`);
+  }
+
+  // ── Offences ───────────────────────────────────────────────────────────────
+
+  createOffense(payload: CreateStaffOffenseRequest): Promise<StaffOffense> {
+    return apiService.post<StaffOffense>('/discipline/offenses', payload);
+  }
+
+  updateOffense(id: string, payload: UpdateStaffOffenseRequest): Promise<StaffOffense> {
+    return apiService.put<StaffOffense>(`/discipline/offenses/${id}`, { ...payload, id });
+  }
+
+  /** ⚠ Admin. */
+  deleteOffense(id: string): Promise<void> {
+    return apiService.delete<void>(`/discipline/offenses/${id}`);
+  }
+
+  // ── The procedure ladder under an offence ──────────────────────────────────
+
+  addProcedure(
+    offenseId: string,
+    payload: CreateStaffOffenseProcedureRequest,
+  ): Promise<StaffOffenseProcedure> {
+    return apiService.post<StaffOffenseProcedure>(
+      `/discipline/offenses/${offenseId}/procedures`,
+      { ...payload, offenseId },
+    );
+  }
+
+  /** Note the flat route: a step is keyed by its own id once created, not by offence. */
+  updateProcedure(
+    id: string,
+    payload: UpdateStaffOffenseProcedureRequest,
+  ): Promise<StaffOffenseProcedure> {
+    return apiService.put<StaffOffenseProcedure>(
+      `/discipline/offenses/procedures/${id}`,
+      { ...payload, id },
+    );
+  }
+
+  /** ⚠ Admin. */
+  deleteProcedure(id: string): Promise<void> {
+    return apiService.delete<void>(`/discipline/offenses/procedures/${id}`);
+  }
+
+  /**
+   * Renumbers the whole ladder in one write.
+   *
+   * Send every step id in the order wanted; the server assigns the sequences. Moving one step by
+   * editing its `sequence` alone would collide with whatever already held that number, which is
+   * why this exists.
+   */
+  reorderProcedures(offenseId: string, orderedProcedureIds: string[]): Promise<StaffOffenseProcedure[]> {
+    return apiService.post<StaffOffenseProcedure[]>(
+      `/discipline/offenses/${offenseId}/procedures/reorder`,
+      { offenseId, orderedProcedureIds },
+    );
+  }
+
+  // ── Action types ───────────────────────────────────────────────────────────
+
+  createActionType(payload: CreateDisciplinaryActionTypeRequest): Promise<DisciplinaryActionType> {
+    return apiService.post<DisciplinaryActionType>('/discipline/action-types', payload);
+  }
+
+  updateActionType(
+    id: string,
+    payload: UpdateDisciplinaryActionTypeRequest,
+  ): Promise<DisciplinaryActionType> {
+    return apiService.put<DisciplinaryActionType>(`/discipline/action-types/${id}`, { ...payload, id });
+  }
+
+  /** ⚠ Admin. */
+  deleteActionType(id: string): Promise<void> {
+    return apiService.delete<void>(`/discipline/action-types/${id}`);
   }
 }
 

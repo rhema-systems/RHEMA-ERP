@@ -8,30 +8,63 @@ os.makedirs(SP, exist_ok=True)
 # ---------------- BACKEND: every HR write endpoint ----------------
 CTRL_DIR = "src/ErpSystem.Api/Controllers/HR"
 ROUTE_ATTR = re.compile(r'^\s*\[Route\("([^"]+)"\)\]', re.M)
+CLASS_DECL = re.compile(r'^(?P<indent>\s*)(?:public\s+|internal\s+)?(?P<abstract>abstract\s+)?'
+                        r'(?:sealed\s+)?(?:partial\s+)?class\s+(?P<name>\w+?)(?:Controller)?\b\s*:',
+                        re.M)
+
+
+def class_spans(text):
+    """
+    Every controller class in the file, with the character span it owns and the [Route] attributes
+    declared on IT rather than on a sibling.
+
+    ⚠ Two HR files hold two routed controllers each (`StaffDisciplineLookupController.cs` and
+    `CompetencyController.cs`). Crossing every route in the file with every action in it invented
+    a phantom route for each real one — `api/discipline/action-types/{id}/procedures` was reported
+    for months and answers 404. Area 9 slice 10 proved it. Attribute per class instead.
+    """
+    decls = list(CLASS_DECL.finditer(text))
+    out = []
+    for i, m in enumerate(decls):
+        start = m.start()
+        end = decls[i + 1].start() if i + 1 < len(decls) else len(text)
+        # The attributes sit above the declaration, after the previous class's span.
+        attr_from = decls[i - 1].start() if i else 0
+        header = text[attr_from:start]
+        bases = [r.group(1).replace("[controller]", m.group("name"))
+                 for r in ROUTE_ATTR.finditer(header)]
+        out.append({"name": m.group("name"), "abstract": bool(m.group("abstract")),
+                    "start": start, "end": end, "bases": bases})
+    return out
+
+
 routes, skipped = [], []
 for fn in sorted(os.listdir(CTRL_DIR)):
     if not fn.endswith(".cs"):
         continue
     src = open(os.path.join(CTRL_DIR, fn), encoding="utf-8", errors="replace").read()
-    cm = re.search(r'(abstract\s+)?class\s+(\w+?)(?:Controller)?\b\s*:', src)
-    if not cm:
+    spans = class_spans(src)
+    if not spans:
         skipped.append((fn, "no class")); continue
-    if cm.group(1):
+    if all(s["abstract"] for s in spans):
         skipped.append((fn, "abstract base")); continue
-    ctrl = cm.group(2)
-    bases = [m.group(1).replace("[controller]", ctrl) for m in ROUTE_ATTR.finditer(src)]
-    for mm in re.finditer(r'\[Http(Post|Put|Patch|Delete|Get)(?:\("([^"]*)"\))?\]', src):
-        verb, sub = mm.group(1), (mm.group(2) or "")
-        line = src[:mm.start()].count("\n") + 1
-        if not bases:
-            fulls = [sub]
-        elif sub.startswith(("/", "~/")):
-            fulls = [sub.lstrip("~").lstrip("/")]
-        else:
-            fulls = [b + ("/" + sub if sub else "") for b in bases]
-        for full in fulls:
-            routes.append({"file": fn, "verb": verb, "route": re.sub(r"/+", "/", full),
-                           "bases": bases, "line": line})
+    for span in spans:
+        if span["abstract"]:
+            continue
+        body = src[span["start"]:span["end"]]
+        bases = span["bases"]
+        for mm in re.finditer(r'\[Http(Post|Put|Patch|Delete|Get)(?:\("([^"]*)"\))?\]', body):
+            verb, sub = mm.group(1), (mm.group(2) or "")
+            line = src[:span["start"] + mm.start()].count("\n") + 1
+            if not bases:
+                fulls = [sub]
+            elif sub.startswith(("/", "~/")):
+                fulls = [sub.lstrip("~").lstrip("/")]
+            else:
+                fulls = [b + ("/" + sub if sub else "") for b in bases]
+            for full in fulls:
+                routes.append({"file": fn, "verb": verb, "route": re.sub(r"/+", "/", full),
+                               "bases": bases, "line": line})
 
 # ---------------- FRONTEND: every HTTP call site ----------------
 FE = "frontend/src"
