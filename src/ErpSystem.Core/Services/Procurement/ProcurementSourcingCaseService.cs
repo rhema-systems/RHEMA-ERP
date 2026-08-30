@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -869,7 +870,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         if (approvalActors.Contains(requisition.RequestedById))
             return Fail("SOURCING_METHOD_OVERRIDE_SOD_CONFLICT", "The requisition initiator cannot approve the method override.");
 
-        if (controlMode != OverrideControlMode.None && !IsAdministrator())
+        if (controlMode != OverrideControlMode.None && !HasPlatformSuperAdministratorBypass())
         {
             var capabilityRequest = new ProcurementAccessCapabilityRequest
             {
@@ -1168,7 +1169,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     private async Task EnsureCapabilityAsync(string permission, string reference, string correlationId, CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         try
         {
             var result = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
@@ -1189,7 +1190,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             throw new ProcurementSourcingCaseAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private void Touch(ProcurementSourcingCase item, DateTime now)
     {

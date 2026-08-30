@@ -58,7 +58,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get all checklist templates
     /// </summary>
     [HttpGet("templates")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<AwardVerificationChecklistTemplateDto>>> GetAllTemplates([FromQuery] bool includeInactive = false)
     {
         try
@@ -77,7 +77,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get paged checklist templates
     /// </summary>
     [HttpGet("templates/paged")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<PagedResult<AwardVerificationChecklistTemplateDto>>> GetTemplatesPaged(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
@@ -100,7 +100,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get a checklist template by ID
     /// </summary>
     [HttpGet("templates/{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<AwardVerificationChecklistTemplateDto>> GetTemplateById(Guid id)
     {
         try
@@ -121,7 +121,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get the default checklist template
     /// </summary>
     [HttpGet("templates/default")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<AwardVerificationChecklistTemplateDto>> GetDefaultTemplate()
     {
         try
@@ -142,7 +142,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get templates applicable for a contract value
     /// </summary>
     [HttpGet("templates/by-value")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<AwardVerificationChecklistTemplateDto>>> GetTemplatesByContractValue([FromQuery] decimal contractValue)
     {
         try
@@ -161,7 +161,7 @@ public class AwardVerificationsController : ControllerBase
     /// Create a new checklist template
     /// </summary>
     [HttpPost("templates")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<AwardVerificationChecklistTemplateDto>> CreateTemplate([FromBody] CreateAwardVerificationChecklistTemplateDto dto)
     {
         try
@@ -184,7 +184,7 @@ public class AwardVerificationsController : ControllerBase
     /// Update a checklist template
     /// </summary>
     [HttpPut("templates/{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<AwardVerificationChecklistTemplateDto>> UpdateTemplate(Guid id, [FromBody] UpdateAwardVerificationChecklistTemplateDto dto)
     {
         try
@@ -211,7 +211,7 @@ public class AwardVerificationsController : ControllerBase
     /// Delete a checklist template
     /// </summary>
     [HttpDelete("templates/{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTemplate(Guid id)
     {
         try
@@ -234,7 +234,7 @@ public class AwardVerificationsController : ControllerBase
     /// Add an item to a template
     /// </summary>
     [HttpPost("templates/{templateId}/items")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<AwardVerificationChecklistItemDto>> AddTemplateItem(Guid templateId, [FromBody] CreateAwardVerificationChecklistItemDto dto)
     {
         try
@@ -257,7 +257,7 @@ public class AwardVerificationsController : ControllerBase
     /// Update a template item
     /// </summary>
     [HttpPut("templates/items/{itemId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<AwardVerificationChecklistItemDto>> UpdateTemplateItem(Guid itemId, [FromBody] CreateAwardVerificationChecklistItemDto dto)
     {
         try
@@ -280,7 +280,7 @@ public class AwardVerificationsController : ControllerBase
     /// Delete a template item
     /// </summary>
     [HttpDelete("templates/items/{itemId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> DeleteTemplateItem(Guid itemId)
     {
         try
@@ -307,7 +307,7 @@ public class AwardVerificationsController : ControllerBase
     /// Start a verification process for a tender
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderAwardVerificationDto>> StartVerification([FromBody] StartAwardVerificationDto dto)
     {
         try
@@ -334,7 +334,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get verification by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderAwardVerificationDto>> GetVerificationById(Guid id)
     {
         try
@@ -355,7 +355,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get verification by tender ID
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderAwardVerificationDto>> GetVerificationByTenderId(Guid tenderId)
     {
         try
@@ -376,7 +376,7 @@ public class AwardVerificationsController : ControllerBase
     /// Get pending verifications
     /// </summary>
     [HttpGet("pending")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderAwardVerificationDto>>> GetPendingVerifications()
     {
         try
@@ -395,7 +395,7 @@ public class AwardVerificationsController : ControllerBase
     /// Verify a checklist item for a bidder
     /// </summary>
     [HttpPost("verify-item")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderAwardVerificationItemResultDto>> VerifyChecklistItem([FromBody] VerifyChecklistItemDto dto)
     {
         try
@@ -418,7 +418,7 @@ public class AwardVerificationsController : ControllerBase
     /// Complete verification for a bidder
     /// </summary>
     [HttpPost("complete-bidder")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderAwardVerificationBidderDto>> CompleteBidderVerification([FromBody] CompleteBidderVerificationDto dto)
     {
         try
@@ -445,7 +445,7 @@ public class AwardVerificationsController : ControllerBase
     /// Complete the entire verification process
     /// </summary>
     [HttpPost("{id}/complete")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderAwardVerificationDto>> CompleteVerification(Guid id, [FromBody] CompleteVerificationDto dto)
     {
         try
@@ -472,7 +472,7 @@ public class AwardVerificationsController : ControllerBase
     /// Cancel a verification process
     /// </summary>
     [HttpPost("{id}/cancel")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult> CancelVerification(Guid id, [FromQuery] string? reason = null)
     {
         try

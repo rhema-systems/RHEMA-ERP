@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -645,7 +646,7 @@ public sealed class ProcurementContractOperationsService :
         CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -668,9 +669,8 @@ public sealed class ProcurementContractOperationsService :
                 "An authenticated internal tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task PublishNotificationAsync(
         ProcurementContractOperationsDetailDto detail,

@@ -25,7 +25,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Get all document types
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderDocumentTypeDto>>> GetAll()
     {
         try
@@ -44,7 +44,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Get active document types
     /// </summary>
     [HttpGet("active")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderDocumentTypeDto>>> GetActive()
     {
         try
@@ -63,7 +63,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Get document type by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderDocumentTypeDto>> GetById(Guid id)
     {
         try
@@ -86,7 +86,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Get document types by category
     /// </summary>
     [HttpGet("category/{category}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderDocumentTypeDto>>> GetByCategory(string category)
     {
         try
@@ -105,7 +105,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Create document type
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDocumentTypeDto>> Create([FromBody] CreateTenderDocumentTypeDto dto)
     {
         try
@@ -128,7 +128,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Update document type
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderDocumentTypeDto>> Update(Guid id, [FromBody] UpdateTenderDocumentTypeDto dto)
     {
         try
@@ -151,7 +151,7 @@ public class TenderDocumentTypesController : ControllerBase
     /// Delete document type
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> Delete(Guid id)
     {
         try

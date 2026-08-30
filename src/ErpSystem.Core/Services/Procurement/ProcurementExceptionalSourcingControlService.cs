@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -772,7 +773,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private async Task EnsureCapabilityAsync(string permissionCode, string reference, string correlationId, CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permissionCode, SourceType = SourceType, SourceReference = reference
@@ -909,9 +910,9 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
-        throw new ProcurementExceptionalSourcingAuthorizationException("A TDC procurement or tenant-administration role is required.");
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
+        throw new ProcurementExceptionalSourcingAuthorizationException("The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -934,7 +935,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         if (!current.SequenceEqual(parsed)) throw Conflict("EXCEPTIONAL_VERSION_CONFLICT", "The statutory record changed. Reload before continuing.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static bool IsExceptional(ProcurementMethodType method) =>
         method is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase;

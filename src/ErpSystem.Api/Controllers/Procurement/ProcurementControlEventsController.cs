@@ -7,10 +7,9 @@ namespace ErpSystem.Api.Controllers.Procurement;
 
 [ApiController]
 [Route("api/procurement/control-events")]
-[Authorize(Roles = Readers)]
+[Authorize(Policy = "procurement.audit.read")]
 public sealed class ProcurementControlEventsController : ControllerBase
 {
-    private const string Readers = "SuperAdmin,TenantAdmin,TDC_INTERNAL_AUDIT";
     private readonly IProcurementControlEventService _service;
 
     public ProcurementControlEventsController(IProcurementControlEventService service) => _service = service;

@@ -25,12 +25,18 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementConfigurationProfilesControllerTests
 {
     [Fact]
-    public void ControllerRequiresTenantOrSuperAdministratorRole()
+    public void ControllerUsesReadAuditAndAdministrationPermissions()
     {
         var authorize = typeof(ProcurementConfigurationProfilesController)
             .GetCustomAttribute<AuthorizeAttribute>();
         authorize.Should().NotBeNull();
-        authorize!.Roles.Should().Be("SuperAdmin,TenantAdmin");
+        authorize!.Roles.Should().BeNull();
+        typeof(ProcurementConfigurationProfilesController).GetMethod(nameof(ProcurementConfigurationProfilesController.GetProfiles))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.records.read");
+        typeof(ProcurementConfigurationProfilesController).GetMethod(nameof(ProcurementConfigurationProfilesController.GetHistory))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.audit.read");
+        typeof(ProcurementConfigurationProfilesController).GetMethod(nameof(ProcurementConfigurationProfilesController.Update))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
     }
 
     [Fact]

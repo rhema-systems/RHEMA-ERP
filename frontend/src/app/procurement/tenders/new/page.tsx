@@ -819,7 +819,11 @@ function NewTenderPageContent() {
 
     switch (currentStep) {
       case 1:
-        return <BasicInformation formData={formData} updateFormData={updateFormData} />;
+        return <BasicInformation
+          formData={formData}
+          updateFormData={updateFormData}
+          procurementCategory={sourceRequisition?.procurementCategory}
+        />;
       case 2:
         return <TenderLots formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 3:

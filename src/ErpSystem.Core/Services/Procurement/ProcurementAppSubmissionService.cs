@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -551,7 +552,7 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
 
     private async Task EnsureManagerAsync(string sourceReference, string causationId, CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = PlanPermission,
@@ -565,9 +566,9 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
-        throw new ProcurementAppSubmissionAuthorizationException("A TDC procurement role or tenant-administration role is required.");
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
+        throw new ProcurementAppSubmissionAuthorizationException("The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -576,7 +577,7 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             throw new ProcurementAppSubmissionAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
 
     private static void EnsurePublishedPlan(ProcurementPlan plan)

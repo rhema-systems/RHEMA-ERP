@@ -25,7 +25,7 @@ public class TenderAwardsController : ControllerBase
     /// Get all awards
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderAwardDto>>> GetAwards()
     {
         try
@@ -45,7 +45,7 @@ public class TenderAwardsController : ControllerBase
     /// Get award by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderAwardDto>> GetAward(Guid id)
     {
         try
@@ -69,7 +69,7 @@ public class TenderAwardsController : ControllerBase
     /// Get award by tender ID
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderAwardDto>> GetAwardByTender(Guid tenderId)
     {
         try
@@ -116,7 +116,7 @@ public class TenderAwardsController : ControllerBase
     /// Generate award recommendation
     /// </summary>
     [HttpGet("recommendation/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<AwardRecommendationDto>> GenerateAwardRecommendation(Guid tenderId)
     {
         try
@@ -213,7 +213,7 @@ public class TenderAwardsController : ControllerBase
     /// Approve award
     /// </summary>
     [HttpPost("{id}/approve")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public ActionResult<TenderAwardDto> ApproveAward(Guid id, [FromBody] ApproveAwardDto dto)
     {
         try
@@ -239,7 +239,7 @@ public class TenderAwardsController : ControllerBase
     /// Reject award
     /// </summary>
     [HttpPost("{id}/reject")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public ActionResult<TenderAwardDto> RejectAward(Guid id, [FromBody] RejectAwardDto dto)
     {
         try
@@ -265,7 +265,7 @@ public class TenderAwardsController : ControllerBase
     /// Cancel award
     /// </summary>
     [HttpPost("{id}/cancel")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public async Task<ActionResult<TenderAwardDto>> CancelAward(Guid id, [FromBody] CancelAwardDto dto)
     {
         try
@@ -289,7 +289,7 @@ public class TenderAwardsController : ControllerBase
     /// Generate award notification
     /// </summary>
     [HttpGet("{id}/notification")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public ActionResult<AwardNotificationDto> GenerateAwardNotification(Guid id)
     {
         try
@@ -315,7 +315,7 @@ public class TenderAwardsController : ControllerBase
     /// Send award notifications to supplier (email with PDF + in-app notification)
     /// </summary>
     [HttpPost("{id}/notify")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult> SendAwardNotification(Guid id, [FromBody] AwardNotificationDto dto)
     {
         try
@@ -347,7 +347,7 @@ public class TenderAwardsController : ControllerBase
     /// Create a purchase order from a tender award
     /// </summary>
     [HttpPost("create-purchase-order")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.purchase-order.create")]
     public async Task<ActionResult<PurchaseOrderFromAwardResponseDto>> CreatePurchaseOrderFromAward([FromBody] CreatePurchaseOrderFromAwardDto dto)
     {
         try

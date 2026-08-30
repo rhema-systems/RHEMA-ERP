@@ -23,16 +23,16 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementMasterDataChangesControllerTests
 {
     [Fact]
-    public void ControllerRequiresAuthenticationAndPolicyLifecycleHasExplicitAdminAuthorization()
+    public void ControllerRequiresAuthenticationAndPolicyLifecycleUsesAccessPermission()
     {
         typeof(ProcurementMasterDataChangesController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         var methods = typeof(ProcurementMasterDataChangesController).GetMethods(BindingFlags.Instance | BindingFlags.Public)
             .Where(method => method.DeclaringType == typeof(ProcurementMasterDataChangesController)).ToDictionary(method => method.Name);
 
-        methods[nameof(ProcurementMasterDataChangesController.CreatePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
-        methods[nameof(ProcurementMasterDataChangesController.UpdatePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin,TenantAdmin");
-        methods[nameof(ProcurementMasterDataChangesController.ActivatePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin");
-        methods[nameof(ProcurementMasterDataChangesController.RetirePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("SuperAdmin");
+        methods[nameof(ProcurementMasterDataChangesController.CreatePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
+        methods[nameof(ProcurementMasterDataChangesController.UpdatePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
+        methods[nameof(ProcurementMasterDataChangesController.ActivatePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
+        methods[nameof(ProcurementMasterDataChangesController.RetirePolicy)].GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
     }
 
     [Fact]

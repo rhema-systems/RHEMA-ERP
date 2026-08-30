@@ -84,17 +84,16 @@ public sealed class TenderControlsControllerTests
     }
 
     [Fact]
-    public void MutationRoutesHaveExplicitRoleBoundaries()
+    public void MutationRoutesUseRegisteredProcurementPermissions()
     {
         var type = typeof(TenderControlsController);
         var technical = type.GetMethod(nameof(TenderControlsController.SaveTechnical))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
         var decision = type.GetMethod(nameof(TenderControlsController.DecideApproval))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
 
-        Assert.Contains("Employee", technical);
-        Assert.DoesNotContain("Employee", decision);
-        Assert.Contains("Manager", decision);
+        Assert.Equal("procurement.tender.evaluate", technical);
+        Assert.Equal("procurement.tender.approve", decision);
 
         var awardAuthorization = type.GetMethod(nameof(TenderControlsController.RecordAward))!
             .GetCustomAttribute<AuthorizeAttribute>()!;

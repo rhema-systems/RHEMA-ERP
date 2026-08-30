@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
@@ -704,7 +705,7 @@ public sealed class ProcurementCalendarService : IProcurementCalendarService, IP
         CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -1083,7 +1084,7 @@ public sealed class ProcurementCalendarService : IProcurementCalendarService, IP
         $"on {item.DueLocal:yyyy-MM-dd HH:mm} ({item.TimeZoneId})";
 
     private Guid TenantId { get { EnsureAuthenticatedTenant(); return _currentUser.TenantId; } }
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static string NormalizeCode(string value) => value.Trim().ToUpperInvariant();
     private static string NormalizeCorrelation(string? value) => string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : Truncate(value.Trim(), 100);

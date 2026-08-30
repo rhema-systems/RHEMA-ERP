@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -2331,7 +2332,7 @@ public sealed class ProcurementFrameworkCallOffService :
         if (_currentUser.IsExternalUser)
             throw Authorization(
                 "External portal users cannot administer framework call-offs.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -2349,12 +2350,10 @@ public sealed class ProcurementFrameworkCallOffService :
         if (_currentUser.IsExternalUser)
             throw Authorization(
                 "External portal users cannot access framework call-offs.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
-        throw Authorization("A TDC procurement or internal-audit role is required.");
+        throw Authorization("The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -2365,11 +2364,8 @@ public sealed class ProcurementFrameworkCallOffService :
             throw Authorization("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") ||
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task ExecuteAsync(
         Func<Task> action,

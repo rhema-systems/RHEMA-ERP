@@ -25,7 +25,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Get evaluation by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<TenderEvaluationDto>> GetEvaluation(Guid id)
     {
         try
@@ -49,7 +49,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Get evaluations by bid ID
     /// </summary>
     [HttpGet("by-bid/{bidId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderEvaluationDto>>> GetEvaluationsByBid(Guid bidId)
     {
         try
@@ -69,7 +69,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Get evaluations by tender ID
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderEvaluationDto>>> GetEvaluationsByTender(Guid tenderId)
     {
         try
@@ -90,7 +90,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Get my evaluations (all evaluations assigned to current user)
     /// </summary>
     [HttpGet("my-evaluations")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderEvaluationDto>>> GetMyEvaluations()
     {
         try
@@ -119,7 +119,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Create evaluation
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderEvaluationDto>> CreateEvaluation([FromBody] CreateEvaluationDto dto)
     {
         try
@@ -158,7 +158,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Update evaluation
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderEvaluationDto>> UpdateEvaluation(Guid id, [FromBody] UpdateEvaluationDto dto)
     {
         try
@@ -197,7 +197,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Submit evaluation
     /// </summary>
     [HttpPost("{id}/submit")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<TenderEvaluationDto>> SubmitEvaluation(Guid id, [FromBody] SubmitEvaluationDto dto)
     {
         try
@@ -236,7 +236,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Delete evaluation
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult> DeleteEvaluation(Guid id)
     {
         try
@@ -275,7 +275,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Get evaluation scorecard for a bid
     /// </summary>
     [HttpGet("scorecard/bid/{bidId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<EvaluationScorecardDto>> GetEvaluationScorecard(Guid bidId)
     {
         try
@@ -295,7 +295,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Get consolidated evaluation for a tender
     /// </summary>
     [HttpGet("consolidated/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<ConsolidatedEvaluationDto>> GetConsolidatedEvaluation(Guid tenderId)
     {
         try
@@ -316,7 +316,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Generate evaluation report for a tender
     /// </summary>
     [HttpGet("report/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<EvaluationReportDto>> GenerateEvaluationReport(Guid tenderId)
     {
         try
@@ -337,7 +337,7 @@ public class TenderEvaluationsController : ControllerBase
     /// This applies the technical/financial weighting and ranks bids accordingly.
     /// </summary>
     [HttpPost("qcbs/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public async Task<ActionResult<QCBSEvaluationResultDto>> CalculateQCBSScores(Guid tenderId)
     {
         try
@@ -374,7 +374,7 @@ public class TenderEvaluationsController : ControllerBase
     /// Returns 404 if QCBS evaluation has not been run yet.
     /// </summary>
     [HttpGet("qcbs/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<QCBSEvaluationResultDto>> GetQCBSEvaluationResults(Guid tenderId)
     {
         try

@@ -67,10 +67,18 @@ public class EvaluationTemplateService : IEvaluationTemplateService
         return templates.Select(MapToDto);
     }
 
-    public async Task<IEnumerable<EvaluationTemplateListItemDto>> GetActiveForDropdownAsync()
+    public async Task<IEnumerable<EvaluationTemplateListItemDto>> GetActiveForDropdownAsync(
+        string? category = null,
+        string? tenderType = null)
     {
         var templates = await _templateRepository.GetActiveAsync();
-        return templates.Select(t => new EvaluationTemplateListItemDto
+        var matchingTemplates = templates.Where(template =>
+            (string.IsNullOrWhiteSpace(category) ||
+             string.Equals(template.Category.Trim(), category.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrWhiteSpace(tenderType) ||
+             string.Equals(template.TenderType.Trim(), tenderType.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+        return matchingTemplates.Select(t => new EvaluationTemplateListItemDto
         {
             Id = t.Id,
             TemplateName = t.TemplateName,

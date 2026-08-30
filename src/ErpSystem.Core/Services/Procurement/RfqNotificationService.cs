@@ -182,16 +182,21 @@ public class RfqNotificationService : IRfqNotificationService
         var portalUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
         var actionUrl = $"{portalUrl.TrimEnd('/')}/procurement/rfqs/{rfqId}/controls";
 
-        // Default internal recipients: RFQ creator + tenant managers/admins.
+        // Default internal recipients: RFQ creator plus the TDC roles responsible
+        // for sourcing and tender administration in this tenant.
         var recipientIds = new HashSet<Guid>();
         if (rfq.CreatedById.HasValue)
         {
             recipientIds.Add(rfq.CreatedById.Value);
         }
 
-        // Align with internal RFQ authorization (SuperAdmin/TenantAdmin/Manager).
-        // Note: roles are system-wide; filter to the RFQ tenant.
-        var roles = new[] { "SuperAdmin", "TenantAdmin", "Manager" };
+        // Roles are system-wide, so retain the tenant filter below.
+        var roles = new[]
+        {
+            "TDC_PROCUREMENT_OFFICER",
+            "TDC_SENIOR_PROCUREMENT_OFFICER",
+            "TDC_HEAD_OF_PROCUREMENT"
+        };
         foreach (var role in roles)
         {
             try

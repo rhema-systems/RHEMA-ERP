@@ -19,37 +19,37 @@ public sealed class TenderControlsController : ControllerBase
         ExecuteAsync(() => _service.GetAsync(tenderId, cancellationToken));
 
     [HttpPost("advertise")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<IActionResult> Advertise(Guid tenderId, PublishProcurementTenderRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.PublishAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("document-issues")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<IActionResult> IssueDocument(Guid tenderId, IssueProcurementTenderDocumentRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.IssueDocumentAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("opening")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<IActionResult> CompleteOpening(Guid tenderId, CompleteProcurementTenderOpeningRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.CompleteOpeningAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPut("technical-evaluation")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<IActionResult> SaveTechnical(Guid tenderId, SaveProcurementTenderTechnicalEvaluationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.SaveTechnicalEvaluationAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPut("financial-evaluation")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<IActionResult> SaveFinancial(Guid tenderId, SaveProcurementTenderFinancialEvaluationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.SaveFinancialEvaluationAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("approval/submit")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<IActionResult> SubmitApproval(Guid tenderId, SubmitProcurementTenderApprovalRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.SubmitApprovalAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("approval/decision")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public Task<IActionResult> DecideApproval(Guid tenderId, DecideProcurementTenderApprovalRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.DecideApprovalAsync(tenderId, request, Correlation(), cancellationToken));
 
@@ -59,12 +59,12 @@ public sealed class TenderControlsController : ControllerBase
         ExecuteAsync(() => _service.RecordAwardAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("contract")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> RecordContract(Guid tenderId, RecordProcurementTenderContractRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordContractAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("acceptance")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> RecordAcceptance(Guid tenderId, RecordProcurementTenderAcceptanceRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordAcceptanceAsync(tenderId, request, Correlation(), cancellationToken));
 

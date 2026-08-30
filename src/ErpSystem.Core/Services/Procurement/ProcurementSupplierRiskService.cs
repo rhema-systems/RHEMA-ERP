@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
 using System.Text;
@@ -1031,7 +1032,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierRiskAuthorizationException(
                 "Supplier portal users cannot administer supplier risk.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -1049,10 +1050,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierRiskAuthorizationException(
                 "Supplier portal users cannot access supplier-risk administration.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass())
             return;
 
         var decision = await _accessControl.CheckCapabilityAsync(
@@ -1078,9 +1076,8 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") || _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task RecordAssessmentEventAsync(
         ProcurementSupplierRiskAssessment assessment,

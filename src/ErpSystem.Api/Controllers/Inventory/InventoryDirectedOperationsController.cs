@@ -12,6 +12,8 @@ namespace ErpSystem.Api.Controllers.Inventory;
 [Authorize(Policy = "InternalOnly")]
 public sealed class InventoryDirectedOperationsController : ControllerBase
 {
+    private const string ReadPermission = "procurement.inventory.read";
+
     private readonly IInventoryDirectedOperationService _service;
     private readonly ILogger<InventoryDirectedOperationsController> _logger;
 
@@ -24,6 +26,7 @@ public sealed class InventoryDirectedOperationsController : ControllerBase
     }
 
     [HttpGet("assignees")]
+    [Authorize(Policy = ReadPermission)]
     public Task<ActionResult<IReadOnlyList<InventoryDirectedAssigneeDto>>> GetAssignees(
         [FromQuery] Guid? warehouseId = null,
         [FromQuery] InventoryDirectedTaskType? taskType = null,
@@ -32,6 +35,7 @@ public sealed class InventoryDirectedOperationsController : ControllerBase
             Ok(await _service.GetAssigneesAsync(warehouseId, taskType, cancellationToken)));
 
     [HttpGet("suggestions")]
+    [Authorize(Policy = ReadPermission)]
     public Task<ActionResult<IReadOnlyList<InventoryDirectedSuggestionDto>>> GetSuggestions(
         [FromQuery] Guid warehouseId,
         [FromQuery] InventoryDirectedTaskType? taskType = null,
@@ -41,6 +45,7 @@ public sealed class InventoryDirectedOperationsController : ControllerBase
             Ok(await _service.GetSuggestionsAsync(warehouseId, taskType, take, cancellationToken)));
 
     [HttpGet("tasks")]
+    [Authorize(Policy = ReadPermission)]
     public Task<ActionResult<IReadOnlyList<InventoryDirectedTaskDto>>> GetTasks(
         [FromQuery] Guid? warehouseId = null,
         [FromQuery] InventoryDirectedTaskType? taskType = null,
@@ -51,6 +56,7 @@ public sealed class InventoryDirectedOperationsController : ControllerBase
             Ok(await _service.GetTasksAsync(warehouseId, taskType, status, take, cancellationToken)));
 
     [HttpGet("tasks/{id:guid}")]
+    [Authorize(Policy = ReadPermission)]
     public Task<ActionResult<InventoryDirectedTaskDto>> GetTask(Guid id, CancellationToken cancellationToken) =>
         ExecuteAsync<InventoryDirectedTaskDto>(async () => Ok(await _service.GetTaskAsync(id, cancellationToken)));
 

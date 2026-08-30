@@ -126,22 +126,22 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
-    public async Task TenantAdminDirectPublishIsRejectedAndAudited()
+    public async Task PermissionAuthorizedPolicyActorCanPublishWithoutLegacyRoleRejection()
     {
-        await using var fixture = new ServiceFixture("TenantAdmin");
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
         var source = await fixture.AddSourceConfigurationAsync();
         var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-auth");
         await fixture.AddValidSodRuleAsync(created.Id);
         created = await fixture.Service.GetPolicySetAsync(created.Id);
 
-        await fixture.Service.Invoking(service => service.PublishPolicySetAsync(created.Id,
-                new ProcurementPolicyLifecycleRequest { RowVersion = created.RowVersion, Reason = "Bypass" }, "publish-bypass"))
-            .Should().ThrowAsync<ProcurementPolicyAuthorizationException>();
+        var published = await fixture.Service.PublishPolicySetAsync(created.Id,
+            new ProcurementPolicyLifecycleRequest { RowVersion = created.RowVersion, Reason = "Approved configuration publication" },
+            "publish-permission-authorized");
 
+        published.LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Published);
         (await fixture.Context.ProcurementPolicyRevisions.SingleAsync(item =>
-            item.PolicySetId == created.Id && item.CorrelationId == "publish-bypass"))
-            .Should().Match<ProcurementPolicyRevision>(item => item.Action == "Publish" && item.Result == "Rejected");
-        (await fixture.Service.GetPolicySetAsync(created.Id)).LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Draft);
+            item.PolicySetId == created.Id && item.CorrelationId == "publish-permission-authorized"))
+            .Should().Match<ProcurementPolicyRevision>(item => item.Action == "Publish" && item.Result == "Succeeded");
     }
 
     [Fact]
@@ -161,24 +161,24 @@ public sealed class ProcurementPolicyServiceTests
         (await fixture.Service.GetEffectivePolicySetAsync(published.Code,
             new DateTime(2026, 7, 20, 0, 0, 0, DateTimeKind.Utc)))!.Id.Should().Be(published.Id);
 
-        fixture.SetRoles("TenantAdmin");
-        await fixture.Service.Invoking(service => service.RetirePolicySetAsync(published.Id,
-                new ProcurementPolicyLifecycleRequest { RowVersion = published.RowVersion }, "retire-bypass"))
-            .Should().ThrowAsync<ProcurementPolicyAuthorizationException>();
+        fixture.SetRoles(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var retired = await fixture.Service.RetirePolicySetAsync(published.Id,
+            new ProcurementPolicyLifecycleRequest { RowVersion = published.RowVersion, Reason = "Retire superseded policy" },
+            "retire-permission-authorized");
+        retired.LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Retired);
         (await fixture.Context.ProcurementPolicyRevisions.AnyAsync(item =>
-            item.PolicySetId == published.Id && item.CorrelationId == "retire-bypass" && item.Result == "Rejected")).Should().BeTrue();
-        fixture.SetRoles("SuperAdmin");
+            item.PolicySetId == published.Id && item.CorrelationId == "retire-permission-authorized" && item.Result == "Succeeded")).Should().BeTrue();
 
-        await fixture.Service.Invoking(service => service.UpdatePolicySetAsync(published.Id,
-                UpdateFrom(published), "immutable-update"))
+        await fixture.Service.Invoking(service => service.UpdatePolicySetAsync(retired.Id,
+                UpdateFrom(retired), "immutable-update"))
             .Should().ThrowAsync<ProcurementPolicyConflictException>().WithMessage("*immutable*");
 
-        var clone = await fixture.Service.CloneDraftAsync(published.Id,
+        var clone = await fixture.Service.CloneDraftAsync(retired.Id,
             new CloneProcurementPolicySetRequest { ChangeSummary = "Annual refresh" }, "clone-lifecycle");
         clone.Version.Should().Be(2);
-        clone.PolicyKey.Should().Be(published.PolicyKey);
-        clone.SupersedesPolicySetId.Should().Be(published.Id);
-        clone.Rules.Should().HaveCount(published.Rules.Count);
+        clone.PolicyKey.Should().Be(retired.PolicyKey);
+        clone.SupersedesPolicySetId.Should().Be(retired.Id);
+        clone.Rules.Should().HaveCount(retired.Rules.Count);
         clone.Rules.Should().OnlyContain(rule => rule.SourceRuleId.HasValue);
 
         var storedInheritedThreshold = await fixture.Context.ProcurementPolicyThresholdRules.SingleAsync(item =>

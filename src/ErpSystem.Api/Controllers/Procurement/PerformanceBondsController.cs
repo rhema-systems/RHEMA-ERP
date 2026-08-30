@@ -88,7 +88,7 @@ public class PerformanceBondsController : ControllerBase
     /// Create a new performance bond request (internal user sends to business partner)
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     [RequestSizeLimit(20_000_000)]
     public async Task<ActionResult<PerformanceBondRequestDto>> CreateRequest(
         IFormFile? templateFile,
@@ -189,7 +189,7 @@ public class PerformanceBondsController : ControllerBase
     /// Review performance bond (approve or reject)
     /// </summary>
     [HttpPost("{id}/review")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public async Task<ActionResult<PerformanceBondRequestDto>> ReviewBond(Guid id, [FromBody] ReviewPerformanceBondDto dto)
     {
         try
@@ -256,7 +256,7 @@ public class PerformanceBondsController : ControllerBase
     /// Download submitted performance bond document
     /// </summary>
     [HttpGet("{id}/download-submission")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<IActionResult> DownloadSubmission(Guid id)
     {
         try
@@ -293,4 +293,3 @@ public class PerformanceBondsController : ControllerBase
         }
     }
 }
-

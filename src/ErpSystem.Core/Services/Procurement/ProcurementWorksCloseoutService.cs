@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -1695,7 +1696,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         CancellationToken cancellationToken)
     {
         EnsureInternal();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         try
         {
             var result = await _access.EnforceCapabilityAsync(
@@ -1720,10 +1721,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             throw Authorization("An authenticated internal tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.Roles.Any(role =>
-            role.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
-            role.Equals("TenantAdmin", StringComparison.OrdinalIgnoreCase));
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private static void EnsureWorksAndStatus(
         Contract contract,

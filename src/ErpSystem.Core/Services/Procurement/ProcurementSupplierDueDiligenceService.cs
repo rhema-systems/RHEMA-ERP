@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -1018,7 +1019,7 @@ public sealed class ProcurementSupplierDueDiligenceService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierDueDiligenceAuthorizationException(
                 "Supplier portal users cannot administer due-diligence reviews.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -1035,13 +1036,11 @@ public sealed class ProcurementSupplierDueDiligenceService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierDueDiligenceAuthorizationException(
                 "Supplier portal users cannot access due-diligence administration.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role =>
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementSupplierDueDiligenceAuthorizationException(
-            "A supplier-review or TDC procurement role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -1052,9 +1051,8 @@ public sealed class ProcurementSupplierDueDiligenceService :
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") || _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task RecordEventAsync(
         ProcurementSupplierDueDiligenceReview entity,

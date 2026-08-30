@@ -23,27 +23,27 @@ public sealed class ExceptionalSourcingControlsController : ControllerBase
         ExecuteAsync(() => _service.GetReadinessAsync(tenderId, cancellationToken));
 
     [HttpPost("prepare")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<IActionResult> Prepare(Guid tenderId, PrepareProcurementExceptionalSourcingRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.PrepareAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("approval/submit")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<IActionResult> SubmitApproval(Guid tenderId, SubmitProcurementExceptionalApprovalRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.SubmitApprovalAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("approval/decision")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.approve")]
     public Task<IActionResult> DecideApproval(Guid tenderId, DecideProcurementExceptionalApprovalRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.DecideApprovalAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("negotiation")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public Task<IActionResult> RecordNegotiation(Guid tenderId, RecordProcurementExceptionalNegotiationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordNegotiationAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("recommendation")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    [Authorize(Policy = "procurement.tender.evaluate")]
     public Task<IActionResult> RecordRecommendation(Guid tenderId, RecordProcurementExceptionalRecommendationRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordRecommendationAsync(tenderId, request, Correlation(), cancellationToken));
 
@@ -53,17 +53,17 @@ public sealed class ExceptionalSourcingControlsController : ControllerBase
         ExecuteAsync(() => _service.RecordAwardAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("contract")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> RecordContract(Guid tenderId, RecordProcurementTenderContractRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordContractAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("acceptance")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> RecordAcceptance(Guid tenderId, RecordProcurementTenderAcceptanceRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordAcceptanceAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("post-award-filing")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> RecordPostAwardFiling(Guid tenderId, RecordProcurementPostAwardFilingRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordPostAwardFilingAsync(tenderId, request, Correlation(), cancellationToken));
 
