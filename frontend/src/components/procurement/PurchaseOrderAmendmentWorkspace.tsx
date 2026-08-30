@@ -805,9 +805,6 @@ export function PurchaseOrderAmendmentWorkspace({
               </Card>
             ))
           )}
-          <p className="text-xs text-muted-foreground">
-            Audit decisions: {overview.decisionKeys.join(' · ')}
-          </p>
         </CardContent>
       </Card>
 

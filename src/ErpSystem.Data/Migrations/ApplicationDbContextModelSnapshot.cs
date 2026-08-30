@@ -125592,6 +125592,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("InvitedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("OpenedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 

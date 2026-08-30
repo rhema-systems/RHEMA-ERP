@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -59,6 +59,7 @@ import Link from 'next/link';
 import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { useAuth } from '@/hooks/use-auth';
 import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
+import { exportProcurementDocumentPdf, printProcurementDocument } from '@/lib/procurement-document-output';
 
 const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Freight / Shipping' },
@@ -99,6 +100,8 @@ export default function PurchaseOrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [documentAction, setDocumentAction] = useState<'print' | 'pdf' | null>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
   
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
@@ -208,6 +211,32 @@ export default function PurchaseOrderDetailPage() {
     return Math.min((receivedQty / orderedQty) * 100, 100);
   };
 
+  const handlePrint = () => {
+    if (!documentRef.current || !order) return;
+    try {
+      setDocumentAction('print');
+      printProcurementDocument(documentRef.current, order.orderNumber);
+      toast.success('Purchase order print view opened');
+    } catch (printError: any) {
+      toast.error(printError?.message || 'Failed to open the purchase order print view');
+    } finally {
+      setDocumentAction(null);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!documentRef.current || !order) return;
+    try {
+      setDocumentAction('pdf');
+      await exportProcurementDocumentPdf(documentRef.current, order.orderNumber);
+      toast.success('Purchase order PDF downloaded');
+    } catch (exportError: any) {
+      toast.error(exportError?.message || 'Failed to export the purchase order PDF');
+    } finally {
+      setDocumentAction(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -242,7 +271,7 @@ export default function PurchaseOrderDetailPage() {
                      order.status === 'Acknowledged' || order.status === 'Partially Received';
 
   return (
-    <div className="space-y-6">
+    <div ref={documentRef} className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -264,7 +293,7 @@ export default function PurchaseOrderDetailPage() {
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-document-exclude="true">
           {canEdit && (
             <Link href={`/procurement/purchase-orders/${id}/edit`}>
               <Button variant="outline">
@@ -296,13 +325,13 @@ export default function PurchaseOrderDetailPage() {
             </Button>
           )}
           
-          <Button variant="outline">
-            <Printer className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={handlePrint} disabled={documentAction !== null}>
+            {documentAction === 'print' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Printer className="h-4 w-4 mr-2" />}
             Print
           </Button>
           
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={() => void handleExportPdf()} disabled={documentAction !== null}>
+            {documentAction === 'pdf' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
             Export PDF
           </Button>
         </div>

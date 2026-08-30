@@ -1117,6 +1117,16 @@ public class PurchaseOrdersController : ControllerBase
                 sourceCorrelationId,
                 HttpContext.RequestAborted);
 
+            var existingItems = (await _purchaseOrderItemRepository
+                    .GetItemsByPurchaseOrderIdAsync(id))
+                .Where(item => !item.IsDeleted)
+                .ToList();
+            var preserveExistingItems = updateDto.Items.Count == 0;
+            if (preserveExistingItems && existingItems.Count == 0)
+            {
+                return BadRequest("The purchase order has no existing lines to preserve.");
+            }
+
             // Get tenant ID from current user
             var tenantId = _currentUserService.TenantId;
             if (tenantId == Guid.Empty)
@@ -1125,7 +1135,9 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             // Calculate totals
-            var subtotal = updateDto.Items.Sum(item => item.OrderedQuantity * item.UnitPrice);
+            var subtotal = preserveExistingItems
+                ? existingItems.Sum(item => item.OrderedQuantity * item.UnitPrice)
+                : updateDto.Items.Sum(item => item.OrderedQuantity * item.UnitPrice);
             var taxAmount = updateDto.TaxAmount ?? 0;
             var shippingCost = updateDto.ShippingCost ?? 0;
             var miscellaneousCost = updateDto.MiscellaneousCost ?? 0;
@@ -1134,8 +1146,16 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(updateDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(updateDto.CostApportionmentBasis);
-            var proposedSourceLines = updateDto.Items.Select(item =>
-                new ProcurementPurchaseOrderSourceOrderLine
+            var proposedSourceLines = preserveExistingItems
+                ? existingItems.Select(item => new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                }).ToList()
+                : updateDto.Items.Select(item => new ProcurementPurchaseOrderSourceOrderLine
                 {
                     InventoryItemId = item.InventoryItemId,
                     ItemDescription = item.ItemDescription,
@@ -1208,6 +1228,14 @@ public class PurchaseOrdersController : ControllerBase
                         return BadRequest("All items in a consignment purchase order must use the selected consignment DeliveryWarehouseId.");
                     }
                 }
+
+                if (preserveExistingItems)
+                {
+                    foreach (var item in existingItems)
+                    {
+                        item.WarehouseId = updateDto.DeliveryWarehouseId.Value;
+                    }
+                }
             }
 
             ownsSourceCapacityTransaction = !_unitOfWork.HasActiveTransaction;
@@ -1230,56 +1258,56 @@ public class PurchaseOrdersController : ControllerBase
 
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
 
-            // Delete existing items
-            var existingItems = await _purchaseOrderItemRepository.GetItemsByPurchaseOrderIdAsync(id);
-            foreach (var existingItem in existingItems)
+            var persistedItems = existingItems;
+            if (!preserveExistingItems)
             {
-                await _purchaseOrderItemRepository.DeleteItemAsync(existingItem.Id);
-            }
-
-            // Create new items
-            var recreatedItems = new List<PurchaseOrderItem>();
-            foreach (var itemDto in updateDto.Items)
-            {
-                // Skip items with empty InventoryItemId
-                if (itemDto.InventoryItemId == Guid.Empty)
+                foreach (var existingItem in existingItems)
                 {
-                    _logger.LogWarning("Skipping item with empty InventoryItemId in purchase order update");
-                    continue;
+                    await _purchaseOrderItemRepository.DeleteItemAsync(existingItem.Id);
                 }
-                
-                recreatedItems.Add(new PurchaseOrderItem
+
+                persistedItems = new List<PurchaseOrderItem>();
+                foreach (var itemDto in updateDto.Items)
                 {
-                    Id = Guid.NewGuid(),
-                    PurchaseOrderId = purchaseOrder.Id,
-                    InventoryItemId = itemDto.InventoryItemId,
-                    BusinessPartnerItemCode = itemDto.SupplierItemCode,
-                    ItemDescription = itemDto.ItemDescription,
-                    OrderedQuantity = itemDto.OrderedQuantity,
-                    ReceivedQuantity = 0,
-                    UnitOfMeasure = itemDto.UnitOfMeasure ?? "EA",
-                    ItemUnitOfMeasureId = itemDto.ItemUnitOfMeasureId,
-                    WarehouseId = itemDto.WarehouseId,
-                    UnitPrice = itemDto.UnitPrice,
-                    PriceListLineId = itemDto.PriceListLineId,
-                    LineTotal = itemDto.OrderedQuantity * itemDto.UnitPrice,
-                    ExpectedDeliveryDate = itemDto.ExpectedDeliveryDate,
-                    Notes = itemDto.Notes,
-                    TenantId = tenantId
-                });
+                    if (itemDto.InventoryItemId == Guid.Empty)
+                    {
+                        return BadRequest("Every replacement purchase-order line must reference a valid inventory item. Send no lines for a header-only update.");
+                    }
+
+                    persistedItems.Add(new PurchaseOrderItem
+                    {
+                        Id = Guid.NewGuid(),
+                        PurchaseOrderId = purchaseOrder.Id,
+                        InventoryItemId = itemDto.InventoryItemId,
+                        BusinessPartnerItemCode = itemDto.SupplierItemCode,
+                        ItemDescription = itemDto.ItemDescription,
+                        OrderedQuantity = itemDto.OrderedQuantity,
+                        ReceivedQuantity = 0,
+                        UnitOfMeasure = itemDto.UnitOfMeasure ?? "EA",
+                        ItemUnitOfMeasureId = itemDto.ItemUnitOfMeasureId,
+                        WarehouseId = itemDto.WarehouseId,
+                        UnitPrice = itemDto.UnitPrice,
+                        PriceListLineId = itemDto.PriceListLineId,
+                        LineTotal = itemDto.OrderedQuantity * itemDto.UnitPrice,
+                        ExpectedDeliveryDate = itemDto.ExpectedDeliveryDate,
+                        Notes = itemDto.Notes,
+                        TenantId = tenantId
+                    });
+                }
             }
 
             await ApplyPurchaseOrderCostAllocationAsync(
                 purchaseOrder,
-                recreatedItems,
+                persistedItems,
                 totalAdditionalCost,
                 costAllocationMethod,
                 costApportionmentBasis);
             purchaseOrder.CostsAllocated = costAllocationMethod == SpreadToItemCost && totalAdditionalCost > 0;
 
-            foreach (var item in recreatedItems)
+            foreach (var item in persistedItems)
             {
-                await _purchaseOrderItemRepository.CreateItemAsync(item);
+                if (!preserveExistingItems)
+                    await _purchaseOrderItemRepository.CreateItemAsync(item);
             }
 
             // CRITICAL: Save changes to database

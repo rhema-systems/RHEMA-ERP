@@ -51,6 +51,9 @@ export interface RfqDto {
   sentAt?: string;
   supplierCount: number;
   quoteCount: number;
+  supplierStatus?: string;
+  supplierStatusChangedAt?: string;
+  supplierQuoteRevisionNumber: number;
 }
 
 export interface RfqItemDto {
@@ -73,6 +76,8 @@ export interface RfqInvitationDto {
   primaryEmail?: string;
   status: string; // Selected, Invited, Responded, Declined
   invitedAt: string;
+  openedAt?: string;
+  respondedAt?: string;
 }
 
 export interface RfqQuoteItemDto {
@@ -381,6 +386,18 @@ export const rfqService = {
     const response = await fetch(
       `${API_BASE_URL}/procurement/rfqs/${id}/my-view`,
       {
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok) throw new Error(await readApiError(response));
+    return response.json();
+  },
+
+  async openMyRfq(id: string): Promise<RfqDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/rfqs/${id}/my-view/opened`,
+      {
+        method: 'POST',
         headers: getAuthHeaders(),
       }
     );

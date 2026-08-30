@@ -398,6 +398,24 @@ public class RfqsController : ControllerBase
         }
     }
 
+    [HttpPost("{id:guid}/my-view/opened")]
+    public async Task<ActionResult<RfqDetailDto>> RecordMyRfqOpened(Guid id)
+    {
+        if (!_currentUserProvider.IsExternalUser)
+            return Forbid();
+
+        var businessPartner = await ResolveCurrentBusinessPartnerAsync();
+        if (businessPartner == null)
+            return NotFound();
+
+        var detail = await _rfqService.RecordSupplierRfqOpenedAsync(
+            id,
+            businessPartner.Id,
+            _currentUserProvider.UserId,
+            _currentUserProvider.TenantId);
+        return detail is null ? NotFound() : Ok(detail);
+    }
+
     [HttpPost("{id:guid}/quote")]
     public async Task<ActionResult<RfqQuoteDto>> SubmitQuote(Guid id, [FromBody] SubmitRfqQuoteDto dto)
     {

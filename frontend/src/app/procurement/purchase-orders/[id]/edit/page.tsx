@@ -765,11 +765,7 @@ export default function EditPurchaseOrderPage() {
         // Check if it's a valid non-empty GUID
         return id && id.length > 0 && id !== '00000000-0000-0000-0000-000000000000';
       });
-      
-      if (validItems.length === 0) {
-        toast.error('No valid items to save. Please ensure all items have a valid inventory item selected.');
-        return;
-      }
+      const preserveSourceItems = validItems.length !== items.length;
       
       const normalizedDeliveryWarehouseId =
         deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
@@ -797,7 +793,11 @@ export default function EditPurchaseOrderPage() {
         expenseGLAccount: costAllocationMethod === 'GLExpense' ? expenseGLAccount || undefined : undefined,
         discountAmount: discountAmount || undefined,
         requestedById,
-        items: validItems.map(item => ({
+        // An RFQ/PR award may legitimately contain controlled description-only
+        // lines that have not yet been linked to InventoryItem. Sending no lines
+        // tells the update endpoint to preserve the immutable source lines while
+        // applying safe header changes such as delivery location.
+        items: (preserveSourceItems ? [] : validItems).map(item => ({
           inventoryItemId: item.inventoryItemId,
           supplierItemCode: item.supplierItemCode || undefined,
           itemDescription: item.itemDescription || undefined,
@@ -828,6 +828,9 @@ export default function EditPurchaseOrderPage() {
       }
 
       toast.success('Purchase order updated');
+      if (preserveSourceItems) {
+        toast.info('Delivery and header details were updated; approved source lines were preserved unchanged.');
+      }
       router.push(`/procurement/purchase-orders/${id}`);
     } catch (error: any) {
       console.error('Error updating purchase order:', error);

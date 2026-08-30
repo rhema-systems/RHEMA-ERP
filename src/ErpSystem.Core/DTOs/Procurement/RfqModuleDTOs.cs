@@ -16,6 +16,12 @@ public class RfqDto
     public DateTime? SentAt { get; set; }
     public int SupplierCount { get; set; }
     public int QuoteCount { get; set; }
+    /// <summary>
+    /// Supplier-portal lifecycle for the current supplier. Internal RFQ listings leave this null.
+    /// </summary>
+    public string? SupplierStatus { get; set; }
+    public DateTime? SupplierStatusChangedAt { get; set; }
+    public int SupplierQuoteRevisionNumber { get; set; }
 }
 
 public class RfqDetailDto : RfqDto
@@ -50,6 +56,8 @@ public class RfqInvitationDto
     public string? PrimaryEmail { get; set; }
     public string Status { get; set; } = "Invited";
     public DateTime InvitedAt { get; set; }
+    public DateTime? OpenedAt { get; set; }
+    public DateTime? RespondedAt { get; set; }
 }
 
 public class RfqQuoteDto

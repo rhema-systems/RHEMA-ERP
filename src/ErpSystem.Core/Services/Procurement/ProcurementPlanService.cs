@@ -141,48 +141,58 @@ public class ProcurementPlanService : IProcurementPlanService
             await EnsureBudgetPlanningCapacityAsync(selectedBudget, dto.TotalEstimatedBudget);
         }
 
-        var planNumber = await _planRepository.GeneratePlanNumberAsync(dto.FiscalYear);
-        var currentUserId = _currentUserProvider.UserId;
-        var resolvedCurrency = selectedBudget?.Currency ?? dto.Currency;
-
-        var plan = new ProcurementPlan
+        var ownsNumberReservation = await BeginPlanNumberReservationAsync(dto.FiscalYear);
+        ProcurementPlan plan;
+        try
         {
-            PlanNumber = planNumber,
-            Title = dto.Title,
-            Description = dto.Description,
-            DepartmentId = dto.DepartmentId,
-            FiscalYear = dto.FiscalYear,
-            PlanningCycle = dto.PlanningCycle,
-            PlanningQuarter = dto.PlanningQuarter,
-            PlanStartDate = dto.PlanStartDate,
-            PlanEndDate = dto.PlanEndDate,
-            PlanDurationYears = dto.PlanDurationYears,
-            TotalEstimatedBudget = dto.TotalEstimatedBudget,
-            BudgetId = selectedBudget?.Id,
-            Currency = resolvedCurrency,
-            Notes = dto.Notes,
-            Status = "Draft",
-            PreparedById = currentUserId != Guid.Empty ? currentUserId : null,
-            PreparedDate = DateTime.UtcNow,
-            RevisionNumber = 1,
-            TenantId = _currentUserProvider.TenantId
-        };
+            var planNumber = await _planRepository.GeneratePlanNumberAsync(dto.FiscalYear);
+            var currentUserId = _currentUserProvider.UserId;
+            var resolvedCurrency = selectedBudget?.Currency ?? dto.Currency;
 
-        await _planRepository.AddAsync(plan);
-
-        // Add items if provided
-        if (dto.Items.Any())
-        {
-            foreach (var itemDto in dto.Items)
+            plan = new ProcurementPlan
             {
-                var item = CreatePlanItem(plan.Id, itemDto, plan.Currency, selectedBudget?.Id);
-                await _itemRepository.AddAsync(item);
+                PlanNumber = planNumber,
+                Title = dto.Title,
+                Description = dto.Description,
+                DepartmentId = dto.DepartmentId,
+                FiscalYear = dto.FiscalYear,
+                PlanningCycle = dto.PlanningCycle,
+                PlanningQuarter = dto.PlanningQuarter,
+                PlanStartDate = dto.PlanStartDate,
+                PlanEndDate = dto.PlanEndDate,
+                PlanDurationYears = dto.PlanDurationYears,
+                TotalEstimatedBudget = dto.TotalEstimatedBudget,
+                BudgetId = selectedBudget?.Id,
+                Currency = resolvedCurrency,
+                Notes = dto.Notes,
+                Status = "Draft",
+                PreparedById = currentUserId != Guid.Empty ? currentUserId : null,
+                PreparedDate = DateTime.UtcNow,
+                RevisionNumber = 1,
+                TenantId = _currentUserProvider.TenantId
+            };
+
+            await _planRepository.AddAsync(plan);
+
+            // Add items if provided
+            if (dto.Items.Any())
+            {
+                foreach (var itemDto in dto.Items)
+                {
+                    var item = CreatePlanItem(plan.Id, itemDto, plan.Currency, selectedBudget?.Id);
+                    await _itemRepository.AddAsync(item);
+                }
             }
+
+            await SavePlanNumberReservationAsync(ownsNumberReservation);
+        }
+        catch
+        {
+            await RollbackPlanNumberReservationAsync(ownsNumberReservation);
+            throw;
         }
 
-        await _unitOfWork.SaveChangesAsync();
-
-        _logger.LogInformation("Created procurement plan {PlanNumber} for department {DepartmentId}", planNumber, dto.DepartmentId);
+        _logger.LogInformation("Created procurement plan {PlanNumber} for department {DepartmentId}", plan.PlanNumber, dto.DepartmentId);
 
         return await GetByIdAsync(plan.Id) ?? throw new InvalidOperationException("Failed to retrieve created plan");
     }
@@ -512,76 +522,126 @@ public class ProcurementPlanService : IProcurementPlanService
         if (sourcePlan.Status is not ("Approved" or "Active" or "Completed"))
             throw new InvalidOperationException("Only approved, active, or completed plans can be amended");
 
-        var currentUserId = _currentUserProvider.UserId;
-        var amendment = new ProcurementPlan
+        var ownsNumberReservation = await BeginPlanNumberReservationAsync(sourcePlan.FiscalYear);
+        ProcurementPlan amendment;
+        try
         {
-            PlanNumber = await _planRepository.GeneratePlanNumberAsync(sourcePlan.FiscalYear),
-            Title = string.IsNullOrWhiteSpace(dto.Title) ? $"{sourcePlan.Title} - Amendment {sourcePlan.RevisionNumber + 1}" : dto.Title.Trim(),
-            Description = string.IsNullOrWhiteSpace(dto.Description) ? sourcePlan.Description : dto.Description,
-            DepartmentId = sourcePlan.DepartmentId,
-            FiscalYear = sourcePlan.FiscalYear,
-            PlanningCycle = sourcePlan.PlanningCycle,
-            PlanningQuarter = sourcePlan.PlanningQuarter,
-            PlanStartDate = sourcePlan.PlanStartDate,
-            PlanEndDate = sourcePlan.PlanEndDate,
-            PlanDurationYears = sourcePlan.PlanDurationYears,
-            Status = "Draft",
-            TotalEstimatedBudget = sourcePlan.TotalEstimatedBudget,
-            ApprovedBudget = 0,
-            Currency = sourcePlan.Currency,
-            PreparedById = currentUserId != Guid.Empty ? currentUserId : null,
-            PreparedDate = DateTime.UtcNow,
-            RevisionNumber = sourcePlan.RevisionNumber + 1,
-            PreviousVersionId = sourcePlan.Id,
-            Notes = $"Amendment reason: {dto.Reason.Trim()}",
-            TenantId = _currentUserProvider.TenantId
-        };
-
-        await _planRepository.AddAsync(amendment);
-
-        foreach (var sourceItem in sourcePlan.Items.Where(i => !i.IsDeleted))
-        {
-            var item = new ProcurementPlanItem
+            var currentUserId = _currentUserProvider.UserId;
+            amendment = new ProcurementPlan
             {
-                ProcurementPlanId = amendment.Id,
-                InventoryItemId = sourceItem.InventoryItemId,
-                ProcurementBudgetId = sourceItem.ProcurementBudgetId,
-                ProcurementBudgetAllocationId = sourceItem.ProcurementBudgetAllocationId,
-                MarketAnalysisId = sourceItem.MarketAnalysisId,
-                BudgetLineCode = sourceItem.BudgetLineCode,
-                BudgetCategoryName = sourceItem.BudgetCategoryName,
-                ApprovedBudgetAmount = sourceItem.ApprovedBudgetAmount,
-                BudgetNotes = sourceItem.BudgetNotes,
-                ItemDescription = sourceItem.ItemDescription,
-                Specifications = sourceItem.Specifications,
-                ItemCategory = sourceItem.ItemCategory,
-                EstimatedQuantity = sourceItem.EstimatedQuantity,
-                UnitOfMeasure = sourceItem.UnitOfMeasure,
-                EstimatedUnitPrice = sourceItem.EstimatedUnitPrice,
-                EstimatedTotalCost = sourceItem.EstimatedTotalCost,
-                Currency = amendment.Currency,
-                Priority = sourceItem.Priority,
-                IsCritical = sourceItem.IsCritical,
-                RequiredDate = sourceItem.RequiredDate,
-                PlannedProcurementMonth = sourceItem.PlannedProcurementMonth,
-                PlannedQuarter = sourceItem.PlannedQuarter,
-                PreferredSupplierId = sourceItem.PreferredSupplierId,
-                PreferredSupplierName = sourceItem.PreferredSupplierName,
-                AlternativeSuppliers = sourceItem.AlternativeSuppliers,
-                Justification = sourceItem.Justification,
-                Status = "Planned",
-                ProcurementMethod = sourceItem.ProcurementMethod,
-                Notes = sourceItem.Notes,
+                PlanNumber = await _planRepository.GeneratePlanNumberAsync(sourcePlan.FiscalYear),
+                Title = string.IsNullOrWhiteSpace(dto.Title) ? $"{sourcePlan.Title} - Amendment {sourcePlan.RevisionNumber + 1}" : dto.Title.Trim(),
+                Description = string.IsNullOrWhiteSpace(dto.Description) ? sourcePlan.Description : dto.Description,
+                DepartmentId = sourcePlan.DepartmentId,
+                FiscalYear = sourcePlan.FiscalYear,
+                PlanningCycle = sourcePlan.PlanningCycle,
+                PlanningQuarter = sourcePlan.PlanningQuarter,
+                PlanStartDate = sourcePlan.PlanStartDate,
+                PlanEndDate = sourcePlan.PlanEndDate,
+                PlanDurationYears = sourcePlan.PlanDurationYears,
+                Status = "Draft",
+                TotalEstimatedBudget = sourcePlan.TotalEstimatedBudget,
+                ApprovedBudget = 0,
+                Currency = sourcePlan.Currency,
+                PreparedById = currentUserId != Guid.Empty ? currentUserId : null,
+                PreparedDate = DateTime.UtcNow,
+                RevisionNumber = sourcePlan.RevisionNumber + 1,
+                PreviousVersionId = sourcePlan.Id,
+                Notes = $"Amendment reason: {dto.Reason.Trim()}",
                 TenantId = _currentUserProvider.TenantId
             };
 
-            await _itemRepository.AddAsync(item);
-        }
+            await _planRepository.AddAsync(amendment);
 
-        await _unitOfWork.SaveChangesAsync();
+            foreach (var sourceItem in sourcePlan.Items.Where(i => !i.IsDeleted))
+            {
+                var item = new ProcurementPlanItem
+                {
+                    ProcurementPlanId = amendment.Id,
+                    InventoryItemId = sourceItem.InventoryItemId,
+                    ProcurementBudgetId = sourceItem.ProcurementBudgetId,
+                    ProcurementBudgetAllocationId = sourceItem.ProcurementBudgetAllocationId,
+                    MarketAnalysisId = sourceItem.MarketAnalysisId,
+                    BudgetLineCode = sourceItem.BudgetLineCode,
+                    BudgetCategoryName = sourceItem.BudgetCategoryName,
+                    ApprovedBudgetAmount = sourceItem.ApprovedBudgetAmount,
+                    BudgetNotes = sourceItem.BudgetNotes,
+                    ItemDescription = sourceItem.ItemDescription,
+                    Specifications = sourceItem.Specifications,
+                    ItemCategory = sourceItem.ItemCategory,
+                    EstimatedQuantity = sourceItem.EstimatedQuantity,
+                    UnitOfMeasure = sourceItem.UnitOfMeasure,
+                    EstimatedUnitPrice = sourceItem.EstimatedUnitPrice,
+                    EstimatedTotalCost = sourceItem.EstimatedTotalCost,
+                    Currency = amendment.Currency,
+                    Priority = sourceItem.Priority,
+                    IsCritical = sourceItem.IsCritical,
+                    RequiredDate = sourceItem.RequiredDate,
+                    PlannedProcurementMonth = sourceItem.PlannedProcurementMonth,
+                    PlannedQuarter = sourceItem.PlannedQuarter,
+                    PreferredSupplierId = sourceItem.PreferredSupplierId,
+                    PreferredSupplierName = sourceItem.PreferredSupplierName,
+                    AlternativeSuppliers = sourceItem.AlternativeSuppliers,
+                    Justification = sourceItem.Justification,
+                    Status = "Planned",
+                    ProcurementMethod = sourceItem.ProcurementMethod,
+                    Notes = sourceItem.Notes,
+                    TenantId = _currentUserProvider.TenantId
+                };
+
+                await _itemRepository.AddAsync(item);
+            }
+
+            await SavePlanNumberReservationAsync(ownsNumberReservation);
+        }
+        catch
+        {
+            await RollbackPlanNumberReservationAsync(ownsNumberReservation);
+            throw;
+        }
         _logger.LogInformation("Created amendment {AmendmentPlanNumber} from procurement plan {SourcePlanNumber}", amendment.PlanNumber, sourcePlan.PlanNumber);
 
         return await GetByIdAsync(amendment.Id) ?? throw new InvalidOperationException("Failed to retrieve created amendment");
+    }
+
+    private async Task<bool> BeginPlanNumberReservationAsync(int fiscalYear)
+    {
+        var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+        try
+        {
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+
+            await _unitOfWork.AcquireTransactionLockAsync(
+                $"PROCUREMENT_PLAN_NUMBER:{fiscalYear}");
+            return ownsTransaction;
+        }
+        catch
+        {
+            if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+            }
+            throw;
+        }
+    }
+
+    private async Task SavePlanNumberReservationAsync(bool ownsTransaction)
+    {
+        if (ownsTransaction)
+            await _unitOfWork.CommitAsync();
+        else
+            await _unitOfWork.SaveChangesAsync();
+    }
+
+    private async Task RollbackPlanNumberReservationAsync(bool ownsTransaction)
+    {
+        if (!ownsTransaction)
+            return;
+
+        await _unitOfWork.RollbackAsync();
+        _unitOfWork.ClearTrackedChanges();
     }
 
     public async Task<IEnumerable<ProcurementPlanDto>> GetVersionHistoryAsync(Guid id)

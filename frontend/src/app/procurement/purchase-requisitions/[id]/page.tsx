@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Card,
@@ -85,6 +85,7 @@ import { PurchaseRequisitionSourcingReleaseControl } from '@/components/procurem
 import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseRequisitionDocuments';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import { printProcurementDocument } from '@/lib/procurement-document-output';
 
 const PRStatuses = [
   {
@@ -197,6 +198,7 @@ export default function PurchaseRequisitionDetailPage() {
   const [poSourceStatus, setPoSourceStatus] =
     useState<ProcurementPurchaseOrderSourceStatusDto>();
   const [exporting, setExporting] = useState(false);
+  const documentRef = useRef<HTMLDivElement>(null);
 
   const fetchRequisition = async () => {
     try {
@@ -500,6 +502,15 @@ export default function PurchaseRequisitionDetailPage() {
     }
   };
 
+  const handlePrint = () => {
+    if (!documentRef.current || !requisition) return;
+    try {
+      printProcurementDocument(documentRef.current, requisition.requisitionNumber);
+    } catch (printError: any) {
+      toast.error(printError?.message || 'Failed to open the requisition print view');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -552,7 +563,7 @@ export default function PurchaseRequisitionDetailPage() {
     Boolean(resolvedMethod && tenderMethods.has(resolvedMethod));
 
   return (
-    <div className="space-y-6">
+    <div ref={documentRef} className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -584,7 +595,7 @@ export default function PurchaseRequisitionDetailPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-document-exclude="true">
           {canEdit && (
             <Link href={`/procurement/purchase-requisitions/${id}/edit`}>
               <Button variant="outline">
@@ -631,7 +642,7 @@ export default function PurchaseRequisitionDetailPage() {
             </Button>
           )}
 
-          <Button variant="outline">
+          <Button variant="outline" onClick={handlePrint}>
             <Printer className="h-4 w-4 mr-2" />
             Print
           </Button>
