@@ -80,6 +80,7 @@ export default function SubmitBidPage() {
     warrantyTerms: '',
     technicalProposal: '',
     commercialProposal: '',
+    selectedLotIds: [],
     items: [],
     associationType: undefined,
     acceptedDeclaration: false,
@@ -198,6 +199,7 @@ export default function SubmitBidPage() {
           warrantyTerms: draftBid.warrantyTerms || '',
           technicalProposal: draftBid.technicalProposal || '',
           commercialProposal: draftBid.commercialProposal || '',
+          selectedLotIds: [],
           items: draftItems.map((item) => ({
             tenderItemId: item.tenderItemId,
             offeredQuantity: item.offeredQuantity,
@@ -223,6 +225,10 @@ export default function SubmitBidPage() {
           }
         });
         setSelectedLotIds(Array.from(selectedLotIdsFromDraft));
+        setBidData((prev) => ({
+          ...prev,
+          selectedLotIds: Array.from(selectedLotIdsFromDraft),
+        }));
 
         // Determine which step to start on based on progress
         let startStep = 1;
@@ -358,7 +364,7 @@ export default function SubmitBidPage() {
     }
 
     // Auto-save when moving from Step 1 (lot selection) to Step 2
-    if (currentStep === 1 && !createdBidId) {
+    if (currentStep === 1) {
       try {
         setSubmitting(true);
 
@@ -381,13 +387,26 @@ export default function SubmitBidPage() {
 
         const draftData = {
           ...bidData,
+          selectedLotIds,
           items: initialItems,
         };
 
-        // Create the bid as draft
-        const createdBid = await tenderBidService.createBid(draftData);
-        setCreatedBidId(createdBid.id);
-        setBidData((prev) => ({ ...prev, items: initialItems }));
+        if (createdBidId) {
+          await tenderBidService.updateBid(createdBidId, {
+            associationType: bidData.associationType,
+            acceptedDeclaration: bidData.acceptedDeclaration,
+            selectedLotIds,
+            items: initialItems,
+          });
+        } else {
+          const createdBid = await tenderBidService.createBid(draftData);
+          setCreatedBidId(createdBid.id);
+        }
+        setBidData((prev) => ({
+          ...prev,
+          selectedLotIds,
+          items: initialItems,
+        }));
         toast.success(
           'Lot selection saved. You can now enter pricing details.'
         );
@@ -484,12 +503,17 @@ export default function SubmitBidPage() {
 
           const draftData = {
             ...bidData,
+            selectedLotIds,
             items: initialItems,
           };
 
           const createdBid = await tenderBidService.createBid(draftData);
           setCreatedBidId(createdBid.id);
-          setBidData((prev) => ({ ...prev, items: initialItems }));
+          setBidData((prev) => ({
+            ...prev,
+            selectedLotIds,
+            items: initialItems,
+          }));
           toast.success('Lot selection saved as draft');
         } else {
           toast.success('Lot selection already saved');
@@ -526,7 +550,10 @@ export default function SubmitBidPage() {
         toast.success('Bid draft updated successfully');
       } else {
         // Create new draft (shouldn't happen if lot selection was done properly)
-        const createdBid = await tenderBidService.createBid(bidData);
+        const createdBid = await tenderBidService.createBid({
+          ...bidData,
+          selectedLotIds,
+        });
         setCreatedBidId(createdBid.id);
         toast.success('Bid saved as draft successfully');
       }
@@ -604,7 +631,10 @@ export default function SubmitBidPage() {
 
       if (!bidId) {
         // Create the bid if not already created
-        const createdBid = await tenderBidService.createBid(bidData);
+        const createdBid = await tenderBidService.createBid({
+          ...bidData,
+          selectedLotIds,
+        });
         bidId = createdBid.id;
       } else {
         // Update existing draft

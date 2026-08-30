@@ -118,6 +118,7 @@
     <Compile Include="Controllers\Procurement\SupplierApplicantLifecycleControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderBidsOwnershipControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerCivilQuantitySurveyAuthorizationTests.cs" />

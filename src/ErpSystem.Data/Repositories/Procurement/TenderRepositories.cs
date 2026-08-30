@@ -392,6 +392,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return await query
             .Include(b => b.BusinessPartner)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .FirstOrDefaultAsync();
     }
 
@@ -406,6 +411,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
             .Include(b => b.Tender)
             .Include(b => b.BusinessPartner)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .Include(b => b.Documents)
             .Include(b => b.Evaluations)
                 .ThenInclude(e => e.TenderEvaluator)
@@ -420,6 +430,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
             .Where(b => b.BidNumber == bidNumber && !b.IsDeleted)
             .Include(b => b.BusinessPartner)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .FirstOrDefaultAsync();
     }
 
@@ -428,6 +443,11 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return await _dbSet
             .Where(b => b.TenderId == tenderId && b.BusinessPartnerId == businessPartnerId && !b.IsDeleted)
             .Include(b => b.Items)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Lot)
+            .Include(b => b.BidLots)
+                .ThenInclude(bl => bl.Items)
+                    .ThenInclude(item => item.TenderItem)
             .Include(b => b.Documents)
             .FirstOrDefaultAsync();
     }

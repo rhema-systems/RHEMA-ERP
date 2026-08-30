@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, ArrowRight, Save, FileText, Package, Upload, DollarSign, Users, CheckCircle2, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { tenderService, type UpdateTenderDto, type TenderDetailDto } from '@/services/tenderService';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { buildUpdateTenderDto } from '@/lib/tender-form-payload';
 
 // Import step components
 import BasicInformation from '@/components/procurement/tenders/BasicInformation';
@@ -245,40 +246,10 @@ export default function EditTenderPage() {
     try {
       setSaving(true);
 
-      // Serialize document requirements to JSON
-      const requiredDocuments = formData.documentRequirements.length > 0
-        ? JSON.stringify(formData.documentRequirements)
-        : undefined;
-
       console.log('TenderEdit - handleSaveDraft called');
       console.log('TenderEdit - formData.documentRequirements:', formData.documentRequirements);
-      console.log('TenderEdit - requiredDocuments JSON:', requiredDocuments);
 
-      const updateDto: UpdateTenderDto = {
-        title: formData.title,
-        description: formData.description,
-        submissionDeadline: formData.submissionDeadline || undefined,
-        openingDate: formData.openingDate || undefined,
-        estimatedValue: formData.estimatedValue || undefined,
-        currency: formData.currency,
-        minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
-        requiresPrequalification: formData.requiresPrequalification,
-        allowPartialBids: formData.allowPartialBids,
-        priceWeightage: formData.priceWeightage,
-        qualityWeightage: formData.qualityWeightage,
-        deliveryWeightage: formData.deliveryWeightage,
-        experienceWeightage: formData.experienceWeightage,
-        evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
-        notes: formData.notes || undefined,
-        termsAndConditions: formData.termsAndConditions || undefined,
-        requiredDocuments, // Include document requirements
-        requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-        // QCBS Evaluation fields
-        useQCBSEvaluation: formData.useQCBSEvaluation,
-        technicalWeight: formData.technicalWeight,
-        financialWeight: formData.financialWeight,
-        minimumTechnicalScore: formData.minimumTechnicalScore,
-      };
+      const updateDto = buildUpdateTenderDto(formData);
 
       console.log('TenderEdit - updateDto:', updateDto);
 
@@ -333,36 +304,7 @@ export default function EditTenderPage() {
       setSaving(true);
       console.log('🔵 Starting tender update...');
 
-      // Serialize document requirements to JSON
-      const requiredDocuments = formData.documentRequirements.length > 0
-        ? JSON.stringify(formData.documentRequirements)
-        : undefined;
-
-      const updateDto: UpdateTenderDto = {
-        title: formData.title,
-        description: formData.description,
-        submissionDeadline: formData.submissionDeadline || undefined,
-        openingDate: formData.openingDate || undefined,
-        estimatedValue: formData.estimatedValue || undefined,
-        currency: formData.currency,
-        minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
-        requiresPrequalification: formData.requiresPrequalification,
-        allowPartialBids: formData.allowPartialBids,
-        priceWeightage: formData.priceWeightage,
-        qualityWeightage: formData.qualityWeightage,
-        deliveryWeightage: formData.deliveryWeightage,
-        experienceWeightage: formData.experienceWeightage,
-        evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
-        notes: formData.notes || undefined,
-        termsAndConditions: formData.termsAndConditions || undefined,
-        requiredDocuments,
-        requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-        // QCBS Evaluation fields
-        useQCBSEvaluation: formData.useQCBSEvaluation,
-        technicalWeight: formData.technicalWeight,
-        financialWeight: formData.financialWeight,
-        minimumTechnicalScore: formData.minimumTechnicalScore,
-      };
+      const updateDto = buildUpdateTenderDto(formData);
 
       console.log('🔵 updateDto:', updateDto);
 

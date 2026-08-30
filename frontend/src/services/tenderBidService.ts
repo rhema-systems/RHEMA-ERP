@@ -160,6 +160,7 @@ export interface CreateTenderBidDto {
   technicalProposal?: string;
   commercialProposal?: string;
   acceptedDeclaration?: boolean;
+  selectedLotIds: string[];
   items: CreateTenderBidItemDto[];
 }
 
@@ -169,7 +170,9 @@ export interface UpdateTenderBidDto {
   warrantyTerms?: string;
   technicalProposal?: string;
   commercialProposal?: string;
+  associationType?: string;
   acceptedDeclaration?: boolean;
+  selectedLotIds?: string[];
   items?: UpdateTenderBidItemDto[];
 }
 
