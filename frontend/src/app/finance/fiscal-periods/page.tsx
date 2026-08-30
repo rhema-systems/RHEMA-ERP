@@ -9,8 +9,9 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, FileDown, Loader2, RotateCw } from 'lucide-react';
+import { CalendarClock, CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, FileDown, Loader2, RotateCw } from 'lucide-react';
 import type { FiscalPeriod, ModuleDefinition } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
@@ -39,6 +40,9 @@ export default function FiscalPeriodsPage() {
     const [reopenReviewComment, setReopenReviewComment] = useState('');
     const [processing, setProcessing] = useState(false);
     const [downloadingClosePackId, setDownloadingClosePackId] = useState<string | null>(null);
+    const [postingPolicyPeriod, setPostingPolicyPeriod] = useState<FiscalPeriod | null>(null);
+    const [allowFutureDating, setAllowFutureDating] = useState(false);
+    const [postingPolicyReason, setPostingPolicyReason] = useState('');
 
     const loadData = useCallback(async () => {
         try {
@@ -104,6 +108,46 @@ export default function FiscalPeriodsPage() {
             toast({
                 title: 'Period could not be opened',
                 description: error.message || 'The accounting period opening failed.',
+                variant: 'destructive',
+            });
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleUpdatePostingDatePolicy = async () => {
+        if (!postingPolicyPeriod) return;
+
+        const reason = postingPolicyReason.trim();
+        if (reason.length < 10) {
+            toast({
+                title: 'Reason required',
+                description: 'Provide at least 10 characters explaining this posting-date policy change.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        try {
+            setProcessing(true);
+            await financeDataService.updateFiscalPeriodPostingDatePolicy(
+                postingPolicyPeriod.id,
+                allowFutureDating,
+                reason
+            );
+            toast({
+                title: 'Posting-date policy updated',
+                description: allowFutureDating
+                    ? 'Final Finance posting may now use a future date inside this period.'
+                    : 'Final Finance posting is now limited to today or earlier inside this period.',
+            });
+            setPostingPolicyPeriod(null);
+            setPostingPolicyReason('');
+            await loadData();
+        } catch (error: any) {
+            toast({
+                title: 'Posting-date policy was not changed',
+                description: error.message || 'The policy update failed.',
                 variant: 'destructive',
             });
         } finally {
@@ -374,6 +418,15 @@ export default function FiscalPeriodsPage() {
                                                                 Partial Lock
                                                             </Badge>
                                                         )}
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={period.allowFutureDating
+                                                                ? 'text-xs w-fit border-blue-200 text-blue-700 bg-blue-50'
+                                                                : 'text-xs w-fit text-muted-foreground'}
+                                                        >
+                                                            <CalendarClock className="h-3 w-3 mr-1" />
+                                                            {period.allowFutureDating ? 'Future posting allowed' : 'Future posting blocked'}
+                                                        </Badge>
                                                     </div>
                                                 </td>
                                                 <td className="p-4 text-right">
@@ -390,6 +443,20 @@ export default function FiscalPeriodsPage() {
                                                         )}
 
                                                         {/* Period Actions */}
+                                                        {canAdminister && (status === 'Future' || status === 'Open') && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => {
+                                                                    setPostingPolicyPeriod(period);
+                                                                    setAllowFutureDating(period.allowFutureDating);
+                                                                    setPostingPolicyReason('');
+                                                                }}
+                                                            >
+                                                                <CalendarClock className="mr-1 h-4 w-4" />
+                                                                Date policy
+                                                            </Button>
+                                                        )}
                                                         {(canOpen || canAdminister) && status === 'Future' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
@@ -611,6 +678,66 @@ export default function FiscalPeriodsPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            <Dialog
+                open={postingPolicyPeriod !== null}
+                onOpenChange={(open) => {
+                    if (!open && !processing) {
+                        setPostingPolicyPeriod(null);
+                        setPostingPolicyReason('');
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Posting-date policy: {postingPolicyPeriod?.periodName}</DialogTitle>
+                        <DialogDescription>
+                            Period status controls whether posting is open. This separate policy controls whether final Finance posting may use a date after today, while still inside this period.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="flex items-center justify-between rounded-md border p-4">
+                            <div className="pr-4">
+                                <Label htmlFor="allow-future-dating">Allow future-dated posting</Label>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Drafts and approvals remain available either way; this policy is enforced at final posting.
+                                </p>
+                            </div>
+                            <Switch
+                                id="allow-future-dating"
+                                checked={allowFutureDating}
+                                onCheckedChange={setAllowFutureDating}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="posting-policy-reason">Audit reason</Label>
+                            <Textarea
+                                id="posting-policy-reason"
+                                value={postingPolicyReason}
+                                onChange={(event) => setPostingPolicyReason(event.target.value)}
+                                placeholder="Explain why future-dated posting is being enabled or disabled."
+                                maxLength={500}
+                                rows={3}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            disabled={processing}
+                            onClick={() => {
+                                setPostingPolicyPeriod(null);
+                                setPostingPolicyReason('');
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button onClick={() => void handleUpdatePostingDatePolicy()} disabled={processing}>
+                            {processing ? 'Saving...' : 'Save Policy'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

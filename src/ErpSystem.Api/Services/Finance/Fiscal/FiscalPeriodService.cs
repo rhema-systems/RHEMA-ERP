@@ -498,6 +498,56 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 () => OpenPeriodCoreAsync(request, cancellationToken),
                 cancellationToken);
 
+        public async Task<FiscalPeriodDto> UpdatePostingDatePolicyAsync(
+            Guid periodId,
+            PeriodPostingDatePolicyRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            var reason = request.Reason?.Trim() ?? string.Empty;
+            if (reason.Length < 10)
+                throw new InvalidOperationException("A reason of at least 10 characters is required to change the posting-date policy.");
+
+            var period = await _unitOfWork.Repository<FiscalPeriod>()
+                .FirstOrDefaultAsync(candidate => candidate.TenantId == TenantId
+                    && candidate.Id == periodId
+                    && !candidate.IsDeleted);
+
+            if (period == null)
+                throw new ArgumentException($"Fiscal period with Id '{periodId}' not found.");
+            if (period.IsClosed || period.IsLocked || period.IsCloseInitiated)
+                throw new InvalidOperationException("Posting-date policy cannot be changed while a period is closing, closed, or locked.");
+            if (period.AllowFutureDating == request.AllowFutureDating)
+                return MapFiscalPeriodToDto(period);
+
+            var beforePolicyChange = BuildPeriodAuditSnapshot(period);
+            period.AllowFutureDating = request.AllowFutureDating;
+            period.UpdatedAt = DateTime.UtcNow;
+            period.UpdatedBy = UserName;
+            period.LastModifiedById = CurrentUserId;
+
+            await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodPostingDatePolicyUpdated,
+                period,
+                beforeValues: beforePolicyChange,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                reason: reason,
+                comment: request.AllowFutureDating
+                    ? "Future-dated Finance posting enabled for this period."
+                    : "Future-dated Finance posting disabled for this period.",
+                cancellationToken: cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Fiscal period {Code} future-dating policy set to {AllowFutureDating} by {User}. Reason: {Reason}",
+                period.PeriodCode,
+                period.AllowFutureDating,
+                UserName,
+                reason);
+
+            return MapFiscalPeriodToDto(period);
+        }
+
         private async Task<FiscalPeriodDto> OpenPeriodCoreAsync(
             PeriodOpenRequestDto request,
             CancellationToken cancellationToken)
@@ -4322,6 +4372,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 period.IsOpen,
                 period.IsClosed,
                 period.IsLocked,
+                period.AllowFutureDating,
                 period.IsGlobalLockSuspended,
                 period.ClosedDate,
                 period.ClosedByUserId,
@@ -4431,6 +4482,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 EndDate = period.EndDate,
                 PeriodStatus = period.PeriodStatus,
                 IsOpen = period.IsOpen,
+                AllowFutureDating = period.AllowFutureDating,
                 IsLocked = period.IsLocked,
                 IsGlobalLockSuspended = period.IsGlobalLockSuspended,
                 IsPartiallyLocked = period.IsOpen

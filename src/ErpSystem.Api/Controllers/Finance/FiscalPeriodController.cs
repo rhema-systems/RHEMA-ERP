@@ -687,6 +687,36 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Configures whether an open or future period accepts posting dates after today.
+        /// This audited Finance-administrator control does not alter the period lifecycle.
+        /// </summary>
+        [HttpPut("periods/{id}/posting-date-policy")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult<FiscalPeriodDto>> UpdatePostingDatePolicy(
+            Guid id,
+            [FromBody] PeriodPostingDatePolicyRequestDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Posting-date policy request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.UpdatePostingDatePolicyAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Closes a fiscal period, preventing new transactions from being posted.
         /// </summary>
         /// <remarks>
