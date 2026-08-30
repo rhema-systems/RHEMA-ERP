@@ -109,6 +109,16 @@ public class WorkflowEngine : IWorkflowEngine
         var startStep = await _workflowStepRepository.GetStartStepAsync(definition.Id)
             ?? throw new InvalidOperationException($"No start step found for workflow '{workflowName}'");
 
+        // Validate the immutable route before writing any workflow records. This prevents a maker
+        // from starting a workflow that can never reach completion because the only configured
+        // approver is excluded by maker-checker or another actor-eligibility rule.
+        var workflowSteps = (await _workflowStepRepository.GetByWorkflowDefinitionAsync(definition.Id)).ToList();
+        await _runtimeGovernance.EnsureMandatoryApprovalActorsAvailableAsync(
+            definition.TenantId,
+            initiatedById,
+            workflowName,
+            workflowSteps);
+
         var workflowInstance = new WorkflowInstance
         {
             Id = Guid.NewGuid(),
@@ -475,8 +485,12 @@ public class WorkflowEngine : IWorkflowEngine
 
         await _workflowApprovalRepository.SaveChangesAsync();
 
+        var cancelledAt = DateTime.UtcNow;
         instance.Status = WorkflowInstanceStatus.Cancelled;
-        instance.CompletedDate = DateTime.UtcNow;
+        // Retain CompletedDate for existing terminal-state consumers, while recording
+        // cancellation in the dedicated field used by workflow audit and reporting.
+        instance.CompletedDate = cancelledAt;
+        instance.CancelledDate = cancelledAt;
         instance.Notes = reason;
         await _workflowInstanceRepository.UpdateAsync(instance);
         await _workflowInstanceRepository.SaveChangesAsync();
@@ -1066,6 +1080,7 @@ public class WorkflowEngine : IWorkflowEngine
                     approvalConfig.MinApprovalsRequired,
                     currentGroupApprovals))
             {
+                await ExpireSupersededApprovalsAsync(currentGroupApprovals);
                 var nextGroup = WorkflowApprovalSequenceCoordinator.GetNextQueuedGroup(approvals);
                 if (nextGroup.HasValue)
                 {
@@ -1101,6 +1116,11 @@ public class WorkflowEngine : IWorkflowEngine
             };
         }
 
+        // A Single/Majority/minimum approval policy can complete while alternative approval
+        // requests are still pending. Close those requests before advancing so completed steps
+        // never retain actionable-looking or audit-ambiguous sibling approvals.
+        await ExpireSupersededApprovalsAsync(approvals);
+
         stepInstance.Status = WorkflowStepInstanceStatus.Completed;
         stepInstance.CompletedDate = DateTime.UtcNow;
         stepInstance.Comments = comments;
@@ -1118,6 +1138,28 @@ public class WorkflowEngine : IWorkflowEngine
             resultData);
 
         return await AdvanceFromStepAsync(instance, stepDefinition, userId, resultData);
+    }
+
+    private async Task ExpireSupersededApprovalsAsync(IEnumerable<WorkflowApproval> approvals)
+    {
+        var superseded = approvals
+            .Where(candidate => candidate.Status is WorkflowApprovalStatus.Pending or WorkflowApprovalStatus.Queued)
+            .ToList();
+        if (superseded.Count == 0)
+        {
+            return;
+        }
+
+        var expiredAt = DateTime.UtcNow;
+        foreach (var candidate in superseded)
+        {
+            candidate.Status = WorkflowApprovalStatus.Expired;
+            candidate.ProcessedDate = expiredAt;
+            candidate.Comments ??= "Approval request closed because the step approval requirement was satisfied.";
+            await _workflowApprovalRepository.UpdateAsync(candidate);
+        }
+
+        await _workflowApprovalRepository.SaveChangesAsync();
     }
 
     private async Task<WorkflowExecutionResult> HandleRejectionAsync(

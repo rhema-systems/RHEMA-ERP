@@ -247,6 +247,7 @@
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
     <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />
+    <Compile Include="Services\Workflow\WorkflowApproverEligibilityTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
     <Compile Include="Services\Identity\HrIdentityReconciliationServiceTests.cs" />
     <Compile Include="Services\Procurement\ProcurementCentralDmsAdoptionTests.cs" />
