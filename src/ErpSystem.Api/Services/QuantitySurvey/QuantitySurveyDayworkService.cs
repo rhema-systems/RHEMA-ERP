@@ -440,7 +440,7 @@ public sealed class QuantitySurveyDayworkService(
         await Query(tracked).SingleOrDefaultAsync(value => value.Id == id, token)
         ?? throw new QuantitySurveyDayworkNotFoundException("The governed daywork sheet was not found.");
     private async Task RequireProjectAsync(Guid projectId)
-    { if (projectId == Guid.Empty || await projectService.GetProjectByIdAsync(projectId) is null) throw new UnauthorizedAccessException("You are not permitted to access the selected project."); }
+    { if (!await projectService.HasProjectAccessAsync(projectId)) throw new UnauthorizedAccessException("You are not permitted to access the selected project."); }
     private async Task<string> NextNumberAsync(CancellationToken token)
     { var year = DateTime.UtcNow.Year; var count = await db.QuantitySurveyDayworkSheets.IgnoreQueryFilters().CountAsync(value => value.TenantId == TenantId && value.CreatedAt.Year == year, token); return $"DW-{year}-{count + 1:00000}"; }
 

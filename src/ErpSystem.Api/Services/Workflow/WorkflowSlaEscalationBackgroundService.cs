@@ -23,6 +23,11 @@ public sealed class WorkflowSlaEscalationBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // BackgroundService.StartAsync invokes ExecuteAsync while the host is still starting.
+        // Yield before the first database scan so a slow or newly materialized workflow store
+        // cannot prevent Kestrel from becoming ready.
+        await Task.Yield();
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try { await ExecuteCycleAsync(stoppingToken); }

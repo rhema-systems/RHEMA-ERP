@@ -39,7 +39,7 @@ public sealed class QuantitySurveyEscalationDisputeAuditPackDocumentBuilder(
         var userId = Guid.TryParse(currentUser.UserId, out var actor) && actor != Guid.Empty
             ? actor : throw new UnauthorizedAccessException("An authenticated user is required.");
         var model = await LoadAsync(request.EntityId, tenantId, cancellationToken);
-        if (await projectService.GetProjectByIdAsync(model.Dispute.ProjectId) is null)
+        if (!await projectService.HasProjectAccessAsync(model.Dispute.ProjectId))
             throw new UnauthorizedAccessException("You are not permitted to export this project's dispute evidence.");
         if (model.Dispute.Status != "Resolved" || model.Dispute.Outcome is null || model.Dispute.ResolvedAt is null)
             throw new QuantitySurveyEscalationDisputeConflictException("Resolve the dispute before generating its final audit pack.");

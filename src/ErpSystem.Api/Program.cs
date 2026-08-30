@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Events;
@@ -154,7 +155,10 @@ if (args.Length > 0 && args[0] == "seed-hr-all")
     var tempBuilder = CreateSeedBuilder(args);
 
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor();
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider, ErpSystem.Api.Services.CurrentUserService>();
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
 
     var tempApp = tempBuilder.Build();
 
@@ -382,6 +386,14 @@ builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
 builder.Services.AddDevelopmentServices(builder.Environment);
+
+// Disposable browser-assurance hosts exercise synchronous API workflows and should not
+// run unrelated schedulers against their short-lived database. Production keeps the
+// default enabled value; test launchers must opt out explicitly.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true))
+{
+    builder.Services.RemoveAll<IHostedService>();
+}
 
 // Add Quality Certificate Service
 builder.Services.AddScoped<ErpSystem.Api.Services.QualityCertificateService>();

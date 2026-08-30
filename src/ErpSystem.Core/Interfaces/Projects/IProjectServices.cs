@@ -8,6 +8,7 @@ namespace ErpSystem.Core.Interfaces.Projects;
 public interface IProjectService
 {
     Task<PagedResult<ProjectDto>> GetProjectsAsync(int page, int pageSize, string? search = null, string? status = null, Guid? projectTypeId = null, Guid? portfolioId = null, Guid? programId = null);
+    Task<bool> HasProjectAccessAsync(Guid projectId);
     Task<ProjectDetailDto?> GetProjectByIdAsync(Guid id);
     Task<ProjectWorkspaceDto?> GetProjectWorkspaceAsync(Guid id);
     Task<ProjectLinkOptionsDto> GetProjectLinkOptionsAsync(Guid projectId);

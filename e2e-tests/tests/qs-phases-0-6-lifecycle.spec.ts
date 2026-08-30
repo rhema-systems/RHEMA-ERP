@@ -7,10 +7,10 @@ const required = (name: string): string => {
 };
 
 const ids = {
-  measurement: 'd6000000-0000-4000-8000-000000000001',
-  measurementLine: 'd6000000-0000-4000-8000-000000000002',
-  measurementEvidence: 'd6000000-0000-4000-8000-000000000003',
-  measurementRecord: 'd6000000-0000-4000-8000-000000000004',
+  measurement: 'd6000000-0000-4000-8000-000000000101',
+  measurementLine: 'd6000000-0000-4000-8000-000000000102',
+  measurementEvidence: 'd6000000-0000-4000-8000-000000000103',
+  measurementRecord: 'd6000000-0000-4000-8000-000000000104',
   worksheet: 'd6020000-0000-4000-8000-000000000010',
   worksheetEvidence: 'd6020000-0000-4000-8000-000000000011',
   contractorClaim: 'd6020000-0000-4000-8000-000000000012',
@@ -19,12 +19,16 @@ const ids = {
   vet: 'd6020000-0000-4000-8000-000000000014',
   consultantEndorse: 'd6020000-0000-4000-8000-000000000015',
   worksheetSubmit: 'd6020000-0000-4000-8000-000000000016',
-  worksheetApprove1: 'd6020000-0000-4000-8000-000000000017',
-  worksheetApprove2: 'd6020000-0000-4000-8000-000000000018',
+  worksheetQsReview: 'd6020000-0000-4000-8000-000000000017',
+  worksheetEngineeringConfirmation: 'd6020000-0000-4000-8000-000000000018',
+  worksheetFinanceValidation: 'd6020000-0000-4000-8000-000000000025',
+  worksheetFinalApproval: 'd6020000-0000-4000-8000-000000000026',
   certificate: 'd6020000-0000-4000-8000-000000000020',
   certificateSubmit: 'd6020000-0000-4000-8000-000000000021',
-  certificateApprove1: 'd6020000-0000-4000-8000-000000000022',
-  certificateApprove2: 'd6020000-0000-4000-8000-000000000023',
+  certificateQsReview: 'd6020000-0000-4000-8000-000000000022',
+  certificateEngineeringConfirmation: 'd6020000-0000-4000-8000-000000000023',
+  certificateFinanceValidation: 'd6020000-0000-4000-8000-000000000027',
+  certificateFinalApproval: 'd6020000-0000-4000-8000-000000000028',
 };
 
 const parsed = async <T>(response: APIResponse, label: string): Promise<T> => {
@@ -78,7 +82,7 @@ async function login(
   return { context, page, headers: { Authorization: `Bearer ${token}` } };
 }
 
-test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async ({
+test('QS phases 0-6 governed role-separated review, approval, and Finance handoff lifecycle', async ({
   browser,
   request,
 }) => {
@@ -94,6 +98,9 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
   const boqVersionId = required('QS_ACCEPTANCE_BOQ_VERSION_ID');
   const contractorId = required('QS_ACCEPTANCE_CONTRACTOR_ID');
   const consultantId = required('QS_ACCEPTANCE_CONSULTANT_ID');
+  const measurementDate =
+    process.env.QS_ACCEPTANCE_MEASUREMENT_DATE?.trim() ||
+    `${new Date().toISOString().slice(0, 10)}T12:00:00Z`;
 
   const maker = await login(
     browser,
@@ -113,9 +120,33 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
     required('QS_ACCEPTANCE_CONSULTANT_USERNAME'),
     required('QS_ACCEPTANCE_CONSULTANT_PASSWORD'),
   );
-  const checker = await login(
+  const reviewer = await login(
     browser,
-    'independent QS checker',
+    'independent QS reviewer',
+    required('QS_ACCEPTANCE_REVIEWER_USERNAME'),
+    required('QS_ACCEPTANCE_REVIEWER_PASSWORD'),
+  );
+  const workflowReviewer = await login(
+    browser,
+    'independent workflow QS reviewer',
+    required('QS_ACCEPTANCE_WORKFLOW_REVIEWER_USERNAME'),
+    required('QS_ACCEPTANCE_WORKFLOW_REVIEWER_PASSWORD'),
+  );
+  const engineer = await login(
+    browser,
+    'engineering and project confirmer',
+    required('QS_ACCEPTANCE_ENGINEER_USERNAME'),
+    required('QS_ACCEPTANCE_ENGINEER_PASSWORD'),
+  );
+  const financeValidator = await login(
+    browser,
+    'Finance validator',
+    required('QS_ACCEPTANCE_FINANCE_VALIDATOR_USERNAME'),
+    required('QS_ACCEPTANCE_FINANCE_VALIDATOR_PASSWORD'),
+  );
+  const approver = await login(
+    browser,
+    'independent final approver',
     required('QS_ACCEPTANCE_CHECKER_USERNAME'),
     required('QS_ACCEPTANCE_CHECKER_PASSWORD'),
   );
@@ -144,6 +175,8 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
     id: string;
     rowVersion: string;
     status: string;
+    boqQuantity: number;
+    totalMeasuredQuantity: number;
   }>(
     await request.post(`${api}/api/quantity-survey/measurements`, {
       headers: maker.headers,
@@ -154,7 +187,7 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
         projectDrawingId: null,
         sourceType: 1,
         title: 'QS phases 0-6 authenticated acceptance measurement',
-        measurementDate: '2026-08-11T12:00:00Z',
+        measurementDate,
         siteLocation: 'Authenticated acceptance test area',
         lines: [
           {
@@ -162,7 +195,10 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
             sequence: 1,
             description: 'Verified work-done count',
             formulaType: 0,
-            timesing: 5,
+            // Keep the golden-path certificate within the approved one-unit BoQ
+            // line and the formal Works contract commitment. Over-measurement is
+            // covered separately by the governed remeasurement/variation path.
+            timesing: 1,
             length: null,
             width: null,
             height: null,
@@ -213,6 +249,10 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
     );
   }
   expect(measurement.status).toBe('Recorded');
+  expect(
+    measurement.totalMeasuredQuantity,
+    'The golden-path measurement must remain inside its approved BoQ quantity; over-measurement uses the governed remeasurement/variation flow.',
+  ).toBeLessThanOrEqual(measurement.boqQuantity);
 
   const preview = await parsed<{
     id: string;
@@ -383,7 +423,7 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
       await request.put(
         `${api}/api/quantity-survey/valuation-worksheets/${valuationId}`,
         {
-          headers: maker.headers,
+          headers: reviewer.headers,
           data: {
             clientRequestId: ids.qsReview,
             projectBoqVersionId: boqVersionId,
@@ -413,7 +453,7 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
       await request.post(
         `${api}/api/quantity-survey/valuation-worksheets/worksheets/${worksheet.id}/vet`,
         {
-          headers: maker.headers,
+          headers: reviewer.headers,
           data: {
             clientRequestId: ids.vet,
             rowVersion: worksheet.rowVersion,
@@ -466,25 +506,42 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
     );
   }
 
-  for (const clientRequestId of [
-    ids.worksheetApprove1,
-    ids.worksheetApprove2,
+  for (const stage of [
+    {
+      label: 'QS review',
+      clientRequestId: ids.worksheetQsReview,
+      actor: workflowReviewer,
+    },
+    {
+      label: 'engineering and project confirmation',
+      clientRequestId: ids.worksheetEngineeringConfirmation,
+      actor: engineer,
+    },
+    {
+      label: 'Finance validation',
+      clientRequestId: ids.worksheetFinanceValidation,
+      actor: financeValidator,
+    },
+    {
+      label: 'independent final approval',
+      clientRequestId: ids.worksheetFinalApproval,
+      actor: approver,
+    },
   ]) {
     if (worksheet.status === 'Approved') break;
     worksheet = await parsed<typeof worksheet>(
       await request.post(
         `${api}/api/quantity-survey/valuation-worksheets/worksheets/${worksheet.id}/approve`,
         {
-          headers: checker.headers,
+          headers: stage.actor.headers,
           data: {
-            clientRequestId,
+            clientRequestId: stage.clientRequestId,
             rowVersion: worksheet.rowVersion,
-            reason:
-              'Independent QS approval after technical and evidence review.',
+            reason: `Authenticated ${stage.label} of the valuation evidence and governed source lineage.`,
           },
         },
       ),
-      'approve valuation workflow step',
+      `complete valuation ${stage.label}`,
     );
   }
   expect(worksheet).toMatchObject({
@@ -541,25 +598,59 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
       'submit payment certificate',
     );
   }
-  for (const clientRequestId of [
-    ids.certificateApprove1,
-    ids.certificateApprove2,
+  for (const stage of [
+    {
+      label: 'QS review',
+      clientRequestId: ids.certificateQsReview,
+      actor: workflowReviewer,
+    },
+    {
+      label: 'engineering and project confirmation',
+      clientRequestId: ids.certificateEngineeringConfirmation,
+      actor: engineer,
+    },
+    {
+      label: 'Finance validation',
+      clientRequestId: ids.certificateFinanceValidation,
+      actor: financeValidator,
+    },
+    {
+      label: 'independent final approval',
+      clientRequestId: ids.certificateFinalApproval,
+      actor: approver,
+    },
   ]) {
     if (certificate.status === 'Approved') break;
     certificate = await parsed<typeof certificate>(
       await request.post(
         `${api}/api/quantity-survey/payment-certificates/${certificate.id}/approve`,
         {
-          headers: checker.headers,
+          headers: stage.actor.headers,
           data: {
-            clientRequestId,
+            clientRequestId: stage.clientRequestId,
             rowVersion: certificate.rowVersion,
-            reason:
-              'Independent certificate approval and automatic Finance AP handoff.',
+            reason: `Authenticated ${stage.label} of the payment certificate and governed valuation lineage.`,
           },
         },
       ),
-      'approve payment certificate workflow step',
+      `complete payment-certificate ${stage.label}`,
+    );
+  }
+  if (certificate.status === 'Approved' && !certificate.vendorInvoiceId) {
+    certificate = await parsed<typeof certificate>(
+      await request.post(
+        `${api}/api/quantity-survey/payment-certificates/${certificate.id}/approve`,
+        {
+          headers: approver.headers,
+          data: {
+            clientRequestId: ids.certificateFinalApproval,
+            rowVersion: certificate.rowVersion,
+            reason:
+              'Authenticated independent final approval of the payment certificate and governed valuation lineage.',
+          },
+        },
+      ),
+      'resume the committed certificate approval at its governed DMS and Finance boundaries',
     );
   }
   expect(certificate).toMatchObject({
@@ -599,7 +690,12 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
   );
   expect(
     new Set(valuationHistory.map((value) => value.actorName)).size,
-  ).toBeGreaterThanOrEqual(3);
+    // Intermediate shared-workflow approvals are retained by the workflow
+    // owner; the valuation revision owner records the final approval only.
+    // These five actors cover maker, contractor, QS vetter, consultant and
+    // final approver, while the successful stage requests above prove the
+    // separate QS reviewer, engineer and Finance reviewer identities.
+  ).toBeGreaterThanOrEqual(5);
 
   const certificateHistory = await parsed<Array<{ action: string }>>(
     await request.get(
@@ -638,6 +734,10 @@ test('QS phases 0-6 governed maker-checker and Finance handoff lifecycle', async
     maker.context.close(),
     contractor.context.close(),
     consultant.context.close(),
-    checker.context.close(),
+    reviewer.context.close(),
+    workflowReviewer.context.close(),
+    engineer.context.close(),
+    financeValidator.context.close(),
+    approver.context.close(),
   ]);
 });
