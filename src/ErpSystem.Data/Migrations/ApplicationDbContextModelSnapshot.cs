@@ -1178,6 +1178,24 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
 
+                    b.Property<string>("TemplateContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("TemplateFileName")
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<long?>("TemplateFileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("TemplateFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TemplateRepositoryPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1201,6 +1219,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "TemplateCode")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "TemplateFileUploadRecordId");
 
                     b.HasIndex("TenantId", "Module", "DocumentType");
 
@@ -5730,6 +5750,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<bool>("AutoGenerateRentInvoices")
+                        .HasColumnType("bit");
+
                     b.Property<int?>("BeaconCount")
                         .HasColumnType("int");
 
@@ -5885,6 +5908,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("LastRentInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastRentInvoiceNumber")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid?>("LastRentPenaltyInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastRentPenaltyInvoiceNumber")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid?>("LastRentPenaltySourceInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("LeaseTermYears")
                         .HasColumnType("int");
 
@@ -5908,6 +5948,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(240)
                         .HasColumnType("nvarchar(240)");
+
+                    b.Property<DateTime?>("NextRentBillingDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(2000)
@@ -5952,6 +5995,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Region")
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTime?>("RentBillingActivatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RentGracePeriodDays")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("RentPenaltyCapAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("RentPenaltyMethod")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal>("RentPenaltyValue")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime?>("RightOfEntryDate")
                         .HasColumnType("datetime2");
@@ -101631,6 +101691,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid>("ProcedureCaseId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProvidedBy")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("RequiredFrom")
                         .HasMaxLength(150)

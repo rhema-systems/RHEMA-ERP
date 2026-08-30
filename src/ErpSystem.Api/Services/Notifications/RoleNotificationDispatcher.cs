@@ -1,4 +1,3 @@
-using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
@@ -61,20 +60,22 @@ internal static class RoleNotificationDispatcher
 
         foreach (var recipientId in recipients)
         {
-            await notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = recipientId,
-                    Type = type,
-                    Title = title,
-                    Message = message,
-                    Priority = "Normal",
-                    EntityType = entityType,
-                    EntityId = entityId,
-                    ActionUrl = actionUrl,
-                    Metadata = metadata
-                },
-                actorId ?? recipientId,
+            var notificationData = metadata is null
+                ? new Dictionary<string, object>()
+                : new Dictionary<string, object>(metadata);
+            notificationData["EntityType"] = entityType;
+            notificationData["EntityId"] = entityId;
+            if (!string.IsNullOrWhiteSpace(actionUrl))
+            {
+                notificationData["ActionUrl"] = actionUrl;
+            }
+
+            await notificationService.CreateInAppNotificationAsync(
+                recipientId,
+                title,
+                message,
+                type,
+                notificationData,
                 tenantId);
         }
 

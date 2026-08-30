@@ -8960,6 +8960,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+            entity.HasIndex(item => new { item.TenantId, item.TemplateFileUploadRecordId });
         });
 
         builder.Entity<CentralDocumentAnnotationReview>(entity =>

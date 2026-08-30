@@ -70,6 +70,18 @@ public class EstateManagedAssetDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public DateTime? RentBillingActivatedAt { get; set; }
+    public DateTime? NextRentBillingDate { get; set; }
+    public Guid? LastRentInvoiceId { get; set; }
+    public string? LastRentInvoiceNumber { get; set; }
+    public bool AutoGenerateRentInvoices { get; set; }
+    public int RentGracePeriodDays { get; set; }
+    public string RentPenaltyMethod { get; set; } = "None";
+    public decimal RentPenaltyValue { get; set; }
+    public decimal? RentPenaltyCapAmount { get; set; }
+    public Guid? LastRentPenaltyInvoiceId { get; set; }
+    public string? LastRentPenaltyInvoiceNumber { get; set; }
+    public Guid? LastRentPenaltySourceInvoiceId { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -150,6 +162,8 @@ public class UpdateEstateManagedAssetRegisterDto
 public class UpdateEstateManagedAssetOccupancyDto
 {
     public EstateManagedAssetStatus Status { get; set; }
+    public DateTime? ActualDate { get; set; }
+    public bool? ReleaseOccupant { get; set; }
     public bool? IsAvailableForLease { get; set; }
     public bool? IsAvailableForSale { get; set; }
     public bool? IsPublishedToExternalPortal { get; set; }

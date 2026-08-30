@@ -1083,7 +1083,7 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("Invoice"))
         {
             var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            if (invoice?.Status == InvoiceStatus.Draft)
+            if (invoice?.Status == InvoiceStatus.PendingApproval)
             {
                 await RecordCustomerInvoiceAuditAsync(
                     tenantId,

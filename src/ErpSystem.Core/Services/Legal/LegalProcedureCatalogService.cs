@@ -7,6 +7,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
     private static readonly LegalProcedureCatalogItem[] Procedures =
     [
         new("Legal Department Procedure Manual", "LegalProcedure", "Source: Legal - Procedure Manual", "General legal intake, review, drafting, approval, execution, and record keeping through configured workflows.", "BookOpen", 6, "slate"),
+        new("Property Agreement Reviews", "LegalPropertyAgreementReview", "Source: Estate / Property Management -> Legal", "Draft rental, lease, and sale agreements received from Property Management for legal vetting, correction, approval, and controlled release.", "FileCheck2", 3, "emerald"),
         new("Legal Opinions / Advisory", "LegalOpinionAdvisory", "Source: Legal - Advisory / Opinion Requests", "Legal opinion requests, issue summaries, research notes, advice memos, confidentiality, approvals, and closure routed through configured workflows.", "MessageSquare", 5, "indigo"),
         new("External Counsel Management", "LegalExternalCounsel", "Source: Legal - External Counsel / Law Firm Oversight", "External counsel instructions, retainers, matter assignment, fees, performance, invoices, and closeout routed through configured workflows.", "Briefcase", 5, "zinc"),
         new("Mortgages", "LegalMortgage", "Source: Legal - Mortgages", "Mortgage request review, document preparation, execution support, and completion tracking through configured workflows.", "FileSignature", 6, "cyan"),
@@ -44,6 +45,16 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
     private static IReadOnlyList<LegalWorkspaceStage> BuildStages(string entityType)
     {
+        if (string.Equals(entityType, "LegalPropertyAgreementReview", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                Stage("Legal Intake", "Legal Admin Assistant", "The linked property transaction and draft agreement are registered in Legal.", ["Confirm Estate source reference", "Confirm draft agreement is attached", "Assign Legal Officer"]),
+                Stage("Agreement Vetting", "Legal Officer", "The Legal Officer checks parties, property particulars, commercial terms, obligations, execution blocks, and legal risk.", ["Verify parties and property", "Review clauses and schedules", "Approve or return for correction"]),
+                Stage("Head of Legal Release", "Head of Legal", "The vetted agreement is approved for controlled release to the customer or returned to Property Management.", ["Confirm Legal Officer recommendation", "Record release decision", "Return approved reference to Property Management"])
+            ];
+        }
+
         if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase))
         {
             return
@@ -78,10 +89,11 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Client Payment Call", "Legal Admin Assistant", "Client is called to pay transfer fee within the approved period.", ["Notify client", "Track 30-day payment window", "Capture payment evidence"]),
                 Stage("Transfer Drafting", "Legal Admin Assistant", "After payment, the draft transfer form is prepared.", ["Confirm payment", "Prepare transfer draft", "Send to Legal Officer"]),
                 Stage("Legal Vetting", "Legal Officer", "Legal Officer vets and approves the transfer draft.", ["Review parties", "Review property details", "Approve or return draft"]),
-                Stage("Client Execution", "Client Signature", "Client signs the approved transfer form.", ["Invite parties", "Capture signature date", "Attach executed copy"]),
+                Stage("Client Execution", "Legal Admin Assistant", "Legal Admin captures the client-signed transfer form and routes the execution pack.", ["Invite parties", "Capture signature date", "Attach executed copy"]),
                 Stage("Legal Officer Signature", "Legal Officer", "Legal Officer signs the transfer instrument.", ["Confirm execution", "Sign instrument", "Forward for LAA signature"]),
                 Stage("Legal Admin Signature", "Legal Admin Assistant", "Legal Admin signs or attests as required.", ["Apply LAA signature", "Check execution pack", "Send to Head of Legal"]),
-                Stage("Head of Legal Signature", "Head of Legal", "Head of Legal signs and the file is returned for Estate records amendment.", ["Sign transfer", "Distribute signed forms", "Return file to Estate Records"])
+                Stage("Head of Legal Signature", "Head of Legal", "Head of Legal signs the transfer instrument.", ["Sign transfer", "Release for Legal Admin closeout"]),
+                Stage("Legal Admin Closeout", "Legal Admin Assistant", "Legal Admin distributes signed forms and returns the file for Estate records amendment.", ["Distribute signed forms", "Return file to Estate Records", "Upload Estate return note"])
             ];
         }
 
@@ -189,19 +201,10 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
     private static IReadOnlyList<LegalWorkspaceDocument> BuildDocuments(string entityType)
     {
-        var documents = new List<LegalWorkspaceDocument>
-        {
-            Doc("Source request / forwarding minute", "Estate / Originating Department", true),
-            Doc("Property file extract", "Estate Records", true),
-            Doc("Payment / receipt evidence", "Finance / Client", false),
-            Doc("Legal review note", "Legal Officer", true),
-            Doc("Final signed / dispatched document", "Legal Department", true)
-        };
-
         if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
         {
-            documents.AddRange([
+            return UniqueDocuments([
                 Doc("Served court process", "Registry / Court bailiff", true),
                 Doc("Court jacket / docket", "Legal Officer", true),
                 Doc("Filed response / court filing evidence", "Legal Admin Assistant / Court", true),
@@ -211,7 +214,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
         if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
         {
-            documents.AddRange([
+            return UniqueDocuments([
                 Doc("Lease request and Estate forwarding letter", "Estate Department", true),
                 Doc("Cadastral plan and schedule", "Estate / Planning", true),
                 Doc("Draft lease / deed of variation / sublease", "Secretary", true),
@@ -222,7 +225,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
         if (string.Equals(entityType, "LegalAssignmentSubleaseVesting", StringComparison.OrdinalIgnoreCase))
         {
-            documents.AddRange([
+            return UniqueDocuments([
                 Doc("Consent to assign / sublease request", "Estate / Applicant", true),
                 Doc("Recognition of vesting evidence", "Applicant / Legal", false),
                 Doc("Draft consent / recognition letter", "Legal Admin Assistant", true),
@@ -233,7 +236,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entityType, "LegalMortgageInPrinciple", StringComparison.OrdinalIgnoreCase))
         {
-            documents.AddRange([
+            return UniqueDocuments([
                 Doc("Mortgage consent request", "Estate / Applicant", true),
                 Doc("Financial institution / mortgagee letter", "Applicant / Mortgagee", true),
                 Doc("Draft mortgage consent / in-principle letter", "Legal Admin Assistant", true),
@@ -243,7 +246,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
         if (string.Equals(entityType, "LegalTerminationRecognition", StringComparison.OrdinalIgnoreCase))
         {
-            documents.AddRange([
+            return UniqueDocuments([
                 Doc("Site report", "Estate / Legal Clerk", true),
                 Doc("Termination notice", "Legal Admin Assistant", true),
                 Doc("21-day posting evidence", "Legal Clerk", true),
@@ -254,7 +257,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
         if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
         {
-            documents.AddRange([
+            return UniqueDocuments([
                 Doc("Transfer file from Estate", "Estate Department", true),
                 Doc("Transfer fee payment receipt", "Finance / Client", true),
                 Doc("Draft transfer form", "Legal Admin Assistant", true),
@@ -263,6 +266,17 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             ]);
         }
 
+        return UniqueDocuments([
+            Doc("Source request / forwarding minute", "Estate / Originating Department", true),
+            Doc("Property file extract", "Estate Records", true),
+            Doc("Payment / receipt evidence", "Finance / Client", false),
+            Doc("Legal review note", "Legal Officer", true),
+            Doc("Final signed / dispatched document", "Legal Department", true)
+        ]);
+    }
+
+    private static IReadOnlyList<LegalWorkspaceDocument> UniqueDocuments(IEnumerable<LegalWorkspaceDocument> documents)
+    {
         return documents
             .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
@@ -274,6 +288,12 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         var fields = new List<LegalWorkspaceField>
         {
             Field("referenceNumber", "Legal reference number", "text"),
+            Field("sourceProcedureCaseId", "Originating procedure case ID", "text"),
+            Field("sourceEntityType", "Originating entity type", "text"),
+            Field("sourceRecordReference", "Originating transaction reference", "text"),
+            Field("matterPurpose", "Legal matter purpose", "text"),
+            Field("transactionType", "Property transaction type", "text"),
+            Field("agreementReference", "Agreement / DMS reference", "text"),
             Field("sourceDepartment", "Source department", "select", ["Estate", "Property Management", "Finance", "Managing Director", "External Party", "Court / Registry", "Other"]),
             Field("propertyFileReference", "Property file reference", "text"),
             Field("propertyNumber", "Property / plot / house number", "text"),
@@ -301,11 +321,20 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Field("courtProcessType", "Court process type", "select", ["Writ of Summons", "Motion", "Notice", "Order", "Letter", "Other"]),
                 Field("courtName", "Court name", "text"),
                 Field("caseNumber", "Court case number", "text"),
+                Field("claimantName", "Claimant / applicant", "text"),
+                Field("defendantName", "Defendant / respondent", "text"),
+                Field("claimAmount", "Claim / exposure amount", "currency"),
+                Field("litigationRisk", "Litigation risk", "select", ["Low", "Medium", "High", "Critical"]),
+                Field("courtMatterStatus", "Court matter status", "select", ["Pending", "Active", "Stayed", "Awaiting judgment", "On appeal", "Closed"]),
+                Field("courtOutcome", "Court outcome", "select", ["Pending", "Won", "Lost", "Settled", "Withdrawn", "Struck out", "Not applicable"]),
                 Field("serviceDate", "Service date", "date"),
                 Field("responseDeadline", "Response / filing deadline", "date"),
                 Field("courtJacketReference", "Court jacket / docket reference", "text"),
                 Field("filingReference", "Court filing reference", "text"),
-                Field("nextHearingDate", "Next hearing date", "date")
+                Field("nextHearingDate", "Next hearing date", "date"),
+                Field("judgmentDate", "Judgment / settlement date", "date"),
+                Field("judgmentSummary", "Judgment / settlement summary", "textarea"),
+                Field("appealStatus", "Appeal status", "select", ["Not applicable", "Under consideration", "Filed", "Concluded"])
             ]);
         }
 
@@ -366,6 +395,13 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Field("transfereeName", "Transferee name", "text"),
                 Field("interviewDate", "Applicant / transferee interview date", "date"),
                 Field("transferFeePayable", "Transfer fee payable", "currency"),
+                Field("transferFeePaymentRequestReference", "Transfer fee payment request reference", "text"),
+                Field("transferFeeInvoiceReference", "Transfer fee invoice reference", "text"),
+                Field("transferFeeInvoiceStatus", "Transfer fee invoice status", "text"),
+                Field("transferFeeInvoiceAmount", "Transfer fee invoice amount", "currency"),
+                Field("transferFeeInvoicePaidAmount", "Transfer fee invoice paid amount", "currency"),
+                Field("transferFeeInvoiceBalance", "Transfer fee invoice balance", "currency"),
+                Field("transferFeePaymentCheckStatus", "Transfer fee payment check", "text"),
                 Field("transferFeeReceipt", "Transfer fee receipt", "text"),
                 Field("mdApprovalReference", "Managing Director approval reference", "text"),
                 Field("transferDeclarationReference", "Transfer declaration reference", "text"),

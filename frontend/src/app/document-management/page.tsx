@@ -23,6 +23,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   documentManagementService,
   type CentralDocumentDashboard,
@@ -67,6 +69,7 @@ export default function DocumentManagementPage() {
   );
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const registerPages = usePaginatedItems(register, 10);
 
   React.useEffect(() => {
     let mounted = true;
@@ -142,12 +145,7 @@ export default function DocumentManagementPage() {
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
             <Link href="/estate/property-management/EstatePropertyManagementDocumentRecordIndex">
-              Property Records
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/estate/facilities/EstateFacilityDocument">
-              Facilities Documents
+              Property & Facilities Records
             </Link>
           </Button>
         </div>
@@ -412,7 +410,7 @@ export default function DocumentManagementPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {register.map((document) => (
+          {registerPages.items.map((document) => (
             <div
               key={document.documentReference}
               className="rounded-md border bg-background p-4"
@@ -446,6 +444,15 @@ export default function DocumentManagementPage() {
               </div>
             </div>
           ))}
+          {register.length > registerPages.pageSize ? (
+            <Pagination
+              currentPage={registerPages.currentPage}
+              totalPages={registerPages.totalPages}
+              totalItems={registerPages.totalItems}
+              pageSize={registerPages.pageSize}
+              onPageChange={registerPages.setCurrentPage}
+            />
+          ) : null}
         </CardContent>
       </Card>
     </div>

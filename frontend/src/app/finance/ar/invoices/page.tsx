@@ -40,6 +40,8 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import type { Invoice } from '@/types/ar';
 
 export default function InvoicesPage() {
     const router = useRouter();
@@ -53,6 +55,7 @@ export default function InvoicesPage() {
     const [pageSize] = useState(10);
     const [statusFilter, setStatusFilter] = useState<string>('');
     const { hasPermission, hasAnyPermission } = useAuth();
+    const [invoiceToSubmit, setInvoiceToSubmit] = useState<Invoice | null>(null);
 
     const { data: invoicesData, isLoading } = useQuery({
         queryKey: ['invoices', page, pageSize, debouncedSearchTerm, statusFilter, openingBalanceOnly],
@@ -83,19 +86,19 @@ export default function InvoicesPage() {
         },
     });
 
-    const issueInvoiceMutation = useMutation({
-        mutationFn: (id: string) => arService.sendInvoice(id),
+    const submitInvoiceMutation = useMutation({
+        mutationFn: (id: string) => arService.submitInvoiceForApproval(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
             toast({
                 title: 'Success',
-                description: 'Invoice issued and posted successfully',
+                description: 'Invoice submitted to the Finance approval workflow',
             });
         },
         onError: (error: any) => {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to issue invoice',
+                description: error.message || 'Failed to submit invoice for approval',
                 variant: 'destructive',
             });
         },
@@ -109,6 +112,8 @@ export default function InvoicesPage() {
     const getStatusBadge = (status: string) => {
         switch (status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
+            case 'PendingApproval': return <Badge className="bg-amber-600">Pending approval</Badge>;
+            case 'Rejected': return <Badge variant="destructive">Rejected</Badge>;
             case 'Sent': return <Badge className="bg-blue-600">Sent</Badge>;
             case 'Posted': return <Badge className="bg-blue-600">Posted</Badge>;
             case 'Paid': return <Badge className="bg-green-600">Paid</Badge>;
@@ -117,6 +122,9 @@ export default function InvoicesPage() {
             default: return <Badge variant="secondary">{status}</Badge>;
         }
     };
+
+    const formatInvoiceDate = (value?: string | null) =>
+        value ? format(new Date(value), 'MMM dd, yyyy') : 'Not set';
 
     return (
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
@@ -159,6 +167,8 @@ export default function InvoicesPage() {
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem onClick={() => setStatusFilter('')}>All</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Draft')}>Draft</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => setStatusFilter('PendingApproval')}>Pending approval</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => setStatusFilter('Rejected')}>Rejected</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Sent')}>Sent</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Posted')}>Posted</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Paid')}>Paid</DropdownMenuItem>
@@ -204,14 +214,16 @@ export default function InvoicesPage() {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    invoicesData?.items.map((invoice) => (
+                                    invoicesData?.items.map((invoice) => {
+                                        const isPastDue = !!invoice.dueDate && new Date(invoice.dueDate) < new Date() && invoice.balanceAmount > 0;
+                                        return (
                                         <TableRow key={invoice.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/finance/ar/invoices/${invoice.id}`)}>
                                             <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
                                             <TableCell>{invoice.customerName}</TableCell>
-                                            <TableCell>{format(new Date(invoice.invoiceDate), 'MMM dd, yyyy')}</TableCell>
+                                            <TableCell>{formatInvoiceDate(invoice.invoiceDate)}</TableCell>
                                             <TableCell>
-                                                <span className={new Date(invoice.dueDate) < new Date() && invoice.balanceAmount > 0 ? 'text-red-500 font-medium' : ''}>
-                                                    {format(new Date(invoice.dueDate), 'MMM dd, yyyy')}
+                                                <span className={isPastDue ? 'text-red-500 font-medium' : ''}>
+                                                    {formatInvoiceDate(invoice.dueDate)}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right">{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</TableCell>
@@ -230,7 +242,7 @@ export default function InvoicesPage() {
                                                         <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/${invoice.id}`)}>
                                                             View Details
                                                         </DropdownMenuItem>
-                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AR.Invoices.Edit', 'Finance.AR.Invoices.Write']) && (
+                                                        {(invoice.status === 'Draft' || invoice.status === 'Rejected') && hasAnyPermission(['Finance.AR.Invoices.Edit', 'Finance.AR.Invoices.Write']) && (
                                                             <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/${invoice.id}/edit`)}>
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
@@ -241,9 +253,9 @@ export default function InvoicesPage() {
                                                             </DropdownMenuItem>
                                                         )}
                                                         <DropdownMenuSeparator />
-                                                        {invoice.status === 'Draft' && hasPermission('Finance.AR.Invoices.Send') && (
-                                                        <DropdownMenuItem onClick={() => issueInvoiceMutation.mutate(invoice.id)}>
-                                                            <Send className="mr-2 h-4 w-4" /> Issue / Post
+                                                        {(invoice.status === 'Draft' || invoice.status === 'Rejected') && hasPermission('Finance.AR.Invoices.Send') && (
+                                                        <DropdownMenuItem onClick={(event) => { event.stopPropagation(); setInvoiceToSubmit(invoice); }}>
+                                                            <Send className="mr-2 h-4 w-4" /> Submit for Approval
                                                         </DropdownMenuItem>
                                                         )}
                                                         {(invoice.status === 'Sent' || invoice.status === 'Posted' || invoice.status === 'Overdue') && hasPermission('Finance.AR.Invoices.Void') && (
@@ -258,7 +270,8 @@ export default function InvoicesPage() {
                                                 </DropdownMenu>
                                             </TableCell>
                                         </TableRow>
-                                    ))
+                                        );
+                                    })
                                 )}
                             </TableBody>
                         </Table>
@@ -290,6 +303,20 @@ export default function InvoicesPage() {
                     )}
                 </CardContent>
             </Card>
+            <ConfirmationDialog
+                open={invoiceToSubmit !== null}
+                onOpenChange={(open) => !open && setInvoiceToSubmit(null)}
+                title="Submit invoice for approval?"
+                description={invoiceToSubmit ? `${invoiceToSubmit.invoiceNumber} will enter the Finance approval queue and will not post until final approval.` : undefined}
+                confirmText="Submit for approval"
+                isLoading={submitInvoiceMutation.isPending}
+                onConfirm={async () => {
+                    if (!invoiceToSubmit) return false;
+                    await submitInvoiceMutation.mutateAsync(invoiceToSubmit.id);
+                    setInvoiceToSubmit(null);
+                }}
+                maxWidth="500px"
+            />
         </div>
     );
 }

@@ -363,9 +363,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice.JournalEntryId.HasValue)
                 throw new InvalidOperationException("Posted customer invoices cannot be updated. Use a reversal, credit note, or adjustment.");
 
-            // Only allow updates if invoice is in Draft status
-            if (invoice.Status != InvoiceStatus.Draft)
-                throw new InvalidOperationException("Only draft invoices can be updated.");
+            if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Rejected)
+                throw new InvalidOperationException("Only draft or rejected invoices can be updated.");
             
             // Fetch Tenant for Base Currency (needed for recalculation)
             var tenant = await _unitOfWork.Repository<Tenant>()
@@ -531,10 +530,12 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
-            if (invoice.Status != InvoiceStatus.Draft)
-                throw new InvalidOperationException("Only draft invoices can be sent.");                 
+            if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.PendingApproval)
+                throw new InvalidOperationException("Only draft or fully approved pending invoices can be sent.");
 
             var now = DateTime.UtcNow;
+            invoice.Status = InvoiceStatus.Draft;
+            var previousStatus = invoice.Status;
             invoice.Status = InvoiceStatus.Sent;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
@@ -609,7 +610,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     wasAlreadyLinked: false,
                     rollbackBeforeFailureAudit: () =>
                     {
-                        invoice.Status = InvoiceStatus.Draft;
+                        invoice.Status = previousStatus;
                         invoice.UpdatedAt = null;
                         invoice.UpdatedBy = null;
 

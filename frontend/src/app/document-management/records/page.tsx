@@ -22,6 +22,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
+import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   Select,
   SelectContent,
@@ -110,6 +112,7 @@ export default function CentralDocumentRecordsPage() {
       includesText(record.metadataCompleteness?.status, normalizedSearch)
     );
   });
+  const recordPages = usePaginatedItems(visibleRecords, 10);
 
   return (
     <>
@@ -199,7 +202,7 @@ export default function CentralDocumentRecordsPage() {
             </Card>
           ) : null}
 
-          {visibleRecords.map((record) => {
+          {recordPages.items.map((record) => {
             const metadataCompleteness = record.metadataCompleteness;
 
             return (
@@ -281,6 +284,15 @@ export default function CentralDocumentRecordsPage() {
               </Card>
             );
           })}
+          {visibleRecords.length > recordPages.pageSize ? (
+            <Pagination
+              currentPage={recordPages.currentPage}
+              totalPages={recordPages.totalPages}
+              totalItems={recordPages.totalItems}
+              pageSize={recordPages.pageSize}
+              onPageChange={recordPages.setCurrentPage}
+            />
+          ) : null}
         </div>
       </div>
     </>

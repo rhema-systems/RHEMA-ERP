@@ -371,6 +371,8 @@ public class WorkflowDocumentRequirementDto
     public string RequirementKey { get; set; } = string.Empty;
     public string DocumentName { get; set; } = string.Empty;
     public string? DocumentType { get; set; }
+    public string ProvidedBy { get; set; } = "Internal";
+    public string AppliesTo { get; set; } = "All";
     public bool IsRequired { get; set; } = true;
 }
 
