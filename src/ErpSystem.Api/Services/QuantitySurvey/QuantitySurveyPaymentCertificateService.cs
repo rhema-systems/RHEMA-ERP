@@ -32,6 +32,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
     ApplicationDbContext db,
     ICurrentUserService currentUser,
     IProjectService projectService,
+    ICivilEngineeringIpcEndorsementService ipcEndorsements,
     IWorkflowIntegrationService workflow,
     IWorkflowStatusAdapterRegistry workflowAdapters,
     IVendorInvoiceService vendorInvoices,
@@ -261,10 +262,11 @@ public sealed class QuantitySurveyPaymentCertificateService(
             request.MaterialReconciliationId, request.OtherDeductionsAmount, Notes = Normalize(request.Notes) });
         await MutateAsync(id, request.ClientRequestId, request.RowVersion, hash, correlationId,
             QuantitySurveyAuditEventMap.UpdatePaymentCertificate, async entity =>
-            {
-                if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
-                    throw Conflict("Only a Draft payment certificate can be amended.");
-                if (!entity.AdvanceRecoveryApplied && request.AdvanceRecoveryAmount != 0m)
+                {
+                    if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
+                        throw Conflict("Only a Draft payment certificate can be amended.");
+                    await ipcEndorsements.EnsureCertificateCanBeAmendedAsync(entity.Id, token);
+                    if (!entity.AdvanceRecoveryApplied && request.AdvanceRecoveryAmount != 0m)
                     throw Validation("Advance recovery is disabled by the frozen certificate policy.");
                 if (decimal.Round(request.AdvanceRecoveryAmount, 2) != entity.AdvanceRecoveryAmount)
                     throw Validation("Advance recovery is governed by the approved recovery agreement and cannot be typed or amended on the certificate.");
@@ -290,10 +292,11 @@ public sealed class QuantitySurveyPaymentCertificateService(
         var hash = Hash(new { Action = "Submit", reason });
         await MutateAsync(id, request.ClientRequestId, request.RowVersion, hash, correlationId,
             QuantitySurveyAuditEventMap.SubmitPaymentCertificate, async entity =>
-            {
-                if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
-                    throw Conflict("Only a Draft payment certificate can be submitted.");
-                await ValidateReadinessAsync(entity, token);
+                {
+                    if (entity.Status != ProjectPaymentCertificateStatuses.Draft || entity.ApprovalStatus != "Draft")
+                        throw Conflict("Only a Draft payment certificate can be submitted.");
+                    await ipcEndorsements.EnsureCertificateCanProceedAsync(entity.Id, token);
+                    await ValidateReadinessAsync(entity, token);
                 var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.PaymentCertificate,
                     entity.Id, entity.ApprovalWorkflowDefinitionId!.Value);
                 if (!result.ExecutionResult.Success)
@@ -338,7 +341,11 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 {
                 if (entity.Status != ProjectPaymentCertificateStatuses.Issued || entity.ApprovalStatus != "Pending")
                     throw Conflict("The payment certificate must be Pending approval before this decision.");
-                if (approve) await ValidateReadinessAsync(entity, token);
+                if (approve)
+                {
+                    await ipcEndorsements.EnsureCertificateCanProceedAsync(entity.Id, token);
+                    await ValidateReadinessAsync(entity, token);
+                }
                 try { QuantitySurveyPaymentCertificateRules.RequireIndependentApprover(entity.PreparedById ?? Guid.Empty, entity.SubmittedById ?? Guid.Empty, UserId); }
                 catch (InvalidOperationException exception) { throw Conflict(exception.Message); }
                 var workflowStatus = await db.WorkflowInstances.AsNoTracking().Where(value => value.TenantId == TenantId &&

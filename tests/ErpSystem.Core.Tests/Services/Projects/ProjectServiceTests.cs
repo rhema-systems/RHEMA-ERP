@@ -4852,6 +4852,7 @@ public class ProjectServiceTests
         public List<ProjectPhase> ProjectPhases { get; } = new();
         public List<ProjectWorkItem> WorkItems { get; } = new();
         public List<ProjectMilestone> Milestones { get; } = new();
+        public List<ProjectMilestonePhase> MilestonePhases { get; } = new();
         public List<ProjectInitiationVersion> InitiationVersions { get; } = new();
         public List<ProjectResourceAllocation> ResourceAllocations { get; } = new();
         public List<ProjectRisk> Risks { get; } = new();
@@ -4878,6 +4879,7 @@ public class ProjectServiceTests
         public List<ProjectLessonLearned> LessonsLearned { get; } = new();
         public List<ProjectClosure> Closures { get; } = new();
         public List<ProjectUnit> ProjectUnits { get; } = new();
+        public List<ProjectUnitAmenity> ProjectUnitAmenities { get; } = new();
         public List<PurchaseRequisition> PurchaseRequisitions { get; } = new();
         public List<PurchaseOrder> PurchaseOrders { get; } = new();
         public List<PurchaseOrderItem> PurchaseOrderItems { get; } = new();
@@ -4950,6 +4952,7 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<ProjectPhase>> _projectPhaseRepository;
         private readonly Mock<IGenericRepository<ProjectWorkItem>> _workItemRepository;
         private readonly Mock<IGenericRepository<ProjectMilestone>> _milestoneRepository;
+        private readonly Mock<IGenericRepository<ProjectMilestonePhase>> _milestonePhaseRepository;
         private readonly Mock<IGenericRepository<ProjectInitiationVersion>> _initiationVersionRepository;
         private readonly Mock<IGenericRepository<ProjectResourceAllocation>> _resourceAllocationRepository;
         private readonly Mock<IGenericRepository<ProjectRisk>> _riskRepository;
@@ -4976,6 +4979,7 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<ProjectLessonLearned>> _lessonLearnedRepository;
         private readonly Mock<IGenericRepository<ProjectClosure>> _closureRepository;
         private readonly Mock<IGenericRepository<ProjectUnit>> _projectUnitRepository;
+        private readonly Mock<IGenericRepository<ProjectUnitAmenity>> _projectUnitAmenityRepository;
         private readonly Mock<IGenericRepository<PurchaseRequisition>> _purchaseRequisitionRepository;
         private readonly Mock<IGenericRepository<PurchaseOrder>> _purchaseOrderRepository;
         private readonly Mock<IGenericRepository<PurchaseOrderItem>> _purchaseOrderItemRepository;
@@ -5023,6 +5027,7 @@ public class ProjectServiceTests
             _projectPhaseRepository = CreateRepository(ProjectPhases);
             _workItemRepository = CreateRepository(WorkItems);
             _milestoneRepository = CreateRepository(Milestones);
+            _milestonePhaseRepository = CreateRepository(MilestonePhases);
             _initiationVersionRepository = CreateRepository(InitiationVersions);
             _resourceAllocationRepository = CreateRepository(ResourceAllocations);
             _riskRepository = CreateRepository(Risks);
@@ -5049,6 +5054,7 @@ public class ProjectServiceTests
             _lessonLearnedRepository = CreateRepository(LessonsLearned);
             _closureRepository = CreateRepository(Closures);
             _projectUnitRepository = CreateRepository(ProjectUnits);
+            _projectUnitAmenityRepository = CreateRepository(ProjectUnitAmenities);
             _purchaseRequisitionRepository = CreateRepository(PurchaseRequisitions);
             _purchaseOrderRepository = CreateRepository(PurchaseOrders);
             _purchaseOrderItemRepository = CreateRepository(PurchaseOrderItems);
@@ -5204,6 +5210,7 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<ProjectPhase>()).Returns(_projectPhaseRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectWorkItem>()).Returns(_workItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectMilestone>()).Returns(_milestoneRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectMilestonePhase>()).Returns(_milestonePhaseRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectInitiationVersion>()).Returns(_initiationVersionRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectResourceAllocation>()).Returns(_resourceAllocationRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectRisk>()).Returns(_riskRepository.Object);
@@ -5230,6 +5237,7 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<ProjectLessonLearned>()).Returns(_lessonLearnedRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectClosure>()).Returns(_closureRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectUnit>()).Returns(_projectUnitRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectUnitAmenity>()).Returns(_projectUnitAmenityRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseRequisition>()).Returns(_purchaseRequisitionRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrder>()).Returns(_purchaseOrderRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrderItem>()).Returns(_purchaseOrderItemRepository.Object);
@@ -5280,6 +5288,9 @@ public class ProjectServiceTests
             UnitOfWork
                 .Setup(x => x.ExecuteInStrategyAsync(It.IsAny<Func<Task<bool>>>(), It.IsAny<CancellationToken>()))
                 .Returns((Func<Task<bool>> operation, CancellationToken _) => operation());
+            UnitOfWork
+                .Setup(x => x.ExecuteInStrategyAsync(It.IsAny<Func<Task<ProjectDetailDto>>>(), It.IsAny<CancellationToken>()))
+                .Returns((Func<Task<ProjectDetailDto>> operation, CancellationToken _) => operation());
             AppEventBus
                 .Setup(x => x.PublishAsync(It.IsAny<EntityActivityEvent>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);

@@ -155,6 +155,24 @@ describe('AllSettingsPage', () => {
     );
   });
 
+  it('exposes only the Civil Engineering policy to a configuration reader', () => {
+    const allowed = filterSettingsByAccess(
+      settingsNavigationItems,
+      () => false,
+      permissions => permissions.includes('civil-engineering.configuration.read'),
+    );
+    const links = buildSettingsSections(allowed)
+      .flatMap(section => section.cards)
+      .flatMap(card => card.links);
+
+    expect(links).toEqual([
+      expect.objectContaining({
+        title: 'Civil Engineering Policy',
+        href: '/administration/project-management/civil-engineering-config',
+      }),
+    ]);
+  });
+
   it('fails closed for users with no settings role or permission', () => {
     mocks.roles = [];
     mocks.permissions = [];

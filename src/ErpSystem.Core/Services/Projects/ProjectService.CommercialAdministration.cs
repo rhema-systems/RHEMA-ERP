@@ -346,6 +346,7 @@ public partial class ProjectService
         var phase = await ValidateProjectDesignPhaseAsync(projectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(projectId, dto.ProjectPackageId);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
+        EnsureLegacyExtensionOfTimeIsNotWorks(contract);
 
         var entity = new ProjectExtensionOfTime
         {
@@ -379,9 +380,11 @@ public partial class ProjectService
     {
         var entity = await GetProjectExtensionOfTimeEntityAsync(extensionOfTimeId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        EnsureLegacyExtensionOfTimeIsNotWorks(await ValidateProjectCommercialContractAsync(entity.ContractId));
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
+        EnsureLegacyExtensionOfTimeIsNotWorks(contract);
 
         entity.ProjectPhaseId = phase?.Id;
         entity.ProjectPackageId = package?.Id;
@@ -410,6 +413,7 @@ public partial class ProjectService
     {
         var entity = await GetProjectExtensionOfTimeEntityAsync(extensionOfTimeId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        EnsureLegacyExtensionOfTimeIsNotWorks(await ValidateProjectCommercialContractAsync(entity.ContractId));
         await _unitOfWork.Repository<ProjectExtensionOfTime>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -544,6 +548,12 @@ public partial class ProjectService
                    x.Id == contractId.Value
                && x.TenantId == _currentUserProvider.TenantId)
                ?? throw new InvalidOperationException("Selected contract was not found.");
+    }
+
+    internal static void EnsureLegacyExtensionOfTimeIsNotWorks(Contract? contract)
+    {
+        if (string.Equals(contract?.ContractType, "Works", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Works extension-of-time requests must be created and reviewed from Site controls through the governed Civil workflow.");
     }
 
     private static (

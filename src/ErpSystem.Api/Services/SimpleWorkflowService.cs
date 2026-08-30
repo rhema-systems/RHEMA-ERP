@@ -19,6 +19,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Core.Services.Workflow;
 using Microsoft.AspNetCore.Identity;
@@ -1699,6 +1700,33 @@ public class SimpleWorkflowService : IWorkflowService
             context["openItemsDisposed"] = closure.OpenItemsDisposed;
         }
 
+        if (IsEntityType(entityTypeRecord, CivilEngineeringWorkflowBindingRegistry.DirectTask, "Project Civil Direct Task"))
+        {
+            var task = await _unitOfWork.Repository<ProjectCivilDirectTaskControl>()
+                .FirstOrDefaultAsync(
+                    value => value.TenantId == tenantId && value.Id == entityId && !value.IsDeleted,
+                    value => value.Project,
+                    value => value.WorkItem)
+                ?? throw new InvalidOperationException("Civil direct task not found");
+            context["module"] = "CivilEngineering";
+            context["category"] = "DirectTask";
+            context["projectId"] = task.ProjectId;
+            context["projectCode"] = task.Project?.ProjectCode ?? string.Empty;
+            context["projectName"] = task.Project?.Title ?? string.Empty;
+            context["directTaskId"] = task.Id;
+            context["workItemId"] = task.WorkItemId;
+            context["taskTitle"] = task.WorkItem?.Title ?? string.Empty;
+            context["urgency"] = task.Urgency.ToString();
+            context["dueDate"] = task.DueDate;
+            context["assignedToUserId"] = task.AssignedToUserId;
+            context["assignedRoleId"] = task.AssignedRoleId;
+            context["progressPercent"] = task.ProgressPercent;
+            context["status"] = task.Status;
+            context["approvalStatus"] = task.ApprovalStatus;
+            context["submittedById"] = task.CompletedById ?? task.CreatedById ?? Guid.Empty;
+            context["createdById"] = task.CreatedById ?? Guid.Empty;
+        }
+
         if (IsEntityType(entityTypeRecord, "BUSINESS_PARTNER", "BusinessPartner", "Business Partner", "Supplier", "Contractor"))
         {
             var partner = await _businessPartnerRepository.GetByIdAsync(entityId) ?? throw new InvalidOperationException("Business partner not found");
@@ -1961,6 +1989,32 @@ public class SimpleWorkflowService : IWorkflowService
             catch
             {
                 // Ignore display enrichment failure and use the protected entity identifier.
+            }
+        }
+
+        if (IsEntityType(entityTypeRecord, CivilEngineeringWorkflowBindingRegistry.DirectTask, "Project Civil Direct Task"))
+        {
+            try
+            {
+                var task = await _unitOfWork.Repository<ProjectCivilDirectTaskControl>()
+                    .FirstOrDefaultAsync(
+                        value => value.TenantId == (_currentUserService.TenantId ?? Guid.Empty)
+                                 && value.Id == entityId && !value.IsDeleted,
+                        value => value.Project,
+                        value => value.WorkItem);
+                if (task != null)
+                {
+                    var projectLabel = string.IsNullOrWhiteSpace(task.Project?.ProjectCode)
+                        ? task.Project?.Title ?? "Project"
+                        : task.Project.ProjectCode;
+                    item.EntityTitle = $"{projectLabel} - {task.WorkItem?.Title ?? "Civil direct task"}";
+                    item.EntityDescription = $"{task.Urgency} · due {task.DueDate:dd MMM yyyy} · {task.Status}";
+                    return;
+                }
+            }
+            catch
+            {
+                // Protected workflow details should fall back to the record identifier when unavailable.
             }
         }
 

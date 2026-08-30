@@ -2,7 +2,10 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { StatutoryReportCataloguePage } from './StatutoryReportCataloguePage';
+import {
+  civilEngineeringCatalogue,
+  StatutoryReportCataloguePage,
+} from './StatutoryReportCataloguePage';
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
@@ -151,6 +154,33 @@ vi.mock('@tanstack/react-query', () => ({
         isFavorite: false,
         tags: ['audit-trail'],
       },
+      ...[
+        ['55555555-5555-5555-5555-555555555551', 'Design Backlog', 'design-backlog'],
+        ['55555555-5555-5555-5555-555555555552', 'Field Task Register', 'field-task-register'],
+        ['55555555-5555-5555-5555-555555555553', 'Supervision Controls', 'supervision-controls'],
+        ['55555555-5555-5555-5555-555555555554', 'Maintenance and Complaints', 'maintenance-complaints'],
+        ['55555555-5555-5555-5555-555555555555', 'Permitting Watch', 'permitting-watch'],
+        ['55555555-5555-5555-5555-555555555556', 'Completion and Handover Register', 'completion-handover'],
+        ['55555555-5555-5555-5555-555555555561', 'Engineering Work Register', 'engineering-work-register'],
+        ['55555555-5555-5555-5555-555555555562', 'Inspection Report', 'inspection-report'],
+        ['55555555-5555-5555-5555-555555555563', 'Site Instruction Log', 'site-instruction-log'],
+        ['55555555-5555-5555-5555-555555555564', 'Progress Report', 'progress-report'],
+        ['55555555-5555-5555-5555-555555555565', 'Defect Report', 'defect-report'],
+        ['55555555-5555-5555-5555-555555555566', 'Completion Certificate Report', 'completion-certificate-report'],
+        ['55555555-5555-5555-5555-555555555567', 'Project Dashboard', 'project-dashboard'],
+        ['55555555-5555-5555-5555-555555555568', 'Engineering Audit Trail', 'engineering-audit-trail'],
+      ].map(([id, name, code]) => ({
+        id,
+        name,
+        description: 'Published Civil Engineering report',
+        type: 'civil-engineering',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-29T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['architecture-16.5', code],
+      })),
     ] : [],
     isLoading: false,
     isError: false,
@@ -207,7 +237,7 @@ vi.mock('@/services/projectService', () => ({
   },
 }));
 
-function renderCatalogue(reportCode?: string, mode: 'procurement' | 'inventory' | 'compliance' | 'quantity-survey' = 'procurement') {
+function renderCatalogue(reportCode?: string, mode: 'procurement' | 'inventory' | 'compliance' | 'quantity-survey' | 'civil-engineering' = 'procurement') {
   return render(<StatutoryReportCataloguePage mode={mode} reportCode={reportCode} />);
 }
 
@@ -324,5 +354,53 @@ describe('StatutoryReportCataloguePage navigation', () => {
     expect(within(navigator).getByRole('link', { name: /Cost-to-Complete Report/ })).toBeInTheDocument();
     expect(within(navigator).getByRole('link', { name: /Contract Balance Report/ })).toBeInTheDocument();
     expect(within(navigator).getByRole('link', { name: /Quantity Survey Audit Trail/ })).toBeInTheDocument();
+  });
+
+  it('exposes Civil Engineering reports through the same scoped report shell', async () => {
+    renderCatalogue('design-backlog', 'civil-engineering');
+
+    expect(await screen.findByRole('heading', { name: 'Design Backlog' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run report' })).toBeDisabled();
+    expect(screen.getByLabelText('Start date')).toBeInTheDocument();
+    expect(screen.getByLabelText('End date')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open civil engineering report navigator' }));
+    const navigator = await screen.findByRole('complementary', { name: 'Civil Engineering report navigator' });
+    expect(within(navigator).getByRole('link', { name: 'All civil engineering reports' })).toHaveAttribute(
+      'href',
+      '/reports/civil-engineering',
+    );
+  });
+
+  it('exposes the exact architecture-named Civil report routes in the shared report shell', async () => {
+    renderCatalogue(undefined, 'civil-engineering');
+
+    expect(await screen.findByRole('heading', { name: 'Civil Engineering reports' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Architecture-required outputs' })).toBeInTheDocument();
+    expect(civilEngineeringCatalogue).toHaveLength(14);
+    expect(civilEngineeringCatalogue.map(item => item.code)).toEqual(
+      expect.arrayContaining([
+        'engineering-work-register',
+        'inspection-report',
+        'site-instruction-log',
+        'progress-report',
+        'defect-report',
+        'completion-certificate-report',
+        'project-dashboard',
+        'engineering-audit-trail',
+      ]),
+    );
+    expect(screen.getByRole('link', { name: /Completion Certificate Report/ })).toHaveAttribute(
+      'href',
+      '/reports/civil-engineering/completion-certificate-report',
+    );
+    expect(screen.getByRole('link', { name: /Project Dashboard/ })).toHaveAttribute(
+      'href',
+      '/reports/civil-engineering/project-dashboard',
+    );
+    expect(screen.getByRole('link', { name: /Engineering Audit Trail/ })).toHaveAttribute(
+      'href',
+      '/reports/civil-engineering/engineering-audit-trail',
+    );
   });
 });

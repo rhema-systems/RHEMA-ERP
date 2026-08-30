@@ -68,6 +68,37 @@ if (args.Length > 0 && args[0] == "seed")
     return;
 }
 
+// Create the narrowly scoped, role-separated fixture used by the disposable Civil
+// Engineering browser acceptance harness. The seeder itself refuses non-test DB names.
+if (args.Length > 0 && args[0] == "seed-civil-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+    tempBuilder.Services.AddScoped<CivilEngineeringConfigurationProfileSeeder>();
+    tempBuilder.Services.AddScoped<CivilEngineeringAccessControlSeeder>();
+    tempBuilder.Services.AddScoped<ErpSystem.Api.Services.CivilEngineeringE2ETestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        await db.Database.EnsureCreatedAsync();
+        await StampCurrentModelMigrationsAsAppliedAsync(db, logger);
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.CivilEngineeringE2ETestSeeder>()
+            .SeedAsync();
+    }
+
+    Console.WriteLine("Civil Engineering disposable browser fixture seeded successfully.");
+    return;
+}
+
 // Check for maintenance workflow seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance")
 {
@@ -296,7 +327,7 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -410,6 +441,13 @@ builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRec
     provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceEvidenceReadinessService>(provider =>
     provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
+
+// Short-lived, disposable assurance hosts can explicitly opt out of unrelated
+// schedulers. Production behavior remains unchanged unless this setting is set.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true))
+{
+    builder.Services.RemoveAll<IHostedService>();
+}
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();

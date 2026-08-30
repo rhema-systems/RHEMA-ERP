@@ -54,6 +54,15 @@ import {
 import { ProjectCommercialAdminTab } from './components/ProjectCommercialAdminTab';
 import { ProjectCommercialTab } from './components/ProjectCommercialTab';
 import { ProjectCustomerVariationsTab } from './components/ProjectCustomerVariationsTab';
+import { CivilEngineeringDesignWorkflowPanel } from '@/components/projects/civil-engineering/CivilEngineeringDesignWorkflowPanel';
+import { CivilEngineeringProjectEngineerAssignmentsPanel } from '@/components/projects/civil-engineering/CivilEngineeringProjectEngineerAssignmentsPanel';
+import { CivilEngineeringSiteInstructionsPanel } from '@/components/projects/civil-engineering/CivilEngineeringSiteInstructionsPanel';
+import { CivilEngineeringRfisPanel } from '@/components/projects/civil-engineering/CivilEngineeringRfisPanel';
+import { CivilEngineeringQualityTestsPanel } from '@/components/projects/civil-engineering/CivilEngineeringQualityTestsPanel';
+import { CivilEngineeringInspectionControlsPanel } from '@/components/projects/civil-engineering/CivilEngineeringInspectionControlsPanel';
+import { CivilEngineeringIpcEndorsementsPanel } from '@/components/projects/civil-engineering/CivilEngineeringIpcEndorsementsPanel';
+import { CivilEngineeringWeeklySupervisionPanel } from '@/components/projects/civil-engineering/CivilEngineeringWeeklySupervisionPanel';
+import { CivilEngineeringExtensionOfTimePanel } from '@/components/projects/civil-engineering/CivilEngineeringExtensionOfTimePanel';
 import { ProjectDesignTab } from './components/ProjectDesignTab';
 import { ProjectDefectsTab } from './components/ProjectDefectsTab';
 import { ProjectDocumentsTab } from './components/ProjectDocumentsTab';
@@ -244,6 +253,11 @@ const DEFAULT_RESOURCE_ROLES = [
   'RiskOfficer',
   'ProcurementOfficer',
   'ExternalContributor',
+  'TDC_CIVIL_ENGINEER',
+  'TDC_PROJECT_ENGINEER',
+  'TDC_DRAFTSMAN',
+  'TDC_CIVIL_TECHNICIAN',
+  'TDC_CIVIL_ARTISAN',
 ];
 const DEFAULT_RESOURCE_ROUTING_POLICIES = [
   'Balanced',
@@ -258,6 +272,13 @@ const DEFAULT_MEMBER_ROLES = [
   'Task Owner',
   'Finance Officer',
   'External Contributor',
+  'TDC_HEAD_OF_CIVIL_ENGINEERING',
+  'TDC_SUPERVISING_CIVIL_ENGINEER',
+  'TDC_CIVIL_ENGINEER',
+  'TDC_PROJECT_ENGINEER',
+  'TDC_DRAFTSMAN',
+  'TDC_CIVIL_TECHNICIAN',
+  'TDC_CIVIL_ARTISAN',
 ];
 const DEFAULT_TASK_STATUSES = [
   'New',
@@ -6012,6 +6033,7 @@ export default function ProjectWorkspacePage({
           />
         </TabsContent>
         <TabsContent value="design" className="space-y-6">
+          <CivilEngineeringDesignWorkflowPanel projectId={project.id} />
           <ProjectDesignTab
             projectId={project.id}
             drawings={project.drawings}
@@ -6214,6 +6236,14 @@ export default function ProjectWorkspacePage({
           />
         </TabsContent>
         <TabsContent value="site-controls" className="space-y-6">
+          <CivilEngineeringProjectEngineerAssignmentsPanel projectId={project.id} />
+          <CivilEngineeringSiteInstructionsPanel projectId={project.id} />
+          <CivilEngineeringRfisPanel projectId={project.id} />
+          <CivilEngineeringQualityTestsPanel projectId={project.id} />
+          <CivilEngineeringInspectionControlsPanel projectId={project.id} />
+          <CivilEngineeringIpcEndorsementsPanel projectId={project.id} />
+          <CivilEngineeringWeeklySupervisionPanel projectId={project.id} />
+          <CivilEngineeringExtensionOfTimePanel projectId={project.id} />
           <ProjectSiteControlsTab
             rfis={project.rfis}
             siteInstructions={project.siteInstructions}

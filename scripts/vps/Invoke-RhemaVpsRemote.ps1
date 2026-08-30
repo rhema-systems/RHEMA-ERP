@@ -685,6 +685,62 @@ function Invoke-Preflight {
     # prerequisite probe prevents a partially applied FR-PR-005 baseline from
     # reaching migration startup without the immutable ledger it must enforce.
     Write-Output 'GUARD_COVERAGE|20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment'
+    # Civil Engineering migrations create new governed tables. The document-register migration
+    # idempotently inserts only a missing tenant metadata template; existing Project, Workflow
+    # and central-DMS records are not rewritten. All THROW statements live in trigger bodies.
+    Write-Output 'GUARD_COVERAGE|20260814205757_AddCivilEngineeringConfigurationLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260814234022_AddCivilEngineeringDesignWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260815005453_AddCivilEngineeringReconnaissance'
+    Write-Output 'GUARD_COVERAGE|20260815031044_AddCivilEngineeringDesignInputRequests'
+    Write-Output 'GUARD_COVERAGE|20260815135156_AddCivilEngineeringDocumentRegister'
+    # CIV-0201 creates empty appointment and append-only revision registers. Its
+    # tenant/policy/lifecycle hard stops live exclusively in triggers.
+    Write-Output 'GUARD_COVERAGE|20260820150000_AddCivilEngineeringProjectEngineerAssignments'
+    # CIV-0202 adds only Civil routing/envelope, DMS-reference, response, and revision
+    # tables around the existing Projects instruction.
+    Write-Output 'GUARD_COVERAGE|20260820170000_AddCivilEngineeringSiteInstructionRouting'
+    # CIV-0203 through CIV-0205 create empty Projects-owned governed registers with
+    # foreign keys and post-migration trigger hard stops only.
+    Write-Output 'GUARD_COVERAGE|20260820190000_AddCivilEngineeringRfiRouting'
+    Write-Output 'GUARD_COVERAGE|20260820193000_AddCivilEngineeringQualityTestRegister'
+    Write-Output 'GUARD_COVERAGE|20260820213000_AddCivilEngineeringWeeklySupervisionReports'
+    Write-Output 'GUARD_COVERAGE|20260820233000_AddCivilEngineeringIpcEndorsements'
+    # The maintenance overlays create new governed registers and do not rewrite source records.
+    Write-Output 'GUARD_COVERAGE|20260821033000_AddCivilEngineeringMaintenanceIntakes'
+    Write-Output 'GUARD_COVERAGE|20260821050000_AddCivilEngineeringMaintenanceAssessments'
+    Write-Output 'GUARD_COVERAGE|20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs'
+    Write-Output 'GUARD_COVERAGE|20260821060000_AddCivilEngineeringMaintenanceExecutionLinks'
+    Write-Output 'GUARD_COVERAGE|20260821063000_AddCivilEngineeringMaintenanceCompletionControls'
+    # Development-approval and direct-task migrations create Civil-owned envelopes;
+    # their THROW statements protect future writes and do not mutate legacy owner records.
+    Write-Output 'GUARD_COVERAGE|20260821110000_AddCivilEngineeringDevelopmentApprovalFiles'
+    Write-Output 'GUARD_COVERAGE|20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs'
+    Write-Output 'GUARD_COVERAGE|20260821143000_AddCivilEngineeringPermittingEngineeringReviews'
+    Write-Output 'GUARD_COVERAGE|20260821153000_AddCivilEngineeringPermittingHodDecisions'
+    Write-Output 'GUARD_COVERAGE|20260821170000_AddCivilEngineeringDirectTaskControls'
+    Write-Output 'GUARD_COVERAGE|20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260821190000_AddCivilEngineeringUrgentTaskControls'
+    Write-Output 'GUARD_COVERAGE|20260821200000_AddCivilEngineeringMobileFieldFeedback'
+    # The migration workbench is an empty Projects-owned staging and validation register.
+    Write-Output 'GUARD_COVERAGE|20260821210000_AddCivilEngineeringMigrationWorkbench'
+    # Works initiation adds nullable, legacy-safe provenance fields; its hard stops are trigger-only.
+    Write-Output 'GUARD_COVERAGE|20260821230000_AddCivilEngineeringWorksCaseInitiation'
+    # Planning/GIS and its evidence hardening add governed children and trigger controls only.
+    Write-Output 'GUARD_COVERAGE|20260822000000_AddCivilEngineeringPlanningGisValidation'
+    Write-Output 'GUARD_COVERAGE|20260822001000_HardenCivilEngineeringPlanningGisEvidenceBinding'
+    # These lifecycle hardening migrations preserve existing Projects and central-owner records.
+    Write-Output 'GUARD_COVERAGE|20260822002000_HardenCivilEngineeringSiteInstructionLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260822003000_AddCivilEngineeringInspectionControls'
+    Write-Output 'GUARD_COVERAGE|20260822003100_HardenCivilEngineeringInspectionAuditActions'
+    Write-Output 'GUARD_COVERAGE|20260822003200_GovernCivilWeeklyProgressControls'
+    Write-Output 'GUARD_COVERAGE|20260822003300_SnapshotCivilWeeklyMilestoneSchedule'
+    Write-Output 'GUARD_COVERAGE|20260822003400_AddCivilEngineeringExtensionOfTimeControls'
+    # Project-asset reconciliation adds nullable Finance lineage without creating assets.
+    Write-Output 'GUARD_COVERAGE|20260822003500_AddProjectAssetLinkFixedAssetReconciliation'
+    # Configuration reconciliation affects only an editable missing decision; published profiles remain immutable.
+    Write-Output 'GUARD_COVERAGE|20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue'
+    # Inspection-plan governance binds future plans to existing shared workflow owners.
+    Write-Output 'GUARD_COVERAGE|20260822003700_GovernCivilInspectionPlanWorkflow'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
