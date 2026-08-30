@@ -95,6 +95,54 @@ Expected:
 - A supplier invoice is not a prerequisite for operational stock update after an approved inspected receipt. Figure 10 places inventory update before three-way matching and payment.
 - The budget commitment is created when the approved PO or contract is issued, not at receipt. Receipt/invoice/payment must not create the same commitment again.
 
+## Executable assurance gates
+
+Use this document as the business UAT script and run the following automated gates before recording customer UAT. The SQL gate requires `RHEMA_TEST_SQLSERVER` to reference a disposable-database-capable SQL Server 2022 instance; never commit or print its value.
+
+```powershell
+dotnet test tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj --no-restore `
+  -p:TdcFocusedTestBuild=true `
+  -p:TdcFocusedTestFile="Services\Inventory\InventoryStoresArchitectureSqlServerIntegrationTests.cs" `
+  --filter "FullyQualifiedName~InventoryStoresArchitectureSqlServerIntegrationTests" -m:1
+```
+
+`InventoryStoresArchitectureSqlServerIntegrationTests` creates and removes a uniquely named database and uses only fresh records. Its representative transfer actor matrix is:
+
+| Test actor | Fresh-record action | Database control proved |
+| --- | --- | --- |
+| Maker | Creates and submits the transfer | Draft-only creation and an immutable submitted source |
+| Unauthorized user | Attempts to submit without an active tenant assignment | SQL error `51802`; no action or state mutation |
+| Maker acting as approver | Attempts approval inside a rolled-back transaction | SQL error `51854`; no self-approved action or status survives |
+| Independent approver | Approves the submitted transfer | Separate approval actor and durable action history |
+| Independent dispatcher | Dispatches and posts the source movement | Source balance and governed `TransferOut` lineage update once |
+| Independent receiver | Receives and posts the destination movement | Destination balance and governed `TransferIn` lineage update once |
+| Independent closer | Completes the reconciled transfer | Completed state requires a separate closer and closed quantities |
+| Alternate-tenant maker | Owns a separate fresh transfer | Tenant-filtered reads hide the alternate-tenant row |
+
+The same SQL journey also proves negative-stock rejection, post-submit amendment rejection, persisted DB read-back after each transition, tenant-scoped movement-number uniqueness, and action-idempotency replay rejection. It is a representative database lifecycle gate, not a substitute for the receipt/inspection/DMS, issue/asset, adjustment/count, Finance/AP, reporting/export, or visible browser scenarios below.
+
+Run the broader focused Core/API and frontend suites for those cross-module seams. Authenticated browser scripts live in `e2e-tests/tests/inv-fu-002-maintenance-reservation.spec.ts`, `inv-fu-003-issue-return-asset.spec.ts`, and `inv-fu-004-transfer.spec.ts`; they require a running seeded local host and their named role credentials. A component or service test must not be recorded as browser evidence.
+
+The executable fresh-record INV-FU-004 / E2E-011 transfer journey is:
+
+```powershell
+& .\scripts\acceptance\Invoke-InvFu004E2E011.ps1
+```
+
+Run it against the configured local acceptance database with the API listening on `127.0.0.1:5100`, the central ClamAV scanner healthy, and branch-locked dependencies installed in `frontend` and `e2e-tests`. The script starts its own frontend on port 3001, uses governed APIs rather than direct lifecycle mutation, runs the Chromium transfer spec, and restores temporary passwords, grants, and tenant changes in `finally`. Its fresh-record actor matrix is:
+
+| Acceptance actor | Fresh-record responsibility | Control evidence |
+| --- | --- | --- |
+| `employee` | Creates and submits the transfer | Maker identity and submitted lineage |
+| `manager` | Independently approves and performs the final read | Maker-checker separation and completed-state visibility |
+| `admin` | Creates protected DMS evidence and independently dispatches | Clean-scanned evidence plus source stock movement |
+| `finance.clerk` | Independently records partial/damaged receipt | Destination receipt, discrepancy and stock movement |
+| `ap.officer` | Independently resolves the discrepancy and closes | Evidence-backed resolution and reconciled closure |
+| `estate.officer1` | Attempts an unauthorized mutation and an alternate-tenant read | HTTP 403 mutation denial and HTTP 404 tenant isolation |
+| Anonymous caller | Attempts the transfer list | HTTP 401 authentication boundary |
+
+The script reads the completed transfer back through the API and database, verifies exact source/destination stock deltas, immutable action history, distinct actors, audit rows, control events, protected DMS evidence, replay idempotency and direct-SQL tamper rejection before browser evidence can pass.
+
 ## UAT-INV-001: Controlled item, warehouse, location and access setup
 
 1. Sign in as an authorized master-data administrator.
