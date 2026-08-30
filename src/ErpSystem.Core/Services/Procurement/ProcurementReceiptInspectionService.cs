@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -129,11 +130,11 @@ public sealed class ProcurementReceiptInspectionService :
             receipt, cancellationToken);
         if (!externalLinked)
         {
-            manageAllowed = IsAdministrator() ||
+            manageAllowed = HasPlatformSuperAdministratorBypass() ||
                             await CanUseCapabilityAsync(
                                 ManagePermission, receipt, warehouseId,
                                 cancellationToken);
-            approveAllowed = IsAdministrator() ||
+            approveAllowed = HasPlatformSuperAdministratorBypass() ||
                              await CanUseCapabilityAsync(
                                  ApprovePermission, receipt, warehouseId,
                                  cancellationToken);
@@ -1913,7 +1914,7 @@ public sealed class ProcurementReceiptInspectionService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Supplier portal users cannot administer internal receipt inspection.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var warehouseId = await ResolveWarehouseIdAsync(
             receipt, cancellationToken);
         var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
@@ -1935,7 +1936,7 @@ public sealed class ProcurementReceiptInspectionService :
         if (_currentUser.IsExternalUser)
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Supplier portal users cannot access internal receipt inspection.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
 
         var warehouseId = await ResolveWarehouseIdAsync(receipt, cancellationToken);
         if (await CanUseCapabilityAsync(
@@ -2683,8 +2684,8 @@ public sealed class ProcurementReceiptInspectionService :
                 "An authenticated tenant user is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string ActorName => string.IsNullOrWhiteSpace(_currentUser.FullName)
         ? _currentUser.Username

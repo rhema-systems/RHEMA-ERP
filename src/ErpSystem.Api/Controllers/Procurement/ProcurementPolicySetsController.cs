@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 
 [ApiController]
 [Route("api/procurement/policy-sets")]
-[Authorize(Roles = "SuperAdmin,TenantAdmin")]
+[Authorize]
 public sealed class ProcurementPolicySetsController : ControllerBase
 {
     private readonly IProcurementPolicyService _service;
@@ -17,10 +17,12 @@ public sealed class ProcurementPolicySetsController : ControllerBase
     public ProcurementPolicySetsController(IProcurementPolicyService service) => _service = service;
 
     [HttpGet]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetPolicySets([FromQuery] ProcurementPolicySetListRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetPolicySetsAsync(request, cancellationToken)));
 
     [HttpGet("effective")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetEffective(
         [FromQuery] string code,
         [FromQuery] DateTime? atUtc = null,
@@ -33,16 +35,19 @@ public sealed class ProcurementPolicySetsController : ControllerBase
         });
 
     [HttpGet("role-options")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetRoleOptions(
         [FromQuery] Guid? workflowDefinitionId = null,
         CancellationToken cancellationToken = default) =>
         ExecuteAsync(async () => Ok(await _service.GetRoleOptionsAsync(workflowDefinitionId, cancellationToken)));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetPolicySet(Guid id, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetPolicySetAsync(id, cancellationToken)));
 
     [HttpPost]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Create([FromBody] CreateProcurementPolicySetRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () =>
         {
@@ -51,18 +56,22 @@ public sealed class ProcurementPolicySetsController : ControllerBase
         });
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Update(Guid id, [FromBody] UpdateProcurementPolicySetRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.UpdatePolicySetAsync(id, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/rules")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> CreateRule(Guid id, [FromBody] SaveProcurementPolicyRuleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.SaveRuleAsync(id, null, request, CorrelationId, cancellationToken)));
 
     [HttpPut("{id:guid}/rules/{ruleId:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> UpdateRule(Guid id, Guid ruleId, [FromBody] SaveProcurementPolicyRuleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.SaveRuleAsync(id, ruleId, request, CorrelationId, cancellationToken)));
 
     [HttpDelete("{id:guid}/rules/{kind}/{ruleId:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> DeleteRule(
         Guid id,
         ProcurementPolicyRuleKind kind,
@@ -75,18 +84,22 @@ public sealed class ProcurementPolicySetsController : ControllerBase
         });
 
     [HttpPost("{id:guid}/validate")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Validate(Guid id, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.ValidatePolicySetAsync(id, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/publish")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Publish(Guid id, [FromBody] ProcurementPolicyLifecycleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.PublishPolicySetAsync(id, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/retire")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Retire(Guid id, [FromBody] ProcurementPolicyLifecycleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.RetirePolicySetAsync(id, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/clone-draft")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> CloneDraft(Guid id, [FromBody] CloneProcurementPolicySetRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () =>
         {
@@ -95,6 +108,7 @@ public sealed class ProcurementPolicySetsController : ControllerBase
         });
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> DeleteDraft(Guid id, [FromBody] ProcurementPolicyLifecycleRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(async () =>
         {
@@ -103,6 +117,7 @@ public sealed class ProcurementPolicySetsController : ControllerBase
         });
 
     [HttpGet("{id:guid}/history")]
+    [Authorize(Policy = "procurement.audit.read")]
     public Task<IActionResult> GetHistory(Guid id, CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetHistoryAsync(id, cancellationToken)));
 

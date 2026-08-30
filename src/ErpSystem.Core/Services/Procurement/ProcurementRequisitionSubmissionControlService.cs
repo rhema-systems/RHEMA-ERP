@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -434,7 +435,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
         string correlationId,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = SubmitPermission,
@@ -447,10 +448,10 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
         throw new ProcurementRequisitionSubmissionAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -459,7 +460,7 @@ public sealed class ProcurementRequisitionSubmissionControlService : IProcuremen
             throw new ProcurementRequisitionSubmissionAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private static string NormalizeCorrelation(string correlationId) =>
         string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : Truncate(correlationId.Trim(), 100);
     private static string Truncate(string value, int length) => value.Length <= length ? value : value[..length];

@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -657,7 +658,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
 
     private async Task EnsureCapabilityAsync(string permission, string reference, string correlationId, CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         try
         {
             var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
@@ -677,10 +678,10 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null)) return;
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
         throw new ProcurementRequisitionSourcingAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureAuthenticatedTenant()
@@ -689,7 +690,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             throw new ProcurementRequisitionSourcingAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static void Add(List<PurchaseRequisitionSourcingRequirementDto> requirements, string key, string label,
         bool satisfied, string code, string message, string? evidence = null) => requirements.Add(new()

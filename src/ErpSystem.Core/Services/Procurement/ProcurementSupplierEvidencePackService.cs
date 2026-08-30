@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -1251,7 +1252,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierEvidencePackAuthorizationException(
                 "Supplier portal users cannot administer evidence-pack configuration.");
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -1268,11 +1269,11 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
         if (_currentUser.IsExternalUser)
             throw new ProcurementSupplierEvidencePackAuthorizationException(
                 "Supplier portal users cannot access evidence-pack administration.");
-        if (IsAdministrator() || _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementSupplierEvidencePackAuthorizationException(
-            "A TDC procurement role or tenant-administration role is required.");
+            "The procurement records read permission is required.");
     }
 
     private void EnsureRegistrationReader(BusinessPartnerRegistration registration)
@@ -1291,9 +1292,8 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
                 "An authenticated tenant context is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("Admin") || _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private async Task RecordEventAsync(
         ProcurementSupplierEvidencePackVersion entity,

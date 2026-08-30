@@ -100,21 +100,20 @@ public sealed class PrequalificationControllerTests
     }
 
     [Fact]
-    public void ApprovalAndSubmissionRoutesHaveExplicitRoleBoundaries()
+    public void ApprovalAndSubmissionRoutesUseRegisteredProcurementPermissions()
     {
         var type = typeof(PrequalificationController);
         var controllerAuthorization = type.GetCustomAttribute<AuthorizeAttribute>();
-        var evaluateRoles = type.GetMethod(nameof(PrequalificationController.Evaluate))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var decideRoles = type.GetMethod(nameof(PrequalificationController.Decide))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
+        var evaluatePolicy = type.GetMethod(nameof(PrequalificationController.Evaluate))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
+        var decidePolicy = type.GetMethod(nameof(PrequalificationController.Decide))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy;
         var supplierSubmission = type.GetMethod(nameof(PrequalificationController.SubmitApplication))!
             .GetCustomAttribute<AuthorizeAttribute>();
 
         Assert.NotNull(controllerAuthorization);
-        Assert.Contains("Employee", evaluateRoles);
-        Assert.DoesNotContain("Employee", decideRoles);
-        Assert.Contains("Manager", decideRoles);
+        Assert.Equal("procurement.tender.evaluate", evaluatePolicy);
+        Assert.Equal("procurement.sourcing.approve", decidePolicy);
         Assert.Null(supplierSubmission);
     }
 

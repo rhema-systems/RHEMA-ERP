@@ -471,8 +471,8 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("TenantAdmin"))
-            throw new ProcurementPolicyAuthorizationException("Only SuperAdmin or TenantAdmin may administer procurement SOD controls.");
+        // SOD policy administration is permission-gated by procurement.access.manage
+        // at the API boundary. The SOD domain must not substitute a legacy role list.
     }
 
     private void EnsureEditor() => EnsureAdministrator();

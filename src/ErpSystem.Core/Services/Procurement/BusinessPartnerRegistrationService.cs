@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Notifications;
@@ -6,7 +7,6 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
-using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -212,13 +212,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         else if (registration.CreatedById.HasValue &&
                  registration.CreatedById.Value != userId)
         {
-            if (!_currentUserProvider.Roles.Contains("Admin") &&
-                !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
-            {
-                _logger.LogWarning("User {UserId} attempted to update registration {RegistrationId} owned by {OwnerId}",
-                    userId, id, registration.CreatedById);
-                throw new InvalidOperationException($"You do not have permission to update this registration");
-            }
+            await EnsureInternalCapabilityAsync(
+                "procurement.supplier.manage",
+                registration,
+                userId,
+                $"supplier-registration-update-{registration.Id:N}");
         }
 
         if (registration.Status != "Draft" && registration.Status != "MoreInfoRequired")
@@ -2442,8 +2440,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new ProcurementAccessAuthorizationException(
                 "The supplier registration belongs to a different tenant.");
         }
-        if (_currentUserProvider.HasRole(Constants.Roles.SuperAdmin) ||
-            _currentUserProvider.HasRole("TenantAdmin"))
+        if (_currentUserProvider.HasRole(Constants.Roles.SuperAdmin))
         {
             return;
         }

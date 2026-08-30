@@ -2697,15 +2697,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (_currentUser.Roles.Any(role =>
-                string.Equals(role, "SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(role, ProcurementAccessControlRegistry.InternalAuditRole,
-                    StringComparison.OrdinalIgnoreCase) ||
-                ProcurementAccessControlRegistry.FindRole(role) is not null))
-            return;
-        throw new ProcurementAwardReadinessAuthorizationException(
-            "A TDC procurement, audit, or tenant-administration role is required.");
+        // Read endpoints require procurement.records.read or procurement.audit.read.
+        // Keep only tenant and external-user protection in the domain service.
     }
 
     private void EnsureAuthenticatedTenant()

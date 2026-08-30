@@ -82,45 +82,21 @@ public sealed class RfqsControllerStatutoryControlsTests
     }
 
     [Fact]
-    public void StatutoryRoutesDeclareExplicitRoleBoundaries()
+    public void StatutoryRoutesUseRegisteredProcurementPermissions()
     {
         var controllerType = typeof(RfqsController);
-        var procurementMakerRoles = new[]
-        {
-            "TDC_PROCUREMENT_OFFICER",
-            "TDC_SENIOR_PROCUREMENT_OFFICER",
-            "TDC_HEAD_OF_PROCUREMENT"
-        };
-
-        foreach (var actionName in new[]
-                 {
-                     nameof(RfqsController.GetRfqPdf),
-                     nameof(RfqsController.UpdateRfq),
-                     nameof(RfqsController.SendRfq)
-                 })
-        {
-            var roles = controllerType.GetMethod(actionName)!
-                .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-
-            foreach (var procurementMakerRole in procurementMakerRoles)
-                Assert.Contains(procurementMakerRole, roles);
-
-            Assert.DoesNotContain("TDC_EVALUATOR", roles);
-            Assert.DoesNotContain("TDC_INTERNAL_AUDIT", roles);
-        }
-
-        var controlsRoles = controllerType.GetMethod(nameof(RfqsController.GetControls))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var evaluationRoles = controllerType.GetMethod(nameof(RfqsController.SaveEvaluation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-        var decisionRoles = controllerType.GetMethod(nameof(RfqsController.DecideEvaluation))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles!;
-
-        Assert.Contains("TDC_INTERNAL_AUDIT", controlsRoles);
-        Assert.Contains("TDC_OBSERVER", controlsRoles);
-        Assert.Contains("TDC_EVALUATOR", evaluationRoles);
-        Assert.DoesNotContain("TDC_EVALUATOR", decisionRoles);
-        Assert.Contains("TDC_HEAD_OF_PROCUREMENT", decisionRoles);
+        Assert.Equal("procurement.records.read", controllerType.GetMethod(nameof(RfqsController.GetRfqPdf))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.sourcing.manage", controllerType.GetMethod(nameof(RfqsController.UpdateRfq))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.sourcing.manage", controllerType.GetMethod(nameof(RfqsController.SendRfq))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.records.read", controllerType.GetMethod(nameof(RfqsController.GetControls))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.tender.evaluate", controllerType.GetMethod(nameof(RfqsController.SaveEvaluation))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
+        Assert.Equal("procurement.tender.approve", controllerType.GetMethod(nameof(RfqsController.DecideEvaluation))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy);
 
         var awardAuthorization = controllerType
             .GetMethod(nameof(RfqsController.AwardRfqAndCreatePurchaseOrders))!

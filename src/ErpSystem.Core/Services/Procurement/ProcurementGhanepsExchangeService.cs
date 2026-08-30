@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -2277,7 +2278,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         CancellationToken cancellationToken)
     {
         EnsureInternalReader();
-        if (IsAdministrator()) return;
+        if (HasPlatformSuperAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(
             new ProcurementAccessCapabilityRequest
             {
@@ -2300,7 +2301,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         string reconciliationPermissionCode,
         CancellationToken cancellationToken)
     {
-        if (IsAdministrator()) return new Capabilities(true, true, true);
+        if (HasPlatformSuperAdministratorBypass()) return new Capabilities(true, true, true);
         var correlation = $"ghaneps-status-{Guid.NewGuid():N}";
         var manage = await _accessControl.CheckCapabilityAsync(
             new ProcurementAccessCapabilityRequest
@@ -2384,18 +2385,14 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             throw Authorization("An authenticated tenant context is required.");
         if (_currentUser.IsExternalUser)
             throw Authorization("Supplier portal users cannot access the internal GHANEPS exchange register.");
-        if (IsAdministrator() ||
-            _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole) ||
-            _currentUser.Roles.Any(role => ProcurementAccessControlRegistry.FindRole(role) is not null))
+        if (HasPlatformSuperAdministratorBypass() ||
+            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
-        throw Authorization("A TDC procurement, internal-audit, or tenant-administration role is required.");
+        throw Authorization("The procurement records read permission is required.");
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SystemAdmin") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("Admin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private static bool MappingApplies(
         ProcurementGhanepsConfiguredMappingDto mapping,

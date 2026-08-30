@@ -323,14 +323,6 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     {
         EnsureEditor();
         var policySet = await FindPolicySetAsync(id, tracked: true, cancellationToken);
-        if (!_currentUser.HasRole("SuperAdmin"))
-        {
-            await AddRevisionAsync(policySet.Id, null, null, "Publish", "Rejected", correlationId,
-                "Only SuperAdmin may publish an executable procurement policy.", PolicySnapshot(policySet), null);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementPolicyAuthorizationException("Only SuperAdmin may publish executable procurement policies.");
-        }
-
         ProcurementPolicyLifecyclePolicy.EnsureCanPublish(policySet);
         EnsureRowVersion(policySet.RowVersion, request.RowVersion, "policy");
         var validation = await BuildValidationAsync(policySet, cancellationToken);
@@ -413,13 +405,6 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     {
         EnsureEditor();
         var policySet = await FindPolicySetAsync(id, tracked: true, cancellationToken);
-        if (!_currentUser.HasRole("SuperAdmin"))
-        {
-            await AddRevisionAsync(policySet.Id, null, null, "Retire", "Rejected", correlationId,
-                "Only SuperAdmin may retire an executable procurement policy.", PolicySnapshot(policySet), null);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new ProcurementPolicyAuthorizationException("Only SuperAdmin may retire executable procurement policies.");
-        }
         ProcurementPolicyLifecyclePolicy.EnsureCanRetire(policySet);
         EnsureRowVersion(policySet.RowVersion, request.RowVersion, "policy");
         var before = PolicySnapshot(policySet);
@@ -1511,8 +1496,9 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     private void EnsureEditor()
     {
         EnsureAuthenticatedTenant();
-        if (!_currentUser.HasRole("SuperAdmin") && !_currentUser.HasRole("TenantAdmin"))
-            throw new ProcurementPolicyAuthorizationException("Procurement policy administration requires SuperAdmin or TenantAdmin.");
+        // The controller requires procurement.access.manage for every mutation.
+        // Keep tenant and lifecycle enforcement in the domain without narrowing
+        // the authorized actor back to legacy generic roles.
     }
 
     private void Touch(ProcurementPolicySet policySet)

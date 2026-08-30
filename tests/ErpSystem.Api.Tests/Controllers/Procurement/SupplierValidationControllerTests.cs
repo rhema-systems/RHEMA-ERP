@@ -1,4 +1,5 @@
 using ErpSystem.Api.Controllers.Procurement;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
@@ -14,7 +15,7 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class SupplierValidationControllerTests
 {
     [Fact]
-    public async Task InternalAdministratorReceivesStructuredTenantSafeDecision()
+    public async Task InternalSupplierReviewerReceivesStructuredTenantSafeDecision()
     {
         var fixture = new Fixture(external: false);
         var partnerId = Guid.NewGuid();
@@ -74,12 +75,22 @@ public sealed class SupplierValidationControllerTests
             TenantId = Guid.NewGuid();
             Validation = new Mock<ISupplierValidationService>();
             var access = new Mock<IProcurementAccessControlService>();
+            access.Setup(item => item.CheckCapabilityAsync(
+                    It.Is<ProcurementAccessCapabilityRequest>(request =>
+                        request.PermissionCode == "procurement.supplier.review"),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = !external,
+                    Code = external ? "ACCESS_DENIED" : "ACCESS_ALLOWED",
+                    Message = external ? "Denied" : "Allowed"
+                });
             var current = new Mock<ICurrentUserProvider>();
             current.SetupGet(item => item.TenantId).Returns(TenantId);
             current.SetupGet(item => item.UserId).Returns(Guid.NewGuid());
             current.SetupGet(item => item.IsAuthenticated).Returns(true);
             current.SetupGet(item => item.IsExternalUser).Returns(external);
-            current.Setup(item => item.HasRole("TenantAdmin")).Returns(!external);
 
             Controller = new SupplierValidationController(
                 Validation.Object,

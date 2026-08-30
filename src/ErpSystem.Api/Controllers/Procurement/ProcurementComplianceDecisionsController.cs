@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 
 [ApiController]
 [Route("api/procurement/compliance-decisions")]
-[Authorize(Roles = "SuperAdmin,TenantAdmin")]
+[Authorize(Policy = "procurement.records.read")]
 public sealed class ProcurementComplianceDecisionsController : ControllerBase
 {
     private readonly IProcurementComplianceDecisionService _service;

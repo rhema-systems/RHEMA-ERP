@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -2167,7 +2168,7 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
         if (_currentUser.IsExternalUser)
             throw Authorization(
                 "Supplier portal users cannot perform internal PO amendment actions.");
-        if (IsAdministrator())
+        if (HasPlatformSuperAdministratorBypass())
             return;
         try
         {
@@ -2590,12 +2591,8 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
         return result;
     }
 
-    private bool IsAdministrator() =>
-        _currentUser.HasRole("SystemAdmin") ||
-        _currentUser.HasRole("SuperAdmin") ||
-        _currentUser.HasRole("TenantAdmin") ||
-        _currentUser.HasRole("Administrator") ||
-        _currentUser.HasRole("Admin");
+    private bool HasPlatformSuperAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string ActorName() =>
         string.IsNullOrWhiteSpace(_currentUser.FullName)

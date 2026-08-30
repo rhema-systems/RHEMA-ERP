@@ -50,7 +50,7 @@ public class TenderBidsController : ControllerBase
     /// Get all bids with pagination
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<PagedResult<TenderBidSummaryDto>>> GetBids(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
@@ -128,7 +128,7 @@ public class TenderBidsController : ControllerBase
     /// Get bids by tender ID
     /// </summary>
     [HttpGet("by-tender/{tenderId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<IEnumerable<TenderBidSummaryDto>>> GetBidsByTender(Guid tenderId)
     {
         try
@@ -335,7 +335,7 @@ public class TenderBidsController : ControllerBase
     /// Mark bid as opened
     /// </summary>
     [HttpPost("{id}/open")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderBidDetailDto>> OpenBid(Guid id)
     {
         try
@@ -358,7 +358,7 @@ public class TenderBidsController : ControllerBase
     /// Open all submitted bids for a tender
     /// </summary>
     [HttpPost("tender/{tenderId}/open-all")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<object>> OpenAllBidsByTender(Guid tenderId)
     {
         try
@@ -377,7 +377,7 @@ public class TenderBidsController : ControllerBase
     /// Get supplier bid list for a tender
     /// </summary>
     [HttpGet("tender/{tenderId}/supplier-list")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.records.read")]
     public async Task<ActionResult<List<SupplierBidListItemDto>>> GetSupplierBidList(Guid tenderId)
     {
         try
@@ -799,7 +799,7 @@ public class TenderBidsController : ControllerBase
     /// Verify payment
     /// </summary>
     [HttpPost("{bidId}/payments/{paymentId}/verify")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderPaymentDto>> VerifyPayment(Guid bidId, Guid paymentId, [FromBody] VerifyPaymentDto dto)
     {
         try
@@ -822,7 +822,7 @@ public class TenderBidsController : ControllerBase
     /// Schedule interview
     /// </summary>
     [HttpPost("{id}/interviews")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderInterviewDto>> ScheduleInterview(Guid id, [FromBody] ScheduleInterviewDto dto)
     {
         try
@@ -847,7 +847,7 @@ public class TenderBidsController : ControllerBase
     /// Update interview
     /// </summary>
     [HttpPut("{bidId}/interviews/{interviewId}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = "procurement.tender.administer")]
     public async Task<ActionResult<TenderInterviewDto>> UpdateInterview(Guid bidId, Guid interviewId, [FromBody] UpdateInterviewDto dto)
     {
         try

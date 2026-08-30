@@ -69,7 +69,10 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { projectService } from '@/services/projectService';
 import { ReportResult, reportsService } from '@/services/reports';
-import { ReportModuleNavigator } from './ReportModuleNavigator';
+import {
+  ReportModuleNavigator,
+  type ReportModuleNavigationItem,
+} from './ReportModuleNavigator';
 
 type CatalogueMode =
   'procurement' | 'inventory' | 'compliance' | 'quantity-survey' | 'civil-engineering';
@@ -677,6 +680,26 @@ export function StatutoryReportCataloguePage({
       ),
     [catalogue, reportsQuery.data]
   );
+  const navigatorItems: Array<
+    ReportModuleNavigationItem & Pick<CatalogueItem, 'description'>
+  > = [
+    ...(isQuantitySurvey
+      ? [
+          {
+            code: 'dashboard',
+            title: 'QS Cost Dashboard',
+            description: 'Authority-scoped cost control dashboard.',
+            group: 'Cost control',
+            icon: BarChart3,
+            available: true,
+          },
+        ]
+      : []),
+    ...catalogue.map((item) => ({
+      ...item,
+      available: reports.some((report) => report.tags?.includes(item.code)),
+    })),
+  ];
   const suppliersQuery = useQuery({
     queryKey: ['business-partners', 'report-filter'],
     queryFn: () => businessPartnerService.getAllPartnersForDropdown(),
@@ -1036,26 +1059,7 @@ export function StatutoryReportCataloguePage({
           moduleName={moduleName}
           modulePath={modulePath}
           activeReportCode={selectedCode}
-          items={[
-            ...(isQuantitySurvey
-              ? [
-                  {
-                    code: 'dashboard',
-                    title: 'QS Cost Dashboard',
-                    description: 'Authority-scoped cost control dashboard.',
-                    group: 'Cost control',
-                    icon: BarChart3,
-                    available: true,
-                  },
-                ]
-              : []),
-            ...catalogue.map((item) => ({
-              ...item,
-              available: reports.some((report) =>
-                report.tags?.includes(item.code)
-              ),
-            })),
-          ]}
+          items={navigatorItems}
         />
         <div className="min-w-0">
           <h1 className="truncate text-xl font-semibold tracking-tight">
