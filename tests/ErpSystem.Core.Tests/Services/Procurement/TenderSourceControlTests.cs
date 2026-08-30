@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using FluentAssertions;
@@ -27,6 +28,33 @@ public sealed class TenderSourceControlTests
             SourcingReleaseId = Guid.NewGuid(),
             SourcingCaseId = Guid.NewGuid()
         }).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering)]
+    [InlineData(ProcurementMethodType.InternationalCompetitiveTendering)]
+    [InlineData(ProcurementMethodType.QualityBasedSelection)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection)]
+    public void AdvancedStatutoryOrConsultingTenderRequiresControlledPublication(
+        ProcurementMethodType method)
+    {
+        TenderService.RequiresControlledPublication(new ProcurementSourcingCaseEntryGateDto
+        {
+            SourcingReleaseId = Guid.NewGuid(),
+            SourcingCaseId = Guid.NewGuid(),
+            SelectedMethod = method
+        }).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ReleaseOnlyInvitationToBidDoesNotRequireAdvancedPublicationFields()
+    {
+        TenderService.RequiresControlledPublication(new ProcurementSourcingCaseEntryGateDto
+        {
+            SourcingReleaseId = Guid.NewGuid(),
+            SourcingCaseId = null,
+            SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+        }).Should().BeFalse();
     }
 
     [Fact]

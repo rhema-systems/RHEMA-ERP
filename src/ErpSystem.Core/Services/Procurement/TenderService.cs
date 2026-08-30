@@ -14,6 +14,8 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public class TenderService : ITenderService
 {
+    private const string TenderEvaluatePermission = "procurement.tender.evaluate";
+
     private readonly ITenderRepository _tenderRepository;
     private readonly ITenderItemRepository _itemRepository;
     private readonly ITenderDocumentRepository _documentRepository;
@@ -30,6 +32,7 @@ public class TenderService : ITenderService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderService> _logger;
     private readonly IAppEventBus _appEventBus;
@@ -56,6 +59,7 @@ public class TenderService : ITenderService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         UserManager<ApplicationUser> userManager,
+        RoleManager<ApplicationRole> roleManager,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
         IProcurementSourcingCaseService sourcingCaseService,
@@ -81,6 +85,7 @@ public class TenderService : ITenderService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _userManager = userManager;
+        _roleManager = roleManager;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
         _sourcingCaseService = sourcingCaseService;
@@ -555,9 +560,7 @@ public class TenderService : ITenderService
             {
                 ValidateReleaseOnlyPublication(tender, dto, DateTime.UtcNow);
             }
-            if (UsesAdvancedSourcingControls(gate) &&
-                gate.SelectedMethod is (ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering or
-                    ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection))
+            if (RequiresControlledPublication(gate))
             {
                 if (!dto.OpeningDate.HasValue)
                     throw new ProcurementTenderControlValidationException("TENDER_OPENING_REQUIRED", "Controlled tender publication requires an opening date.");
@@ -1076,6 +1079,26 @@ public class TenderService : ITenderService
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
             await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender);
 
+            if (dto.Evaluators.Count == 0)
+                throw new InvalidOperationException("Select at least one authorised tender evaluator.");
+
+            var selectedUserIds = dto.Evaluators.Select(item => item.UserId).ToList();
+            if (selectedUserIds.Any(userId => userId == Guid.Empty) ||
+                selectedUserIds.Distinct().Count() != selectedUserIds.Count)
+                throw new InvalidOperationException("Each evaluator must be a different valid user.");
+
+            var eligibleCandidates = (await GetEligibleEvaluatorCandidatesAsync())
+                .ToDictionary(item => item.UserId);
+            var ineligibleUserIds = selectedUserIds
+                .Where(userId => !eligibleCandidates.ContainsKey(userId))
+                .ToList();
+            if (ineligibleUserIds.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Only active users in the current tenant whose Security role grants " +
+                    $"'{TenderEvaluatePermission}' can be assigned as tender evaluators.");
+            }
+
             var evaluatorIds = new List<Guid>();
 
             foreach (var evaluatorDto in dto.Evaluators)
@@ -1110,6 +1133,66 @@ public class TenderService : ITenderService
             _logger.LogError(ex, "Error assigning evaluators to tender {TenderId}", tenderId);
             throw;
         }
+    }
+
+    public async Task<IEnumerable<TenderEvaluatorCandidateDto>> GetEvaluatorCandidatesAsync(Guid tenderId)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(tenderId)
+            ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+        if (tender.TenantId != _currentUserProvider.TenantId)
+            throw new InvalidOperationException("The tender is not available in the current tenant.");
+
+        var assignedUserIds = (await _evaluatorRepository.GetByTenderIdAsync(tenderId))
+            .Select(item => item.UserId)
+            .ToHashSet();
+
+        return (await GetEligibleEvaluatorCandidatesAsync())
+            .Where(item => !assignedUserIds.Contains(item.UserId))
+            .OrderBy(item => item.FullName)
+            .ThenBy(item => item.UserName)
+            .ToList();
+    }
+
+    private async Task<List<TenderEvaluatorCandidateDto>> GetEligibleEvaluatorCandidatesAsync()
+    {
+        var permission = await _unitOfWork.Repository<Permission>().FirstOrDefaultAsync(
+            item => !item.IsDeleted && item.Name == TenderEvaluatePermission,
+            item => item.RolePermissions);
+        if (permission is null)
+            return new List<TenderEvaluatorCandidateDto>();
+
+        var candidates = new Dictionary<Guid, TenderEvaluatorCandidateDto>();
+        foreach (var roleId in permission.RolePermissions.Select(item => item.RoleId).Distinct())
+        {
+            var role = await _roleManager.FindByIdAsync(roleId.ToString());
+            if (role?.Name is not { Length: > 0 } roleName)
+                continue;
+
+            var users = await _userManager.GetUsersInRoleAsync(roleName);
+            foreach (var user in users.Where(item =>
+                         item.IsActive && item.TenantId == _currentUserProvider.TenantId))
+            {
+                if (!candidates.TryGetValue(user.Id, out var candidate))
+                {
+                    candidate = new TenderEvaluatorCandidateDto
+                    {
+                        UserId = user.Id,
+                        UserName = user.UserName ?? string.Empty,
+                        FullName = user.FullName,
+                        Email = user.Email ?? string.Empty
+                    };
+                    candidates.Add(user.Id, candidate);
+                }
+
+                if (!candidate.RoleNames.Contains(roleName, StringComparer.OrdinalIgnoreCase))
+                    candidate.RoleNames.Add(roleName);
+            }
+        }
+
+        foreach (var candidate in candidates.Values)
+            candidate.RoleNames.Sort(StringComparer.OrdinalIgnoreCase);
+
+        return candidates.Values.ToList();
     }
 
     public async Task<IEnumerable<TenderEvaluatorDto>> GetTenderEvaluatorsAsync(Guid tenderId)
@@ -1597,6 +1680,13 @@ public class TenderService : ITenderService
 
     internal static bool UsesAdvancedSourcingControls(ProcurementSourcingCaseEntryGateDto gate) =>
         gate.SourcingCaseId.HasValue && gate.SourcingCaseId.Value != Guid.Empty;
+
+    internal static bool RequiresControlledPublication(ProcurementSourcingCaseEntryGateDto gate) =>
+        UsesAdvancedSourcingControls(gate) &&
+        gate.SelectedMethod is (ProcurementMethodType.NationalCompetitiveTendering or
+            ProcurementMethodType.InternationalCompetitiveTendering or
+            ProcurementMethodType.QualityBasedSelection or
+            ProcurementMethodType.QualityAndCostBasedSelection);
 
     internal static void ValidateReleaseOnlyPublication(
         Tender tender,

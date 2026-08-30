@@ -115,6 +115,52 @@ public sealed class TenderEvaluatorLineageTests
             It.IsAny<TenderEvaluator>()), Times.Never);
     }
 
+    [Fact]
+    public async Task EvaluatorCandidatesContainOnlyActiveSameTenantUsersWithEvaluatePermission()
+    {
+        var fixture = new Fixture(new Tender
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Fixture.TenantId,
+            TenderNumber = "TND-CANDIDATES",
+            TenderType = "ITB"
+        });
+
+        var candidates = (await fixture.Service.GetEvaluatorCandidatesAsync(fixture.Tender.Id)).ToList();
+
+        candidates.Should().ContainSingle();
+        candidates[0].UserId.Should().Be(fixture.EligibleEvaluatorId);
+        candidates[0].RoleNames.Should().ContainSingle().Which.Should().Be("TDC_EVALUATOR");
+    }
+
+    [Fact]
+    public async Task StandaloneAssignmentRejectsUserWithoutTenderEvaluatePermission()
+    {
+        var releaseId = Guid.NewGuid();
+        var fixture = new Fixture(new Tender
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Fixture.TenantId,
+            TenderNumber = "TND-INELIGIBLE-EVALUATOR",
+            TenderType = "ITB",
+            SourcePurchaseRequisitionId = Guid.NewGuid(),
+            SourcingReleaseId = releaseId
+        });
+        fixture.SourceGate = new ProcurementSourcingCaseEntryGateDto
+        {
+            SourcingReleaseId = releaseId
+        };
+        var request = fixture.Assignment();
+        request.Evaluators[0].UserId = Guid.NewGuid();
+
+        var action = () => fixture.Service.AssignEvaluatorsAsync(fixture.Tender.Id, request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*procurement.tender.evaluate*");
+        fixture.Evaluators.Verify(repository => repository.CreateAsync(
+            It.IsAny<TenderEvaluator>()), Times.Never);
+    }
+
     private sealed class Fixture
     {
         internal static readonly Guid TenantId = Guid.NewGuid();
@@ -128,6 +174,8 @@ public sealed class TenderEvaluatorLineageTests
                 .ReturnsAsync((Tender value) => value);
             Evaluators.Setup(repository => repository.CreateAsync(It.IsAny<TenderEvaluator>()))
                 .ReturnsAsync((TenderEvaluator value) => value);
+            Evaluators.Setup(repository => repository.GetByTenderIdAsync(tender.Id))
+                .ReturnsAsync(Array.Empty<TenderEvaluator>());
             SourcingCases.Setup(service => service.EnforceSourceEntryAsync(
                     It.IsAny<Guid>(), It.IsAny<ErpSystem.Core.Enums.ProcurementMethodType?>(),
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -142,8 +190,67 @@ public sealed class TenderEvaluatorLineageTests
             CurrentUser.SetupGet(user => user.UserId).Returns(UserId);
 
             var userStore = new Mock<IUserStore<ApplicationUser>>();
-            var userManager = new Mock<UserManager<ApplicationUser>>(
+            UserManager = new Mock<UserManager<ApplicationUser>>(
                 userStore.Object, null!, null!, null!, null!, null!, null!, null!, null!);
+            UserManager.Setup(manager => manager.GetUsersInRoleAsync("TDC_EVALUATOR"))
+                .ReturnsAsync(new List<ApplicationUser>
+                {
+                    new()
+                    {
+                        Id = EligibleEvaluatorId,
+                        TenantId = TenantId,
+                        UserName = "tender.evaluator",
+                        Email = "tender.evaluator@example.test",
+                        FirstName = "Tender",
+                        LastName = "Evaluator",
+                        IsActive = true
+                    },
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = Guid.NewGuid(),
+                        UserName = "other.tenant",
+                        FirstName = "Other",
+                        LastName = "Tenant",
+                        IsActive = true
+                    },
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        UserName = "inactive.evaluator",
+                        FirstName = "Inactive",
+                        LastName = "Evaluator",
+                        IsActive = false
+                    }
+                });
+
+            RoleManager = new Mock<RoleManager<ApplicationRole>>(
+                Mock.Of<IRoleStore<ApplicationRole>>(),
+                Array.Empty<IRoleValidator<ApplicationRole>>(),
+                null!, null!, null!);
+            RoleManager.Setup(manager => manager.FindByIdAsync(EvaluatorRoleId.ToString()))
+                .ReturnsAsync(new ApplicationRole("TDC_EVALUATOR") { Id = EvaluatorRoleId });
+
+            Permissions.Setup(repository => repository.FirstOrDefaultAsync(
+                    It.IsAny<System.Linq.Expressions.Expression<Func<Permission, bool>>>(),
+                    It.IsAny<System.Linq.Expressions.Expression<Func<Permission, object>>[]>()))
+                .ReturnsAsync(new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "procurement.tender.evaluate",
+                    DisplayName = "Evaluate tenders",
+                    Category = "Procurement",
+                    RolePermissions =
+                    [
+                        new RolePermission
+                        {
+                            RoleId = EvaluatorRoleId,
+                            PermissionId = Guid.NewGuid()
+                        }
+                    ]
+                });
+            UnitOfWork.Setup(unit => unit.Repository<Permission>()).Returns(Permissions.Object);
 
             Service = new TenderService(
                 Tenders.Object,
@@ -161,7 +268,8 @@ public sealed class TenderEvaluatorLineageTests
                 Mock.Of<IWorkflowIntegrationService>(),
                 Mock.Of<IWorkflowStatusAdapterRegistry>(),
                 UnitOfWork.Object,
-                userManager.Object,
+                UserManager.Object,
+                RoleManager.Object,
                 CurrentUser.Object,
                 Mock.Of<IAppEventBus>(),
                 SourcingCases.Object,
@@ -173,6 +281,8 @@ public sealed class TenderEvaluatorLineageTests
         }
 
         internal Tender Tender { get; }
+        internal Guid EligibleEvaluatorId { get; } = Guid.NewGuid();
+        internal Guid EvaluatorRoleId { get; } = Guid.NewGuid();
         internal TenderService Service { get; }
         internal Mock<ITenderRepository> Tenders { get; } = new();
         internal Mock<ITenderEvaluatorRepository> Evaluators { get; } = new();
@@ -180,6 +290,9 @@ public sealed class TenderEvaluatorLineageTests
         internal Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         internal Mock<IProcurementEvaluationCommitteeControlService> EvaluationCommittee { get; } = new();
         internal Mock<IUnitOfWork> UnitOfWork { get; } = new();
+        internal Mock<IGenericRepository<Permission>> Permissions { get; } = new();
+        internal Mock<UserManager<ApplicationUser>> UserManager { get; }
+        internal Mock<RoleManager<ApplicationRole>> RoleManager { get; }
         internal Mock<ICurrentUserProvider> CurrentUser { get; } = new();
         internal ProcurementSourcingCaseEntryGateDto SourceGate { get; set; } = new();
 
@@ -189,7 +302,7 @@ public sealed class TenderEvaluatorLineageTests
             [
                 new EvaluatorAssignmentDto
                 {
-                    UserId = Guid.NewGuid(),
+                    UserId = EligibleEvaluatorId,
                     Role = "Technical Evaluator",
                     WeightagePercentage = 100m
                 }

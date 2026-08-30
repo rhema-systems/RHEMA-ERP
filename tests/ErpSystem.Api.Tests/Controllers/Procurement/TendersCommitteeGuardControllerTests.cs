@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -55,6 +56,29 @@ public sealed class TendersCommitteeGuardControllerTests
             .Which.Extensions["code"].Should()
             .Be("EVALUATION_COMMITTEE_MEMBERSHIP_REQUIRED");
         remove.Should().BeOfType<ConflictObjectResult>();
+    }
+
+    [Fact]
+    public async Task EvaluatorCandidatesUseTenderAdministerPolicyAndDedicatedService()
+    {
+        var service = new Mock<ITenderService>();
+        var tenderId = Guid.NewGuid();
+        var candidates = new List<TenderEvaluatorCandidateDto>
+        {
+            new() { UserId = Guid.NewGuid(), FullName = "Tender Evaluator" }
+        };
+        service.Setup(item => item.GetEvaluatorCandidatesAsync(tenderId))
+            .ReturnsAsync(candidates);
+        var controller = Controller(service.Object);
+
+        var result = await controller.GetEvaluatorCandidates(tenderId);
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeSameAs(candidates);
+        typeof(TendersController).GetMethod(nameof(TendersController.GetEvaluatorCandidates))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Should().ContainSingle(attribute => attribute.Policy == "procurement.tender.administer");
     }
 
     private static TendersController Controller(ITenderService service) => new(

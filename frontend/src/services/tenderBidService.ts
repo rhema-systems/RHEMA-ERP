@@ -1,5 +1,7 @@
 // Tender Bid Service - API calls for tender bid management
 
+import type { TenderBidInitiationStatus } from '@/lib/tender-bid-initiation';
+
 // ==================== INTERFACES ====================
 
 export interface TenderBidSummaryDto {
@@ -154,6 +156,7 @@ export interface TenderPaymentDto {
 
 export interface CreateTenderBidDto {
   tenderId: string;
+  associationType?: 'AllUsers' | 'Self' | 'SelectedUsers';
   deliveryDays?: number;
   paymentTerms?: string;
   warrantyTerms?: string;
@@ -211,7 +214,8 @@ export interface WithdrawTenderBidDto {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  const token =
+    localStorage.getItem('token') || localStorage.getItem('authToken');
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -225,17 +229,26 @@ export async function getBids(params: {
   search?: string;
   status?: string;
   tenderId?: string;
-}): Promise<{ items: TenderBidSummaryDto[]; totalCount: number; pageNumber: number; pageSize: number }> {
+}): Promise<{
+  items: TenderBidSummaryDto[];
+  totalCount: number;
+  pageNumber: number;
+  pageSize: number;
+}> {
   const queryParams = new URLSearchParams();
   if (params.page) queryParams.append('page', params.page.toString());
-  if (params.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+  if (params.pageSize)
+    queryParams.append('pageSize', params.pageSize.toString());
   if (params.search) queryParams.append('search', params.search);
   if (params.status) queryParams.append('status', params.status);
   if (params.tenderId) queryParams.append('tenderId', params.tenderId);
 
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids?${queryParams}`, {
-    headers: getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids?${queryParams}`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -260,10 +273,15 @@ export async function getBidById(id: string): Promise<TenderBidDetailDto> {
 }
 
 // Get my draft bid for a tender
-export async function getMyDraftBidByTenderId(tenderId: string): Promise<TenderBidDetailDto | null> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/my-draft-bid/${tenderId}`, {
-    headers: getAuthHeaders(),
-  });
+export async function getMyDraftBidByTenderId(
+  tenderId: string
+): Promise<TenderBidDetailDto | null> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/my-draft-bid/${tenderId}`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (response.status === 404) {
     return null;
@@ -277,10 +295,15 @@ export async function getMyDraftBidByTenderId(tenderId: string): Promise<TenderB
 }
 
 // Get bids by tender ID
-export async function getBidsByTenderId(tenderId: string): Promise<TenderBidSummaryDto[]> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/by-tender/${tenderId}`, {
-    headers: getAuthHeaders(),
-  });
+export async function getBidsByTenderId(
+  tenderId: string
+): Promise<TenderBidSummaryDto[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/by-tender/${tenderId}`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to fetch tender bids');
@@ -291,21 +314,28 @@ export async function getBidsByTenderId(tenderId: string): Promise<TenderBidSumm
 
 // Get my bids (for business partners)
 export async function getMyBids(): Promise<TenderBidSummaryDto[]> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/my-bids`, {
-    headers: getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/my-bids`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
     console.error('getMyBids API error:', response.status, errorText);
-    throw new Error(`Failed to fetch my bids: ${response.status} - ${errorText}`);
+    throw new Error(
+      `Failed to fetch my bids: ${response.status} - ${errorText}`
+    );
   }
 
   return response.json();
 }
 
 // Create a new bid
-export async function createBid(data: CreateTenderBidDto): Promise<TenderBidDetailDto> {
+export async function createBid(
+  data: CreateTenderBidDto
+): Promise<TenderBidDetailDto> {
   console.log('Creating bid with data:', JSON.stringify(data, null, 2));
 
   const response = await fetch(`${API_BASE_URL}/procurement/TenderBids`, {
@@ -324,7 +354,10 @@ export async function createBid(data: CreateTenderBidDto): Promise<TenderBidDeta
 }
 
 // Update bid
-export async function updateBid(id: string, data: UpdateTenderBidDto): Promise<TenderBidDetailDto> {
+export async function updateBid(
+  id: string,
+  data: UpdateTenderBidDto
+): Promise<TenderBidDetailDto> {
   const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${id}`, {
     method: 'PUT',
     headers: getAuthHeaders(),
@@ -339,12 +372,18 @@ export async function updateBid(id: string, data: UpdateTenderBidDto): Promise<T
 }
 
 // Submit bid
-export async function submitBid(id: string, data: SubmitTenderBidDto): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${id}/submit`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
+export async function submitBid(
+  id: string,
+  data: SubmitTenderBidDto
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${id}/submit`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to submit bid');
@@ -352,12 +391,18 @@ export async function submitBid(id: string, data: SubmitTenderBidDto): Promise<v
 }
 
 // Withdraw bid
-export async function withdrawBid(id: string, data: WithdrawTenderBidDto): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${id}/withdraw`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
+export async function withdrawBid(
+  id: string,
+  data: WithdrawTenderBidDto
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${id}/withdraw`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to withdraw bid');
@@ -366,10 +411,13 @@ export async function withdrawBid(id: string, data: WithdrawTenderBidDto): Promi
 
 // Open bid (mark as opened)
 export async function openBid(id: string): Promise<TenderBidDetailDto> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${id}/open`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${id}/open`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -392,12 +440,18 @@ export async function deleteBid(id: string): Promise<void> {
 }
 
 // Add bid item
-export async function addBidItem(bidId: string, data: CreateTenderBidItemDto): Promise<TenderBidItemDto> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/items`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
+export async function addBidItem(
+  bidId: string,
+  data: CreateTenderBidItemDto
+): Promise<TenderBidItemDto> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/items`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to add bid item');
@@ -407,12 +461,19 @@ export async function addBidItem(bidId: string, data: CreateTenderBidItemDto): P
 }
 
 // Update bid item
-export async function updateBidItem(bidId: string, itemId: string, data: CreateTenderBidItemDto): Promise<TenderBidItemDto> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/items/${itemId}`, {
-    method: 'PUT',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
+export async function updateBidItem(
+  bidId: string,
+  itemId: string,
+  data: CreateTenderBidItemDto
+): Promise<TenderBidItemDto> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/items/${itemId}`,
+    {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to update bid item');
@@ -422,11 +483,17 @@ export async function updateBidItem(bidId: string, itemId: string, data: CreateT
 }
 
 // Delete bid item
-export async function deleteBidItem(bidId: string, itemId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/items/${itemId}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-  });
+export async function deleteBidItem(
+  bidId: string,
+  itemId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/items/${itemId}`,
+    {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to delete bid item');
@@ -434,10 +501,15 @@ export async function deleteBidItem(bidId: string, itemId: string): Promise<void
 }
 
 // Get bid documents
-export async function getBidDocuments(bidId: string): Promise<TenderBidDocumentDto[]> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/documents`, {
-    headers: getAuthHeaders(),
-  });
+export async function getBidDocuments(
+  bidId: string
+): Promise<TenderBidDocumentDto[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/documents`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to fetch bid documents');
@@ -460,13 +532,17 @@ export async function uploadBidDocument(
     formData.append('documentName', documentName);
   }
 
-  const { ['Content-Type']: _contentType, ...headers } = getAuthHeaders() as Record<string, string>;
+  const { ['Content-Type']: _contentType, ...headers } =
+    getAuthHeaders() as Record<string, string>;
 
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/documents`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/documents`,
+    {
+      method: 'POST',
+      headers,
+      body: formData,
+    }
+  );
 
   if (!response.ok) {
     const error = await response.text();
@@ -477,18 +553,22 @@ export async function uploadBidDocument(
 }
 
 // Download bid document
-export function downloadBidDocument(bidId: string, documentId: string, documentName: string): void {
+export function downloadBidDocument(
+  bidId: string,
+  documentId: string,
+  documentName: string
+): void {
   const headers = getAuthHeaders();
   const url = `${API_BASE_URL}/procurement/TenderBids/${bidId}/documents/${documentId}/download`;
 
   fetch(url, { headers })
-    .then(response => {
+    .then((response) => {
       if (!response.ok) {
         throw new Error('Failed to download document');
       }
       return response.blob();
     })
-    .then(blob => {
+    .then((blob) => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -498,17 +578,22 @@ export function downloadBidDocument(bidId: string, documentId: string, documentN
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     })
-    .catch(error => {
+    .catch((error) => {
       console.error('Error downloading document:', error);
       throw error;
     });
 }
 
 // Get bid payments
-export async function getBidPayments(bidId: string): Promise<TenderPaymentDto[]> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/payments`, {
-    headers: getAuthHeaders(),
-  });
+export async function getBidPayments(
+  bidId: string
+): Promise<TenderPaymentDto[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/payments`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to fetch bid payments');
@@ -517,12 +602,58 @@ export async function getBidPayments(bidId: string): Promise<TenderPaymentDto[]>
   return response.json();
 }
 
+export async function getInitiationStatus(
+  tenderId: string
+): Promise<TenderBidInitiationStatus> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/initiation-status/${tenderId}`,
+    { headers: getAuthHeaders() }
+  );
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null);
+    throw new Error(problem?.detail || 'Failed to load bid initiation status');
+  }
+  return response.json();
+}
+
+export async function recordBidPayment(
+  bidId: string,
+  input: {
+    tenderFeeId: string;
+    amount: number;
+    currency: string;
+    paymentMethod: string;
+    transactionId: string;
+    notes?: string;
+  }
+): Promise<TenderPaymentDto> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/payments`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(input),
+    }
+  );
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null);
+    throw new Error(problem?.detail || 'Failed to record tender fee payment');
+  }
+  return response.json();
+}
+
 // Delete bid document
-export async function deleteBidDocument(bidId: string, documentId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/${bidId}/documents/${documentId}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-  });
+export async function deleteBidDocument(
+  bidId: string,
+  documentId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/${bidId}/documents/${documentId}`,
+    {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to delete bid document');
@@ -530,11 +661,16 @@ export async function deleteBidDocument(bidId: string, documentId: string): Prom
 }
 
 // Open all bids for a tender
-export async function openAllBidsByTender(tenderId: string): Promise<{ openedCount: number; message: string }> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/tender/${tenderId}/open-all`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
+export async function openAllBidsByTender(
+  tenderId: string
+): Promise<{ openedCount: number; message: string }> {
+  const response = await fetch(
+    `${API_BASE_URL}/procurement/TenderBids/tender/${tenderId}/open-all`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();

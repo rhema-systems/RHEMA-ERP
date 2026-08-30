@@ -20,6 +20,11 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
         // Existing supplier/external portal features live under procurement
         "/api/procurement",
 
+        // Supplier-owned tender BoQ routes. The trailing slash prevents sibling
+        // external-portal routes from being admitted by this prefix, while the
+        // controller and service enforce ExternalUser, tenant, and partner ownership.
+        "/api/external-portal/tender-bids/",
+
         // Unified notifications endpoints + SignalR hub
         "/api/notifications",
         "/api/hubs",

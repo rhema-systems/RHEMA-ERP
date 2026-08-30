@@ -337,6 +337,37 @@ public class TenderPaymentDto
 }
 
 /// <summary>
+/// Server-derived initiation state for the current supplier and tender.
+/// </summary>
+public class TenderBidInitiationStatusDto
+{
+    public Guid TenderId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? DraftBidId { get; set; }
+    public bool HasAssignment { get; set; }
+    public string? AssignmentType { get; set; }
+    public bool RequiresAcceptanceDeclaration { get; set; }
+    public bool DeclarationAccepted { get; set; }
+    public bool DeclarationSatisfied { get; set; }
+    public bool PaymentRequired { get; set; }
+    public bool HasPayment { get; set; }
+    public bool PaymentSatisfied { get; set; }
+    public bool CanProceed { get; set; }
+    public List<TenderFeePaymentStatusDto> Fees { get; set; } = new();
+}
+
+public class TenderFeePaymentStatusDto
+{
+    public Guid TenderFeeId { get; set; }
+    public string FeeType { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public bool IsMandatory { get; set; }
+    public string Status { get; set; } = "NotPaid";
+    public Guid? PaymentId { get; set; }
+}
+
+/// <summary>
 /// Create payment DTO
 /// </summary>
 public class CreateTenderPaymentDto

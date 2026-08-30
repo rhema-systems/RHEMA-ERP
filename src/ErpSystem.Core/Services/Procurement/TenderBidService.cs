@@ -17,6 +17,7 @@ public class TenderBidService : ITenderBidService
     private readonly ITenderBidItemRepository _bidItemRepository;
     private readonly ITenderBidDocumentRepository _bidDocumentRepository;
     private readonly ITenderPaymentRepository _paymentRepository;
+    private readonly ITenderFeeRepository _feeRepository;
     private readonly ITenderInterviewRepository _interviewRepository;
     private readonly ITenderAssignmentRepository _assignmentRepository;
     private readonly ITenderBidLotRepository _bidLotRepository;
@@ -39,6 +40,7 @@ public class TenderBidService : ITenderBidService
         ITenderBidItemRepository bidItemRepository,
         ITenderBidDocumentRepository bidDocumentRepository,
         ITenderPaymentRepository paymentRepository,
+        ITenderFeeRepository feeRepository,
         ITenderInterviewRepository interviewRepository,
         ITenderAssignmentRepository assignmentRepository,
         ITenderBidLotRepository bidLotRepository,
@@ -60,6 +62,7 @@ public class TenderBidService : ITenderBidService
         _bidItemRepository = bidItemRepository;
         _bidDocumentRepository = bidDocumentRepository;
         _paymentRepository = paymentRepository;
+        _feeRepository = feeRepository;
         _interviewRepository = interviewRepository;
         _assignmentRepository = assignmentRepository;
         _bidLotRepository = bidLotRepository;
@@ -251,6 +254,27 @@ public class TenderBidService : ITenderBidService
             _logger.LogError(ex, "Error retrieving draft bid for tender {TenderId}", tenderId);
             throw;
         }
+    }
+
+    public async Task<TenderBidInitiationStatusDto> GetInitiationStatusAsync(Guid tenderId)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(tenderId)
+            ?? throw new TenderBidInitiationValidationException(
+                "TENDER_NOT_FOUND", "The tender was not found.");
+        var businessPartner = await GetCurrentBusinessPartnerAsync()
+            ?? throw new TenderBidInitiationValidationException(
+                "TENDER_BID_SUPPLIER_REQUIRED",
+                "The current account is not linked to an active supplier.");
+        var assignments = await _assignmentRepository.GetByTenderAndBusinessPartnerAsync(
+            tenderId, businessPartner.Id);
+        var assignment = assignments.FirstOrDefault();
+        var bid = await _bidRepository.GetByTenderAndPartnerAsync(tenderId, businessPartner.Id);
+        var fees = (await _feeRepository.GetByTenderIdAsync(tenderId)).ToList();
+        var payments = (await _paymentRepository.GetByBusinessPartnerIdAsync(businessPartner.Id))
+            .Where(payment => fees.Any(fee => fee.Id == payment.TenderFeeId))
+            .ToList();
+
+        return BuildInitiationStatus(tender, businessPartner.Id, assignment, bid, fees, payments);
     }
 
     public async Task<TenderBidDetailDto> CreateBidAsync(CreateTenderBidDto dto)
@@ -713,10 +737,38 @@ public class TenderBidService : ITenderBidService
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
 
             var submittedAtUtc = DateTime.UtcNow;
+            var assignments = (await _assignmentRepository.GetByTenderAndBusinessPartnerAsync(
+                tender.Id, bid.BusinessPartnerId)).ToList();
+            var fees = (await _feeRepository.GetByTenderIdAsync(tender.Id)).ToList();
+            var payments = (await _paymentRepository.GetByBusinessPartnerIdAsync(bid.BusinessPartnerId))
+                .Where(payment => fees.Any(fee => fee.Id == payment.TenderFeeId))
+                .ToList();
+            ValidateInitiationRequirements(tender, bid, assignments, fees, payments);
             await _exceptionalSourcingControlService.EnsureBidSupplierAllowedAsync(tender.Id, bid.BusinessPartnerId);
-            await _tenderDocumentControlService.EnsureSubmissionReadyAsync(
-                ProcurementTenderDocumentSourceType.Tender, tender.Id, bid.BusinessPartnerId,
-                Guid.NewGuid().ToString("N"));
+            // The controlled-document register is owned by an advanced locked
+            // sourcing case. A published direct tender can legitimately retain
+            // only its approved requisition and immutable sourcing release; its
+            // publication path deliberately does not fabricate a sourcing case or
+            // controlled-document register. Keep the advanced guard fail-closed,
+            // but do not apply it to that release-only route.
+            var usesAdvancedSourcingControls = tender.SourcingCaseId.HasValue &&
+                                               tender.SourcingCaseId.Value != Guid.Empty;
+            if (!usesAdvancedSourcingControls &&
+                (!tender.SourcePurchaseRequisitionId.HasValue ||
+                 tender.SourcePurchaseRequisitionId.Value == Guid.Empty ||
+                 !tender.SourcingReleaseId.HasValue ||
+                 tender.SourcingReleaseId.Value == Guid.Empty))
+            {
+                throw new ProcurementRequisitionSourcingValidationException(
+                    "TENDER_SOURCE_LINEAGE_REQUIRED",
+                    "The published tender must retain its approved requisition and immutable sourcing-release lineage before bid submission.");
+            }
+            if (usesAdvancedSourcingControls)
+            {
+                await _tenderDocumentControlService.EnsureSubmissionReadyAsync(
+                    ProcurementTenderDocumentSourceType.Tender, tender.Id, bid.BusinessPartnerId,
+                    Guid.NewGuid().ToString("N"));
+            }
             var usesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
             if (!usesControlledTenderLifecycle && submittedAtUtc > tender.SubmissionDeadline)
             {
@@ -1196,24 +1248,43 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            // Get the business partner for the current user
-            // First, try to get as main account owner
-            var businessPartner = await _businessPartnerRepository.GetByUserIdAsync(_currentUserProvider.UserId);
-
-            // If not found, try to get as sub-user via BusinessPartnerUser table
-            if (businessPartner == null)
-            {
-                var businessPartnerUser = await _businessPartnerUserRepository.GetByUserIdAsync(_currentUserProvider.UserId);
-                if (businessPartnerUser != null && businessPartnerUser.IsActive)
-                {
-                    businessPartner = businessPartnerUser.BusinessPartner;
-                }
-            }
-
-            if (businessPartner == null)
-            {
-                throw new InvalidOperationException("No business partner found for the current user. Please complete your business partner registration first.");
-            }
+            var businessPartner = await GetCurrentBusinessPartnerAsync()
+                ?? throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_SUPPLIER_REQUIRED",
+                    "The current account is not linked to an active supplier.");
+            if (!dto.TenderBidId.HasValue || dto.TenderBidId.Value == Guid.Empty)
+                throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_BID_REQUIRED",
+                    "Create the tender bid draft before recording its fee payment.");
+            var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId.Value)
+                ?? throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_BID_NOT_FOUND", "The tender bid draft was not found.");
+            if (bid.BusinessPartnerId != businessPartner.Id || !string.Equals(bid.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+                throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_BID_INVALID",
+                    "Fee payment can be recorded only against the current supplier's draft bid.");
+            var fee = await _feeRepository.GetByIdAsync(dto.TenderFeeId)
+                ?? throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_FEE_NOT_FOUND", "The selected tender fee was not found.");
+            if (fee.TenderId != bid.TenderId || fee.Amount <= 0m)
+                throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_FEE_INVALID",
+                    "The selected fee does not belong to this tender or does not require payment.");
+            var existingPayments = await _paymentRepository.GetByBusinessPartnerIdAsync(businessPartner.Id);
+            var existing = existingPayments
+                .Where(item => !item.IsDeleted && item.TenderFeeId == fee.Id)
+                .OrderByDescending(item => item.PaymentDate)
+                .FirstOrDefault();
+            if (existing is not null &&
+                (IsPaymentSatisfied(existing) || string.Equals(existing.Status, "Pending", StringComparison.OrdinalIgnoreCase)))
+                return MapPaymentToDto(existing);
+            var transactionReference = string.IsNullOrWhiteSpace(dto.TransactionId)
+                ? dto.PaymentReference?.Trim()
+                : dto.TransactionId.Trim();
+            if (string.IsNullOrWhiteSpace(transactionReference))
+                throw new TenderBidInitiationValidationException(
+                    "TENDER_BID_PAYMENT_REFERENCE_REQUIRED",
+                    "Enter the bank, receipt, or transaction reference for this fee payment.");
 
             var payment = new TenderPayment
             {
@@ -1222,12 +1293,13 @@ public class TenderBidService : ITenderBidService
                 TenderFeeId = dto.TenderFeeId,
                 BusinessPartnerId = businessPartner.Id,
                 PaymentReference = await _paymentRepository.GeneratePaymentReferenceAsync(),
-                Amount = dto.Amount,
-                Currency = dto.Currency,
-                PaymentMethod = dto.PaymentMethod,
+                Amount = fee.Amount,
+                Currency = fee.Currency,
+                PaymentMethod = fee.PaymentMethod,
                 Status = "Pending",
-                PaymentDate = DateTime.UtcNow,
-                TransactionId = dto.TransactionId,
+                PaymentDate = dto.PaymentDate ?? DateTime.UtcNow,
+                TransactionId = transactionReference,
+                Notes = dto.Notes,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -1583,6 +1655,111 @@ public class TenderBidService : ITenderBidService
             TransactionId = payment.TransactionId,
             PaymentProof = payment.PaymentProof
         };
+    }
+
+    internal static TenderBidInitiationStatusDto BuildInitiationStatus(
+        Tender tender,
+        Guid businessPartnerId,
+        TenderAssignment? assignment,
+        TenderBid? bid,
+        IReadOnlyCollection<TenderFee> fees,
+        IReadOnlyCollection<TenderPayment> payments)
+    {
+        var feeStatuses = fees
+            .Where(fee => !fee.IsDeleted)
+            .Select(fee =>
+            {
+                var feePayments = payments
+                    .Where(payment => !payment.IsDeleted && payment.TenderFeeId == fee.Id)
+                    .OrderByDescending(payment => payment.PaymentDate)
+                    .ToList();
+                var satisfied = feePayments.FirstOrDefault(IsPaymentSatisfied);
+                var latest = satisfied ?? feePayments.FirstOrDefault();
+                var status = satisfied is not null
+                    ? "Verified"
+                    : latest is null
+                        ? "NotPaid"
+                        : string.Equals(latest.Status, "Pending", StringComparison.OrdinalIgnoreCase)
+                            ? "Pending"
+                            : string.Equals(latest.Status, "Rejected", StringComparison.OrdinalIgnoreCase)
+                                ? "Rejected"
+                                : "NotPaid";
+                return new TenderFeePaymentStatusDto
+                {
+                    TenderFeeId = fee.Id,
+                    FeeType = fee.FeeType,
+                    Amount = fee.Amount,
+                    Currency = fee.Currency,
+                    IsMandatory = fee.IsMandatory,
+                    Status = status,
+                    PaymentId = latest?.Id
+                };
+            })
+            .ToList();
+        var mandatoryFees = feeStatuses
+            .Where(fee => fee.IsMandatory && fee.Amount > 0m)
+            .ToList();
+        var declarationSatisfied = !tender.RequiresAcceptanceDeclaration || bid?.AcceptedDeclaration == true;
+        var paymentSatisfied = mandatoryFees.Count == 0 ||
+                               mandatoryFees.All(fee => fee.Status == "Verified");
+        var hasAssignment = assignment is not null;
+
+        return new TenderBidInitiationStatusDto
+        {
+            TenderId = tender.Id,
+            BusinessPartnerId = businessPartnerId,
+            DraftBidId = bid is { Status: "Draft" } ? bid.Id : null,
+            HasAssignment = hasAssignment,
+            AssignmentType = assignment?.AssignmentType,
+            RequiresAcceptanceDeclaration = tender.RequiresAcceptanceDeclaration,
+            DeclarationAccepted = bid?.AcceptedDeclaration == true,
+            DeclarationSatisfied = declarationSatisfied,
+            PaymentRequired = mandatoryFees.Count > 0,
+            HasPayment = paymentSatisfied,
+            PaymentSatisfied = paymentSatisfied,
+            CanProceed = hasAssignment && declarationSatisfied && paymentSatisfied,
+            Fees = feeStatuses
+        };
+    }
+
+    internal static void ValidateInitiationRequirements(
+        Tender tender,
+        TenderBid bid,
+        IReadOnlyCollection<TenderAssignment> assignments,
+        IReadOnlyCollection<TenderFee> fees,
+        IReadOnlyCollection<TenderPayment> payments)
+    {
+        if (!assignments.Any())
+            throw new TenderBidInitiationValidationException(
+                "TENDER_BID_ASSIGNMENT_REQUIRED",
+                "Create the supplier tender assignment before submitting the bid.");
+        if (tender.RequiresAcceptanceDeclaration && !bid.AcceptedDeclaration)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_BID_DECLARATION_REQUIRED",
+                "Accept the required supplier declaration before submitting the bid.");
+
+        var unpaidMandatoryFees = fees
+            .Where(fee => !fee.IsDeleted && fee.IsMandatory && fee.Amount > 0m)
+            .Where(fee => !payments.Any(payment =>
+                !payment.IsDeleted && payment.TenderFeeId == fee.Id && IsPaymentSatisfied(payment)))
+            .Select(fee => fee.FeeType)
+            .ToList();
+        if (unpaidMandatoryFees.Count > 0)
+            throw new TenderBidInitiationValidationException(
+                "TENDER_BID_PAYMENT_REQUIRED",
+                $"Verified payment is required for: {string.Join(", ", unpaidMandatoryFees)}.");
+    }
+
+    private static bool IsPaymentSatisfied(TenderPayment payment) =>
+        string.Equals(payment.Status, "Verified", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(payment.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<BusinessPartner?> GetCurrentBusinessPartnerAsync()
+    {
+        var businessPartner = await _businessPartnerRepository.GetByUserIdAsync(_currentUserProvider.UserId);
+        if (businessPartner is not null) return businessPartner;
+        var link = await _businessPartnerUserRepository.GetByUserIdAsync(_currentUserProvider.UserId);
+        return link is { IsActive: true } ? link.BusinessPartner : null;
     }
 
     private static TenderEvaluationDto MapEvaluationToDto(TenderEvaluation evaluation)

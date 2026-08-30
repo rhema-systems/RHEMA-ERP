@@ -24,6 +24,7 @@ import {
   awardReadinessSourceLabel,
   createAwardReadinessEvaluationRequest,
 } from '@/lib/procurement-award-readiness';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { procurementAwardReadinessService as service } from '@/services/procurement-award-readiness.service';
 import type {
   ProcurementAwardReadinessDecision,
@@ -34,9 +35,6 @@ const errorStatus = (error: unknown) =>
   typeof error === 'object' && error !== null && 'status' in error
     ? Number((error as { status?: unknown }).status)
     : undefined;
-
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'The request could not be completed.';
 
 export function AwardReadinessWorkspace({
   sourceType,
@@ -98,7 +96,7 @@ export function AwardReadinessWorkspace({
           : 'Award remains blocked; the immutable decision and remediation were retained.'
       );
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: (error) => toast.error(getProcurementProblemMessage(error)),
   });
 
   const refresh = async () => {
@@ -156,7 +154,7 @@ export function AwardReadinessWorkspace({
             Award-readiness controls are unavailable
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-            {errorMessage(error)}
+            {getProcurementProblemMessage(error)}
           </p>
           <Button asChild variant="outline" className="mt-5">
             <Link href={backHref}>Return to {sourceLabel.toLowerCase()}</Link>
@@ -262,7 +260,9 @@ export function AwardReadinessWorkspace({
         sodStatus={sodStatus.data}
         isSodStatusLoading={sodStatus.isLoading}
         sodStatusError={
-          sodStatus.isError ? errorMessage(sodStatus.error) : undefined
+          sodStatus.isError
+            ? getProcurementProblemMessage(sodStatus.error)
+            : undefined
         }
         canEvaluate={canEvaluate}
         isEvaluating={evaluate.isPending}

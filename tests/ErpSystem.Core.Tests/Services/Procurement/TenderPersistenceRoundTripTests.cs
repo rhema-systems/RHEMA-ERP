@@ -205,6 +205,12 @@ public sealed class TenderPersistenceRoundTripTests
                 null!,
                 null!,
                 null!);
+            var roleManager = new Mock<RoleManager<ApplicationRole>>(
+                Mock.Of<IRoleStore<ApplicationRole>>(),
+                Array.Empty<IRoleValidator<ApplicationRole>>(),
+                null!,
+                null!,
+                null!);
 
             RegisterTemplate(Guid.Empty, "Template A");
 
@@ -225,6 +231,7 @@ public sealed class TenderPersistenceRoundTripTests
                 Mock.Of<IWorkflowStatusAdapterRegistry>(),
                 unitOfWork.Object,
                 userManager.Object,
+                roleManager.Object,
                 currentUser.Object,
                 eventBus.Object,
                 sourcing.Object,

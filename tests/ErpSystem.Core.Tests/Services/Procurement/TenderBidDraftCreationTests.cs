@@ -116,6 +116,7 @@ public sealed class TenderBidDraftCreationTests
             bidItems.Object,
             Mock.Of<ITenderBidDocumentRepository>(),
             Mock.Of<ITenderPaymentRepository>(),
+            Mock.Of<ITenderFeeRepository>(),
             Mock.Of<ITenderInterviewRepository>(),
             Mock.Of<ITenderAssignmentRepository>(),
             bidLots.Object,
