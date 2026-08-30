@@ -80,7 +80,9 @@ DISPOSITIONS = {
     "StaffDisciplineSupportController.cs":
         ("BUILD", "Action steps and legal reviews are displayed but can never be recorded."),
     "StaffDisciplineSubEntityController.cs":
-        ("BUILD", "Corrective action items cannot be edited or removed."),
+        ("BUILD", "The corrective-action note here was stale \u2014 those were built in slice 9. The "
+                  "investigation and hearing were built in slice 11 (2026-08-30) and have left the "
+                  "queue. The 10 that remain are the sanctions, blocked on D-18."),
     "MedicalInsuranceController.cs":
         ("BUILD", "Network facilities, premium records, provider documents, insurance claims."),
     "JobVacancyController.cs":
@@ -609,6 +611,26 @@ _d("PayComponentsController.cs", [
 # instrument 01 used to cross every [Route] in a FILE with every action in it. Fixed at the
 # instrument on 2026-08-30, so those rows no longer exist and need no disposition.
 
+_SANCTION = ("BUILD", "Blocked — see D-18, which RESTATES the original block rather than lifting "
+                      "it. The FR-HR-080 authority rule does exist in `RecordDecision`, but no "
+                      "actor reaches it, and a warning can be recorded against a case nobody has "
+                      "decided — so an editable sanction today would let a penalty be written with "
+                      "no authority rule in force. `probe-authority-gate.mjs` holds both findings "
+                      "as passing assertions.")
+
+_d("StaffDisciplineSubEntityController.cs", [
+    ("POST", "api/discipline/cases/{}/warning", _SANCTION),
+    ("PUT", "api/discipline/cases/{}/warning", _SANCTION),
+    ("POST", "api/discipline/cases/{}/suspension", _SANCTION),
+    ("PUT", "api/discipline/cases/{}/suspension", _SANCTION),
+    ("POST", "api/discipline/cases/{}/fine", _SANCTION),
+    ("POST", "api/discipline/cases/{}/fine/payment", _SANCTION),
+    ("POST", "api/discipline/cases/{}/termination", _SANCTION),
+    ("PUT", "api/discipline/cases/{}/termination", _SANCTION),
+    ("POST", "api/discipline/cases/{}/separation", _SANCTION),
+    ("PUT", "api/discipline/cases/{}/separation", _SANCTION),
+])
+
 # ── Single real gaps ────────────────────────────────────────────────────────
 _d("JobCandidateController.cs", [
     ("POST", "api/job-candidates/{}/documents", _HELPER),
@@ -929,6 +951,28 @@ BLOCKERS = [
      "uses it heavily.",
      "Blocks nothing built so far. Recorded because a 500 that names nothing costs someone an hour "
      "the next time"),
+    ("D-18", "The sanctions' block stands, but not for the reason recorded", "OPEN",
+     "The case screen has said since slice 1 that the sanctions must stay read-only \u2014 warning, "
+     "suspension, fine, termination, separation \u2014 \"until the issuing-authority rule is in "
+     "place\". Slice 10 made `MinimumAuthority` maintainable per action type and "
+     "`RecordDecision` does contain the rule, so the condition looked met. It is not, and "
+     "`probe-authority-gate.mjs` establishes why with seven passing assertions.\n\n"
+     "  **No actor reaches the rule.** `HR.Discipline.Write` is granted only to HR, LegacyHrUser, "
+     "SuperAdmin, TenantAdmin and Admin, and the check excludes HR, SuperAdmin and Admin **by "
+     "name**. A head of department \u2014 the actor the rule was written for \u2014 holds none of "
+     "those permissions and is refused at the endpoint gate long before the service check runs. "
+     "There is no head-of-department role at all, which is the deferred org-authority model "
+     "showing through: 0 of 41 org units have a head recorded.\n\n"
+     "  **And the sanctions are not uniformly gated by the decision.** A termination is refused "
+     "until the decision is confirmed (`EnsureTerminationIsFoundedAsync`); a **warning is not**, "
+     "and can be recorded against a case nobody has decided. So even a working authority rule on "
+     "the decision would not govern an editable warning \u2014 the sanction can be written with no "
+     "decision behind it at all.\n\n"
+     "  Two things would clear this: a role that actually holds `HR.Discipline.Write` without "
+     "being HR (which is the org-authority model), and a founded-ness guard on the remaining "
+     "sanctions matching the one termination already has. Until then an editable sanction would "
+     "ship exactly the hole the original note warned about.",
+     "Blocks the 10 sanction endpoints on StaffDisciplineSubEntity"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "
@@ -997,6 +1041,9 @@ w("| 2026-08-29 | Medical insurance: network facilities, provider documents and 
 w("| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |")
 w("| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |")
 w("| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |")
+w("| 2026-08-30 | **The investigation and the hearing are recordable** (area 9 slice 11, 29 assertions). Both were read-only for no reason beyond nobody having built the editors \u2014 neither imposes a penalty, so FR-HR-080 never governed them. Five endpoints, and the panel is built around three traps: `complete` takes a bare JSON string, recording findings does NOT complete the investigation, and clearing the accompaniment must clear every representative field with it. |")
+w("| 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** The recorded reason (\"blocked on FR-HR-080\") was imprecise \u2014 the rule exists \u2014 but the substance holds: no actor reaches the rule, and a warning can be recorded against a case nobody has decided. Tested rather than assumed; `probe-authority-gate.mjs` keeps both findings as passing assertions, so the day one fails is the day the gap closed. |")
+w("| 2026-08-30 | **Stale-navigation-on-a-write-response, fourth instance.** `investigatorName`, `hearingOfficerName` and `representativeEmployeeName` all came back null from the create and update responses while the detail and queue reads resolved them. Four writers now re-read before mapping, the same fix the succession document uploader got. Every instance so far has been found by a harness assertion, never by reading the code. |")
 w("| 2026-08-30 | **The discipline catalogue is authorable** (area 9 slice 10, 43 assertions). Offences, their procedure ladders and the sanction catalogue can all be created, corrected, reordered and retired from `/administration/hr/discipline/catalogue`. A client was previously stuck with whatever the seed shipped — unable to name an offence it had not anticipated, or fix a typo in one it had. |")
 w("| 2026-08-30 | ⚠ **Instrument 01 invented a phantom route for every real one in a file holding two controllers.** It crossed every `[Route]` in a FILE with every `[Http*]` in it, so `StaffDisciplineLookup` read as 20 writes when it has 10, and `Competency` as 12 when it has 6. `api/discipline/action-types/{}/procedures` was reported for months and answers 404 — slice 10 proves it. **Fixed at the instrument**: routes are now attributed per class. 16 phantom endpoints left the backend count (2151 → 2135). |")
 w("| 2026-08-30 | **A TypeScript type can be fiction nothing has caught yet.** `StaffOffense.offenseProcedures` never existed — the DTO field is `Procedures` — but no screen had read it, so nothing failed. The first screen to use it would have rendered an empty ladder with no error and no clue. Corrected, and the harness now pins the real name. Fourth instance of this shape. |")

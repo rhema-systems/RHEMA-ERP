@@ -13,8 +13,8 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2135 |
-| Wired to a screen | 1772 |
-| No caller found (instrument 01) | 363 |
+| Wired to a screen | 1777 |
+| No caller found (instrument 01) | 358 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
 | Write-DTO fields no form can set | 87 across 38 DTOs |
 
@@ -38,6 +38,9 @@ yet classified.
 | 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |
 | 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
 | 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
+| 2026-08-30 | **The investigation and the hearing are recordable** (area 9 slice 11, 29 assertions). Both were read-only for no reason beyond nobody having built the editors — neither imposes a penalty, so FR-HR-080 never governed them. Five endpoints, and the panel is built around three traps: `complete` takes a bare JSON string, recording findings does NOT complete the investigation, and clearing the accompaniment must clear every representative field with it. |
+| 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** The recorded reason ("blocked on FR-HR-080") was imprecise — the rule exists — but the substance holds: no actor reaches the rule, and a warning can be recorded against a case nobody has decided. Tested rather than assumed; `probe-authority-gate.mjs` keeps both findings as passing assertions, so the day one fails is the day the gap closed. |
+| 2026-08-30 | **Stale-navigation-on-a-write-response, fourth instance.** `investigatorName`, `hearingOfficerName` and `representativeEmployeeName` all came back null from the create and update responses while the detail and queue reads resolved them. Four writers now re-read before mapping, the same fix the succession document uploader got. Every instance so far has been found by a harness assertion, never by reading the code. |
 | 2026-08-30 | **The discipline catalogue is authorable** (area 9 slice 10, 43 assertions). Offences, their procedure ladders and the sanction catalogue can all be created, corrected, reordered and retired from `/administration/hr/discipline/catalogue`. A client was previously stuck with whatever the seed shipped — unable to name an offence it had not anticipated, or fix a typo in one it had. |
 | 2026-08-30 | ⚠ **Instrument 01 invented a phantom route for every real one in a file holding two controllers.** It crossed every `[Route]` in a FILE with every `[Http*]` in it, so `StaffDisciplineLookup` read as 20 writes when it has 10, and `Competency` as 12 when it has 6. `api/discipline/action-types/{}/procedures` was reported for months and answers 404 — slice 10 proves it. **Fixed at the instrument**: routes are now attributed per class. 16 phantom endpoints left the backend count (2151 → 2135). |
 | 2026-08-30 | **A TypeScript type can be fiction nothing has caught yet.** `StaffOffense.offenseProcedures` never existed — the DTO field is `Procedures` — but no screen had read it, so nothing failed. The first screen to use it would have rendered an empty ladder with no error and no clue. Corrected, and the harness now pins the real name. Fourth instance of this shape. |
@@ -165,6 +168,18 @@ yet classified.
   `CreateTalentPoolDto.OwnerId` is `[Required]` but typed as a non-nullable `Guid`, and `[Required]` does not reject `Guid.Empty` — so an omitted owner passes model validation intact and dies at the database on `FK_TalentPools_Employees_OwnerId` with error 547, surfacing as the generic handler's 500 that names neither the field nor the constraint. The same shape as D-04, where a wrong-catalogue qualification id 500'd naming nothing. Found by slice 13 tripping over it while building a talent-pool fixture, not by looking for it. The fix is a validation guard that rejects `Guid.Empty` with a message naming the field; sending the id is the workaround, not the fix. Worth a sweep rather than a one-line patch — `[Required]` on a non-nullable `Guid` is inert everywhere it appears, and this DTO family uses it heavily.
 
   _Blocks nothing built so far. Recorded because a 500 that names nothing costs someone an hour the next time_
+
+- [ ] **D-18 — The sanctions' block stands, but not for the reason recorded** · `OPEN`
+
+  The case screen has said since slice 1 that the sanctions must stay read-only — warning, suspension, fine, termination, separation — "until the issuing-authority rule is in place". Slice 10 made `MinimumAuthority` maintainable per action type and `RecordDecision` does contain the rule, so the condition looked met. It is not, and `probe-authority-gate.mjs` establishes why with seven passing assertions.
+
+  **No actor reaches the rule.** `HR.Discipline.Write` is granted only to HR, LegacyHrUser, SuperAdmin, TenantAdmin and Admin, and the check excludes HR, SuperAdmin and Admin **by name**. A head of department — the actor the rule was written for — holds none of those permissions and is refused at the endpoint gate long before the service check runs. There is no head-of-department role at all, which is the deferred org-authority model showing through: 0 of 41 org units have a head recorded.
+
+  **And the sanctions are not uniformly gated by the decision.** A termination is refused until the decision is confirmed (`EnsureTerminationIsFoundedAsync`); a **warning is not**, and can be recorded against a case nobody has decided. So even a working authority rule on the decision would not govern an editable warning — the sanction can be written with no decision behind it at all.
+
+  Two things would clear this: a role that actually holds `HR.Discipline.Write` without being HR (which is the org-authority model), and a founded-ness guard on the remaining sanctions matching the one termination already has. Until then an editable sanction would ship exactly the hole the original note warned about.
+
+  _Blocks the 10 sanction endpoints on StaffDisciplineSubEntity_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -544,7 +559,7 @@ for hundreds of gaps that do not exist.
 - [ ] `GET    api/discipline/witnesses/employee/{}`
 - [ ] `GET    api/discipline/witnesses/{}`
 
-### Discipline — case sub-entities — 11 of 26 writes wired
+### Discipline — case sub-entities — 16 of 26 writes wired
 
 **Writes**
 
@@ -554,11 +569,11 @@ for hundreds of gaps that do not exist.
 - [x] `POST   api/discipline/cases/{}/corrective-action`
 - [ ] `POST   api/discipline/cases/{}/fine`
 - [ ] `POST   api/discipline/cases/{}/fine/payment`
-- [ ] `POST   api/discipline/cases/{}/hearing`
-- [ ] `PUT    api/discipline/cases/{}/hearing/outcome`
-- [ ] `POST   api/discipline/cases/{}/investigation`
-- [ ] `PUT    api/discipline/cases/{}/investigation`
-- [ ] `POST   api/discipline/cases/{}/investigation/complete`
+- [x] `POST   api/discipline/cases/{}/hearing`
+- [x] `PUT    api/discipline/cases/{}/hearing/outcome`
+- [x] `POST   api/discipline/cases/{}/investigation`
+- [x] `PUT    api/discipline/cases/{}/investigation`
+- [x] `POST   api/discipline/cases/{}/investigation/complete`
 - [ ] `POST   api/discipline/cases/{}/separation`
 - [ ] `PUT    api/discipline/cases/{}/separation`
 - [ ] `POST   api/discipline/cases/{}/suspension`
@@ -712,9 +727,9 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
 | PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
 | PerformanceAppraisals | 15 | 29 | `BUILD` 5 · `INTENTIONAL` 10 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
-| StaffDisciplineSubEntity | 15 | 26 | `BUILD` | Corrective action items cannot be edited or removed. |
 | Awards | 13 | 56 | `BUILD` | Nomination attachments — edit and delete. |
 | TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
+| StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
 | MedicalInsurance | 9 | 24 | `BUILD` | Network facilities, premium records, provider documents, insurance claims. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
 | SuccessionPlan | 8 | 14 | `BUILD` 7 · `INTENTIONAL` 1 | Classified 2026-08-29: all 8 real. Competency requirements and actions are read-only in the UI; the 2 document endpoints are blocked on D-14/D-15. |
@@ -794,7 +809,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**130 of the 336 queued endpoints are classified here — 43 BUILD, 43 INTENTIONAL, 44 FALSE.** The remaining 206 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**140 of the 331 queued endpoints are classified here — 53 BUILD, 43 INTENTIONAL, 44 FALSE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -875,6 +890,29 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>Superseded by `POST {}/submit-appeal`, which is wired and enforces the at-least-one-appealed-item rule.
 - `PATCH  api/PerformanceAppraisals/{}/status` — **INTENTIONAL**
   <br>Raw status set. Status is moved by the named workflow transitions, each of which enforces its own preconditions.
+
+### StaffDisciplineSubEntity — 10 BUILD
+
+- `POST   api/discipline/cases/{}/fine` — **BUILD**
+  <br>Blocked — see D-18, which RESTATES the original block rather than lifting it. The FR-HR-080 authority rule does exist in `RecordDecision`, but no actor reaches it, and a warning can be recorded against a case nobody has decided — so an editable sanction today would let a penalty be written with no authority rule in force. `probe-authority-gate.mjs` holds both findings as passing assertions.
+- `POST   api/discipline/cases/{}/fine/payment` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `POST   api/discipline/cases/{}/separation` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `PUT    api/discipline/cases/{}/separation` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `POST   api/discipline/cases/{}/suspension` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `PUT    api/discipline/cases/{}/suspension` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `POST   api/discipline/cases/{}/termination` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `PUT    api/discipline/cases/{}/termination` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `POST   api/discipline/cases/{}/warning` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
+- `PUT    api/discipline/cases/{}/warning` — **BUILD**
+  <br>_As `POST api/discipline/cases/{}/fine`._
 
 ### SuccessionPlan — 7 BUILD · 1 INTENTIONAL
 

@@ -143,8 +143,15 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Investigation opened for case {CaseId}", dto.CaseId);
+        // Re-read so the response carries the resolved names. Mapping the just-written
+        // entity returns investigatorName / hearingOfficerName / representativeEmployeeName
+        // as null, because a freshly added or updated entity has no navigation loaded — the
+        // create response then disagrees with the detail read that follows it. Caught by
+        // slice 11; same shape as the succession document uploader (D-14's slice).
 
-        return entity.ToDto();
+        var saved = await _investigationRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<StaffDisciplineInvestigationDto> UpdateAsync(UpdateInvestigationDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -162,7 +169,9 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
         await _investigationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // Re-read so the response carries the resolved names — see the note on the sibling writer.
+        var saved = await _investigationRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> CompleteAsync(Guid caseId, string findings, Guid userId, CancellationToken cancellationToken = default)
@@ -322,7 +331,9 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
 
         _logger.LogInformation("Hearing scheduled for case {CaseId} on {HearingDate}", dto.CaseId, dto.HearingDate);
 
-        return entity.ToDto();
+        // Re-read so the response carries the resolved names — see the note on the sibling writer.
+        var saved = await _hearingRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<StaffDisciplineHearingDto> RecordOutcomeAsync(RecordHearingOutcomeDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -354,8 +365,15 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Hearing outcome recorded for case {CaseId}", dto.CaseId);
+        // Re-read so the response carries the resolved names. Mapping the just-written
+        // entity returns investigatorName / hearingOfficerName / representativeEmployeeName
+        // as null, because a freshly added or updated entity has no navigation loaded — the
+        // create response then disagrees with the detail read that follows it. Caught by
+        // slice 11; same shape as the succession document uploader (D-14's slice).
 
-        return entity.ToDto();
+        var saved = await _hearingRepository.GetByCaseIdAsync(GetTenantId(), dto.CaseId);
+
+        return (saved ?? entity).ToDto();
     }
 }
 

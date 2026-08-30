@@ -29,6 +29,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { CaseProcessPanel } from '@/components/hr/discipline/CaseProcessPanel';
 import { ActionStepsPanel } from '@/components/hr/discipline/ActionStepsPanel';
 import { LegalReviewsPanel } from '@/components/hr/discipline/LegalReviewsPanel';
 import { CorrectiveActionPanel } from '@/components/hr/discipline/CorrectiveActionPanel';
@@ -70,8 +71,17 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
  * fine, termination — remain read-only for exactly the original reason, and must stay that way
  * until the issuing-authority rule is in place.
  *
- * ⚠ The investigation and hearing are also still read-only, but for a different and weaker reason:
- * nobody has built their editors yet. They are not blocked on anything.
+ * The investigation and hearing are now recordable too (`CaseProcessPanel`). They were never
+ * blocked on anything — neither imposes a penalty, so FR-HR-080 does not govern them — and the
+ * only reason they had stayed read-only was that nobody had built the editors.
+ *
+ * ⚠ **The sanctions' block was re-tested on 2026-08-30 and it STANDS**, though not for the reason
+ * recorded above. The authority rule does exist in `RecordDecision` — but no actor reaches it:
+ * `HR.Discipline.Write` is held only by HR, LegacyHrUser and the admin roles, and the rule excludes
+ * HR, SuperAdmin and Admin by name, while a head of department holds none of them and is refused at
+ * the endpoint gate. Worse, a WARNING can be recorded against a case nobody has decided, so even a
+ * working rule on the decision would not govern an editable warning. `probe-authority-gate.mjs`
+ * records both findings as passing assertions.
  */
 export default function DisciplineCaseDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -457,45 +467,12 @@ export default function DisciplineCaseDetailPage() {
         </TabsContent>
 
         <TabsContent value="process" className="space-y-4 pt-4">
-          <Card>
-            <CardHeader><CardTitle>Investigation</CardTitle></CardHeader>
-            <CardContent>
-              {detail.investigation ? (
-                <div className="grid gap-5 md:grid-cols-3">
-                  <Field label="Investigator" value={detail.investigation.investigatorName} />
-                  <Field label="Started" value={fmtDate(detail.investigation.investigationStartDate)} />
-                  <Field label="Completed" value={fmtDate(detail.investigation.investigationEndDate)} />
-                  <div className="md:col-span-3">
-                    <Field label="Findings" value={detail.investigation.investigationFindings} />
-                  </div>
-                  <div className="md:col-span-3">
-                    <Field label="Evidence collected" value={detail.investigation.evidenceCollected} />
-                  </div>
-                </div>
-              ) : (
-                <EmptyState title="No investigation" description="None has been opened for this case." />
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Hearing</CardTitle></CardHeader>
-            <CardContent>
-              {detail.hearing ? (
-                <div className="grid gap-5 md:grid-cols-3">
-                  <Field label="Date" value={fmtDate(detail.hearing.hearingDate)} />
-                  <Field label="Venue" value={detail.hearing.hearingVenue} />
-                  <Field label="Hearing officer" value={detail.hearing.hearingOfficerName} />
-                  <Field label="Employee's representative" value={detail.hearing.representativeEmployeeName} />
-                  <div className="md:col-span-3">
-                    <Field label="Notes" value={detail.hearing.hearingNotes} />
-                  </div>
-                </div>
-              ) : (
-                <EmptyState title="No hearing" description="None has been scheduled for this case." />
-              )}
-            </CardContent>
-          </Card>
+          <CaseProcessPanel
+            caseId={id}
+            detail={detail}
+            canWrite={canWriteDiscipline}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline', 'case', id] })}
+          />
 
           <ActionStepsPanel
             caseId={id}

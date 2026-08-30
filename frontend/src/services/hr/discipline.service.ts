@@ -19,6 +19,7 @@ import type {
   RecordAppealOutcomeRequest,
   DisciplineHearing,
   StaffOffense,
+  DisciplinaryRepresentativeType,
   StaffOffenseSummary,
   StaffOffenseProcedure,
   CreateStaffOffenseRequest,
@@ -328,6 +329,84 @@ class DisciplineProcessService {
 
   getHearingsAwaitingOutcome(): Promise<DisciplineHearing[]> {
     return apiService.get<DisciplineHearing[]>('/discipline/hearings/awaiting-outcome');
+  }
+
+  // ── Recording the investigation ────────────────────────────────────────────
+
+  /** Opens one. A case carries at most one investigation, so a second call is refused. */
+  openInvestigation(
+    caseId: string,
+    payload: { investigatorId?: string | null; investigationStartDate?: string | null },
+  ): Promise<DisciplineInvestigation> {
+    return apiService.post<DisciplineInvestigation>(
+      `/discipline/cases/${caseId}/investigation`, { ...payload, caseId });
+  }
+
+  /**
+   * Corrects it. Every field is written, so seed from the case detail's `investigation`.
+   *
+   * ⚠ Recording findings here does NOT complete the investigation — the case stays where it is.
+   * Completing is the separate call below, and it is what moves the case on.
+   */
+  updateInvestigation(
+    caseId: string,
+    payload: {
+      investigatorId?: string | null;
+      investigationStartDate?: string | null;
+      investigationEndDate?: string | null;
+      investigationFindings?: string | null;
+      evidenceCollected?: string | null;
+    },
+  ): Promise<DisciplineInvestigation> {
+    return apiService.put<DisciplineInvestigation>(
+      `/discipline/cases/${caseId}/investigation`, { ...payload, caseId });
+  }
+
+  /**
+   * Completes it, which advances the case.
+   *
+   * ⚠ **The body is a bare JSON string, not an object.** The action takes `[FromBody] string
+   * findings`; sending `{ findings }` 400s naming no field. Same trap as the action-step complete
+   * and skip calls — see slice 9.
+   */
+  completeInvestigation(caseId: string, findings: string): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(
+      `/discipline/cases/${caseId}/investigation/complete`, findings);
+  }
+
+  // ── Recording the hearing ──────────────────────────────────────────────────
+
+  scheduleHearing(
+    caseId: string,
+    payload: { hearingDate: string; hearingVenue?: string | null; hearingOfficerId?: string | null },
+  ): Promise<DisciplineHearing> {
+    return apiService.post<DisciplineHearing>(
+      `/discipline/cases/${caseId}/hearing`, { ...payload, caseId });
+  }
+
+  /**
+   * Records what happened at it — attendance, the employee's statement and who represented them.
+   *
+   * FR-HR-179: whether the employee was heard, and by whom they were accompanied, is the record a
+   * case turns on later. `representativeEmployeeId` names a colleague; the free-text name/position
+   * fields are for a representative who is not an employee.
+   */
+  recordHearingOutcome(
+    caseId: string,
+    payload: {
+      employeeAttendedHearing: boolean;
+      employeeStatement?: string | null;
+      employeeHadRepresentation: boolean;
+      representativeType?: DisciplinaryRepresentativeType | null;
+      representativeEmployeeId?: string | null;
+      representativeName?: string | null;
+      representativePosition?: string | null;
+      representativeContactInfo?: string | null;
+      hearingNotes?: string | null;
+    },
+  ): Promise<DisciplineHearing> {
+    return apiService.put<DisciplineHearing>(
+      `/discipline/cases/${caseId}/hearing/outcome`, { ...payload, caseId });
   }
 }
 
