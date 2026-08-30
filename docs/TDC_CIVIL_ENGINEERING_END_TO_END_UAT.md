@@ -56,6 +56,27 @@ Prepare these controlled records before testing:
 
 Do not enter raw database IDs, workflow IDs, DMS record IDs, role IDs, contractor IDs or property IDs. Select controlled records by their business names/references. The application retains stable IDs internally.
 
+### 3.1 Executable authenticated browser subset
+
+The repository includes a fresh-record, role-separated browser subset for the direct-field-work lifecycle:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\civil-engineering\Invoke-CivilEngineeringBrowserAcceptance.ps1
+```
+
+The runner requires local SQL Server 2022 access through integrated authentication, `sqlcmd`, the built frontend dependencies and Playwright Chromium. It creates a uniquely named `RhemaERP_CivilBrowser_*` database, materializes the current EF model, stamps that disposable current-model schema through the established migration-history helper, generates four ephemeral passwords in process memory, seeds one controlled project and four distinct actors, starts the local API and frontend, runs the Civil Playwright spec, and drops the database in `finally`. It does not write or print actor credentials.
+
+The automated subset visibly exercises:
+
+1. a supervising engineer/maker opening `Development -> Civil Task Assignments`, selecting the controlled project and assignee, and creating a fresh task;
+2. an unauthenticated API read returning `401`;
+3. a fourth authenticated user seeing the permission-denied page with no assign action and receiving `403` from the direct lookup API;
+4. the independently signed-in assignee acknowledging and completing the task;
+5. an independently signed-in Civil Engineer/reviewer accepting the completed task; and
+6. API and refreshed-UI read-back of each state transition and the final `Accepted` state; then direct SQL read-back of 100 percent progress, maker/assignee/reviewer separation, three immutable feedback events/revision actors and trusted Civil direct-task foreign keys.
+
+This browser subset is evidence for the covered portion of `CIV-E2E-007` and the named authentication/permission negatives only. It does not replace the production baseline-to-head migration gate, nor does it claim browser execution of the design, site, Maintenance, permitting, DMS, reports, offline replay/idempotency, cross-tenant, stale-row or every exception path below. Record those remaining results from their named manual/API/SQL gates in the execution matrix.
+
 ## 4. UI locations
 
 | Activity | UI location |

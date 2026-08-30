@@ -13,6 +13,18 @@ Use a non-production tenant and a single named project. Before running any scena
 - The test project has the controlled contractor Business Partner, a permitted external-access policy, and published central-DMS evidence available where the scenario needs it. Do not use a document ID from another tenant or an unpublished version.
 - Record IDs, role/user IDs, central-DMS document/version references, workflow IDs, API correlation IDs, and Audit Log entries in the evidence sheet. Do not use free-text IDs in place of the selectors in the UI.
 
+## Automated browser evidence boundary
+
+Run the disposable authenticated subset from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\civil-engineering\Invoke-CivilEngineeringBrowserAcceptance.ps1
+```
+
+The runner creates and drops a fresh SQL Server 2022 database and uses four distinct ephemeral actors: supervising-engineer maker, technician assignee, Civil Engineer reviewer and authenticated unauthorized user. The Playwright spec covers visible module navigation, controlled project/assignee selection, fresh task creation, per-transition API read-back, unauthenticated `401`, permission-hidden UI plus `403`, assignee acknowledgement/completion, independent acceptance, and refreshed final read-back. The runner then queries SQL directly for the accepted/100-percent state, distinct maker/assignee/reviewer IDs, exact immutable feedback/revision actor counts and trusted direct-task foreign keys.
+
+Treat this as partial automated evidence for `CIV-E2E-007` and the named `CIV-E2E-009` direct-task denials. Offline queue/replay, changed-payload idempotency conflict, returned-task amendment, second-tenant isolation, DMS evidence and every other matrix flow still require their separate API/SQL/manual evidence. Do not mark either matrix row or `CIV-0606` complete from this subset alone.
+
 ## UI locations
 
 | Area | Tested UI location |
