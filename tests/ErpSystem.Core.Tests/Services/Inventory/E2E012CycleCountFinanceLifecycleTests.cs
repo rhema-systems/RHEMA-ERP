@@ -909,6 +909,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         public Guid ActorId { get; private set; } = userId;
         public string? UserId => ActorId.ToString();
         public string? UserName { get; private set; } = username;
+        public string FullName => UserName ?? username;
         public string? Email => $"{UserName}@e2e.local";
         public Guid? TenantId { get; } = tenantId;
         public Guid? EmployeeId => null;

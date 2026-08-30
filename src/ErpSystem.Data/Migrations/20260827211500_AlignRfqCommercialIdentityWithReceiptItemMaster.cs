@@ -17,13 +17,13 @@ public partial class AlignRfqCommercialIdentityWithReceiptItemMaster : Migration
 
         migrationBuilder.Sql(BuildPatchSql(
             "TR_PurchaseOrders_ApprovedCommercialCapacity",
-            expectedIdentityOccurrences: 6,
+            expectedIdentityOccurrences: 4,
             OldIdentity,
             SourceLineIdentity));
 
         migrationBuilder.Sql(BuildPatchSql(
             "TR_PurchaseOrderItems_ApprovedCommercialCapacity",
-            expectedIdentityOccurrences: 4,
+            expectedIdentityOccurrences: 2,
             OldIdentity,
             SourceLineIdentity));
     }
@@ -32,13 +32,13 @@ public partial class AlignRfqCommercialIdentityWithReceiptItemMaster : Migration
     {
         migrationBuilder.Sql(BuildPatchSql(
             "TR_PurchaseOrders_ApprovedCommercialCapacity",
-            expectedIdentityOccurrences: 6,
+            expectedIdentityOccurrences: 4,
             SourceLineIdentity,
             OldIdentity));
 
         migrationBuilder.Sql(BuildPatchSql(
             "TR_PurchaseOrderItems_ApprovedCommercialCapacity",
-            expectedIdentityOccurrences: 4,
+            expectedIdentityOccurrences: 2,
             SourceLineIdentity,
             OldIdentity));
 
