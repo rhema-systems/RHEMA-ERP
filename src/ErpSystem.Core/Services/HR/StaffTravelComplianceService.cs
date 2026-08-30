@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -507,12 +507,25 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
             .ToList();
     }
 
-    public async Task<IEnumerable<StaffTravelAlertSummaryDto>> GetCurrentAlertsForCountryAsync(Guid countryId, CancellationToken cancellationToken = default)
+    /// <summary>The alerts in force for a destination right now.</summary>
+    /// <remarks>
+    /// ⚠ <b>This returned <c>StaffTravelAlertSummaryDto</c>, which has no <c>Body</c></b> — and the
+    /// body IS the alert. The travel request's compliance panel renders the title, the severity and
+    /// then <c>{a.body &amp;&amp; …}</c>, so since it shipped a traveller has been shown
+    /// "Civil unrest · High" and never a word about what or where. TypeScript did not catch it
+    /// because the client typed this read as the full DTO.
+    ///
+    /// <para>The D-09 rule still holds and this is not an exception to it: a cross-record read
+    /// feeds a list, and <c>alerts/active</c> and <c>alerts/country/{}</c> remain summaries for
+    /// exactly that reason. This read is not a list — its whole purpose is to carry an alert's
+    /// content to the person travelling there.</para>
+    /// </remarks>
+    public async Task<IEnumerable<StaffTravelAlertDto>> GetCurrentAlertsForCountryAsync(Guid countryId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         return (await _alertRepository.GetCurrentAlertsForCountryAsync(countryId))
             .Where(a => a.TenantId == tenantId)
-            .Select(a => a.ToSummaryDto())
+            .Select(a => a.ToDto())
             .ToList();
     }
 
@@ -701,7 +714,9 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
         await SendAlertAsync(entity, alert, request, cancellationToken);
 
-        var reloaded = await _notificationRepository.GetByIdAsync(entity.Id);
+        // GetByIdAsync loads no navigations, so this re-read was returning the same blanks it was
+        // added to avoid: alertTitle, requestNumber and employeeName all empty on the create.
+        var reloaded = await _notificationRepository.GetByIdWithDetailsAsync(entity.Id);
         return (reloaded ?? entity).ToDto();
     }
 

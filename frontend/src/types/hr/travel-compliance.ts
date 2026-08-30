@@ -198,6 +198,28 @@ export type TravelAlertType =
 
 export type TravelAlertSeverity = 'Info' | 'Warning' | 'Critical' | 'Emergency';
 
+/**
+ * The row `alerts/active` and `alerts/country/{id}` return.
+ *
+ * ⚠ **No `body`.** Those two are cross-record lists and stay summaries; the alert's text lives on
+ * the full record. `alerts/country/{id}/current` — the read that tells a traveller what is
+ * happening at their destination — returns {@link StaffTravelAlert} in full, because the body IS
+ * the alert. The client used to type all three as the full record, which is why the compliance
+ * panel could bind `body` against a payload that never carried it and TypeScript said nothing.
+ */
+export interface StaffTravelAlertSummary {
+  id: string;
+  alertType: TravelAlertType;
+  alertTypeName: string;
+  severity: TravelAlertSeverity;
+  severityName: string;
+  countryName?: string | null;
+  city?: string | null;
+  title: string;
+  effectiveFrom: string;
+  isActive: boolean;
+}
+
 export interface StaffTravelAlert extends AuditFields {
   alertType: TravelAlertType;
   alertTypeName: string;
@@ -229,14 +251,34 @@ export interface CreateStaffTravelAlert {
 
 export type UpdateStaffTravelAlert = CreateStaffTravelAlert & { id: string };
 
+/**
+ * A destination alert sent to one traveller for one trip.
+ *
+ * ⚠ `alertTitle`, `requestNumber` and `employeeName` are on the DTO and were missing here, so the
+ * desk's screen could not name the alert, the trip or the person without the compiler objecting.
+ *
+ * ⚠ **Acknowledging is the traveller's act alone.** The desk route sits on Travel.Write, which no
+ * `Employee` holds, while the service refuses anyone but the addressee — so the acknowledgement
+ * runs through `staff-travel/me/alert-notifications/{id}/acknowledge` and nothing else.
+ */
 export interface StaffTravelAlertNotification extends AuditFields {
   travelAlertId: string;
+  alertTitle?: string | null;
   staffTravelRequestId: string;
+  requestNumber?: string | null;
   employeeId: string;
+  employeeName: string;
   /** Server-stamped when the alert is actually dispatched — not a caller's assertion (F-09). */
   notificationSentAt?: string | null;
   isAcknowledged: boolean;
   acknowledgedAt?: string | null;
+}
+
+/** What the desk sends: an alert, a trip, and the traveller on it. */
+export interface CreateStaffTravelAlertNotification {
+  travelAlertId: string;
+  staffTravelRequestId: string;
+  employeeId: string;
 }
 
 // ── Insurance ────────────────────────────────────────────────────────────────

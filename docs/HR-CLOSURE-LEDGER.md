@@ -12,9 +12,9 @@ yet classified.
 
 | Measure | Count |
 | --- | ---: |
-| HR write endpoints | 2135 |
-| Wired to a screen | 1789 |
-| No caller found (instrument 01) | 346 |
+| HR write endpoints | 2136 |
+| Wired to a screen | 1794 |
+| No caller found (instrument 01) | 342 |
 | Confirmed unreachable (01 ∩ 02) | 27 |
 | Write-DTO fields no form can set | 79 across 33 DTOs |
 
@@ -292,6 +292,38 @@ yet classified.
   A reason column on the breach flag would be a small change and worth more than the whole rules subsystem in its current state.
 
   _Blocks nothing built. Every cap breach ever authorised is unexplained_
+
+- [x] **D-31 — Every traveller has been shown a destination alert with no text** · `DONE 2026-08-30`
+
+  `alerts/country/{id}/current` returned `StaffTravelAlertSummaryDto`, which has no `Body` — and **the body is the alert**. The travel request's compliance strip renders the title, the severity and then `{a.body && …}`, so since the day it shipped a traveller has seen "Civil unrest · High" and never a word about what is happening, where, or what to do. A severity with no text is not a security briefing.
+
+  **TypeScript said this was fine**, because the client typed all three alert list reads as the full record while the API returned summaries — the same fiction-that-type-checks shape as the travel-type union and the group-travel summary. Only reading the DTO or running the call finds it.
+
+  The read now returns the full record and the repository includes the country. **The D-09 rule is unchanged and this is not an exception to it**: `alerts/active` and `alerts/country/{id}` are cross-record lists and stay summaries, asserted as such by the harness so a later "consistency" change does not quietly widen them. This read is not a list — its only job is to carry an alert's content to the person going there. **Needs a backend rebuild.**
+
+  _Was the whole point of the destination-alert feature, silently missing — cleared_
+
+- [x] **D-32 — The travel-alert acknowledgement was unreachable by anyone** · `DONE 2026-08-30`
+
+  `POST compliance/alert-notifications/{id}/acknowledge` sits on `HR.Travel.Write`, and `AcknowledgeNotificationAsync` refuses anyone but the employee the alert was addressed to. Those two rules do not overlap: `HrStaffGrants` gives Travel.Write to HR staff and **never to the `Employee` role** — the map's own remarks state the rule — so a traveller is refused at the endpoint gate and an HR officer who passes it is refused by the service. The only actor who could ever use it was a travel-desk officer acknowledging an alert about their own trip.
+
+  **The same shape as D-18**, where no actor reaches the discipline authority rule: a rule nobody can reach is not a rule. Building the desk's "send this alert to the traveller" action without fixing it would have shipped another queue that can never be worked.
+
+  Cleared with three token-scoped routes on `StaffTravelMeController` — read, unread and acknowledge — which is the answer this codebase already uses for the asset acknowledgement and the probation review: no employee id is accepted anywhere, so there is nothing to forge. The desk route is kept and documented as deliberately unwired. **Needs a backend rebuild.**
+
+  ⚠ Proven both ways by `hr-travel/run-slice13-groups-and-alerts.mjs`: the HR officer is refused (403), the traveller is refused on the desk route (403), the traveller succeeds on `/me`, and a traveller acknowledging someone ELSE's notification gets 404 — not 403, which would confirm the notification exists.
+
+  _Was making 'confirm you have read this security briefing' impossible for anyone — cleared_
+
+- [x] **D-33 — The travel content audit was reporting six findings from a dead fixture id** · `DONE 2026-08-30`
+
+  `audit-content.mjs` hard-coded a Procurement `Supplier` id seeded in SQL during area 12. The row is gone — the database has been rebuilt since — so all three booking creates failed the foreign key with the generic 500, and the three booking reads then reported "0 rows despite a fixture". **Six findings that read as a travel regression and were a stale fixture**, which is worse than none: red findings nobody trusts are how a real one gets missed.
+
+  It cannot be resolved at runtime either, because `api/Suppliers` answers 400 — cross-module defect #1, Procurement's dead `SuppliersController`. `VendorId` is nullable on all three booking DTOs, so the audit now sends none and drops the two `vendorName` assertions that depended on it. **38 fields resolved, 0 findings.** Restore the vendor the day Procurement's supplier list works.
+
+  The transferable point: a harness fixture pinned to an id from another module ages badly, and it fails in a direction that blames the module under test.
+
+  _Was hiding whether travel bookings work behind six false findings — cleared_
 
 - [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
 
@@ -845,7 +877,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
 | CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
-| StaffTravelRequests | 5 | 18 | `BUILD` 3 · `FALSE` 2 | Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed. |
 | Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
 | CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
 | ConsultantClientPortalAuth | 4 | 7 | `BUILD` | Client portal authentication. |
@@ -876,6 +907,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffDemotions | 2 | 4 | `BUILD` | Classified 2026-08-29: both real. No delete, and the employee's own response has no surface at all, so HR's wired pending-appeals queue cannot fill. |
 | StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
+| StaffTravelRequests | 2 | 18 | `FALSE` | Built 2026-08-30 (slice 21). ⚠ The queue said a group 'cannot be edited, deleted, or have a participant removed'; in fact group travel had NO screen of any kind - it could not be created, listed or opened either, and the reads are invisible to instrument 01 while the writes had client methods. /hr/travel/groups and /[id] exist now. One defect cleared first: UpdateGroupTravelAsync mapped an include-less entity, so the edit response reported ZERO participants on a group that has them. |
 | TalentPools | 2 | 9 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A pool member's documents open from the members table on /hr/succession/pools/{id}, on the shared succession-document panel. The remaining flags are the metadata-only POST and the development-activity duplicate. |
 | AppraisalNotifications | 1 | 3 | `INTENTIONAL` | Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant. |
 | AppraisalReviewEvents | 1 | 9 | `FALSE` | hrDocumentService.upload artefact. |
@@ -906,7 +938,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | StaffRequisitions | 1 | 19 | `FALSE` | hrDocumentService.upload artefact. |
 | StaffSecondments | 1 | 4 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
 | StaffTransfers | 1 | 3 | `BUILD` | Classified 2026-08-29: real - no movement sub-type wires its Admin delete. |
-| StaffTravelCompliance | 1 | 25 | `BUILD` | Classified 2026-08-29: real - nothing raises a compliance alert, so the wired acknowledge action has nothing to acknowledge. |
 | SuccessionDocuments | 1 | 1 | `DONE` | Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. It still reads as flagged because the client calls it through hrDocumentService.upload(endpoint, file, fields) - the helper-indirection artefact, the single largest false-positive source in this queue - and its download sibling is a GET, which instrument 01 skips outright. |
 | SuccessionPlan | 1 | 14 | `INTENTIONAL` | Built 2026-08-30 (slice 19). The plan's actions and competency requirements are authorable from the detail screen, and the documents tab drives the gated upload, the token-bearing download and the Admin-tier delete. Three backend defects had to clear first, all found by the standing checks and none by a probe failing: the per-plan actions read was a summary missing nine of the update payload's thirteen fields (D-19), the assigner was assertable by the request body (D-20), and removing a competency requirement made it permanently unrequirable (D-21). The one remaining flag is the metadata-only document POST, deliberately unwired. |
 | TrainingCompletions | 1 | 6 | `BUILD` | Classified 2026-08-29: real, and already in section F - bulk completion has no UI. |
@@ -920,7 +951,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**128 of the 319 queued endpoints are classified here — 39 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**124 of the 315 queued endpoints are classified here — 35 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -1024,19 +1055,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>_As `POST api/discipline/cases/{}/fine`._
 - `PUT    api/discipline/cases/{}/warning` — **BUILD**
   <br>_As `POST api/discipline/cases/{}/fine`._
-
-### StaffTravelRequests — 3 BUILD · 2 FALSE
-
-- `DELETE api/staff-travel/requests/groups/{}/participants/{}` — **BUILD**
-  <br>Group travel can be created and given participants, and then nothing: the group cannot be edited, cannot be deleted, and a participant cannot be taken off it.
-- `DELETE api/staff-travel/requests/groups/{}` — **BUILD**
-  <br>_As `DELETE api/staff-travel/requests/groups/{}/participants/{}`._
-- `PUT    api/staff-travel/requests/groups/{}` — **BUILD**
-  <br>_As `DELETE api/staff-travel/requests/groups/{}/participants/{}`._
-- `POST   api/staff-travel/requests/{}/reject` — **FALSE**
-  <br>Wired at travel.service.ts `reject()`. The reason is a query parameter, so the call site reads `${baseUrl}/${id}/reject${query}` and instrument 01 folds the interpolation into the path segment instead of dropping it.
-- `POST   api/staff-travel/requests/{}/attachments` — **FALSE**
-  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
 
 ### Assets — 2 INTENTIONAL · 2 FALSE
 
@@ -1175,6 +1193,13 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/staff-movements/{}/attachments` — **INTENTIONAL**
   <br>The metadata-only route, deliberately unwired. It rejects FilePath, FileUploadRecordId, DocumentRecordId and DocumentVersionId outright and says so in its 400, exactly as the discipline document route does, so through the API it can only mint a row naming no file. The upload route beside it is the supported way in.
 
+### StaffTravelRequests — 2 FALSE
+
+- `POST   api/staff-travel/requests/{}/reject` — **FALSE**
+  <br>Wired at travel.service.ts `reject()`. The reason is a query parameter, so the call site reads `${baseUrl}/${id}/reject${query}` and instrument 01 folds the interpolation into the path segment instead of dropping it.
+- `POST   api/staff-travel/requests/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
 ### TalentPools — 2 INTENTIONAL
 
 - `POST   api/talent-pools/members/{}/development-activities` — **INTENTIONAL**
@@ -1306,11 +1331,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 
 - `DELETE api/staff-transfers/{}` — **BUILD**
   <br>Every movement sub-type wires create and update and none wires the Admin-tier delete. A promotion, transfer, demotion or secondment detail recorded against the wrong movement is permanent.
-
-### StaffTravelCompliance — 1 BUILD
-
-- `POST   api/staff-travel/compliance/alert-notifications` — **BUILD**
-  <br>Same shape as the policy exception above: the alert list and its acknowledge action are wired, and `CreateAlertNotificationAsync` has no caller but this endpoint, so no alert can ever exist to acknowledge.
 
 ### SuccessionDocuments — 1 DONE
 

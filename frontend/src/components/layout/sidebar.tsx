@@ -75,6 +75,7 @@ import {
   Gavel,
   Network,
   ShieldQuestion,
+  TriangleAlert,
   Users2,
   UserRoundCheck,
   Grid3x3,
@@ -1221,6 +1222,7 @@ export const navigationItems: NavItem[] = [
           // Area 25 slice 7: My Travel re-homed to the portal (/me/travel).
           // Claims get their own entry because the finance desk works a queue ACROSS trips —
           // "approved and unpaid" — which no single travel request can show.
+          { title: 'Group Travel', href: '/hr/travel/groups', icon: Users2 },
           { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
           { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard },
         ],
@@ -3294,6 +3296,7 @@ export const navigationItems: NavItem[] = [
             icon: Plane,
             children: [
               { title: 'Travel Policies', href: '/administration/hr/travel/policies', icon: ShieldCheck },
+              { title: 'Destination Alerts', href: '/administration/hr/travel/alerts', icon: TriangleAlert },
               { title: 'Reminders', href: '/administration/hr/travel/reminders', icon: AlarmClock },
             ],
           },

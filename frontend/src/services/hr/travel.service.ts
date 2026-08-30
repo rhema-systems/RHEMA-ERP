@@ -1,6 +1,7 @@
 import { apiService } from '../api.service';
 import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
+import type { StaffTravelAlertNotification } from '@/types/hr/travel-compliance';
 import type {
   StaffTravelRequest,
   StaffTravelRequestSummary,
@@ -16,6 +17,8 @@ import type {
   UpdateStaffTravelRequestComment,
   CancelMyStaffTravelRequest,
   CreateStaffGroupTravel,
+  UpdateStaffGroupTravel,
+  GroupTravelStatus,
 } from '@/types/hr/travel';
 
 /**
@@ -184,8 +187,31 @@ class TravelService {
     return apiService.get<StaffGroupTravel>(`${this.baseUrl}/groups/${id}`);
   }
 
+  getGroupsByStatus(status: GroupTravelStatus) {
+    return apiService.get<StaffGroupTravelSummary[]>(`${this.baseUrl}/groups/status/${status}`);
+  }
+
   createGroup(payload: CreateStaffGroupTravel) {
     return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups`, payload);
+  }
+
+  /**
+   * ⚠ Send `status` — it is on the update payload and not the create, so omitting it sends the
+   * enum default and moves the trip back to its first state.
+   */
+  updateGroup(payload: UpdateStaffGroupTravel) {
+    return apiService.put<StaffGroupTravel>(`${this.baseUrl}/groups/${payload.id}`, payload);
+  }
+
+  /**
+   * `HR.Travel.Admin`.
+   *
+   * ⚠ The participants' own travel requests are NOT cancelled — they survive as standalone trips
+   * still carrying the deleted group's id. Deleting the group means "this is no longer organised
+   * as a group", not "nobody is going".
+   */
+  deleteGroup(id: string) {
+    return apiService.delete<void>(`${this.baseUrl}/groups/${id}`);
   }
 
   /** Raises one request per employee, skipping anyone already in the group. */
@@ -193,6 +219,15 @@ class TravelService {
     return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups/${groupId}/participants`, {
       groupTravelId: groupId, employeeIds, ...template,
     });
+  }
+
+  /**
+   * `HR.Travel.Admin`. Takes the person off the group without cancelling their trip — their
+   * request survives on its own, which is why the screen says so before confirming.
+   */
+  removeGroupParticipant(groupId: string, requestId: string) {
+    return apiService.delete<void>(
+      `${this.baseUrl}/groups/${groupId}/participants/${requestId}`);
   }
 
   // ── Self-service (api/staff-travel/me) ─────────────────────────────────────
@@ -222,6 +257,29 @@ class TravelService {
 
   cancelMine(id: string, payload: CancelMyStaffTravelRequest) {
     return apiService.post<void>(`${this.meUrl}/requests/${id}/cancel`, payload);
+  }
+
+  // ── My destination alerts ──────────────────────────────────────────────────
+  //
+  // ⚠ These exist because the desk-side acknowledge was unreachable by anyone. It sits on
+  // Travel.Write, which `HrStaffGrants` gives to HR staff and never to the `Employee` role, while
+  // the service refuses anyone but the employee the alert was addressed to — so a traveller could
+  // not pass the gate and an HR officer who did was refused by the service. Same shape as the
+  // discipline authority gate, and the same answer the assets acknowledgement already uses: a
+  // token-scoped route that takes no employee id from anywhere.
+
+  getMyAlerts() {
+    return apiService.get<StaffTravelAlertNotification[]>(`${this.meUrl}/alert-notifications`);
+  }
+
+  getMyUnacknowledgedAlerts() {
+    return apiService.get<StaffTravelAlertNotification[]>(
+      `${this.meUrl}/alert-notifications/unacknowledged`);
+  }
+
+  /** Confirms the caller has read a destination alert. Nobody can do this on their behalf. */
+  acknowledgeMyAlert(id: string) {
+    return apiService.post<void>(`${this.meUrl}/alert-notifications/${id}/acknowledge`, {});
   }
 }
 

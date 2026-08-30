@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, ShieldAlert, Stamp, Umbrella, Check, TriangleAlert } from 'lucide-react';
+import { Loader2, Plus, Send, ShieldAlert, Stamp, Umbrella, Check, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import {
   DateField,
@@ -140,6 +141,35 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
     queryFn: () => travelComplianceService.getCurrentAlertsForCountry(request.destinationCountryId),
   });
 
+  // Who has already been told what, so the desk does not send the same alert twice.
+  const { data: sentAlerts } = useQuery({
+    queryKey: ['travel-alert-notifications', requestId],
+    queryFn: () => travelComplianceService.getAlertNotifications(request.employeeId),
+    enabled: !!request.employeeId,
+  });
+
+  const notify = useMutation({
+    mutationFn: (alertId: string) =>
+      travelComplianceService.notifyTraveller({
+        travelAlertId: alertId,
+        staffTravelRequestId: requestId,
+        employeeId: request.employeeId,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['travel-alert-notifications', requestId] });
+      toast({
+        title: 'Alert sent to the traveller',
+        description: 'They confirm they have read it from their own travel page.',
+      });
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'Could not send the alert',
+        description: e?.response?.data?.message ?? e?.message,
+      }),
+  });
+
   const currencyOptions = (currencies ?? []).map((c) => ({
     value: c.currencyCode, label: `${c.currencyCode} — ${c.currencyName}`,
   }));
@@ -259,17 +289,47 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {(alerts ?? []).map((a) => (
-              <div key={a.id} className="rounded-md border p-3">
-                <p className="text-sm font-medium">
-                  {a.title}
-                  <span className="text-muted-foreground">
-                    {' '}· {humanize(a.severityName)} · {humanize(a.alertTypeName)}
-                  </span>
-                </p>
-                {a.body && <p className="mt-1 text-sm text-muted-foreground">{a.body}</p>}
-              </div>
-            ))}
+            {/*
+              ⚠ `body` renders now. This read returned a SUMMARY DTO with no body until
+              2026-08-30 while the client typed it as the full record, so every traveller saw
+              "Civil unrest · High" and never a word about what or where — since the day this
+              shipped, silently, and type-checking clean.
+            */}
+            {(alerts ?? []).map((a) => {
+              const sent = (sentAlerts ?? []).find(
+                (n) => n.travelAlertId === a.id && n.staffTravelRequestId === requestId);
+              return (
+                <div key={a.id} className="rounded-md border p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="text-sm font-medium">
+                      {a.title}
+                      <span className="text-muted-foreground">
+                        {' '}· {humanize(a.severityName)} · {humanize(a.alertTypeName)}
+                      </span>
+                    </p>
+                    {sent ? (
+                      <Badge variant={sent.isAcknowledged ? 'secondary' : 'outline'}>
+                        {sent.isAcknowledged ? 'Read by traveller' : 'Sent, not yet read'}
+                      </Badge>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={notify.isPending}
+                        onClick={() => notify.mutate(a.id)}
+                      >
+                        <Send className="mr-2 h-3.5 w-3.5" />
+                        Send to traveller
+                      </Button>
+                    )}
+                  </div>
+                  {a.body && <p className="mt-1 text-sm text-muted-foreground">{a.body}</p>}
+                  {a.source && (
+                    <p className="mt-1 text-xs text-muted-foreground">Source: {a.source}</p>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

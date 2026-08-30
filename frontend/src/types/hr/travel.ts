@@ -74,7 +74,20 @@ export type TravelAttachmentType =
   | 'VisaSupport'
   | 'Other';
 
-export type GroupTravelStatus = 'Planned' | 'Confirmed' | 'InProgress' | 'Completed' | 'Cancelled';
+/**
+ * ⚠ Written from the enum, not from guesses. The union used to read
+ * `Planned | Confirmed | InProgress | Completed | Cancelled`: `Planned` and `Confirmed` are not
+ * members at all, and `Open` and `Closed` — the two states a group spends its life in while people
+ * are being added — were missing. A status control built on the old union would have offered two
+ * values the API rejects and hidden the two that matter.
+ */
+export type GroupTravelStatus =
+  | 'Planning'
+  | 'Open'
+  | 'Closed'
+  | 'InProgress'
+  | 'Completed'
+  | 'Cancelled';
 
 // ── Read models ──────────────────────────────────────────────────────────────
 
@@ -160,22 +173,32 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   attachments?: StaffTravelRequestAttachment[];
 }
 
+/**
+ * A group trip as the list returns it.
+ *
+ * ⚠ Two fields here were fiction. `leadEmployeeId` is on the FULL record and not the summary, and
+ * the count is `currentParticipantCount` — `participantCount` matched nothing the API sends, so
+ * every list row rendered `undefined` participants while type-checking clean. An edit form must
+ * fetch by id for the same reason: the summary carries neither owner id nor destination country.
+ */
 export interface StaffGroupTravelSummary extends AuditFields {
   groupName: string;
-  leadEmployeeId: string;
   leadEmployeeName: string;
   eventName?: string | null;
   destinationCity: string;
   travelStartDate: string;
   travelEndDate: string;
   status: GroupTravelStatus;
-  participantCount: number;
+  statusName: string;
+  currentParticipantCount: number;
   maxParticipants?: number | null;
 }
 
 export interface StaffGroupTravel extends StaffGroupTravelSummary {
+  leadEmployeeId: string;
   destinationCountryId: string;
-  destinationCountryName: string;
+  destinationCountryName?: string | null;
+  /** The participants' own travel requests — one per person, raised by adding them. */
   requests?: StaffTravelRequestSummary[];
 }
 
@@ -304,3 +327,13 @@ export interface CreateStaffGroupTravel {
   travelEndDate: string;
   maxParticipants?: number | null;
 }
+
+/**
+ * ⚠ Wider than the create by exactly one field: `status`. A group's status is set by editing it —
+ * there is no separate transition route — so an edit form that omits it would send the enum's
+ * default and silently move the trip back to its first state.
+ */
+export type UpdateStaffGroupTravel = CreateStaffGroupTravel & {
+  id: string;
+  status: GroupTravelStatus;
+};

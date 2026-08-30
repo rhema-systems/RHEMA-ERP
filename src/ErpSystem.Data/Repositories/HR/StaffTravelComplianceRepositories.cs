@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.StaffTravel;
+﻿using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -259,6 +259,8 @@ public class StaffTravelAlertRepository : GenericRepository<StaffTravelAlert>, I
     {
         var now = DateTime.UtcNow;
         return await _dbSet
+            // The country is projected onto the DTO this read now returns in full.
+            .Include(a => a.Country)
             .Where(a => a.CountryId == countryId && a.IsActive && !a.IsDeleted
                      && a.EffectiveFrom <= now && (a.EffectiveTo == null || a.EffectiveTo >= now))
             .OrderByDescending(a => a.Severity)
@@ -300,10 +302,14 @@ public class StaffTravelAlertNotificationRepository : GenericRepository<StaffTra
             .ToListAsync();
     }
 
+    // ⚠ StaffTravelRequest is included on both of these because the DTO carries RequestNumber and
+    // the traveller's own screen has to say WHICH trip an alert is about. TravelAlert alone left
+    // that column blank.
     public async Task<IEnumerable<StaffTravelAlertNotification>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
             .Include(n => n.TravelAlert)
+            .Include(n => n.StaffTravelRequest)
             .Where(n => n.EmployeeId == employeeId && !n.IsDeleted)
             .OrderByDescending(n => n.NotificationSentAt)
             .ToListAsync();
@@ -313,9 +319,29 @@ public class StaffTravelAlertNotificationRepository : GenericRepository<StaffTra
     {
         return await _dbSet
             .Include(n => n.TravelAlert)
+            .Include(n => n.StaffTravelRequest)
             .Where(n => n.EmployeeId == employeeId && !n.IsAcknowledged && !n.IsDeleted)
             .OrderByDescending(n => n.NotificationSentAt)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// One notification with every navigation its DTO projects — the alert, the trip and the
+    /// employee.
+    /// </summary>
+    /// <remarks>
+    /// The plain <c>GetByIdAsync</c> loads none of them, so <c>CreateAlertNotificationAsync</c>
+    /// re-read with it and still returned a row whose <c>alertTitle</c>, <c>requestNumber</c> and
+    /// <c>employeeName</c> were all blank — the desk saw three empty columns on the row it had
+    /// just created and the right ones after a refetch.
+    /// </remarks>
+    public async Task<StaffTravelAlertNotification?> GetByIdWithDetailsAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(n => n.TravelAlert)
+            .Include(n => n.StaffTravelRequest)
+            .Include(n => n.Employee)
+            .FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
     }
 }
 

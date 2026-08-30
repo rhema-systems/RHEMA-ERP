@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -288,8 +288,9 @@ public class StaffTravelComplianceController : HrControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelAlertSummaryDto>>> GetAlertsByCountry(Guid countryId)
         => Ok(await _service.GetAlertsByCountryAsync(countryId));
 
+    /// <summary>The alerts in force for a destination — in full, because the body is the alert.</summary>
     [HttpGet("alerts/country/{countryId:guid}/current")]
-    public async Task<ActionResult<IEnumerable<StaffTravelAlertSummaryDto>>> GetCurrentAlertsForCountry(Guid countryId)
+    public async Task<ActionResult<IEnumerable<StaffTravelAlertDto>>> GetCurrentAlertsForCountry(Guid countryId)
         => Ok(await _service.GetCurrentAlertsForCountryAsync(countryId));
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]

@@ -17,6 +17,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { travelService } from '@/services/hr/travel.service';
+import { MyTravelAlertsPanel } from '@/components/hr/travel/MyTravelAlertsPanel';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -59,6 +60,12 @@ export default function MyTravelPage() {
           </Button>
         }
       />
+
+      {/*
+        Above the trip list on purpose: an unread security briefing about somewhere you are going
+        is the most urgent thing on this page. The panel renders nothing when there are no alerts.
+      */}
+      <MyTravelAlertsPanel />
 
       <Card>
         <CardContent className="p-0">

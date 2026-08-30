@@ -12,9 +12,11 @@ import type {
   CreateStaffTravelRiskAssessment,
   UpdateStaffTravelRiskAssessment,
   StaffTravelAlert,
+  StaffTravelAlertSummary,
   CreateStaffTravelAlert,
   UpdateStaffTravelAlert,
   StaffTravelAlertNotification,
+  CreateStaffTravelAlertNotification,
   StaffTravelInsurancePolicy,
   CreateStaffTravelInsurancePolicy,
   UpdateStaffTravelInsurancePolicy,
@@ -208,14 +210,23 @@ class TravelComplianceService {
     return apiService.get<StaffTravelAlert>(`${this.baseUrl}/alerts/${id}`);
   }
 
+  /** ⚠ Summaries — no `body`. Fetch by id for the alert's text. */
   getActiveAlerts() {
-    return apiService.get<StaffTravelAlert[]>(`${this.baseUrl}/alerts/active`);
+    return apiService.get<StaffTravelAlertSummary[]>(`${this.baseUrl}/alerts/active`);
   }
 
+  /** ⚠ Summaries, as above. */
   getAlertsByCountry(countryId: string) {
-    return apiService.get<StaffTravelAlert[]>(`${this.baseUrl}/alerts/country/${countryId}`);
+    return apiService.get<StaffTravelAlertSummary[]>(`${this.baseUrl}/alerts/country/${countryId}`);
   }
 
+  /**
+   * The alerts in force for a destination, **in full**.
+   *
+   * ⚠ This returned summaries until 2026-08-30 while being typed here as the full record, so the
+   * travel request's alert strip bound `body` against a payload that never carried it and showed
+   * a severity with no text — since the day it shipped, silently, and type-checking clean.
+   */
   getCurrentAlertsForCountry(countryId: string) {
     return apiService.get<StaffTravelAlert[]>(
       `${this.baseUrl}/alerts/country/${countryId}/current`);
@@ -243,7 +254,21 @@ class TravelComplianceService {
       `${this.baseUrl}/alert-notifications/employee/${employeeId}/unacknowledged`);
   }
 
-  /** ⚠ Only the employee the alert was sent to. Anyone else gets 403. */
+  /** Sends a destination alert to one traveller for one trip. Travel.Write — the desk's act. */
+  notifyTraveller(payload: CreateStaffTravelAlertNotification) {
+    return apiService.post<StaffTravelAlertNotification>(
+      `${this.baseUrl}/alert-notifications`, payload);
+  }
+
+  /**
+   * ⚠ **Deliberately unwired — use {@link travelMeService.acknowledgeAlert} instead.**
+   *
+   * This route sits on Travel.Write, which `HrStaffGrants` gives to HR staff and never to the
+   * `Employee` role, while the service refuses anyone but the employee the alert was addressed to.
+   * The two rules do not overlap, so no traveller can pass the gate and no HR officer passes the
+   * service check — the action was unreachable by anyone. The token-scoped `/me` route is the way
+   * in; this one is kept only so the desk-side surface is not silently missing a verb.
+   */
   acknowledgeAlertNotification(id: string) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/alert-notifications/${id}/acknowledge`, {});

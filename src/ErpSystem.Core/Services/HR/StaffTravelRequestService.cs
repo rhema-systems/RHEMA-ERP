@@ -858,13 +858,22 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             .ToSummaryDtoList();
     }
 
+    /// <remarks>
+    /// ⚠ The re-read is not decoration. <c>GetOwnedGroupTravelAsync</c> uses the plain
+    /// <c>GetByIdAsync</c>, which loads no navigations — so mapping it returned a group with a
+    /// blank lead-employee name, no destination country, and an <b>empty Requests list</b>. A
+    /// screen re-rendering from the edit response would have shown a group trip with nobody on it.
+    /// <c>CreateGroupTravelAsync</c> two methods above already re-reads for the same reason.
+    /// </remarks>
     public async Task<StaffGroupTravelDto> UpdateGroupTravelAsync(UpdateStaffGroupTravelDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedGroupTravelAsync(updateDto.Id);
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _groupTravelRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var refreshed = await _groupTravelRepository.GetWithRequestsAsync(entity.Id);
+        return (refreshed ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteGroupTravelAsync(Guid id, CancellationToken cancellationToken = default)

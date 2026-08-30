@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.StaffTravel;
+﻿using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -126,6 +126,9 @@ public interface IStaffTravelAlertNotificationRepository : IGenericRepository<St
 
     /// <summary>Returns all notifications addressed to an employee.</summary>
     Task<IEnumerable<StaffTravelAlertNotification>> GetByEmployeeIdAsync(Guid employeeId);
+
+    /// <summary>One notification with its alert, its trip and its employee loaded.</summary>
+    Task<StaffTravelAlertNotification?> GetByIdWithDetailsAsync(Guid id);
 
     /// <summary>Returns notifications for an employee that have not yet been acknowledged.</summary>
     Task<IEnumerable<StaffTravelAlertNotification>> GetUnacknowledgedAsync(Guid employeeId);

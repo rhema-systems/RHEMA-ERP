@@ -109,7 +109,7 @@ DISPOSITIONS = {
     "SuccessionCandidatesController.cs":
         ("DONE", "Built 2026-08-30 (slice 19). A candidate's own files hang off a Documents dialog on the successors tab, sharing the one panel the plan and the talent-pool member use — one table and one DTO serve all three owners, so one component does. The remaining flags are the metadata-only POST and the development-activity trio that duplicates api/succession-development."),
     "StaffTravelRequestsController.cs":
-        ("BUILD", "Classified 2026-08-29: 3 real - a travel group cannot be edited, deleted, or have a participant removed."),
+        ("DONE", "Built 2026-08-30 (slice 21). ⚠ The queue said a group 'cannot be edited, deleted, or have a participant removed'; in fact group travel had NO screen of any kind - it could not be created, listed or opened either, and the reads are invisible to instrument 01 while the writes had client methods. /hr/travel/groups and /[id] exist now. One defect cleared first: UpdateGroupTravelAsync mapped an include-less entity, so the edit response reported ZERO participants on a group that has them."),
     "TalentPoolsController.cs":
         ("DONE", "Built 2026-08-30 (slice 19). A pool member's documents open from the members table on /hr/succession/pools/{id}, on the shared succession-document panel. The remaining flags are the metadata-only POST and the development-activity duplicate."),
     "TrainingServiceBondsController.cs":
@@ -161,7 +161,7 @@ DISPOSITIONS = {
     "StaffSecondmentsController.cs":
         ("BUILD", "Classified 2026-08-29: real - no movement sub-type wires its Admin delete."),
     "StaffTravelComplianceController.cs":
-        ("BUILD", "Classified 2026-08-29: real - nothing raises a compliance alert, so the wired acknowledge action has nothing to acknowledge."),
+        ("DONE", "Built 2026-08-30 (slice 21). The destination-alert feed is authorable at /administration/hr/travel/alerts, alerts are sent to a named traveller from the trip's compliance tab, and the traveller reads and acknowledges them on /me/travel. Three defects cleared first - D-31, D-32 and the notification create response, which resolved none of its three names."),
     "TrainingCompletionsController.cs":
         ("BUILD", "Classified 2026-08-29: real, and already in section F - bulk completion has no UI."),
     "TrainingNominationsController.cs":
@@ -1204,6 +1204,58 @@ BLOCKERS = [
      "  A reason column on the breach flag would be a small change and worth more than the whole "
      "rules subsystem in its current state.",
      "Blocks nothing built. Every cap breach ever authorised is unexplained"),
+    ("D-31", "Every traveller has been shown a destination alert with no text", "DONE 2026-08-30",
+     "`alerts/country/{id}/current` returned `StaffTravelAlertSummaryDto`, which has no `Body` — "
+     "and **the body is the alert**. The travel request's compliance strip renders the title, the "
+     "severity and then `{a.body && …}`, so since the day it shipped a traveller has seen "
+     "\"Civil unrest · High\" and never a word about what is happening, where, or what to do. A "
+     "severity with no text is not a security briefing.\n\n"
+     "  **TypeScript said this was fine**, because the client typed all three alert list reads as "
+     "the full record while the API returned summaries — the same fiction-that-type-checks shape "
+     "as the travel-type union and the group-travel summary. Only reading the DTO or running the "
+     "call finds it.\n\n"
+     "  The read now returns the full record and the repository includes the country. **The D-09 "
+     "rule is unchanged and this is not an exception to it**: `alerts/active` and "
+     "`alerts/country/{id}` are cross-record lists and stay summaries, asserted as such by the "
+     "harness so a later \"consistency\" change does not quietly widen them. This read is not a "
+     "list — its only job is to carry an alert's content to the person going there. "
+     "**Needs a backend rebuild.**",
+     "Was the whole point of the destination-alert feature, silently missing — cleared"),
+    ("D-32", "The travel-alert acknowledgement was unreachable by anyone", "DONE 2026-08-30",
+     "`POST compliance/alert-notifications/{id}/acknowledge` sits on `HR.Travel.Write`, and "
+     "`AcknowledgeNotificationAsync` refuses anyone but the employee the alert was addressed to. "
+     "Those two rules do not overlap: `HrStaffGrants` gives Travel.Write to HR staff and **never "
+     "to the `Employee` role** — the map's own remarks state the rule — so a traveller is refused "
+     "at the endpoint gate and an HR officer who passes it is refused by the service. The only "
+     "actor who could ever use it was a travel-desk officer acknowledging an alert about their "
+     "own trip.\n\n"
+     "  **The same shape as D-18**, where no actor reaches the discipline authority rule: a rule "
+     "nobody can reach is not a rule. Building the desk's \"send this alert to the traveller\" "
+     "action without fixing it would have shipped another queue that can never be worked.\n\n"
+     "  Cleared with three token-scoped routes on `StaffTravelMeController` — read, unread and "
+     "acknowledge — which is the answer this codebase already uses for the asset acknowledgement "
+     "and the probation review: no employee id is accepted anywhere, so there is nothing to "
+     "forge. The desk route is kept and documented as deliberately unwired. **Needs a backend "
+     "rebuild.**\n\n"
+     "  ⚠ Proven both ways by `hr-travel/run-slice13-groups-and-alerts.mjs`: the HR officer is "
+     "refused (403), the traveller is refused on the desk route (403), the traveller succeeds on "
+     "`/me`, and a traveller acknowledging someone ELSE's notification gets 404 — not 403, which "
+     "would confirm the notification exists.",
+     "Was making 'confirm you have read this security briefing' impossible for anyone — cleared"),
+    ("D-33", "The travel content audit was reporting six findings from a dead fixture id", "DONE 2026-08-30",
+     "`audit-content.mjs` hard-coded a Procurement `Supplier` id seeded in SQL during area 12. The "
+     "row is gone — the database has been rebuilt since — so all three booking creates failed the "
+     "foreign key with the generic 500, and the three booking reads then reported \"0 rows despite "
+     "a fixture\". **Six findings that read as a travel regression and were a stale fixture**, "
+     "which is worse than none: red findings nobody trusts are how a real one gets missed.\n\n"
+     "  It cannot be resolved at runtime either, because `api/Suppliers` answers 400 — cross-module "
+     "defect #1, Procurement's dead `SuppliersController`. `VendorId` is nullable on all three "
+     "booking DTOs, so the audit now sends none and drops the two `vendorName` assertions that "
+     "depended on it. **38 fields resolved, 0 findings.** Restore the vendor the day Procurement's "
+     "supplier list works.\n\n"
+     "  The transferable point: a harness fixture pinned to an id from another module ages badly, "
+     "and it fails in a direction that blames the module under test.",
+     "Was hiding whether travel bookings work behind six false findings — cleared"),
     ("D-02", "Self-service invitation response still act-as-anyone", "OPEN",
      "events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write "
      "policy, so today it means 'HR records the response'. That is correct for the HR screens "

@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -40,11 +40,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelMeController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
+    private readonly IStaffTravelComplianceService _compliance;
 
-    public StaffTravelMeController(IStaffTravelRequestService service, ICurrentUserService currentUser)
+    public StaffTravelMeController(
+        IStaffTravelRequestService service,
+        IStaffTravelComplianceService compliance,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _compliance = compliance;
     }
 
     /// <summary>
@@ -167,6 +172,79 @@ public class StaffTravelMeController : HrControllerBase
             CancelledById = employeeId,
             CancellationReason = dto.CancellationReason
         }, userId, ct);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // MY DESTINATION ALERTS
+    // =========================================================================
+    //
+    // ⚠ Why these exist here rather than on the compliance controller.
+    //
+    // `POST compliance/alert-notifications/{id}/acknowledge` sits on the Travel WRITE policy, and
+    // `AcknowledgeNotificationAsync` refuses anyone but the employee the alert was sent to. Those
+    // two rules do not overlap: `HrStaffGrants` gives Travel.Write to HR staff and never to the
+    // `Employee` role — the map's own remarks say so — so a traveller cannot pass the endpoint
+    // gate, and an HR officer who passes it is then refused by the service. The action was
+    // unreachable by anyone except a desk officer acknowledging an alert about their own trip.
+    //
+    // Same shape as the discipline authority gate: a rule nobody can reach is not a rule. And the
+    // same answer this codebase already uses for the assets acknowledgement — a token-scoped
+    // route, on a controller that expects its callers to hold no travel permission at all, taking
+    // no employee id from anywhere.
+
+    /// <summary>Destination alerts sent to the caller for their trips.</summary>
+    [HttpGet("alert-notifications")]
+    public async Task<ActionResult<IEnumerable<StaffTravelAlertNotificationDto>>> GetMyAlerts(
+        CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your travel alerts") is { } error) return error;
+        return Ok(await _compliance.GetNotificationsByEmployeeAsync(employeeId, ct));
+    }
+
+    /// <summary>The ones the caller has not yet confirmed reading.</summary>
+    [HttpGet("alert-notifications/unacknowledged")]
+    public async Task<ActionResult<IEnumerable<StaffTravelAlertNotificationDto>>> GetMyUnacknowledgedAlerts(
+        CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your travel alerts") is { } error) return error;
+        return Ok(await _compliance.GetUnacknowledgedNotificationsAsync(employeeId, ct));
+    }
+
+    /// <summary>
+    /// Confirm you have read a destination alert.
+    /// </summary>
+    /// <remarks>
+    /// The acknowledger is the token's, and the service refuses a notification addressed to
+    /// someone else — an acknowledgement anyone can record on your behalf records nothing. That
+    /// check is the service's and is not repeated here; this route simply stops being the reason
+    /// nobody could reach it.
+    /// </remarks>
+    [HttpPost("alert-notifications/{id:guid}/acknowledge")]
+    public async Task<IActionResult> AcknowledgeMyAlert(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Acknowledging a travel alert") is { } error) return error;
+
+        try
+        {
+            await _compliance.AcknowledgeNotificationAsync(
+                new AcknowledgeStaffTravelAlertNotificationDto { NotificationId = id }, employeeId, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Someone else's alert. 404 rather than 403, so the response does not confirm that a
+            // notification with this id exists — the same answer this controller gives for a
+            // request that is not the caller's.
+            return NotFound();
+        }
+        catch (ArgumentException)
+        {
+            return NotFound();
+        }
+
         return NoContent();
     }
 }
