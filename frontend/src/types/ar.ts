@@ -1,4 +1,5 @@
 import type { ControlledDocumentIssueSummary } from '@/types/controlled-documents';
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
 
 export interface Customer {
     id: string;
@@ -99,6 +100,7 @@ export interface Invoice {
     tenantId: string;
     createdAt: string;
     createdBy?: string;
+    financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface InvoiceCreateRequest {
@@ -115,9 +117,11 @@ export interface InvoiceCreateRequest {
     isOpeningBalance?: boolean;
     notes?: string;
     lineItems: InvoiceLineItemRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface InvoiceLineItemRequest {
+    id?: string;
     lineItemType: 'Product' | 'GLAccount';
     productId?: string;
     glAccountId?: string;

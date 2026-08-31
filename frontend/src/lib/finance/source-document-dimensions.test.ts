@@ -9,6 +9,8 @@ import {
   getDimensionSummary,
   getMissingRequiredDimensions,
   resolveSourceDimensionValues,
+  toFinanceDimensionValueRecord,
+  toFinancePostingDimensionValues,
   type FinanceDimensionRuleContext,
 } from './source-document-dimensions';
 
@@ -142,5 +144,26 @@ describe('source document dimensions', () => {
         1
       )
     ).toBe('OPS · +1');
+  });
+
+  it('serializes only canonical code pairs and restores persisted evidence', () => {
+    expect(
+      toFinancePostingDimensionValues({ PROJECT: 'P100', DEPT: 'OPS', FUND: '' })
+    ).toEqual([
+      { dimensionCode: 'DEPT', valueCode: 'OPS' },
+      { dimensionCode: 'PROJECT', valueCode: 'P100' },
+    ]);
+    expect(
+      toFinanceDimensionValueRecord([
+        {
+          dimensionCode: 'DEPT',
+          dimensionName: 'Department',
+          valueCode: 'OPS',
+          valueName: 'Operations',
+          isReadOnly: true,
+          ruleType: 'Fixed',
+        },
+      ])
+    ).toEqual({ DEPT: 'OPS' });
   });
 });

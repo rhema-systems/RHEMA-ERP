@@ -94,6 +94,7 @@ public sealed class FinanceSourceDocumentDimensionInputDto
         Array.Empty<FinancePostingDimensionValueDto>();
     public IReadOnlyList<FinanceSourceLineDimensionInputDto> Lines { get; set; } =
         Array.Empty<FinanceSourceLineDimensionInputDto>();
+    public bool ApplyDefaultToEligibleLines { get; set; }
 }
 
 /// <summary>
@@ -110,10 +111,53 @@ public sealed class FinanceSourceDimensionAssignmentDto
     public string ContractVersion { get; set; } = string.Empty;
     public Guid SourceDocumentId { get; set; }
     public Guid? SourceLineId { get; set; }
-    public Guid FinanceDimensionSetId { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
     public Guid? FinanceDimensionSnapshotId { get; set; }
-    public bool IsFrozen => FinanceDimensionSnapshotId.HasValue;
+    public DateTime? EvidenceFrozenAt { get; set; }
+    public bool IsFrozen => EvidenceFrozenAt.HasValue;
+    public string BudgetEvidenceStatus { get; set; } = "NotApplicable";
+    public string? BudgetEvaluationHash { get; set; }
+    public DateTime? BudgetEvidenceUpdatedAt { get; set; }
     public string? RowVersion { get; set; }
+}
+
+public sealed class FinanceSourceDimensionValueDto
+{
+    public string DimensionCode { get; set; } = string.Empty;
+    public string DimensionName { get; set; } = string.Empty;
+    public string ValueCode { get; set; } = string.Empty;
+    public string ValueName { get; set; } = string.Empty;
+    public string? RuleType { get; set; }
+    public bool IsReadOnly { get; set; }
+}
+
+public sealed class FinanceSourceLineDimensionDto
+{
+    public Guid SourceLineId { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string? CombinationHash { get; set; }
+    public string? DisplayValue { get; set; }
+    public bool IsFrozen { get; set; }
+    public IReadOnlyList<FinanceSourceDimensionValueDto> Values { get; set; } =
+        Array.Empty<FinanceSourceDimensionValueDto>();
+    public IReadOnlyList<string> ReadinessWarnings { get; set; } = Array.Empty<string>();
+}
+
+public sealed class FinanceSourceDocumentDimensionDto
+{
+    public FinanceDimensionRouteId RouteId { get; set; }
+    public FinanceDimensionCertificationState CertificationState { get; set; }
+    public Guid SourceDocumentId { get; set; }
+    public Guid? DefaultFinanceDimensionSetId { get; set; }
+    public IReadOnlyList<FinanceSourceDimensionValueDto> DefaultValues { get; set; } =
+        Array.Empty<FinanceSourceDimensionValueDto>();
+    public IReadOnlyList<FinanceSourceLineDimensionDto> Lines { get; set; } =
+        Array.Empty<FinanceSourceLineDimensionDto>();
+    public IReadOnlyList<string> ReadinessWarnings { get; set; } = Array.Empty<string>();
+    public string BudgetEvidenceStatus { get; set; } = "NotApplicable";
+    public string? BudgetEvaluationHash { get; set; }
+    public DateTime? BudgetEvidenceUpdatedAt { get; set; }
 }
 
 public sealed class FinanceDimensionSnapshotDto

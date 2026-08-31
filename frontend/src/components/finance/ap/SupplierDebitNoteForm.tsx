@@ -27,6 +27,11 @@ import { financeService } from '@/services/finance.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import type { SupplierDebitNoteLineRequest, VendorInvoice } from '@/types/ap';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import {
+  toFinanceDimensionValueRecord,
+  toFinancePostingDimensionValues,
+} from '@/lib/finance/source-document-dimensions';
 
 interface DraftLine extends SupplierDebitNoteLineRequest {
   key: string;
@@ -97,6 +102,9 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
   const [rowVersion, setRowVersion] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [loadedNoteId, setLoadedNoteId] = useState<string>();
+  const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+  const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+  const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
   const { data: existing, isLoading: isLoadingExisting } = useQuery({
     queryKey: ['supplier-debit-note', noteId],
@@ -171,6 +179,17 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
     setCurrencyCode(existing.currencyCode);
     setExchangeRate(existing.exchangeRate);
     setRowVersion(existing.rowVersion);
+    setDefaultDimensionValues(
+      toFinanceDimensionValueRecord(existing.financeDimensions?.defaultValues ?? [])
+    );
+    setLineDimensionValues(
+      Object.fromEntries(
+        (existing.financeDimensions?.lines ?? []).map((line) => [
+          line.sourceLineId,
+          toFinanceDimensionValueRecord(line.values),
+        ])
+      )
+    );
     setLines(
       existing.lineItems.map((line) => ({
         key: line.id,
@@ -318,7 +337,18 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
         notes: notes.trim() || undefined,
         currencyCode,
         exchangeRate: approvedRate,
-        lines: lines.map(({ key: _key, ...line }) => line),
+        lines: lines.map(({ key, ...line }) => ({ id: key, ...line })),
+        financeDimensions: {
+          defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+          lines: isLinkedNote
+            ? []
+            : lines.flatMap((line) => line.glAccountId ? [{
+                sourceLineId: line.key,
+                accountId: line.glAccountId,
+                dimensions: toFinancePostingDimensionValues(lineDimensionValues[line.key] || {}),
+              }] : []),
+          applyDefaultToEligibleLines: applyDefaultToAll,
+        },
       };
       const saved = noteId
         ? await accountsPayableService.updateSupplierDebitNote(noteId, {
@@ -517,6 +547,47 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
               onChange={(event) => setNotes(event.target.value)}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Finance coding dimensions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLinkedNote ? (
+            <Alert>
+              <AlertTitle>Inherited source evidence</AlertTitle>
+              <AlertDescription>
+                Each line inherits the exact dimensions of its originating
+                posted invoice line. They cannot be cleared or overridden here.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <SourceDocumentDimensionPanel
+              context={{
+                sourceModule: 'AP',
+                sourceDocumentType: 'SupplierDebitNote',
+                postingAction: 'Post',
+                sourceRoute: 'finance.ap.supplier-debit-notes.manual',
+                contractVersion: '1.0',
+              }}
+              effectiveDate={debitNoteDate}
+              lines={lines.map((line) => ({
+                id: line.key,
+                accountId: line.glAccountId,
+                accountLabel: line.description || undefined,
+              }))}
+              defaultValues={defaultDimensionValues}
+              lineValues={lineDimensionValues}
+              onDefaultValuesChange={(values) => {
+                setDefaultDimensionValues(values);
+                setApplyDefaultToAll(false);
+              }}
+              onLineValuesChange={setLineDimensionValues}
+              onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+            />
+          )}
         </CardContent>
       </Card>
 

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +14,8 @@ namespace ErpSystem.Api.Controllers.Finance;
 public sealed class SupplierDebitNotesController : ControllerBase
 {
     private readonly ISupplierDebitNoteService _service;
+    private static readonly FinancePostingProducerContext DimensionProducer =
+        new(FinanceDimensionRouteId.FinanceApSupplierDebitNote);
 
     public SupplierDebitNotesController(ISupplierDebitNoteService service) => _service = service;
 
@@ -27,7 +30,7 @@ public sealed class SupplierDebitNotesController : ControllerBase
     [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<SupplierDebitNoteDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _service.GetByIdAsync(id, cancellationToken);
+        var result = await _service.GetByIdAsync(id, DimensionProducer, cancellationToken);
         return result == null ? NotFound() : Ok(result);
     }
 
@@ -39,7 +42,7 @@ public sealed class SupplierDebitNotesController : ControllerBase
     {
         try
         {
-            var result = await _service.CreateAsync(dto, cancellationToken);
+            var result = await _service.CreateAsync(dto, DimensionProducer, cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
         catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
@@ -53,7 +56,7 @@ public sealed class SupplierDebitNotesController : ControllerBase
         [FromBody] UpdateSupplierDebitNoteDto dto,
         CancellationToken cancellationToken)
     {
-        try { return Ok(await _service.UpdateDraftAsync(id, dto, cancellationToken)); }
+        try { return Ok(await _service.UpdateDraftAsync(id, dto, DimensionProducer, cancellationToken)); }
         catch (DbUpdateConcurrencyException) { return Conflict(new { error = "Supplier debit note was changed by another user. Refresh and try again." }); }
         catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
         catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
@@ -63,7 +66,7 @@ public sealed class SupplierDebitNotesController : ControllerBase
     [Authorize(Policy = FinancePermissions.SubmitApSupplierDebitNotes)]
     public async Task<ActionResult<SupplierDebitNoteDto>> Submit(Guid id, CancellationToken cancellationToken)
     {
-        try { return Ok(await _service.SubmitAsync(id, cancellationToken)); }
+        try { return Ok(await _service.SubmitAsync(id, DimensionProducer, cancellationToken)); }
         catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
         catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
     }
@@ -75,7 +78,7 @@ public sealed class SupplierDebitNotesController : ControllerBase
         [FromBody] SupplierDebitNoteApprovalDto dto,
         CancellationToken cancellationToken)
     {
-        try { return Ok(await _service.ProcessApprovalAsync(id, dto, cancellationToken)); }
+        try { return Ok(await _service.ProcessApprovalAsync(id, dto, DimensionProducer, cancellationToken)); }
         catch (UnauthorizedAccessException) { return Forbid(); }
         catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
         catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
@@ -85,7 +88,7 @@ public sealed class SupplierDebitNotesController : ControllerBase
     [Authorize(Policy = FinancePermissions.PostApSupplierDebitNotes)]
     public async Task<ActionResult<SupplierDebitNoteDto>> Post(Guid id, CancellationToken cancellationToken)
     {
-        try { return Ok(await _service.PostAsync(id, cancellationToken)); }
+        try { return Ok(await _service.PostAsync(id, DimensionProducer, cancellationToken)); }
         catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
         catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
     }

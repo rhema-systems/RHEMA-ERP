@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
@@ -16,6 +17,7 @@ public interface IInvoiceService
     /// Retrieves an invoice by ID.
     /// </summary>
     Task<InvoiceDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<InvoiceDto?> GetByIdAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves an invoice by invoice number.
@@ -35,11 +37,13 @@ public interface IInvoiceService
     /// - Checks for duplicate invoices
     /// </summary>
     Task<InvoiceDto> CreateAsync(InvoiceCreateDto dto, CancellationToken cancellationToken = default);
+    Task<InvoiceDto> CreateAsync(InvoiceCreateDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Updates an existing invoice (only in Draft status).
     /// </summary>
     Task<InvoiceDto> UpdateAsync(InvoiceUpdateDto dto, CancellationToken cancellationToken = default);
+    Task<InvoiceDto> UpdateAsync(InvoiceUpdateDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Soft-deletes an invoice (only in Draft status).
@@ -51,11 +55,13 @@ public interface IInvoiceService
     /// Updates customer's outstanding balance.
     /// </summary>
     Task<InvoiceDto> SendInvoiceAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<InvoiceDto> SendInvoiceAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Posts a sent customer invoice to the General Ledger through the central finance posting engine.
     /// </summary>
     Task<InvoiceDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<InvoiceDto> PostAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Voids/cancels an invoice.

@@ -170,6 +170,14 @@ export function TransactionDimensionLineEditor({
     effectiveDate,
     context
   );
+  const displayValues = applicable.reduce(
+    (resolved, rule) => {
+      if (rule.ruleType === 'Fixed' && rule.defaultValueCode)
+        resolved[rule.dimensionCode] = rule.defaultValueCode;
+      return resolved;
+    },
+    { ...values }
+  );
   const visible = [...definitions]
     .sort((left, right) => left.displayOrder - right.displayOrder)
     .filter(
@@ -203,7 +211,7 @@ export function TransactionDimensionLineEditor({
             <SlidersHorizontal className="mr-2 h-4 w-4" />
           )}
           <span className="truncate">
-            {getDimensionSummary(definitions, values)}
+            {getDimensionSummary(definitions, displayValues)}
           </span>
           {missing.length > 0 && (
             <Badge
@@ -250,7 +258,7 @@ export function TransactionDimensionLineEditor({
                   {fixed && <Badge variant="secondary">Fixed</Badge>}
                 </div>
                 <Select
-                  value={values[definition.code] || '__none__'}
+                  value={displayValues[definition.code] || '__none__'}
                   disabled={disabled || fixed}
                   onValueChange={(value) =>
                     onChange(setValue(values, definition.code, value))

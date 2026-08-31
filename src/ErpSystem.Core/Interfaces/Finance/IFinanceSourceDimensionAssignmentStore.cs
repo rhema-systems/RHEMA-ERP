@@ -10,6 +10,15 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IFinanceSourceDimensionAssignmentStore
 {
+    /// <summary>
+    /// Registers trusted provenance even when a CaptureOptional document has no default or line
+    /// assignments.  The resulting null header assignment is also the persisted nullable default.
+    /// </summary>
+    Task<FinanceSourceDimensionAssignmentDto> RegisterDocumentAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<FinanceSourceDimensionAssignmentDto>> GetDocumentAssignmentsAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
@@ -19,13 +28,27 @@ public interface IFinanceSourceDimensionAssignmentStore
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
         Guid? sourceLineId,
-        Guid financeDimensionSetId,
+        Guid? financeDimensionSetId,
         Guid? financeDimensionSnapshotId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<FinanceSourceDimensionAssignmentDto> FreezeLineAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
+        Guid? financeDimensionSetId,
+        Guid? financeDimensionSnapshotId,
         CancellationToken cancellationToken = default);
 
     Task ClearAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
         Guid? sourceLineId,
+        CancellationToken cancellationToken = default);
+
+    Task RemoveLineAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
         CancellationToken cancellationToken = default);
 }
