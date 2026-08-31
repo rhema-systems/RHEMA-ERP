@@ -426,23 +426,23 @@ public partial class AddFinanceDimensionSourceInfrastructure : Migration
                 RuleVersion = 1
             WHERE RuleFamilyId = '00000000-0000-0000-0000-000000000000';
 
-            UPDATE rule
+            UPDATE accountRule
             SET IsEvidenceLocked = 1
-            FROM FinanceDimensionAccountRules rule
+            FROM FinanceDimensionAccountRules accountRule
             WHERE EXISTS
             (
                 SELECT 1
                 FROM AccountTransactions transactionLine
                 INNER JOIN FinanceDimensionSetItems setItem
                     ON setItem.FinanceDimensionSetId = transactionLine.FinanceDimensionSetId
-                   AND setItem.FinanceDimensionDefinitionId = rule.FinanceDimensionDefinitionId
-                   AND setItem.TenantId = rule.TenantId
-                WHERE transactionLine.TenantId = rule.TenantId
-                  AND transactionLine.AccountId = rule.AccountId
-                  AND transactionLine.TransactionDate >= rule.EffectiveDate
-                  AND (rule.ExpiryDate IS NULL OR transactionLine.TransactionDate < DATEADD(day, 1, CONVERT(date, rule.ExpiryDate)))
-                  AND (rule.SourceModule IS NULL OR rule.SourceModule = transactionLine.SourceModule)
-                  AND (rule.SourceDocumentType IS NULL OR rule.SourceDocumentType = transactionLine.SourceDocumentType)
+                   AND setItem.FinanceDimensionDefinitionId = accountRule.FinanceDimensionDefinitionId
+                   AND setItem.TenantId = accountRule.TenantId
+                WHERE transactionLine.TenantId = accountRule.TenantId
+                  AND transactionLine.AccountId = accountRule.AccountId
+                  AND transactionLine.TransactionDate >= accountRule.EffectiveDate
+                  AND (accountRule.ExpiryDate IS NULL OR transactionLine.TransactionDate < DATEADD(day, 1, CONVERT(date, accountRule.ExpiryDate)))
+                  AND (accountRule.SourceModule IS NULL OR accountRule.SourceModule = transactionLine.SourceModule)
+                  AND (accountRule.SourceDocumentType IS NULL OR accountRule.SourceDocumentType = transactionLine.SourceDocumentType)
                   AND transactionLine.IsDeleted = 0
             );
 
