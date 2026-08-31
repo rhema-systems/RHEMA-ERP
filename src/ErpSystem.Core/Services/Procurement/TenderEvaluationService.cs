@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -129,6 +130,7 @@ public class TenderEvaluationService : ITenderEvaluationService
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
             await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
             EnsureBidEvaluationState(bid);
+            await EnsurePaymentAdmissionForEvaluationAsync(bid);
             await EnsureCommitteeScorerAsync(bid.TenderId, bid.Id);
 
             // Get evaluator assignment for current user
@@ -1028,6 +1030,9 @@ public class TenderEvaluationService : ITenderEvaluationService
                 throw new InvalidOperationException("No evaluated bids found for this tender");
             }
 
+            foreach (var bid in evaluatedBids)
+                await EnsurePaymentAdmissionForEvaluationAsync(bid);
+
             var bidScores = new List<QCBSBidScoreDto>();
             var technicalWeight = tender.TechnicalWeight / 100m;
             var financialWeight = tender.FinancialWeight / 100m;
@@ -1506,7 +1511,56 @@ public class TenderEvaluationService : ITenderEvaluationService
             ?? throw new InvalidOperationException($"Bid with ID {bidId} not found");
         await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
         EnsureBidEvaluationState(bid);
+        await EnsurePaymentAdmissionForEvaluationAsync(bid);
         return bid.TenderId;
+    }
+
+    private async Task EnsurePaymentAdmissionForEvaluationAsync(TenderBid bid)
+    {
+        var fees = await _unitOfWork.Repository<TenderFee>()
+            .GetQueryable(item => item.TenantId == bid.TenantId && item.TenderId == bid.TenderId && !item.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync();
+        var feeIds = fees.Select(item => item.Id).ToList();
+        var payments = feeIds.Count == 0
+            ? new List<TenderPayment>()
+            : await _unitOfWork.Repository<TenderPayment>()
+                .GetQueryable(item => item.TenantId == bid.TenantId &&
+                                      item.BusinessPartnerId == bid.BusinessPartnerId &&
+                                      feeIds.Contains(item.TenderFeeId) &&
+                                      !item.IsDeleted)
+                .AsNoTracking()
+                .ToListAsync();
+        var admission = TenderBidPaymentRules.Assess(bid, fees, payments);
+        if (admission.CanOpenOrEvaluate) return;
+
+        try
+        {
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = bid.TenantId,
+                EntityType = "Bid",
+                Activity = "PaymentAdmissionDenied",
+                Audience = "Internal",
+                EntityId = bid.Id,
+                TriggeredByUserId = _currentUserProvider.UserId,
+                Data = new Dictionary<string, object>
+                {
+                    ["BidId"] = bid.Id,
+                    ["TenderId"] = bid.TenderId,
+                    ["BusinessPartnerId"] = bid.BusinessPartnerId,
+                    ["Stage"] = "Evaluation",
+                    ["Code"] = admission.Code,
+                    ["PaymentAdmissionStatus"] = admission.BlockingStatus.ToString()
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish evaluation payment-admission denial for bid {BidId}", bid.Id);
+        }
+
+        throw new TenderBidInitiationValidationException(admission.Code, admission.Message);
     }
 
     private static void EnsureBidEvaluationState(TenderBid bid)

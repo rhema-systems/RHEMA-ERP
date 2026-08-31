@@ -14,6 +14,7 @@ describe('tender bid initiation routing', () => {
         declarationSatisfied: true,
         paymentRequired: false,
         paymentSatisfied: true,
+        paymentEvidenceAccepted: true,
       })
     ).toBe('complete');
   });
@@ -26,6 +27,7 @@ describe('tender bid initiation routing', () => {
         declarationSatisfied: false,
         paymentRequired: false,
         paymentSatisfied: true,
+        paymentEvidenceAccepted: true,
       })
     ).toBe(2);
   });
@@ -38,8 +40,22 @@ describe('tender bid initiation routing', () => {
         declarationSatisfied: true,
         paymentRequired: true,
         paymentSatisfied: false,
+        paymentEvidenceAccepted: false,
       })
     ).toBe(3);
+  });
+
+  it('allows sealed submission when manual payment evidence awaits verification', () => {
+    expect(
+      nextTenderBidInitiationStep({
+        hasAssignment: true,
+        requiresAcceptanceDeclaration: false,
+        declarationSatisfied: true,
+        paymentRequired: true,
+        paymentSatisfied: false,
+        paymentEvidenceAccepted: true,
+      })
+    ).toBe('complete');
   });
 
   it('does not treat a zero or optional fee as a payment gate', () => {
