@@ -630,6 +630,7 @@ export async function recordBidPayment(
     currency: string;
     paymentMethod: string;
     transactionId: string;
+    paymentProof?: string;
     notes?: string;
   }
 ): Promise<TenderPaymentDto> {
@@ -642,8 +643,12 @@ export async function recordBidPayment(
     }
   );
   if (!response.ok) {
-    const problem = await response.json().catch(() => null);
-    throw new Error(problem?.detail || 'Failed to record tender fee payment');
+    throw new Error(
+      await readTenderPaymentError(
+        response,
+        'Failed to record tender fee payment'
+      )
+    );
   }
   return response.json();
 }

@@ -352,6 +352,8 @@ public class TenderBidInitiationStatusDto
     public bool PaymentRequired { get; set; }
     public bool HasPayment { get; set; }
     public bool PaymentSatisfied { get; set; }
+    public bool PaymentEvidenceAccepted { get; set; }
+    public bool PaymentPendingVerification { get; set; }
     public bool CanProceed { get; set; }
     public List<TenderFeePaymentStatusDto> Fees { get; set; } = new();
 }
@@ -396,6 +398,9 @@ public class CreateTenderPaymentDto
     [MaxLength(500)]
     public string? TransactionId { get; set; }
 
+    [MaxLength(1000)]
+    public string? PaymentProof { get; set; }
+
     public string? Notes { get; set; }
 }
 
@@ -420,6 +425,9 @@ public class RecordPaymentDto
 
     [MaxLength(500)]
     public string? TransactionId { get; set; }
+
+    [MaxLength(1000)]
+    public string? PaymentProof { get; set; }
 
     public string? Notes { get; set; }
 }

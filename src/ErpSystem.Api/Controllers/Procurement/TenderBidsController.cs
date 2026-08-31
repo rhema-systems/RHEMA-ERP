@@ -364,6 +364,10 @@ public class TenderBidsController : ControllerBase
             var bid = await _bidService.OpenBidAsync(id);
             return Ok(bid);
         }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -386,6 +390,21 @@ public class TenderBidsController : ControllerBase
         {
             var count = await _bidService.OpenAllBidsByTenderAsync(tenderId);
             return Ok(new { openedCount = count, message = $"{count} bid(s) opened successfully" });
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(PaymentAdmissionProblem(ex));
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Tender opening conflict",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions = { ["code"] = ex.Code, ["correlationId"] = HttpContext.TraceIdentifier }
+            });
         }
         catch (Exception ex)
         {
@@ -809,6 +828,7 @@ public class TenderBidsController : ControllerBase
                 Currency = dto.Currency,
                 PaymentMethod = dto.PaymentMethod,
                 TransactionId = dto.TransactionId,
+                PaymentProof = dto.PaymentProof,
                 Notes = dto.Notes
             };
 
@@ -1097,4 +1117,17 @@ public class TenderBidsController : ControllerBase
     }
 
     #endregion
+
+    private ProblemDetails PaymentAdmissionProblem(TenderBidInitiationValidationException exception) => new()
+    {
+        Status = StatusCodes.Status422UnprocessableEntity,
+        Title = "Tender bid payment admission failed",
+        Detail = exception.Message,
+        Instance = HttpContext.Request.Path,
+        Extensions =
+        {
+            ["code"] = exception.Code,
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
 }

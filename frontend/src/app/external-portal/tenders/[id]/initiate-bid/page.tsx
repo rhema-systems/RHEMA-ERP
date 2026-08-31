@@ -338,9 +338,9 @@ export default function InitiateBidPage() {
       try {
         const status = await tenderBidService.getInitiationStatus(tenderId);
         setInitiationStatus(status);
-        if (!status.paymentSatisfied) {
+        if (!status.paymentEvidenceAccepted) {
           toast.error(
-            'All mandatory tender fee payments must be verified before bid submission.'
+            'Provide valid payment evidence for every mandatory tender fee before submitting the sealed bid.'
           );
           return;
         }
@@ -448,6 +448,7 @@ export default function InitiateBidPage() {
         currency: fee.currency,
         paymentMethod: fee.paymentMethod,
         transactionId,
+        paymentProof: transactionId,
       });
       const status = await tenderBidService.getInitiationStatus(tenderId);
       setInitiationStatus(status);
@@ -771,7 +772,7 @@ export default function InitiateBidPage() {
             </div>
           )}
 
-          {/* Step 3: Payment Verification */}
+          {/* Step 3: Payment Evidence and Verification */}
           {currentStep === 3 && (
             <div className="space-y-6">
               {initiationStatus?.paymentSatisfied &&
@@ -795,6 +796,10 @@ export default function InitiateBidPage() {
                         )?.status || 'NotPaid';
                       const paymentVerified = paymentStatus === 'Verified';
                       const paymentPending = paymentStatus === 'Pending';
+                      const manualPayment =
+                        /bank|cash|cheque|check|deposit|manual/i.test(
+                          fee.paymentMethod || ''
+                        );
                       return (
                         <Card key={fee.id} className="border-2">
                           <CardHeader className="pb-3">
@@ -875,7 +880,9 @@ export default function InitiateBidPage() {
                                     ) : paymentPending ? (
                                       <Badge className="bg-yellow-100 text-yellow-800">
                                         <Clock className="h-3 w-3 mr-1" />
-                                        Pending
+                                        {manualPayment
+                                          ? 'Evidence awaiting verification'
+                                          : 'Provider confirmation pending'}
                                       </Badge>
                                     ) : paymentStatus === 'Rejected' ? (
                                       <Badge variant="destructive">
@@ -923,8 +930,9 @@ export default function InitiateBidPage() {
                               <Alert className="mt-4">
                                 <Clock className="h-4 w-4" />
                                 <AlertDescription>
-                                  Payment is awaiting verification by an
-                                  authorised procurement user.
+                                  {manualPayment
+                                    ? 'Your manual payment evidence is awaiting verification. You may submit the sealed bid now, but it cannot be opened or evaluated until an authorised procurement user verifies the payment.'
+                                    : 'Online payment provider confirmation is still pending. The sealed bid cannot be submitted until the provider confirms payment.'}
                                 </AlertDescription>
                               </Alert>
                             )}
@@ -943,13 +951,26 @@ export default function InitiateBidPage() {
                     </Alert>
                   )}
 
+                  {initiationStatus?.paymentPendingVerification && (
+                    <Alert className="bg-amber-50 border-amber-200">
+                      <Clock className="h-4 w-4 text-amber-700" />
+                      <AlertDescription className="text-amber-900">
+                        Payment evidence has been accepted for sealed bid
+                        submission and is pending verification. The bid will
+                        remain sealed and excluded from opening and evaluation
+                        until verification is approved.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                   {!initiationStatus?.paymentSatisfied &&
+                    !initiationStatus?.paymentEvidenceAccepted &&
                     getMandatoryFees().length > 0 && (
                       <Alert variant="destructive">
                         <AlertCircle className="h-4 w-4" />
                         <AlertDescription>
-                          Every positive mandatory fee must be verified before
-                          bid submission.
+                          Provide valid manual payment evidence, or wait for
+                          online provider confirmation, before bid submission.
                         </AlertDescription>
                       </Alert>
                     )}
