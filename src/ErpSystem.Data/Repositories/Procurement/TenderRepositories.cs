@@ -531,10 +531,20 @@ public class TenderBidRepository : GenericRepository<TenderBid>, ITenderBidRepos
         return bid;
     }
 
-    public new async Task<TenderBid> UpdateAsync(TenderBid bid)
+    public new Task<TenderBid> UpdateAsync(TenderBid bid)
     {
-        _dbSet.Update(bid);
-        return await Task.FromResult(bid);
+        // Update only the aggregate root. DbSet.Update traverses the complete bid
+        // graph and changes a newly-added bid lot with a client-generated Guid to
+        // Modified. The subsequent bid-item insert then points at a lot row that
+        // was never inserted and SQL Server rejects it through
+        // FK_TenderBidItems_TenderBidLots_BidLotId.
+        var entry = _context.Entry(bid);
+        if (entry.State != EntityState.Added)
+        {
+            entry.State = EntityState.Modified;
+        }
+
+        return Task.FromResult(bid);
     }
 
     public override async Task DeleteAsync(Guid id)
@@ -1852,10 +1862,18 @@ public class TenderBidLotRepository : GenericRepository<TenderBidLot>, ITenderBi
         return bidLot;
     }
 
-    public new async Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
+    public new Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
     {
-        _dbSet.Update(bidLot);
-        return await Task.FromResult(bidLot);
+        // Preserve Added so a selected lot is inserted before its bid items.
+        // DbSet.Update treats a client-generated Guid as evidence that the row
+        // already exists and incorrectly changes a new lot to Modified.
+        var entry = _context.Entry(bidLot);
+        if (entry.State != EntityState.Added)
+        {
+            entry.State = EntityState.Modified;
+        }
+
+        return Task.FromResult(bidLot);
     }
 
     public override async Task DeleteAsync(Guid id)

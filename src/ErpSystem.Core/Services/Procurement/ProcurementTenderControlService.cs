@@ -118,11 +118,15 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             .SingleOrDefaultAsync(cancellationToken);
         if (state is null)
         {
-            return await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            var selectedMethod = await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
                 .Where(item => item.SourcingCaseId.HasValue)
                 .Join(Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted),
-                    tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id, (_, sourcingCase) => sourcingCase.SelectedMethod)
-                .AnyAsync(method => IsQualitySelection(method), cancellationToken);
+                    tender => tender.SourcingCaseId,
+                    sourcingCase => sourcingCase.Id,
+                    (_, sourcingCase) => (ProcurementMethodType?)sourcingCase.SelectedMethod)
+                .SingleOrDefaultAsync(cancellationToken);
+
+            return selectedMethod.HasValue && IsQualitySelection(selectedMethod.Value);
         }
 
         if (!IsQualitySelection(state.Method)) return false;
