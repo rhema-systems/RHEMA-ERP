@@ -533,6 +533,27 @@ SELECT
 "@
 }
 
+function Get-TenderPaymentPermissionSummary {
+    return Invoke-DatabaseTable @"
+SELECT
+    (SELECT COUNT_BIG(*)
+     FROM dbo.Permissions
+     WHERE [Name] = N'procurement.tender.payment.verify'
+       AND [IsDeleted] = 0
+       AND [IsSystemPermission] = 1) AS PermissionCount,
+    (SELECT COUNT_BIG(*)
+     FROM dbo.RolePermissions AS rolePermission
+     INNER JOIN dbo.Permissions AS permission
+         ON permission.Id = rolePermission.PermissionId
+     INNER JOIN dbo.AspNetRoles AS role
+         ON role.Id = rolePermission.RoleId
+     WHERE permission.[Name] = N'procurement.tender.payment.verify'
+       AND permission.[IsDeleted] = 0
+       AND role.[Name] IN
+           (N'TDC_PROCUREMENT_OFFICER', N'TDC_SENIOR_PROCUREMENT_OFFICER')) AS RoleGrantCount;
+"@
+}
+
 function Write-ServiceState {
     Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
         ForEach-Object { Write-Output "SERVICE|$($_.Name)|$($_.Status)" }
@@ -1243,6 +1264,14 @@ function Invoke-Verify {
         'Active SVG entries exist in a shared file-upload policy.'
     Assert-True ([long]$summary.SvgSupplierRequirements -eq 0) `
         'Active SVG entries exist in a supplier evidence requirement.'
+
+    $tenderPaymentPermission = @(Get-TenderPaymentPermissionSummary)[0]
+    Write-Output "TENDER_PAYMENT_VERIFY_PERMISSIONS|$($tenderPaymentPermission.PermissionCount)"
+    Write-Output "TENDER_PAYMENT_VERIFY_ROLE_GRANTS|$($tenderPaymentPermission.RoleGrantCount)"
+    Assert-True ([long]$tenderPaymentPermission.PermissionCount -eq 1) `
+        'The tender-payment verification permission catalogue row is missing or duplicated.'
+    Assert-True ([long]$tenderPaymentPermission.RoleGrantCount -eq 2) `
+        'The tender-payment verification permission is not granted to both operational TDC roles.'
 
     $buildId = (Get-Content (Join-Path $FrontendRoot '.next\BUILD_ID') -Raw).Trim()
     Write-Output "DEPLOYED_BUILD_ID|$buildId"
