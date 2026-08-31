@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Loader2, Search, TriangleAlert } from 'lucide-react';
+import { ClipboardCheck, Loader2, Search, Trash2, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,10 +10,22 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { HR_ADMIN_ROLES } from '@/components/hr/common/PermissionGate';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { employeeService } from '@/services/hr/employee.service';
@@ -40,6 +52,12 @@ import type { BatchAssessmentResult } from '@/types/hr/job-architecture';
 export default function AssessCompetenciesPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+
+  // ⚠ The server gates the delete on HR.Policy.CompetencyAdmin, which requires HR.Competency.Admin
+  // — a strictly higher bar than the assessing this screen otherwise does. Gating the affordance to
+  // match is the point: an assessor offered a button that 403s learns nothing from it.
+  const canDelete = hasAnyPermission(['HR.Competency.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const [search, setSearch] = useState('');
   const [employeeId, setEmployeeId] = useState('');
@@ -47,6 +65,7 @@ export default function AssessCompetenciesPage() {
   const [levels, setLevels] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [result, setResult] = useState<BatchAssessmentResult | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; name: string; level: number } | null>(null);
 
   const { data: employees } = useQuery({
     queryKey: ['hr', 'employees', 'competency-assess', search],
@@ -82,6 +101,28 @@ export default function AssessCompetenciesPage() {
   const staged = rows.filter((r) => {
     const v = levels[r.competency.id];
     return v !== undefined && v !== '' && Number(v) !== (r.existing?.currentProficiencyLevel ?? -1);
+  });
+
+  /**
+   * ⚠ **Removal is not re-assessment, which is why it needed its own control.** Correcting a level
+   * snapshots the old one into history — right for a genuine change, wrong for a row that should
+   * never have existed, because the mistaken judgement stays on the person's record for ever. This
+   * is the only way to take one back, and until now the endpoint had no caller anywhere.
+   */
+  const remove = useMutation({
+    mutationFn: (id: string) => jobArchitectureService.deleteEmployeeCompetency(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['competencies', 'employee', employeeId] });
+      queryClient.invalidateQueries({ queryKey: ['competencies', 'organisation-gaps'] });
+      toast({ title: 'Assessment removed' });
+      setRemoving(null);
+    },
+    onError: (e: unknown) =>
+      toast({
+        variant: 'destructive',
+        title: 'Not removed',
+        description: e instanceof Error ? e.message : 'Refused',
+      }),
   });
 
   const submit = useMutation({
@@ -233,6 +274,7 @@ export default function AssessCompetenciesPage() {
                         <TableHead className="w-[130px]">Held</TableHead>
                         <TableHead className="w-[130px]">New level</TableHead>
                         <TableHead>Evidence</TableHead>
+                        {canDelete && <TableHead className="w-[60px]" />}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -274,6 +316,28 @@ export default function AssessCompetenciesPage() {
                               }
                             />
                           </TableCell>
+                          {canDelete && (
+                            <TableCell>
+                              {/* Only an existing assessment can be removed — there is nothing to
+                                  take back where the employee has never been assessed. */}
+                              {existing && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={`Remove the ${competency.name} assessment`}
+                                  onClick={() =>
+                                    setRemoving({
+                                      id: existing.id,
+                                      name: competency.name,
+                                      level: existing.currentProficiencyLevel,
+                                    })
+                                  }
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>
@@ -299,6 +363,30 @@ export default function AssessCompetenciesPage() {
           </div>
         </>
       )}
+
+      <AlertDialog open={removing !== null} onOpenChange={(o) => !o && setRemoving(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove the {removing?.name} assessment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes the record of level {removing?.level} outright, along with its history.
+              Use it for an assessment made against the wrong person or the wrong competency — if
+              the level has simply changed, record a new one instead, which keeps the old as
+              history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => removing && remove.mutate(removing.id)}
+              disabled={remove.isPending}
+            >
+              {remove.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

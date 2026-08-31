@@ -3309,11 +3309,16 @@ export const navigationItems: NavItem[] = [
             ],
           },
           {
-            // The clearance form an exiting employee is walked through, by department. Built,
-            // and reachable from nothing until the sweep.
             title: 'Separation',
             href: '/administration/hr/separation/clearance-form',
             icon: DoorOpen,
+            children: [
+              // The clearance form an exiting employee is walked through, by department.
+              { title: 'Clearance Form', href: '/administration/hr/separation/clearance-form', icon: DoorOpen },
+              // ⚠ The retirement and contract-expiry sweeps RAISE separations. They run nightly on
+              // their own; this is the manual run, and the only screen either endpoint has ever had.
+              { title: 'Reminders & Sweeps', href: '/administration/hr/separation/reminders', icon: AlarmClock },
+            ],
           },
           {
             title: 'Safety (SHE)',

@@ -672,6 +672,21 @@ class JobArchitectureService {
   }
 
   /**
+   * Removes an assessment outright.
+   *
+   * ⚠ **A re-assessment is not a removal, and that is the whole reason this exists.** Correcting a
+   * level snapshots the previous one to history, so an assessment recorded against the wrong person
+   * or the wrong competency stayed in that person's record for ever, reading as a real judgement
+   * somebody once made. This is the only way to take one back.
+   *
+   * ⚠ Admin tier — `HR.Policy.CompetencyAdmin`, not the assessor's own permission. Gate the
+   * affordance to match, or the desk gets a 403 from a button the screen offered it.
+   */
+  deleteEmployeeCompetency(id: string) {
+    return apiService.delete(`${this.employeeCompetencies}/${id}`);
+  }
+
+  /**
    * Records several competency levels for one employee in a single call.
    *
    * ⚠ Handles BOTH cases: omit `employeeCompetencyId` and give `competencyId` for a first

@@ -261,11 +261,23 @@ class SeparationService {
     });
   }
 
+  /**
+   * ⚠ **This RAISES separations — it is not a preview.** One per person due within the horizon who
+   * does not already have one. Read `getUpcomingRetirements` first if you want to know what it
+   * would do.
+   */
   runRetirementSweep(withinDays?: number) {
     // ⚠ Query params go in the URL: apiService.post takes (endpoint, data) only — there is no
     // third params argument. Assuming one is the same class of mistake as inventing a DTO field.
-    const q = withinDays == null ? '' : `?withinDays=${withinDays}`;
-    return apiService.post<SweepResult>(`${this.baseUrl}/retirements/sweep${q}`, {});
+    // ⚠ The PATH is kept as its own literal and the query appended after, purely so the route reads
+    // as itself. ⚠ **This does NOT make it visible to instrument 01** — tried on 2026-08-31 and it
+    // changed nothing, because that matcher requires the FIRST ARGUMENT to be a literal and a
+    // ternary makes it an identifier. Any computed URL is invisible to it, which is the same blind
+    // spot that reads EmployeesController as 73/81 unwired. Recorded as a FALSE disposition in the
+    // ledger instead; do not "fix" the call site again for coverage's sake.
+    const path = `${this.baseUrl}/retirements/sweep`;
+    return apiService.post<SweepResult>(
+      withinDays == null ? path : `${path}?withinDays=${withinDays}`, {});
   }
 
   /** ⚠ Also empty on live data: 0 of 202 active contracts carry an end date. */
@@ -275,9 +287,11 @@ class SeparationService {
     });
   }
 
+  /** ⚠ Raises separations, as the retirement sweep does. Not a preview. */
   runContractExpirySweep(withinDays?: number) {
-    const q = withinDays == null ? '' : `?withinDays=${withinDays}`;
-    return apiService.post<SweepResult>(`${this.baseUrl}/contract-expiries/sweep${q}`, {});
+    const path = `${this.baseUrl}/contract-expiries/sweep`;
+    return apiService.post<SweepResult>(
+      withinDays == null ? path : `${path}?withinDays=${withinDays}`, {});
   }
 
   // ── Reminders (FR-HR-111) ──────────────────────────────────────────────────

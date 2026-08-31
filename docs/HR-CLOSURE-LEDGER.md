@@ -13,10 +13,19 @@ yet classified.
 | Measure | Count |
 | --- | ---: |
 | HR write endpoints | 2124 |
-| Wired to a screen | 1873 |
-| No caller found (instrument 01) | 251 |
+| Wired to a screen | 1884 |
+| No caller found (instrument 01) | 240 |
 | Confirmed unreachable (01 ∩ 02) | 6 |
 | Write-DTO fields no form can set | 69 across 27 DTOs |
+
+⚠ **"Wired to a screen" over-counts, and by construction rather than by accident.**
+Instrument 01 matches the frontend SERVICE layer, so an endpoint whose client method exists
+counts as wired even when no screen calls that method. The five travel policy-rule and
+exception endpoints are the known instance — withheld from the UI on purpose (D-29), still
+counted here as reached. Any endpoint withheld the same way will read the same way, so this
+row is a ceiling on coverage, never a measurement of it. **The check that sees through it is
+the two greps** — every service method against the screens that call it, and every non-GET
+route template against the service.
 
 ## A. Decisions taken
 
@@ -732,7 +741,7 @@ for hundreds of gaps that do not exist.
 - [ ] `GET    api/discipline/witnesses/employee/{}`
 - [ ] `GET    api/discipline/witnesses/{}`
 
-### Discipline — case sub-entities — 16 of 26 writes wired
+### Discipline — case sub-entities — 26 of 26 writes wired
 
 **Writes**
 
@@ -740,21 +749,21 @@ for hundreds of gaps that do not exist.
 - [x] `POST   api/discipline/cases/{}/appeal/outcome`
 - [x] `POST   api/discipline/cases/{}/appeal/schedule-hearing`
 - [x] `POST   api/discipline/cases/{}/corrective-action`
-- [ ] `POST   api/discipline/cases/{}/fine`
-- [ ] `POST   api/discipline/cases/{}/fine/payment`
+- [x] `POST   api/discipline/cases/{}/fine`
+- [x] `POST   api/discipline/cases/{}/fine/payment`
 - [x] `POST   api/discipline/cases/{}/hearing`
 - [x] `PUT    api/discipline/cases/{}/hearing/outcome`
 - [x] `POST   api/discipline/cases/{}/investigation`
 - [x] `PUT    api/discipline/cases/{}/investigation`
 - [x] `POST   api/discipline/cases/{}/investigation/complete`
-- [ ] `POST   api/discipline/cases/{}/separation`
-- [ ] `PUT    api/discipline/cases/{}/separation`
-- [ ] `POST   api/discipline/cases/{}/suspension`
-- [ ] `PUT    api/discipline/cases/{}/suspension`
-- [ ] `POST   api/discipline/cases/{}/termination`
-- [ ] `PUT    api/discipline/cases/{}/termination`
-- [ ] `POST   api/discipline/cases/{}/warning`
-- [ ] `PUT    api/discipline/cases/{}/warning`
+- [x] `POST   api/discipline/cases/{}/separation`
+- [x] `PUT    api/discipline/cases/{}/separation`
+- [x] `POST   api/discipline/cases/{}/suspension`
+- [x] `PUT    api/discipline/cases/{}/suspension`
+- [x] `POST   api/discipline/cases/{}/termination`
+- [x] `PUT    api/discipline/cases/{}/termination`
+- [x] `POST   api/discipline/cases/{}/warning`
+- [x] `PUT    api/discipline/cases/{}/warning`
 - [x] `DELETE api/discipline/corrective-action-items/{}`
 - [x] `PUT    api/discipline/corrective-action-items/{}`
 - [x] `POST   api/discipline/corrective-action-items/{}/complete`
@@ -883,6 +892,87 @@ for hundreds of gaps that do not exist.
 - [ ] `GET    api/employee-career-paths/{}`
 - [ ] `GET    api/employee-career-paths/{}/details`
 
+### Separations — the two manual sweeps — 29 of 31 writes wired
+
+**Writes**
+
+- [x] `POST   api/hr/separations`
+- [x] `POST   api/hr/separations/clearance-items/{}`
+- [x] `POST   api/hr/separations/clearance-templates`
+- [x] `POST   api/hr/separations/clearance-templates/seed-defaults`
+- [x] `DELETE api/hr/separations/clearance-templates/{}`
+- [x] `PUT    api/hr/separations/clearance-templates/{}`
+- [ ] `POST   api/hr/separations/contract-expiries/sweep`
+- [x] `DELETE api/hr/separations/documents/{}`
+- [x] `POST   api/hr/separations/reminders/run`
+- [x] `POST   api/hr/separations/repair/disciplinary-orphans`
+- [ ] `POST   api/hr/separations/retirements/sweep`
+- [x] `DELETE api/hr/separations/settlement-lines/{}`
+- [x] `PUT    api/hr/separations/settlement-lines/{}`
+- [x] `DELETE api/hr/separations/{}`
+- [x] `PUT    api/hr/separations/{}`
+- [x] `POST   api/hr/separations/{}/approve`
+- [x] `POST   api/hr/separations/{}/cancel`
+- [x] `POST   api/hr/separations/{}/clearance/complete`
+- [x] `POST   api/hr/separations/{}/clearance/refresh-assets`
+- [x] `POST   api/hr/separations/{}/clearance/start`
+- [x] `POST   api/hr/separations/{}/complete`
+- [x] `POST   api/hr/separations/{}/documents`
+- [x] `PUT    api/hr/separations/{}/exit-interview`
+- [x] `POST   api/hr/separations/{}/notice-decision`
+- [x] `POST   api/hr/separations/{}/reject`
+- [x] `POST   api/hr/separations/{}/settlement/finalise`
+- [x] `POST   api/hr/separations/{}/settlement/lines`
+- [x] `POST   api/hr/separations/{}/settlement/prepare`
+- [x] `POST   api/hr/separations/{}/settlement/review/approve`
+- [x] `POST   api/hr/separations/{}/settlement/review/return`
+- [x] `POST   api/hr/separations/{}/submit`
+
+**Reads**
+
+- [ ] `GET    api/hr/separations`
+- [ ] `GET    api/hr/separations/analytics`
+- [ ] `GET    api/hr/separations/analytics/exit-interviews`
+- [ ] `GET    api/hr/separations/clearance-templates`
+- [ ] `GET    api/hr/separations/contract-expiries/upcoming`
+- [ ] `GET    api/hr/separations/documents/{}/download`
+- [ ] `GET    api/hr/separations/employee/{}`
+- [ ] `GET    api/hr/separations/reminders/preview`
+- [ ] `GET    api/hr/separations/retirements/upcoming`
+- [ ] `GET    api/hr/separations/{}`
+- [ ] `GET    api/hr/separations/{}/clearance`
+- [ ] `GET    api/hr/separations/{}/documents`
+- [ ] `GET    api/hr/separations/{}/exit-interview`
+- [ ] `GET    api/hr/separations/{}/settlement`
+
+### Employee competencies — the missing delete — 4 of 4 writes wired
+
+**Writes**
+
+- [x] `POST   api/employee-competencies`
+- [x] `POST   api/employee-competencies/batch-assess`
+- [x] `DELETE api/employee-competencies/{}`
+- [x] `PUT    api/employee-competencies/{}`
+
+**Reads**
+
+- [ ] `GET    api/employee-competencies/competency/{}`
+- [ ] `GET    api/employee-competencies/competency/{}/history`
+- [ ] `GET    api/employee-competencies/employee/{}`
+- [ ] `GET    api/employee-competencies/employee/{}/competency/{}`
+- [ ] `GET    api/employee-competencies/employee/{}/gaps`
+- [ ] `GET    api/employee-competencies/employee/{}/history`
+- [ ] `GET    api/employee-competencies/employee/{}/profile`
+- [ ] `GET    api/employee-competencies/gaps/organisation`
+- [ ] `GET    api/employee-competencies/me/gaps`
+- [ ] `GET    api/employee-competencies/me/profile`
+- [ ] `GET    api/employee-competencies/qualified-for-position/{}`
+- [ ] `GET    api/employee-competencies/stale`
+- [ ] `GET    api/employee-competencies/{}`
+- [ ] `GET    api/employee-competencies/{}/detail`
+- [ ] `GET    api/employee-competencies/{}/history`
+- [ ] `GET    api/employee-competencies/{}/history/latest`
+
 ## D. Hand-review queue (flagged by 01 only)
 
 Instrument 01 found no caller but instrument 02 still sees the path segment in the frontend, so
@@ -900,7 +990,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
 | PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
 | PerformanceAppraisals | 13 | 29 | `INTENTIONAL` 11 · `FALSE` 2 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
-| StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
 | Awards | 9 | 56 | `INTENTIONAL` 3 · `FALSE` 1 · `DONE` 5 | ⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.** |
 | MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
 | Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
@@ -920,7 +1009,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | NHISClaims | 2 | 9 | `INTENTIONAL` 1 · `DONE` 1 | Built 2026-08-30 (slice 19). The claims list gained a Documents dialog at every status - the scheme's rejection letter arrives after the decision and the attendance record before it - driving the gated upload, the download and the Admin-tier delete. No backend change was needed: D-14 had already built and harness-verified the whole transport in the medical slice-5 run, and it had simply never had a caller. The one remaining flag is the metadata-only POST. |
 | PeerNomination | 2 | 4 | `INTENTIONAL` | Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation. |
 | PreEmploymentCheck | 2 | 11 | `FALSE` | hrDocumentService.upload artefact (both document routes). |
-| Separations | 2 | 31 | `BUILD` | Clearance — refresh assets. |
+| Separations | 2 | 31 | `DONE` | Clearance — refresh assets. |
 | StaffDisciplineSupport | 2 | 20 | `INTENTIONAL` 1 · `FALSE` 1 | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
 | StaffTravelRequests | 2 | 18 | `FALSE` | Built 2026-08-30 (slice 21). ⚠ The queue said a group 'cannot be edited, deleted, or have a participant removed'; in fact group travel had NO screen of any kind - it could not be created, listed or opened either, and the reads are invisible to instrument 01 while the writes had client methods. /hr/travel/groups and /[id] exist now. One defect cleared first: UpdateGroupTravelAsync mapped an include-less entity, so the edit response reported ZERO participants on a group that has them. |
@@ -929,7 +1018,6 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | AppraisalReviewEvents | 1 | 9 | `FALSE` | hrDocumentService.upload artefact. |
 | AppraisalWorkflow | 1 | 1 | `INTENTIONAL` | Checked 2026-08-29: they do. The appraisal screens move status through the named transitions on api/PerformanceAppraisals, each with its own preconditions. |
 | CalibrationSessions | 1 | 15 | `FALSE` | hrDocumentService.upload artefact. |
-| EmployeeCompetency | 1 | 4 | `BUILD` | Batch assessment. |
 | EmployeeHealth | 1 | 14 | `FALSE` | hrDocumentService.upload artefact. |
 | HrAnnouncements | 1 | 7 | `FALSE` | DocumentUploadField artefact. |
 | HrLetterRequests | 1 | 3 | `FALSE` | DocumentUploadField artefact. |
@@ -959,7 +1047,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**120 of the 245 queued endpoints are classified here — 13 BUILD, 48 INTENTIONAL, 52 FALSE, 7 DONE.** The remaining 125 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**109 of the 234 queued endpoints are classified here — 48 INTENTIONAL, 52 FALSE, 9 DONE.** The remaining 125 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -1036,29 +1124,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
   <br>Superseded by `POST {}/submit-appeal`, which is wired and enforces the at-least-one-appealed-item rule.
 - `PATCH  api/PerformanceAppraisals/{}/status` — **INTENTIONAL**
   <br>Raw status set. Status is moved by the named workflow transitions, each of which enforces its own preconditions.
-
-### StaffDisciplineSubEntity — 10 BUILD
-
-- `POST   api/discipline/cases/{}/fine` — **BUILD**
-  <br>Blocked — see D-18, which RESTATES the original block rather than lifting it. The FR-HR-080 authority rule does exist in `RecordDecision`, but no actor reaches it, and a warning can be recorded against a case nobody has decided — so an editable sanction today would let a penalty be written with no authority rule in force. `probe-authority-gate.mjs` holds both findings as passing assertions.
-- `POST   api/discipline/cases/{}/fine/payment` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `POST   api/discipline/cases/{}/separation` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `PUT    api/discipline/cases/{}/separation` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `POST   api/discipline/cases/{}/suspension` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `PUT    api/discipline/cases/{}/suspension` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `POST   api/discipline/cases/{}/termination` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `PUT    api/discipline/cases/{}/termination` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `POST   api/discipline/cases/{}/warning` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
-- `PUT    api/discipline/cases/{}/warning` — **BUILD**
-  <br>_As `POST api/discipline/cases/{}/fine`._
 
 ### Awards — 3 INTENTIONAL · 1 FALSE · 5 DONE
 
@@ -1186,12 +1251,12 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/pre-employment-checks/reference-responses/{}/document` — **FALSE**
   <br>_As `POST api/pre-employment-checks/items/{}/document`._
 
-### Separations — 2 BUILD
+### Separations — 2 DONE
 
-- `POST   api/hr/separations/contract-expiries/sweep` — **BUILD**
-  <br>_As the retirement sweep above._ Both also carry `?withinDays=`, so they are double-flagged — the interpolated query-string artefact on top of having no caller.
-- `POST   api/hr/separations/retirements/sweep` — **BUILD**
-  <br>`runRetirementSweep` exists as a client method with **no screen caller** — an orphan of the shape lane 2 kept finding. Low severity, and worth stating why: closure lane 1 hosted both sweeps on `SeparationReminderBackgroundService` at a 17-minute stagger, so FR-HR-093's retirement alerts DO run nightly. What is missing is the manual run-now the other reminder engines offer, which matters when somebody wants to see the effect of a policy change today rather than tomorrow.
+- `POST   api/hr/separations/contract-expiries/sweep` — **DONE**
+  <br>_As the retirement sweep above_, on the same screen and with the same confirmation. ⚠ **Both sweeps RAISE separation records against named people — they are not previews**, which the old entry never said and which cost a live record while probing them: a 10-year horizon raised one immediately (against a harness fixture employee, soft-deleted after). The screen therefore shows the upcoming lists first, marks who already has a separation, states how many are genuinely new, and puts each sweep behind a confirmation naming the horizon.
+- `POST   api/hr/separations/retirements/sweep` — **DONE**
+  <br>Built 2026-08-31 (finish plan, lane 1) — and the gap was FOUR TIMES bigger than this queue could show. The entry said 'a client method with no screen caller'; in fact the **entire separation reminder surface had no screen at all**. All six endpoints — `reminders/preview`, `reminders/run`, `retirements/upcoming`, `retirements/sweep`, `contract-expiries/upcoming`, `contract-expiries/sweep` — were mentioned by exactly one file in the whole frontend: the service that defines them. Three of the six are GETs, which instrument 01 skips outright; `reminders/run` matched its own service definition and counted as wired; only the two sweeps surfaced, and only because of the query-string artefact. **Three separate blind spots hiding one missing screen.** `/administration/hr/separation/reminders` now serves all six. ⚠ It stays flagged: the matcher needs a literal first argument and the query has to be interpolated, so a computed URL is invisible to it — the EmployeesController 73/81 blind spot. Splitting the path from the query was tried and changed nothing.
 
 ### StaffDisciplineSupport — 1 INTENTIONAL · 1 FALSE
 
@@ -1240,11 +1305,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 
 - `POST   api/CalibrationSessions/{}/attachments` — **FALSE**
   <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
-
-### EmployeeCompetency — 1 BUILD
-
-- `DELETE api/employee-competencies/{}` — **BUILD**
-  <br>An assessment recorded against the wrong person or the wrong competency cannot be removed — only re-assessed, which leaves the original in the history as though it had been a real judgement. Small, and the new /hr/competencies/assess screen is where it belongs.
 
 ### EmployeeHealth — 1 FALSE
 
@@ -1404,9 +1464,9 @@ things absent from *both* sides, or present but wrong.
 | Leave | Leave request numbering still uses a max+1 scan | `BUILD` | Move to NumberSequence as Training already did |
 | Succession | Criteria candidate search has no screen | `BUILD` | successionSearchService.searchCandidates has no caller |
 | Succession | Candidate age and service-years-left not displayed | `BUILD` | API returns both |
-| Training | Bulk nomination has no UI | `BUILD` | setBulkResult in NomineesPanel.tsx is dead code |
-| Training | Bulk completion has no UI and no client method | `BUILD` |  |
-| Training | Nominee availability check never shown | `BUILD` | availability-check endpoint has no caller |
+| Training | Bulk nomination has no UI | `BUILD` | ⚠ Re-verified 2026-08-31 and the row was UNDERSTATED, not wrong. `setBulkResult` is declared at NomineesPanel.tsx:63 and has no call site anywhere in the frontend, and there is no `bulkNominate` client method at all — but `bulkResult` IS rendered at lines 158-166, listing the created count and every skipped row. So the RESULT DISPLAY for a bulk nomination was built and the action never was: the panel is waiting for a batch that nothing can start. |
+| Training | Bulk completion has no UI and no client method | `DONE` | ⚠ **The row was false on both halves, re-verified 2026-08-31.** `BulkCompletionPanel.tsx` exists, calls `trainingCompletionService.bulkRecord` at line 89, and is mounted on the schedule detail screen at `schedules/[id]/page.tsx:364` with a readOnly guard for cancelled schedules. The endpoint is `TrainingCompletionsController.BulkRecordCompletion`. |
+| Training | Nominee availability check never shown | `DONE` | ⚠ **The row was false, re-verified 2026-08-31.** A 'Check availability' control is wired at NomineesPanel.tsx:314 onto `checkAvailability` (lines 93-97), which calls `trainingNominationService.checkAvailability` and renders the conflicts. Closure lane 2 built it and this row was never updated — the generator already carried a DONE for the controller while this row and the endpoint disposition beside it both still said BUILD. |
 | Training | No 'Training Activities' grouped screen | `BUILD` |  |
 | Training | Mentoring still inside the Training menu | `BUILD` | Wants its own nav section |
 | Training | Certificate does not gate completion | `BUILD` | Per-program flag |

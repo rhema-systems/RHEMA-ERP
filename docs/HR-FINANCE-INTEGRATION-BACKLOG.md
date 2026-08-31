@@ -35,6 +35,65 @@ the opposite case — it diverges by sitting still, so it is fixed as we go.
 
 ---
 
+## Finance owner's governance message (2026-08-31) — read before implementing anything
+
+Posted by the Finance module owner once PRs **#70** (`codex/finance-fixed-asset-disposal-settlement`)
+and **#72** (`codex/finance-integration-contract-master-promotion`) merged to master — the same
+merge already recorded below as "the posting entry point now EXISTS." Recorded here verbatim
+because it upgrades two things in this backlog from *recommendation* to *stated policy*:
+
+> "Finance integration foundation is now available on master through PRs #70 and #72. Module
+> owners integrating with Finance should begin with: `finance-integration-contract-catalogue.md`,
+> `finance-integration-adapter-checklist.md`, `finance-integration-consumer-test-template.md`.
+> Each interface has a stable FIN-INT-### identifier and is classified as Available, Planned,
+> Decision Required, or Requirements Clarification. **Key rule: operational modules retain
+> ownership of their source transactions and approvals. Finance owns account resolution,
+> fiscal-period controls, currency, tax and subledger effects, journal creation, audit, reversal
+> and idempotency. Other modules should not create Finance journals or posting records
+> directly.** Please coordinate with me before implementing anything marked Planned or Decision
+> Required, and include the reusable consumer-contract tests with every integration."
+
+**What this changes for HR, concretely:**
+
+1. **Payroll's current GL posting is now explicitly out of policy, not merely legacy.**
+   `PostPayrollJournalAsync` (`PayrollService.cs`) calls `IJournalEntryService.CreateJournalEntryAsync()`
+   and `.PostJournalEntryAsync()` directly — Payroll creates and posts a Finance journal itself.
+   The rule above says exactly the opposite: *"other modules should not create Finance journals or
+   posting records directly."* This was already this backlog's top recommendation (see "What this
+   changes in the checklist below" further down); it is now a stated rule from the module that owns
+   the boundary, not just an HR-side judgement call. **Treat the payroll migration to
+   `IFinancePostingEngine` as a compliance fix, not an optional improvement.**
+2. **A coordination gate now applies to anything not already "Available."** Before building
+   against a contract marked Planned, Decision Required, or Requirements Clarification, HR must
+   coordinate with the Finance owner first — not design and build, then ask. The one contract in
+   the catalogue that is explicitly HR/payroll-shaped, **FIN-INT-011 ("SH Fund, PF, ESB and fuel
+   allocation")**, is Requirements Clarification with **no owner assigned**. HR is the natural
+   party to bring a concrete requirement to the Finance owner for this one, rather than wait for
+   it to be defined elsewhere.
+3. **No contract exists yet for HR's own budget surfaces** (`ManpowerBudget`, `TrainingBudget`,
+   `AwardBudget`, `StaffTravelBudget`). FIN-INT-015 (Procurement demand → Finance budget
+   commitment) is Available but is a Procurement-specific contract — reusing its *shape* for an
+   HR budget-commitment need is a **new, Planned-status conversation with the Finance owner**, not
+   something HR can wire up unilaterally by calling `IFinanceBudgetCommitmentService` on its own
+   initiative.
+4. **Every future HR-Finance adapter must ship with the reusable consumer-contract tests.** The
+   shared assertion lives at
+   `tests/ErpSystem.Api.Tests/Services/Finance/FinanceConsumerContractAssertions.cs`
+   (`ShouldSatisfyPostingContract(...)`); see `docs/Finance/finance-integration-consumer-test-template.md`
+   for the required test set (happy path, retry/idempotency, Finance-failure-does-not-mark-posted,
+   cross-tenant, closed/locked-period, AR/AP visibility) and
+   `docs/Finance/finance-integration-adapter-checklist.md` for the design-time checklist (agree
+   ownership and the FIN-INT-### ID before coding; resolve accounts from Finance configuration,
+   never hard-code them; generate a deterministic idempotency key; persist `PostingEventId`/
+   `JournalEntryId` back onto the HR source record).
+
+This does not change the deferral policy itself (the numbered rules above) — GL posting is still
+one sweep, not twenty-seven. It changes what "correct" looks like once that sweep starts, and it
+opens one thing (FIN-INT-011) that HR could reasonably raise with the Finance owner ahead of the
+sweep, since nobody else owns it.
+
+---
+
 ## Register
 
 Status key: 🔲 to record · ✅ recorded, awaiting the sweep · ⏳ area not yet built
@@ -242,10 +301,22 @@ One caveat worth carrying into the sweep: FIN-INT-011 in the catalogue — *“S
 fuel allocation”* — is listed as **owner not defined**, requirements-clarification, version 0.0.
 That is HR/payroll-shaped territory with no owner, and the sweep is the moment it gets one.
 
+⚠ **2026-08-31 update:** the Finance owner has since confirmed this in writing — see "Finance
+owner's governance message" above — and added that anything Planned/Decision-Required/
+Requirements-Clarification (FIN-INT-011 included) needs coordination with them **before** design
+work starts, not after.
+
 ---
 
 ## Before the sweep starts
 
+- [ ] **Migrate Payroll's GL posting off the legacy `IJournalEntryService` calls onto
+      `IFinancePostingEngine`.** No longer just this backlog's top recommendation — the Finance
+      owner's 2026-08-31 message states plainly that "other modules should not create Finance
+      journals or posting records directly," which is exactly what Payroll's current path does.
+- [ ] **Raise FIN-INT-011 ("SH Fund, PF, ESB and fuel allocation") with the Finance owner.** It is
+      the one catalogue entry that is HR/payroll-shaped and has no assigned owner — coordination is
+      required before anyone designs against it.
 - [ ] Back-fill the five closed areas above.
 - [ ] Settle the **three-way** training double-count: area 7's training budget, succession
       development activities, and `ManpowerBudget.TrainingBudget`.

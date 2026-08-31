@@ -655,16 +655,27 @@ _d("SeparationsController.cs", [
     # The note said "Clearance — refresh assets". That was built in lane 3 and left the queue; what
     # is actually flagged is the two sweeps.
     ("POST", "api/hr/separations/retirements/sweep",
-     ("BUILD", "`runRetirementSweep` exists as a client method with **no screen caller** — an orphan "
-               "of the shape lane 2 kept finding. Low severity, and worth stating why: closure "
-               "lane 1 hosted both sweeps on `SeparationReminderBackgroundService` at a 17-minute "
-               "stagger, so FR-HR-093's retirement alerts DO run nightly. What is missing is the "
-               "manual run-now the other reminder engines offer, which matters when somebody wants "
-               "to see the effect of a policy change today rather than tomorrow.")),
+     ("DONE", "Built 2026-08-31 (finish plan, lane 1) — and the gap was FOUR TIMES bigger than this "
+              "queue could show. The entry said 'a client method with no screen caller'; in fact "
+              "the **entire separation reminder surface had no screen at all**. All six endpoints — "
+              "`reminders/preview`, `reminders/run`, `retirements/upcoming`, `retirements/sweep`, "
+              "`contract-expiries/upcoming`, `contract-expiries/sweep` — were mentioned by exactly "
+              "one file in the whole frontend: the service that defines them. Three of the six are "
+              "GETs, which instrument 01 skips outright; `reminders/run` matched its own service "
+              "definition and counted as wired; only the two sweeps surfaced, and only because of "
+              "the query-string artefact. **Three separate blind spots hiding one missing screen.** "
+              "`/administration/hr/separation/reminders` now serves all six. ⚠ It stays flagged: "
+              "the matcher needs a literal first argument and the query has to be interpolated, so "
+              "a computed URL is invisible to it — the EmployeesController 73/81 blind spot. "
+              "Splitting the path from the query was tried and changed nothing.")),
     ("POST", "api/hr/separations/contract-expiries/sweep",
-     ("BUILD", "_As the retirement sweep above._ Both also carry `?withinDays=`, so they are "
-               "double-flagged — the interpolated query-string artefact on top of having no "
-               "caller.")),
+     ("DONE", "_As the retirement sweep above_, on the same screen and with the same confirmation. "
+              "⚠ **Both sweeps RAISE separation records against named people — they are not "
+              "previews**, which the old entry never said and which cost a live record while "
+              "probing them: a 10-year horizon raised one immediately (against a harness fixture "
+              "employee, soft-deleted after). The screen therefore shows the upcoming lists first, "
+              "marks who already has a separation, states how many are genuinely new, and puts each "
+              "sweep behind a confirmation naming the horizon.")),
 ])
 
 _d("StaffDisciplineSupportController.cs", [
@@ -810,12 +821,17 @@ _d("PayComponentsController.cs", [
 # instrument 01 used to cross every [Route] in a FILE with every action in it. Fixed at the
 # instrument on 2026-08-30, so those rows no longer exist and need no disposition.
 
-_SANCTION = ("BUILD", "Blocked — see D-18, which RESTATES the original block rather than lifting "
-                      "it. The FR-HR-080 authority rule does exist in `RecordDecision`, but no "
-                      "actor reaches it, and a warning can be recorded against a case nobody has "
-                      "decided — so an editable sanction today would let a penalty be written with "
-                      "no authority rule in force. `probe-authority-gate.mjs` holds both findings "
-                      "as passing assertions.")
+_SANCTION = ("DONE", "Built 2026-08-31 (`8667ab0e`), and all ten left this queue on their own — "
+                     "which is the check that the wiring is real. `SanctionsPanel.tsx` records and "
+                     "corrects the warning, suspension, fine and its payments, termination and the "
+                     "separation checklist. ⚠ The block this entry used to carry was HALF WRONG and "
+                     "is kept in D-18 for that reason: 'no actor reaches the authority rule' rested "
+                     "on two probe assertions expecting a 401 where a permission refusal is a 403, "
+                     "passing against stale tokens. Re-run with a fresh login per actor, the rule "
+                     "DISCRIMINATES — a capped-authority caller is refused a Management-level "
+                     "sanction and accepted for a head-of-department one. The other half was right "
+                     "and understated: warning, suspension and fine were all accepted on a case with "
+                     "no decision, and all four now share one guard.")
 
 _d("StaffDisciplineSubEntityController.cs", [
     ("POST", "api/discipline/cases/{}/warning", _SANCTION),
@@ -854,13 +870,21 @@ _d("LeaveTypesController.cs", [
 ])
 _d("TrainingCompletionsController.cs", [
     ("POST", "api/training-completions/bulk",
-     ("BUILD", "Already carried in section F from the demo feedback: bulk completion has no UI and "
-               "no client method. Confirmed here against the route.")),
+     ("FALSE", "⚠ This entry said 'bulk completion has no UI and no client method, confirmed here "
+               "against the route' — and it was wrong twice over, because it confirmed the ROUTE "
+               "and trusted section F for the rest. Re-verified 2026-08-31: `BulkCompletionPanel` "
+               "calls `trainingCompletionService.bulkRecord` and is mounted on the schedule detail "
+               "screen. The endpoint reads unwired only because the client method is reached "
+               "through the panel's own service call, not a literal path.")),
 ])
 _d("TrainingNominationsController.cs", [
     ("POST", "api/training-nominations/availability-check",
-     ("BUILD", "Already carried in section F: the availability check is never shown, so a nominee "
-               "is scheduled against a clash the server would have reported.")),
+     ("FALSE", "⚠ This entry said 'the availability check is never shown' while the controller-level "
+               "disposition three hundred lines above it recorded the button as BUILT on the same "
+               "day. Re-verified 2026-08-31: it is wired at NomineesPanel.tsx:314. **Two "
+               "dispositions on one controller disagreed and the file rendered both** — which is "
+               "the argument for deriving section F's rows from the same evidence rather than "
+               "letting them age independently.")),
 ])
 
 # ── Pure artefacts, one per controller ──────────────────────────────────────
@@ -916,9 +940,23 @@ DEMO_FEEDBACK = [
     ("Leave", "Leave request numbering still uses a max+1 scan", "BUILD", "Move to NumberSequence as Training already did"),
     ("Succession", "Criteria candidate search has no screen", "BUILD", "successionSearchService.searchCandidates has no caller"),
     ("Succession", "Candidate age and service-years-left not displayed", "BUILD", "API returns both"),
-    ("Training", "Bulk nomination has no UI", "BUILD", "setBulkResult in NomineesPanel.tsx is dead code"),
-    ("Training", "Bulk completion has no UI and no client method", "BUILD", ""),
-    ("Training", "Nominee availability check never shown", "BUILD", "availability-check endpoint has no caller"),
+    ("Training", "Bulk nomination has no UI", "BUILD",
+     "⚠ Re-verified 2026-08-31 and the row was UNDERSTATED, not wrong. `setBulkResult` is declared "
+     "at NomineesPanel.tsx:63 and has no call site anywhere in the frontend, and there is no "
+     "`bulkNominate` client method at all — but `bulkResult` IS rendered at lines 158-166, listing "
+     "the created count and every skipped row. So the RESULT DISPLAY for a bulk nomination was "
+     "built and the action never was: the panel is waiting for a batch that nothing can start."),
+    ("Training", "Bulk completion has no UI and no client method", "DONE",
+     "⚠ **The row was false on both halves, re-verified 2026-08-31.** `BulkCompletionPanel.tsx` "
+     "exists, calls `trainingCompletionService.bulkRecord` at line 89, and is mounted on the "
+     "schedule detail screen at `schedules/[id]/page.tsx:364` with a readOnly guard for cancelled "
+     "schedules. The endpoint is `TrainingCompletionsController.BulkRecordCompletion`."),
+    ("Training", "Nominee availability check never shown", "DONE",
+     "⚠ **The row was false, re-verified 2026-08-31.** A 'Check availability' control is wired at "
+     "NomineesPanel.tsx:314 onto `checkAvailability` (lines 93-97), which calls "
+     "`trainingNominationService.checkAvailability` and renders the conflicts. Closure lane 2 built "
+     "it and this row was never updated — the generator already carried a DONE for the controller "
+     "while this row and the endpoint disposition beside it both still said BUILD."),
     ("Training", "No 'Training Activities' grouped screen", "BUILD", ""),
     ("Training", "Mentoring still inside the Training menu", "BUILD", "Wants its own nav section"),
     ("Training", "Certificate does not gate completion", "BUILD", "Per-program flag"),
@@ -938,6 +976,10 @@ BUILD_CHECKLISTS = {
     "StaffDisciplineSubEntityController.cs": "Discipline — case sub-entities",
     "MedicalInsuranceController.cs": "Medical insurance",
     "EmployeeCareerPathController.cs": "Employee career paths",
+    # The last three BUILD endpoints in the queue (finish plan, lane 1). Enumerated so their
+    # boxes tick themselves the moment a screen calls them.
+    "SeparationsController.cs": "Separations — the two manual sweeps",
+    "EmployeeCompetencyController.cs": "Employee competencies — the missing delete",
 }
 
 BLOCKERS = [
@@ -1701,6 +1743,15 @@ w("| No caller found (instrument 01) | %d |" % len(unwired))
 w("| Confirmed unreachable (01 ∩ 02) | %d |" % len(HIGH))
 w("| Write-DTO fields no form can set | %d across %d DTOs |"
   % (sum(len(d["missing"]) for d in dto_gaps), len(dto_gaps)))
+w("")
+w("⚠ **\"Wired to a screen\" over-counts, and by construction rather than by accident.**")
+w("Instrument 01 matches the frontend SERVICE layer, so an endpoint whose client method exists")
+w("counts as wired even when no screen calls that method. The five travel policy-rule and")
+w("exception endpoints are the known instance — withheld from the UI on purpose (D-29), still")
+w("counted here as reached. Any endpoint withheld the same way will read the same way, so this")
+w("row is a ceiling on coverage, never a measurement of it. **The check that sees through it is")
+w("the two greps** — every service method against the screens that call it, and every non-GET")
+w("route template against the service.")
 w("")
 
 w("## A. Decisions taken")
