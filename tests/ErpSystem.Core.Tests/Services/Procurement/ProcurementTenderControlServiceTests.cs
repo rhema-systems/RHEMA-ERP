@@ -182,6 +182,23 @@ public sealed class ProcurementTenderControlServiceTests
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    [Theory]
+    [InlineData(ProcurementMethodType.QualityBasedSelection, true)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection, true)]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, false)]
+    public async Task TenderWithoutControlUsesSourcingCaseMethodForFinancialConcealment(
+        ProcurementMethodType method,
+        bool expected)
+    {
+        await using var fixture = new Fixture(method);
+
+        var concealed = await fixture.Service.ShouldConcealFinancialProposalAsync(
+            fixture.Tender.Id,
+            fixture.Bids[0].Id);
+
+        concealed.Should().Be(expected);
+    }
+
     [Fact]
     public async Task QbsAllowsFinancialReviewOnlyForUniqueHighestTechnicalBid()
     {
