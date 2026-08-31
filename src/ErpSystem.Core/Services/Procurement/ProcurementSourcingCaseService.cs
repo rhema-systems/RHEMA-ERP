@@ -21,6 +21,10 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
     private const string ReadPermission = "procurement.records.read";
     private const string ManagePermission = "procurement.sourcing.manage";
     private const string EvaluateTenderPermission = "procurement.tender.evaluate";
+    private const string AdministerTenderPermission = "procurement.tender.administer";
+    private const string ApproveTenderPermission = "procurement.tender.approve";
+    private const string ManageContractPermission = "procurement.contract.manage";
+    private const string CreatePurchaseOrderPermission = "procurement.purchase-order.create";
     private const string ClosePermission = "procurement.sourcing.approve";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -558,13 +562,34 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         string tenderReference,
         string correlationId,
         CancellationToken cancellationToken = default)
+        => await RecoverTenderSourceEntryAsync(
+            requisitionId,
+            retainedSourcingReleaseId,
+            tenderId,
+            tenderReference,
+            correlationId,
+            ProcurementTenderSourceRecoveryBoundary.Evaluation,
+            cancellationToken);
+
+    public async Task<ProcurementSourcingCaseEntryGateDto> RecoverTenderSourceEntryAsync(
+        Guid requisitionId,
+        Guid? retainedSourcingReleaseId,
+        Guid tenderId,
+        string tenderReference,
+        string correlationId,
+        ProcurementTenderSourceRecoveryBoundary boundary,
+        CancellationToken cancellationToken = default)
     {
         if (tenderId == Guid.Empty || string.IsNullOrWhiteSpace(tenderReference))
             throw new ProcurementRequisitionSourcingValidationException(
                 "TENDER_SOURCE_REQUIRED", "A persisted tender identity is required to recover sourcing lineage.");
 
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
-        await EnsureCapabilityAsync(EvaluateTenderPermission, tenderReference, normalizedCorrelation, cancellationToken);
+        await EnsureCapabilityAsync(
+            RecoveryPermission(boundary),
+            tenderReference,
+            normalizedCorrelation,
+            cancellationToken);
         var releaseReadiness = await _sourcingReleases.GetLinkedControlReadinessAsync(requisitionId, cancellationToken);
         if (!releaseReadiness.IsReleased || releaseReadiness.CurrentRelease is null)
             throw new ProcurementRequisitionSourcingValidationException(
@@ -616,6 +641,19 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
             normalizedCorrelation, cancellationToken);
         return gate;
     }
+
+    private static string RecoveryPermission(
+        ProcurementTenderSourceRecoveryBoundary boundary) => boundary switch
+        {
+            ProcurementTenderSourceRecoveryBoundary.Evaluation => EvaluateTenderPermission,
+            ProcurementTenderSourceRecoveryBoundary.AwardAdministration => AdministerTenderPermission,
+            ProcurementTenderSourceRecoveryBoundary.AwardApproval => ApproveTenderPermission,
+            ProcurementTenderSourceRecoveryBoundary.ContractCreation => ManageContractPermission,
+            ProcurementTenderSourceRecoveryBoundary.PurchaseOrderCreation => CreatePurchaseOrderPermission,
+            _ => throw new ProcurementRequisitionSourcingValidationException(
+                "TENDER_SOURCE_RECOVERY_BOUNDARY_INVALID",
+                "The tender sourcing-lineage recovery boundary is not supported.")
+        };
 
     private async Task<ProcurementSourcingCaseEntryGateDto> BuildEntryGateAsync(
         ProcurementSourcingCase entity,

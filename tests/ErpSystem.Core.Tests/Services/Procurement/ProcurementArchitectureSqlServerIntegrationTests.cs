@@ -165,6 +165,21 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         using var unitOfWork = new UnitOfWork(context);
         var reservationStore = new ProcurementBudgetReservationStore(context);
         var access = new Mock<IProcurementAccessControlService>();
+        access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string _, CancellationToken _) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "CAPABILITY_ALLOWED",
+                    Message = "The TDC procurement officer capability is available.",
+                    ActorUserId = actorId,
+                    TenantId = tenantId,
+                    PermissionCode = request.PermissionCode,
+                    EvaluatedAtUtc = DateTime.UtcNow
+                });
         var controlEvents = new Mock<IProcurementControlEventService>();
         controlEvents.Setup(item => item.RecordAsync(
                 It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
@@ -2050,10 +2065,13 @@ public sealed class ProcurementArchitectureSqlServerIntegrationTests
         currentUser.SetupGet(item => item.Username).Returns("proc.sql.actor");
         currentUser.SetupGet(item => item.FullName).Returns("Procurement SQL Actor");
         currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
-        currentUser.SetupGet(item => item.Roles).Returns(new[] { "TenantAdmin" });
+        currentUser.SetupGet(item => item.Roles).Returns(new[] { "TDC_PROCUREMENT_OFFICER" });
         currentUser.SetupGet(item => item.Claims).Returns(new Dictionary<string, string>());
         currentUser.Setup(item => item.HasRole(It.IsAny<string>()))
-            .Returns((string role) => string.Equals(role, "TenantAdmin", StringComparison.OrdinalIgnoreCase));
+            .Returns((string role) => string.Equals(
+                role,
+                "TDC_PROCUREMENT_OFFICER",
+                StringComparison.OrdinalIgnoreCase));
         return currentUser;
     }
 

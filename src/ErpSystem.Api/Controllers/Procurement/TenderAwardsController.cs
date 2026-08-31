@@ -180,6 +180,14 @@ public class TenderAwardsController : ControllerBase
         {
             return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "TENDER_SOURCE_RECOVERY_FORBIDDEN", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -253,6 +261,14 @@ public class TenderAwardsController : ControllerBase
         catch (ProcurementAwardReadinessValidationException ex)
         {
             return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "TENDER_SOURCE_RECOVERY_FORBIDDEN", ex.Message));
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -422,6 +438,18 @@ public class TenderAwardsController : ControllerBase
                     Request.Headers["X-Correlation-ID"].FirstOrDefault() ??
                     HttpContext.TraceIdentifier
             });
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "TENDER_SOURCE_RECOVERY_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
         }
         catch (InvalidOperationException ex)
         {

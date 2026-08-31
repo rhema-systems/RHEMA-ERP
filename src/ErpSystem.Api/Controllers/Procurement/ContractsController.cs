@@ -166,6 +166,30 @@ public class ContractsController : ControllerBase
                 eligibility = ex.Result
             });
         }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                title = ex.Code,
+                status = 422,
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = ex.Code,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, new
+            {
+                title = "Tender source recovery forbidden",
+                status = 403,
+                detail = ex.Message,
+                instance = Request.Path.Value,
+                code = "TENDER_SOURCE_RECOVERY_FORBIDDEN",
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);

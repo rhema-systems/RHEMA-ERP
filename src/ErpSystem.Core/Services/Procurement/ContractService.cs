@@ -21,6 +21,7 @@ public class ContractService : IContractService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ISupplierValidationService _supplierValidation;
+    private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly ILogger<ContractService> _logger;
 
     public ContractService(
@@ -34,6 +35,7 @@ public class ContractService : IContractService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ISupplierValidationService supplierValidation,
+        IProcurementSourcingCaseService sourcingCases,
         ILogger<ContractService> logger)
     {
         _contractRepository = contractRepository;
@@ -46,6 +48,7 @@ public class ContractService : IContractService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _supplierValidation = supplierValidation;
+        _sourcingCases = sourcingCases;
         _logger = logger;
     }
 
@@ -187,6 +190,8 @@ public class ContractService : IContractService
                     "The award and tender tenant lineage does not match.");
             EnsureExactAwardCommercials(
                 dto.ContractValue, dto.Currency, award.AwardedAmount, award.Currency);
+
+            await RecoverTenderSourceLineageAsync(tender, dto.TenderAwardId);
 
             await _supplierValidation.EnforceEligibilityAsync(new SupplierEligibilityEvaluationRequest
             {
@@ -335,6 +340,39 @@ public class ContractService : IContractService
             _logger.LogError(ex, "Error updating contract {ContractId}", id);
             throw;
         }
+    }
+
+    private async Task RecoverTenderSourceLineageAsync(
+        Tender tender,
+        Guid awardId)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue)
+            return;
+
+        var gate = await _sourcingCases.RecoverTenderSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            tender.SourcingReleaseId,
+            tender.Id,
+            tender.TenderNumber,
+            $"contract-award-{awardId:N}",
+            ProcurementTenderSourceRecoveryBoundary.ContractCreation);
+        if (tender.SourcingCaseId.HasValue &&
+            tender.SourcingCaseId != gate.SourcingCaseId)
+        {
+            throw new ProcurementRequisitionSourcingValidationException(
+                "SOURCING_CASE_LINEAGE_MISMATCH",
+                "The tender does not match the sourcing case that owns its current immutable release.");
+        }
+
+        if (tender.SourcingReleaseId == gate.SourcingReleaseId &&
+            tender.SourcingCaseId == gate.SourcingCaseId)
+            return;
+
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        tender.UpdatedAt = DateTime.UtcNow;
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync();
     }
 
     public async Task DeleteAsync(Guid id)
