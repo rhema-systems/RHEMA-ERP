@@ -17,6 +17,9 @@ public interface IProcurementSourcingCaseService
     Task<ProcurementSourcingCaseEntryGateDto> EnforceSourceEntryAsync(Guid requisitionId, ProcurementMethodType? expectedMethod, string sourceType, string sourceReference, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSourcingCaseEntryGateDto> RecoverTenderSourceEntryAsync(Guid requisitionId, Guid? retainedSourcingReleaseId,
         Guid tenderId, string tenderReference, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementSourcingCaseEntryGateDto> RecoverTenderSourceEntryAsync(Guid requisitionId, Guid? retainedSourcingReleaseId,
+        Guid tenderId, string tenderReference, string correlationId, ProcurementTenderSourceRecoveryBoundary boundary,
+        CancellationToken cancellationToken = default);
     Task<ProcurementSourcingCaseEntryGateDto> RevalidateSourceEntryAsync(Guid requisitionId, Guid sourcingReleaseId, Guid sourcingCaseId,
         ProcurementMethodType expectedMethod, string sourceType, Guid sourceEntityId, string sourceReference,
         string correlationId, CancellationToken cancellationToken = default);

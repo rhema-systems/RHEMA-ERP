@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
@@ -44,6 +45,88 @@ public sealed class TenderContractLifecycleSecurityTests
         fixture.Contracts.Verify(
             repository => repository.CreateAsync(It.IsAny<Contract>()), Times.Never);
         fixture.SupplierValidation.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ContractCreationRepairsExactAwardTenderLineageWithContractPermission()
+    {
+        var fixture = new Fixture();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
+        var tender = new Tender
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            TenderNumber = "TND-CONTRACT-LINEAGE",
+            Title = "Award contract lineage",
+            Status = "Awarded",
+            SourcePurchaseRequisitionId = requisitionId,
+            SourcingReleaseId = releaseId
+        };
+        var award = new TenderAward
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            TenderId = tender.Id,
+            TenderBidId = Guid.NewGuid(),
+            BusinessPartnerId = Guid.NewGuid(),
+            AwardedAmount = 1_000m,
+            Currency = "GHS",
+            Status = "Awarded"
+        };
+        Contract? created = null;
+        fixture.Awards.Setup(repository => repository.GetByIdAsync(award.Id))
+            .ReturnsAsync(award);
+        fixture.Tenders.Setup(repository => repository.GetByIdAsync(tender.Id))
+            .ReturnsAsync(tender);
+        fixture.Contracts.Setup(repository => repository.GetByAwardIdAsync(award.Id))
+            .ReturnsAsync((Contract?)null);
+        fixture.Contracts.Setup(repository => repository.GenerateContractNumberAsync())
+            .ReturnsAsync("CON-2026-TEST");
+        fixture.Contracts.Setup(repository => repository.CreateAsync(It.IsAny<Contract>()))
+            .Callback((Contract value) => created = value)
+            .ReturnsAsync((Contract value) => value);
+        fixture.Contracts.Setup(repository => repository.GetByIdWithDetailsAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(() => created);
+        fixture.SupplierValidation.Setup(service => service.EnforceEligibilityAsync(
+                It.IsAny<SupplierEligibilityEvaluationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierValidationResult
+            {
+                IsValid = true,
+                TenantId = fixture.TenantId,
+                BusinessPartnerId = award.BusinessPartnerId,
+                Boundary = SupplierEligibilityBoundary.Contract
+            });
+        fixture.SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                requisitionId,
+                releaseId,
+                tender.Id,
+                tender.TenderNumber,
+                $"contract-award-{award.Id:N}",
+                ProcurementTenderSourceRecoveryBoundary.ContractCreation,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+            {
+                SourcingReleaseId = releaseId,
+                SourcingCaseId = caseId,
+                SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+            });
+
+        var result = await fixture.Service.CreateFromAwardAsync(new CreateContractDto
+        {
+            TenderAwardId = award.Id,
+            ContractTitle = "Awarded goods contract",
+            ContractType = "Goods",
+            ContractValue = award.AwardedAmount,
+            Currency = "GHS"
+        });
+
+        result.ContractNumber.Should().Be("CON-2026-TEST");
+        tender.SourcingCaseId.Should().Be(caseId);
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(tender), Times.Once);
+        fixture.SourcingCases.VerifyAll();
     }
 
     [Fact]
@@ -122,11 +205,12 @@ public sealed class TenderContractLifecycleSecurityTests
                 Amendments.Object,
                 Mock.Of<IContractDocumentRepository>(),
                 Awards.Object,
-                Mock.Of<ITenderRepository>(),
+                Tenders.Object,
                 Mock.Of<ITenderBidRepository>(),
                 UnitOfWork.Object,
                 CurrentUser.Object,
                 SupplierValidation.Object,
+                SourcingCases.Object,
                 NullLogger<ContractService>.Instance);
         }
 
@@ -135,9 +219,11 @@ public sealed class TenderContractLifecycleSecurityTests
         public Mock<IContractRepository> Contracts { get; } = new();
         public Mock<IContractAmendmentRepository> Amendments { get; } = new();
         public Mock<ITenderAwardRepository> Awards { get; } = new();
+        public Mock<ITenderRepository> Tenders { get; } = new();
         public Mock<ICurrentUserProvider> CurrentUser { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
         public Mock<ISupplierValidationService> SupplierValidation { get; } = new();
+        public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         public ContractService Service { get; }
     }
 }

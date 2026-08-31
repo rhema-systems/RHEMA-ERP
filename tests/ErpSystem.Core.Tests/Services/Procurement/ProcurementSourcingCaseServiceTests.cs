@@ -365,9 +365,16 @@ public sealed class ProcurementSourcingCaseServiceTests
             tenderId,
             "TND-LEGACY-001",
             "trace-evaluation-recovery");
+        var retry = await fixture.Service.RecoverTenderSourceEntryAsync(
+            fixture.Requisition.Id,
+            fixture.ReleaseDto.Id,
+            tenderId,
+            "TND-LEGACY-001",
+            "trace-evaluation-recovery-retry");
 
         recovered.SourcingReleaseId.Should().Be(fixture.ReleaseDto.Id);
         recovered.SourcingCaseId.Should().NotBeNull();
+        retry.SourcingCaseId.Should().Be(recovered.SourcingCaseId);
         recovered.SelectedMethod.Should().Be(ProcurementMethodType.NationalCompetitiveTendering);
         var retained = await fixture.Service.GetAsync(recovered.SourcingCaseId!.Value);
         retained.Status.Should().Be(ProcurementSourcingCaseStatus.InProgress);
@@ -376,7 +383,8 @@ public sealed class ProcurementSourcingCaseServiceTests
             item.SourceType == "Tender" &&
             item.SourceEntityId == tenderId &&
             item.SourceEntityReference == "TND-LEGACY-001");
-        fixture.VerifyEvaluatorRecoveryAuthorization();
+        (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(1);
+        fixture.VerifyRecoveryAuthorization("procurement.tender.evaluate", Times.Exactly(2));
     }
 
     [Fact]
@@ -396,6 +404,32 @@ public sealed class ProcurementSourcingCaseServiceTests
                 "trace-evaluation-recovery-denied"))
             .Should().ThrowAsync<ProcurementSourcingCaseAuthorizationException>();
         (await fixture.Context.ProcurementSourcingCases.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(ProcurementTenderSourceRecoveryBoundary.AwardAdministration, "procurement.tender.administer")]
+    [InlineData(ProcurementTenderSourceRecoveryBoundary.AwardApproval, "procurement.tender.approve")]
+    [InlineData(ProcurementTenderSourceRecoveryBoundary.ContractCreation, "procurement.contract.manage")]
+    [InlineData(ProcurementTenderSourceRecoveryBoundary.PurchaseOrderCreation, "procurement.purchase-order.create")]
+    public async Task DownstreamTenderRecoveryUsesThePermissionOfItsExactBoundary(
+        ProcurementTenderSourceRecoveryBoundary boundary,
+        string expectedPermission)
+    {
+        await using var fixture = new Fixture
+        {
+            RecommendedMethod = ProcurementMethodType.NationalCompetitiveTendering
+        };
+
+        var recovered = await fixture.Service.RecoverTenderSourceEntryAsync(
+            fixture.Requisition.Id,
+            fixture.ReleaseDto.Id,
+            Guid.NewGuid(),
+            $"TND-{boundary}",
+            $"trace-{boundary}",
+            boundary);
+
+        recovered.SourcingCaseId.Should().NotBeNull();
+        fixture.VerifyRecoveryAuthorization(expectedPermission);
     }
 
     [Fact]
@@ -687,11 +721,17 @@ public sealed class ProcurementSourcingCaseServiceTests
                 Times.Once);
 
         public void VerifyEvaluatorRecoveryAuthorization() =>
+            VerifyRecoveryAuthorization("procurement.tender.evaluate");
+
+        public void VerifyRecoveryAuthorization(string permission) =>
+            VerifyRecoveryAuthorization(permission, Times.Once());
+
+        public void VerifyRecoveryAuthorization(string permission, Times times) =>
             _accessControl.Verify(item => item.EnforceCapabilityAsync(
                     It.Is<ProcurementAccessCapabilityRequest>(request =>
-                        request.PermissionCode == "procurement.tender.evaluate"),
+                        request.PermissionCode == permission),
                     It.IsAny<string>(), It.IsAny<CancellationToken>()),
-                Times.Once);
+                times);
 
         public void MakeSourceUnavailable() =>
             _releases.Setup(item => item.GetLinkedControlReadinessAsync(

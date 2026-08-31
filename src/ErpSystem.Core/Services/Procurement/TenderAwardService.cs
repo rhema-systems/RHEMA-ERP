@@ -27,6 +27,7 @@ public class TenderAwardService : ITenderAwardService
     private readonly ILogger<TenderAwardService> _logger;
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IProcurementAwardReadinessService _awardReadiness;
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
     private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
@@ -46,6 +47,7 @@ public class TenderAwardService : ITenderAwardService
         ICurrentUserProvider currentUserProvider,
         IProcurementTenderControlService tenderControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IProcurementSourcingCaseService sourcingCases,
         IProcurementAwardReadinessService awardReadiness,
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
         IProcurementPurchaseOrderSodService purchaseOrderSod,
@@ -65,6 +67,7 @@ public class TenderAwardService : ITenderAwardService
         _currentUserProvider = currentUserProvider;
         _tenderControlService = tenderControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _sourcingCases = sourcingCases;
         _awardReadiness = awardReadiness;
         _purchaseOrderSources = purchaseOrderSources;
         _purchaseOrderSod = purchaseOrderSod;
@@ -281,6 +284,12 @@ public class TenderAwardService : ITenderAwardService
                 throw new InvalidOperationException(
                     $"An award recommendation requires an evaluated bid (current status: '{bid.Status}').");
 
+            await RecoverTenderSourceLineageAsync(
+                tender,
+                ProcurementTenderSourceRecoveryBoundary.AwardAdministration,
+                correlationId,
+                cancellationToken);
+
             // Check if award already exists for this tender
             var existingAward = await _awardRepository.GetByTenderIdAsync(tenderId);
             var isRejectedResubmission = existingAward != null &&
@@ -383,6 +392,12 @@ public class TenderAwardService : ITenderAwardService
             !string.Equals(bid.Status, "Evaluated", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 "The tender and recommended bid must remain evaluated until award approval.");
+
+        await RecoverTenderSourceLineageAsync(
+            tender,
+            ProcurementTenderSourceRecoveryBoundary.AwardApproval,
+            correlationId,
+            cancellationToken);
 
         var correlation = string.IsNullOrWhiteSpace(correlationId)
             ? Guid.NewGuid().ToString("N")
@@ -633,6 +648,21 @@ public class TenderAwardService : ITenderAwardService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            if (award.TenantId != _currentUserProvider.TenantId ||
+                tender.TenantId != award.TenantId ||
+                bid.TenantId != award.TenantId ||
+                bid.TenderId != tender.Id ||
+                bid.BusinessPartnerId != award.BusinessPartnerId)
+            {
+                throw new InvalidOperationException(
+                    "The award, tender, bid, supplier, or tenant lineage is invalid.");
+            }
+            if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(award.Status, "ContractSigned", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"A purchase order requires a finalized tender award (current status: '{award.Status}').");
+            }
             if (dto.ContractId.HasValue)
             {
                 var contract = await _unitOfWork.Repository<Contract>()
@@ -650,6 +680,11 @@ public class TenderAwardService : ITenderAwardService
                 }
             }
             var sourceCorrelationId = Guid.NewGuid().ToString("N");
+            await RecoverTenderSourceLineageAsync(
+                tender,
+                ProcurementTenderSourceRecoveryBoundary.PurchaseOrderCreation,
+                sourceCorrelationId,
+                CancellationToken.None);
             var sourceType = dto.ContractId.HasValue
                 ? ProcurementPurchaseOrderSourceType.Contract
                 : ProcurementPurchaseOrderSourceType.TenderAward;
@@ -939,6 +974,44 @@ public class TenderAwardService : ITenderAwardService
             : !string.IsNullOrWhiteSpace(fallback)
                 ? fallback.Trim().ToUpperInvariant()
                 : "GHS";
+
+    private async Task RecoverTenderSourceLineageAsync(
+        Tender tender,
+        ProcurementTenderSourceRecoveryBoundary boundary,
+        string? correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (!tender.SourcePurchaseRequisitionId.HasValue)
+            return;
+
+        var gate = await _sourcingCases.RecoverTenderSourceEntryAsync(
+            tender.SourcePurchaseRequisitionId.Value,
+            tender.SourcingReleaseId,
+            tender.Id,
+            tender.TenderNumber,
+            string.IsNullOrWhiteSpace(correlationId)
+                ? Guid.NewGuid().ToString("N")
+                : correlationId.Trim(),
+            boundary,
+            cancellationToken);
+        if (tender.SourcingCaseId.HasValue &&
+            tender.SourcingCaseId != gate.SourcingCaseId)
+        {
+            throw new ProcurementRequisitionSourcingValidationException(
+                "SOURCING_CASE_LINEAGE_MISMATCH",
+                "The tender does not match the sourcing case that owns its current immutable release.");
+        }
+
+        if (tender.SourcingReleaseId == gate.SourcingReleaseId &&
+            tender.SourcingCaseId == gate.SourcingCaseId)
+            return;
+
+        tender.SourcingReleaseId = gate.SourcingReleaseId;
+        tender.SourcingCaseId = gate.SourcingCaseId;
+        tender.UpdatedAt = DateTime.UtcNow;
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
 
     private async Task EnsureLegacyAwardAllowedAsync(Guid tenderId)
     {

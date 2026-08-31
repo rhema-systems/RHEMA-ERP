@@ -18,13 +18,19 @@ public sealed class TenderAwardServiceAwardReadinessTests
     {
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
         var tender = new Tender
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             TenderNumber = "LEGACY-001",
             Title = "Legacy tender",
-            Status = "Evaluated"
+            Status = "Evaluated",
+            SourcePurchaseRequisitionId = requisitionId,
+            SourcingReleaseId = releaseId,
+            SourcingCaseId = caseId
         };
         var bid = new TenderBid
         {
@@ -58,6 +64,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
         var exceptionalControl =
             new Mock<IProcurementExceptionalSourcingControlService>();
         var readiness = new Mock<IProcurementAwardReadinessService>();
+        var sourcingCases = new Mock<IProcurementSourcingCaseService>();
         var blockedDecision = new ProcurementAwardReadinessDto
         {
             Id = Guid.NewGuid(),
@@ -76,6 +83,20 @@ public sealed class TenderAwardServiceAwardReadinessTests
         exceptionalControl.Setup(service => service.IsExceptionalAsync(
                 tender.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        sourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                requisitionId,
+                releaseId,
+                tender.Id,
+                tender.TenderNumber,
+                "award-correlation",
+                ProcurementTenderSourceRecoveryBoundary.AwardApproval,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+            {
+                SourcingReleaseId = releaseId,
+                SourcingCaseId = caseId,
+                SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+            });
         tenderRepository.Setup(repository => repository.GetByIdAsync(tender.Id))
             .ReturnsAsync(tender);
         bidRepository.Setup(repository => repository.GetByIdAsync(bid.Id))
@@ -113,6 +134,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
             currentUser.Object,
             tenderControl.Object,
             exceptionalControl.Object,
+            sourcingCases.Object,
             readiness.Object,
             new Mock<IProcurementPurchaseOrderSourceService>().Object,
             new Mock<IProcurementPurchaseOrderSodService>().Object,
@@ -144,6 +166,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
             It.IsAny<EvaluateProcurementAwardReadinessRequest>(),
             "award-correlation",
             It.IsAny<CancellationToken>()), Times.Once);
+        sourcingCases.VerifyAll();
     }
 
     [Fact]
@@ -200,6 +223,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
             currentUser.Object,
             tenderControl.Object,
             exceptionalControl.Object,
+            new Mock<IProcurementSourcingCaseService>().Object,
             readiness.Object,
             new Mock<IProcurementPurchaseOrderSourceService>().Object,
             new Mock<IProcurementPurchaseOrderSodService>().Object,
@@ -245,6 +269,147 @@ public sealed class TenderAwardServiceAwardReadinessTests
         fixture.Bids.Verify(repository => repository.UpdateAsync(
             It.IsAny<TenderBid>()), Times.Never);
         fixture.Readiness.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AwardRecommendationRepairsExactPrTenderLineageWithAdministerPermission()
+    {
+        var fixture = new AwardFixture();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
+        fixture.Tender.SourcePurchaseRequisitionId = requisitionId;
+        fixture.Tender.SourcingReleaseId = releaseId;
+        fixture.SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                requisitionId,
+                releaseId,
+                fixture.Tender.Id,
+                fixture.Tender.TenderNumber,
+                "award-lineage",
+                ProcurementTenderSourceRecoveryBoundary.AwardAdministration,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+            {
+                SourcingReleaseId = releaseId,
+                SourcingCaseId = caseId,
+                SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+            });
+
+        var result = await fixture.Service.CreateAwardAsync(
+            fixture.Tender.Id,
+            new CreateAwardDto
+            {
+                TenderId = fixture.Tender.Id,
+                TenderBidId = fixture.Bid.Id,
+                AwardedAmount = fixture.Bid.TotalBidAmount,
+                Currency = "GHS",
+                AwardJustification = "Retained evaluated recommendation"
+            },
+            "award-lineage");
+
+        result.Status.Should().Be("PendingApproval");
+        fixture.Tender.SourcingReleaseId.Should().Be(releaseId);
+        fixture.Tender.SourcingCaseId.Should().Be(caseId);
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(fixture.Tender), Times.Once);
+        fixture.SourcingCases.VerifyAll();
+    }
+
+    [Fact]
+    public async Task AwardRecommendationRejectsAConflictingRetainedSourcingCase()
+    {
+        var fixture = new AwardFixture();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        fixture.Tender.SourcePurchaseRequisitionId = requisitionId;
+        fixture.Tender.SourcingReleaseId = releaseId;
+        fixture.Tender.SourcingCaseId = Guid.NewGuid();
+        fixture.SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                requisitionId,
+                releaseId,
+                fixture.Tender.Id,
+                fixture.Tender.TenderNumber,
+                It.IsAny<string>(),
+                ProcurementTenderSourceRecoveryBoundary.AwardAdministration,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+            {
+                SourcingReleaseId = releaseId,
+                SourcingCaseId = Guid.NewGuid(),
+                SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+            });
+
+        await fixture.Service.Invoking(service => service.CreateAwardAsync(
+                fixture.Tender.Id,
+                new CreateAwardDto
+                {
+                    TenderId = fixture.Tender.Id,
+                    TenderBidId = fixture.Bid.Id,
+                    AwardedAmount = fixture.Bid.TotalBidAmount
+                }))
+            .Should().ThrowAsync<ProcurementRequisitionSourcingValidationException>()
+            .Where(exception => exception.Code == "SOURCING_CASE_LINEAGE_MISMATCH");
+        fixture.Awards.Verify(repository => repository.CreateAsync(
+            It.IsAny<TenderAward>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AwardToPurchaseOrderRepairsLineageBeforeApprovedSourceResolution()
+    {
+        var fixture = new AwardFixture();
+        var requisitionId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
+        fixture.Tender.SourcePurchaseRequisitionId = requisitionId;
+        fixture.Tender.SourcingReleaseId = releaseId;
+        var award = new TenderAward
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            TenderId = fixture.Tender.Id,
+            TenderBidId = fixture.Bid.Id,
+            BusinessPartnerId = fixture.Bid.BusinessPartnerId,
+            AwardedAmount = fixture.Bid.TotalBidAmount,
+            Currency = "GHS",
+            Status = "Awarded"
+        };
+        fixture.Awards.Setup(repository => repository.GetByIdAsync(award.Id))
+            .ReturnsAsync(award);
+        fixture.SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
+                requisitionId,
+                releaseId,
+                fixture.Tender.Id,
+                fixture.Tender.TenderNumber,
+                It.IsAny<string>(),
+                ProcurementTenderSourceRecoveryBoundary.PurchaseOrderCreation,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSourcingCaseEntryGateDto
+            {
+                SourcingReleaseId = releaseId,
+                SourcingCaseId = caseId,
+                SelectedMethod = ProcurementMethodType.NationalCompetitiveTendering
+            });
+        fixture.PurchaseOrderSources.Setup(service => service.ResolveAsync(
+                ProcurementPurchaseOrderSourceType.TenderAward,
+                award.Id,
+                award.BusinessPartnerId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementPurchaseOrderSourceValidationException(
+                "PO_TEST_STOP",
+                "Stop after lineage recovery."));
+
+        await fixture.Service.Invoking(service => service.CreatePurchaseOrderFromAwardAsync(
+                new CreatePurchaseOrderFromAwardDto
+                {
+                    TenderAwardId = award.Id,
+                    RequiredDate = DateTime.UtcNow.AddDays(14)
+                }))
+            .Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(exception => exception.Code == "PO_TEST_STOP");
+
+        fixture.Tender.SourcingCaseId.Should().Be(caseId);
+        fixture.SourcingCases.VerifyAll();
+        fixture.PurchaseOrderSources.VerifyAll();
     }
 
     [Fact]
@@ -381,8 +546,9 @@ public sealed class TenderAwardServiceAwardReadinessTests
                 Mock.Of<ITenderEvaluatorRepository>(), Notifications.Object,
                 Mock.Of<IPurchaseOrderRepository>(), Mock.Of<IPurchaseOrderItemRepository>(),
                 Mock.Of<ITenderNegotiationRepository>(), UnitOfWork.Object, CurrentUser.Object,
-                TenderControls.Object, ExceptionalControls.Object, Readiness.Object,
-                Mock.Of<IProcurementPurchaseOrderSourceService>(),
+                TenderControls.Object, ExceptionalControls.Object, SourcingCases.Object,
+                Readiness.Object,
+                PurchaseOrderSources.Object,
                 Mock.Of<IProcurementPurchaseOrderSodService>(),
                 Mock.Of<ILogger<TenderAwardService>>());
         }
@@ -399,6 +565,8 @@ public sealed class TenderAwardServiceAwardReadinessTests
         public Mock<IProcurementTenderControlService> TenderControls { get; } = new();
         public Mock<IProcurementExceptionalSourcingControlService> ExceptionalControls { get; } = new();
         public Mock<IProcurementAwardReadinessService> Readiness { get; } = new();
+        public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
+        public Mock<IProcurementPurchaseOrderSourceService> PurchaseOrderSources { get; } = new();
         public Mock<ITenderNotificationService> Notifications { get; } = new();
         public TenderAwardService Service { get; }
     }
