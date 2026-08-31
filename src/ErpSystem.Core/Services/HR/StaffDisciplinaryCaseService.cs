@@ -97,6 +97,66 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         return current;
     }
 
+    /// <summary>
+    /// What authority the caller holds to decide THIS employee's case, or <c>null</c> for none.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>FR-HR-080.</b> The rule this replaces read "if you are not HR, SuperAdmin or Admin,
+    /// you are capped at head-of-department authority" — which caps by the ABSENCE of a role rather
+    /// than by heading anything. Two consequences, both proven against the running API before this
+    /// changed: a TenantAdmin who heads no unit received head-of-department authority over every
+    /// employee in the tenant simply for not being HR, and an actual head of department received
+    /// nothing, because headship was never consulted.</para>
+    ///
+    /// <para>Authority is now resolved from the organisation: <b>HR, SuperAdmin and Admin</b> hold
+    /// full authority, and <b>the head of the employee's own unit — or of any unit above it</b> holds
+    /// head-of-department authority. A directorate head therefore covers the departments beneath
+    /// them, which is what a hierarchy means. Everybody else holds none, and is refused exactly as
+    /// though the case did not exist, so its existence is not disclosed.</para>
+    ///
+    /// <para>⚠ The walk is cycle-guarded. The unit tree should be acyclic, but "should be" is how
+    /// the reporting-line cycle in the seeded test data got in — and an unguarded parent walk over a
+    /// looped tree does not fail, it hangs.</para>
+    /// </remarks>
+    private async Task<DisciplinaryActionAuthority?> ResolveIssuingAuthorityAsync(
+        Guid subjectEmployeeId, Guid actorEmployeeId, CancellationToken cancellationToken)
+    {
+        if (_currentUserProvider.HasRole(Constants.Roles.Hr)
+            || _currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
+            || _currentUserProvider.HasRole("Admin"))
+        {
+            return DisciplinaryActionAuthority.Management;
+        }
+
+        // ⚠ The actor comes in as a PARAMETER rather than from ICurrentUserProvider, which carries
+        // UserId and TenantId but no employee link. The controller already resolves the employee id
+        // and refuses the request when the account has none, so it is the one value that has been
+        // checked before the service sees it.
+        if (actorEmployeeId == Guid.Empty)
+            return null;
+
+        var subject = await _unitOfWork.Repository<Employee>().GetByIdAsync(subjectEmployeeId);
+        if (subject?.OrganizationUnitId is not Guid unitId)
+            return null;
+
+        var units = _unitOfWork.Repository<OrganizationUnit>();
+        var visited = new HashSet<Guid>();
+        Guid? cursor = unitId;
+
+        while (cursor is Guid current && visited.Add(current))
+        {
+            var unit = await units.GetByIdAsync(current);
+            if (unit is null || unit.IsDeleted) return null;
+
+            if (unit.HeadEmployeeId == actorEmployeeId)
+                return DisciplinaryActionAuthority.HeadOfDepartment;
+
+            cursor = unit.ParentUnitId;
+        }
+
+        return null;
+    }
+
     private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid id)
     {
         var entity = await _caseRepository.GetByIdAsync(id);
@@ -472,6 +532,20 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     {
         var entity = await GetOwnedCaseAsync(dto.CaseId);
 
+        // ⚠ STANDING FIRST, before the state rules and before anything the caller sent. A caller
+        // with no authority over this employee must not be able to tell a Draft case from one under
+        // review from one that does not exist — and putting this check after the status check did
+        // exactly that, which slice 0 caught by asserting a plain employee is refused. The status
+        // refusal is informative on purpose; it is only safe once we know the caller may see it.
+        var authority = await ResolveIssuingAuthorityAsync(entity.EmployeeId, decidedByEmployeeId, cancellationToken);
+
+        if (authority is null)
+        {
+            // ArgumentException with the SAME message GetOwnedCaseAsync uses, deliberately, so a
+            // caller with no standing cannot distinguish "not yours" from "does not exist".
+            throw new ArgumentException($"Disciplinary case with ID '{dto.CaseId}' not found.");
+        }
+
         var allowedStatuses = new[]
         {
             DisciplinaryStatus.UnderReview,
@@ -492,14 +566,11 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         await EnsureEmployeeHasBeenHeardAsync(entity, cancellationToken);
 
-        if (!_currentUserProvider.HasRole(Constants.Roles.Hr)
-            && !_currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
-            && !_currentUserProvider.HasRole("Admin")
-            && actionType.MinimumAuthority > DisciplinaryActionAuthority.HeadOfDepartment)
+        if (actionType.MinimumAuthority > authority)
         {
             throw new UnauthorizedAccessException(
-                $"'{actionType.Name}' requires {actionType.MinimumAuthority} authority to issue. " +
-                "A head of department may only issue actions set to head-of-department authority.");
+                $"'{actionType.Name}' requires {actionType.MinimumAuthority} authority to issue, " +
+                $"and you hold {authority} authority for this employee.");
         }
 
         entity.ActionTypeId = dto.ActionTypeId;

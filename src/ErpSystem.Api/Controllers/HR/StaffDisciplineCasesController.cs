@@ -279,7 +279,25 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Case moved to Under Review." });
     }
 
-    [Authorize(Policy = HrPermissions.DisciplineWritePolicy)]
+    /// <summary>Proposes the decision on a case. The workflow then routes it for confirmation.</summary>
+    /// <remarks>
+    /// <para><b>⚠ Deliberately ungated, and the authority is resolved in the service instead</b>
+    /// (<c>ResolveIssuingAuthorityAsync</c>). FR-HR-080 gives a head of department authority to issue
+    /// the lightest sanctions, and headship is DATA — <c>OrganizationUnits.HeadEmployeeId</c> — not a
+    /// role, so no permission policy can express it. Behind <c>HR.Discipline.Write</c> a head of
+    /// department could never reach the rule written for them.</para>
+    ///
+    /// <para>This follows what the surrounding routes already do rather than inventing a posture:
+    /// <c>approve-decision</c>, <c>reject-decision</c> and <c>awaiting-my-approval</c> are all
+    /// ungated for exactly this reason, and the last of them says so — "the approver of a
+    /// disciplinary decision is a head of department or the MD, neither of whom is necessarily in
+    /// HR". Confirming a dismissal was already open while merely PROPOSING one was not, which was
+    /// the inconsistency.</para>
+    ///
+    /// <para>The service refuses a caller with no standing over the employee <b>exactly as it
+    /// refuses a case that does not exist</b> — same exception, same message — so the two cannot be
+    /// told apart and the route cannot be used to discover which case ids are real.</para>
+    /// </remarks>
     [HttpPost("{id:guid}/decision")]
     public async Task<IActionResult> RecordDecision(Guid id, [FromBody] RecordDisciplinaryDecisionDto dto)
     {
