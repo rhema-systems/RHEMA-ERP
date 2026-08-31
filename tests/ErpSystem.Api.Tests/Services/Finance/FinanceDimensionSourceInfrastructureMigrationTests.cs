@@ -41,6 +41,10 @@ public sealed class FinanceDimensionSourceInfrastructureMigrationTests
         sql.Should().Contain("[Unavailable definition ");
         sql.Should().Contain("[Unavailable value ");
         sql.Should().Contain("MERGE FinanceDimensionSnapshots");
+        sql.Should().Contain("UPDATE accountRule");
+        sql.Should().Contain("FROM FinanceDimensionAccountRules accountRule");
+        sql.Should().NotContain("UPDATE rule");
+        sql.Should().NotContain("FinanceDimensionAccountRules rule");
         sql.Should().NotContain("UPDATE FinanceDimensionSets SET CombinationHash");
         sql.Should().NotContain("UPDATE AccountTransactions SET DebitAmount");
         sql.Should().NotContain("UPDATE AccountTransactions SET CreditAmount");
