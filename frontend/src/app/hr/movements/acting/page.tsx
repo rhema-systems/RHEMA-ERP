@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { Loader2, Pencil, Plus, CalendarClock, CheckCircle2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, CalendarClock, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -87,6 +87,8 @@ export default function ActingAppointmentsPage() {
   const [completing, setCompleting] = useState<StaffActingAppointment | null>(null);
   const [completionNotes, setCompletionNotes] = useState('');
   const [editing, setEditing] = useState<StaffActingAppointment | null>(null);
+  const [endingEarly, setEndingEarly] = useState<StaffActingAppointment | null>(null);
+  const [endEarlyReason, setEndEarlyReason] = useState('');
   const [edit, setEdit] = useState({
     endDate: '',
     receivesActingAllowance: false,
@@ -163,7 +165,7 @@ export default function ActingAppointmentsPage() {
         receivesActingAllowance: edit.receivesActingAllowance,
         actingAllowance: edit.actingAllowance === '' ? null : Number(edit.actingAllowance),
         allowanceCalculation: edit.allowanceCalculation || null,
-        status: edit.status,
+        // status is deliberately not sent — the server ignores it; see the note in the dialog.
         notes: edit.notes.trim() || null,
       }),
     onSuccess: async () => {
@@ -200,6 +202,30 @@ export default function ActingAppointmentsPage() {
     },
     onError: (error: any) =>
       toast({ title: 'Refused', description: error?.message, variant: 'destructive' }),
+  });
+
+  /**
+   * ⚠ The only route to TerminatedEarly. It was previously reachable only by setting Status on the
+   * plain edit — the same field that could reach Completed and strand the record with no completion
+   * date. The endpoint sets the completion date with the status and records why.
+   */
+  const endEarly = useMutation({
+    mutationFn: () => {
+      if (!endingEarly) throw new Error('No appointment selected');
+      return actingAppointmentService.terminateEarly(endingEarly.id, endEarlyReason.trim());
+    },
+    onSuccess: async () => {
+      await refresh();
+      setEndingEarly(null);
+      setEndEarlyReason('');
+      toast({ title: 'Acting appointment ended early' });
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'Could not end the appointment',
+        description: e?.response?.data?.message ?? e?.message,
+      }),
   });
 
   const complete = useMutation({
@@ -311,10 +337,19 @@ export default function ActingAppointmentsPage() {
                           </Button>
                         )}
                         {(a.status === 'Active' || a.status === 'Extended') && (
-                          <Button size="sm" variant="outline" onClick={() => setCompleting(a)}>
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                            Complete
-                          </Button>
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => setCompleting(a)}>
+                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                              Complete
+                            </Button>
+                            {/* Ending early is a different act from completing: the appointment
+                                stops before the date it was given. It needs a reason, which the
+                                dialog requires and appends to the notes. */}
+                            <Button size="sm" variant="ghost" onClick={() => setEndingEarly(a)}>
+                              <XCircle className="mr-2 h-4 w-4" />
+                              End early
+                            </Button>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -466,24 +501,22 @@ export default function ActingAppointmentsPage() {
                   onChange={(e) => setEdit((f) => ({ ...f, endDate: e.target.value }))}
                 />
               </div>
+              {/*
+                ⚠ This was a Status select offering Active / Extended / TerminatedEarly, and the
+                server now ignores the field entirely — so leaving the control would show something
+                that appears to work and silently does nothing. It was never safe: assigning Status
+                here also reached Completed, which left completionDate null and locked the record out
+                of both this route and `complete`. Every one of these states now has a door that
+                maintains what goes with it, so the status is shown rather than set.
+              */}
               <div className="space-y-2">
-                <Label htmlFor="ae-status">Status</Label>
-                <Select
-                  value={edit.status}
-                  onValueChange={(v) => setEdit((f) => ({ ...f, status: v as StaffActingStatus }))}
-                >
-                  <SelectTrigger id="ae-status"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(['Active', 'Extended', 'TerminatedEarly'] as StaffActingStatus[]).map((st) => (
-                      <SelectItem key={st} value={st}>
-                        {st.replace(/([a-z])([A-Z])/g, '$1 $2')}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Status</Label>
+                <div className="flex h-10 items-center">
+                  <StatusBadge status={editing?.status ?? 'Active'} />
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Completed and Converted are reached by their own actions, not by setting them
-                  here.
+                  Status moves through its own actions — extend, end early, complete or convert —
+                  never by editing. Each records what belongs with the change.
                 </p>
               </div>
             </div>
@@ -593,6 +626,56 @@ export default function ActingAppointmentsPage() {
             <Button onClick={() => complete.mutate()} disabled={complete.isPending}>
               {complete.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Complete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={endingEarly !== null}
+        onOpenChange={(open) => {
+          if (!open) { setEndingEarly(null); setEndEarlyReason(''); }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>End {endingEarly?.appointmentNumber} early</DialogTitle>
+            <DialogDescription>
+              The appointment stops before {endingEarly?.endDate
+                ? new Date(endingEarly.endDate).toLocaleDateString()
+                : 'the date it was given'}. Use Complete instead when it has simply run its course —
+              the two say different things about what happened, and the allowance is worked out from
+              the period actually served.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="endEarlyReason">Reason</Label>
+            <Textarea
+              id="endEarlyReason"
+              rows={3}
+              value={endEarlyReason}
+              onChange={(e) => setEndEarlyReason(e.target.value)}
+              placeholder="Why the appointment is ending before its end date"
+            />
+            {/* Required by the server, and required here so the refusal never has to explain it. */}
+            <p className="text-xs text-muted-foreground">
+              Recorded against the appointment. Ending someone&rsquo;s acting appointment early is a
+              decision, so the record carries why.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setEndingEarly(null); setEndEarlyReason(''); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => endEarly.mutate()}
+              disabled={endEarly.isPending || endEarlyReason.trim() === ''}
+            >
+              {endEarly.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              End early
             </Button>
           </DialogFooter>
         </DialogContent>

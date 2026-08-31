@@ -1224,6 +1224,26 @@ public class ExtendStaffActingAppointmentDto
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// Ends an acting appointment before its end date.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>TerminatedEarly had no route at all.</b> The only way to reach it was to assign Status on
+/// the plain edit — which also reached Completed, left CompletionDate null, and locked the record
+/// out of every route that could repair it. Lane 3 stopped the edit assigning Status, so this exists
+/// to keep the state reachable through a door that maintains what goes with it. A reason is
+/// required: ending somebody's acting appointment early is a decision, not a correction.
+/// </remarks>
+public class TerminateStaffActingAppointmentEarlyDto
+{
+    [Required]
+    public Guid AppointmentId { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
 /// <summary>Convert a completed acting appointment into a permanent promotion.</summary>
 public class ConvertActingToPermanentDto
 {

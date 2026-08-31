@@ -264,6 +264,15 @@ export type UpdateStaffTravelAlert = CreateStaffTravelAlert & { id: string };
 export interface StaffTravelAlertNotification extends AuditFields {
   travelAlertId: string;
   alertTitle?: string | null;
+  /**
+   * The alert's own text and severity.
+   *
+   * ⚠ Both were absent from this type AND from the DTO behind it, so `MyTravelAlertsPanel` had
+   * nothing to render and showed a traveller the title alone — D-31 recurring on the surface that
+   * asks them to confirm they have read a security briefing. Added to both, lane 3.
+   */
+  alertBody?: string | null;
+  severity?: TravelAlertSeverity | null;
   staffTravelRequestId: string;
   requestNumber?: string | null;
   employeeId: string;

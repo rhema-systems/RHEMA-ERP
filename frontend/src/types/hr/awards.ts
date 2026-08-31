@@ -852,3 +852,20 @@ export interface UpdateAwardNomination {
   proposedMonetaryAmount?: number | null;
   proposedLeaveDays?: number | null;
 }
+
+/**
+ * What an award attachment can be, from `AwardAttachmentType`.
+ *
+ * ⚠ Read off the enum rather than inferred from the one value the nomination screen uploads.
+ * Four TypeScript unions in this module's neighbours turned out to be fiction that type-checked,
+ * so this is pinned to the C# definition: Photo = 1, Certificate = 2, Citation = 3,
+ * SupportingDocument = 4.
+ */
+export const AWARD_ATTACHMENT_TYPES = [
+  'Photo',
+  'Certificate',
+  'Citation',
+  'SupportingDocument',
+] as const;
+
+export type AwardAttachmentType = (typeof AWARD_ATTACHMENT_TYPES)[number];

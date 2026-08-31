@@ -3,11 +3,13 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useToast } from '@/hooks/use-toast';
 import {
   AlertTriangle,
   CheckCircle2,
   Info,
   Loader2,
+  RefreshCw,
   ShieldAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -100,6 +102,7 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [docCategory, setDocCategory] = useState<SeparationDocumentCategory>('Other');
@@ -131,6 +134,33 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
   const approvedOrLater = separation
     && ['Approved', 'ClearanceInProgress', 'ClearanceCompleted', 'SettlementPending',
         'SettlementUnderReview', 'SettlementApproved', 'Completed'].includes(separation.status);
+
+  /**
+   * ⚠ Reports what it DID, not merely that it worked. A refresh that adds nothing is the normal
+   * case, and a toast saying "done" leaves the user unable to tell that from a failure.
+   */
+  const refreshAssets = useMutation({
+    mutationFn: () => separationService.refreshClearanceAssets(id),
+    onSuccess: async (updated) => {
+      const before = clearance?.totalItems ?? 0;
+      const added = (updated?.totalItems ?? 0) - before;
+      await queryClient.invalidateQueries({ queryKey: ['separation-clearance', id] });
+      toast({
+        title: added > 0
+          ? `${added} line${added === 1 ? '' : 's'} added from the asset register`
+          : 'Nothing new to add',
+        description: added > 0
+          ? 'Anything issued since the form was drawn is now on it. Lines already answered were left alone.'
+          : 'Everything on the register is already on this form.',
+      });
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'Could not re-read the asset register',
+        description: e?.response?.data?.message ?? e?.message,
+      }),
+  });
 
   const { data: clearance } = useQuery({
     queryKey: ['separation-clearance', id],
@@ -446,6 +476,29 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
             <div className="py-8 text-center text-muted-foreground">Loading the clearance form…</div>
           ) : (
             <>
+              {/*
+                FR-HR-183. The form is drawn once, at the moment clearance starts — anything issued
+                to the leaver after that is simply absent from it, which is how a laptop handed over
+                during someone's notice period leaves with them. The endpoint existed and had no
+                caller of any kind.
+
+                ⚠ Offered as a plain button because it is safe to press twice: it adds only what is
+                missing, reprices only lines nobody has answered, and never touches an answered one.
+              */}
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refreshAssets.mutate()}
+                  disabled={refreshAssets.isPending}
+                >
+                  {refreshAssets.isPending
+                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Re-read the asset register
+                </Button>
+              </div>
+
               <Card>
                 <CardContent className="grid gap-4 pt-6 sm:grid-cols-3 lg:grid-cols-6">
                   <Field label="Lines">{clearance.totalItems}</Field>

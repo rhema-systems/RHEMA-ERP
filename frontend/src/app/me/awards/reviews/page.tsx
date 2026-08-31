@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Info, Loader2, Star, Trophy } from 'lucide-react';
+import { ClipboardCheck, Info, Loader2, Pencil, Star, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +28,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { awardsService } from '@/services/hr/awards.service';
-import type { AwardPendingReview } from '@/types/hr/awards';
+import type { AwardPendingReview, AwardCommitteeReview } from '@/types/hr/awards';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -48,6 +48,9 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
 export default function MyReviewsPage() {
   const queryClient = useQueryClient();
   const [scoring, setScoring] = useState<AwardPendingReview | null>(null);
+  // ⚠ A score a member gave was final: scoring was wired and revising was not, so a mistyped 9
+  // for a 90 stood, on the record that decides who wins. The route existed and had no caller.
+  const [revising, setRevising] = useState<AwardCommitteeReview | null>(null);
   const [score, setScore] = useState('');
   const [comments, setComments] = useState('');
   const [resultCycleId, setResultCycleId] = useState('');
@@ -94,8 +97,38 @@ export default function MyReviewsPage() {
       toast.error(e?.body?.detail || e?.body?.message || e?.message || 'The score was refused.'),
   });
 
+  const revise = useMutation({
+    mutationFn: () => {
+      if (!revising) throw new Error('No review selected.');
+      return awardsService.updateMyScore(revising.id, {
+        score: Number(score),
+        comments: comments.trim(),
+      });
+    },
+    onSuccess: () => {
+      toast.success('Score revised.');
+      setRevising(null);
+      setScore('');
+      setComments('');
+      queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'reviews-given'] });
+      // The committee result is computed from the scores, so it moves with this.
+      queryClient.invalidateQueries({ queryKey: ['me', 'awards', 'committee-result'] });
+    },
+    onError: (e: any) =>
+      toast.error(e?.body?.detail || e?.body?.message || e?.message || 'The revision was refused.'),
+  });
+
+  const openRevise = (r: AwardCommitteeReview) => {
+    setScore(String(r.score ?? ''));
+    setComments(r.comments ?? '');
+    setRevising(r);
+  };
+
   const scoreValue = Number(score);
-  const scoreValid = score !== '' && Number.isFinite(scoreValue) && scoreValue >= 0 && scoreValue <= 100;
+  // ⚠ The API is [Range(1, 100)] — a 0 is refused, naming the field. This used to accept `>= 0`
+  // and let the server do the refusing, which shows the member an error for something the form
+  // could have told them.
+  const scoreValid = score !== '' && Number.isFinite(scoreValue) && scoreValue >= 1 && scoreValue <= 100;
 
   return (
     <div className="space-y-6">
@@ -171,6 +204,7 @@ export default function MyReviewsPage() {
                   <TableHead className="text-right">Score</TableHead>
                   <TableHead>Given</TableHead>
                   <TableHead>Comments</TableHead>
+                  <TableHead className="w-[1%]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -180,6 +214,12 @@ export default function MyReviewsPage() {
                     <TableCell className="text-right">{r.score}</TableCell>
                     <TableCell>{fmtDate(r.reviewDate)}</TableCell>
                     <TableCell className="max-w-md truncate">{r.comments ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      <Button size="sm" variant="ghost" onClick={() => openRevise(r)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Revise
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -269,11 +309,11 @@ export default function MyReviewsPage() {
             </Alert>
 
             <div className="space-y-2">
-              <Label htmlFor="score">Score (0–100)</Label>
+              <Label htmlFor="score">Score (1–100)</Label>
               <Input
                 id="score"
                 type="number"
-                min={0}
+                min={1}
                 max={100}
                 value={score}
                 onChange={(e) => setScore(e.target.value)}
@@ -306,6 +346,72 @@ export default function MyReviewsPage() {
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={Boolean(revising)}
+        onOpenChange={(o) => { if (!o) { setRevising(null); setScore(''); setComments(''); } }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revise your score for {revising?.nominationNumber}</DialogTitle>
+            <DialogDescription>
+              You gave {revising?.score}. Revising replaces it — it is not a second score, and the
+              committee average moves with it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertDescription>
+                Only you can revise a score you gave. Another member opening this record is refused,
+                and the desk has no route to it at all.
+              </AlertDescription>
+            </Alert>
+
+            <div className="space-y-2">
+              <Label htmlFor="revise-score">Score (1–100)</Label>
+              <Input
+                id="revise-score"
+                type="number"
+                min={1}
+                max={100}
+                value={score}
+                onChange={(e) => setScore(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              {/* ⚠ Required here where it is optional on the first score: a revision changes what
+                  the committee decides on, so the record carries why. The server refuses a blank
+                  one naming the field — the form asks first. */}
+              <Label htmlFor="revise-comments">Why you are revising it</Label>
+              <Textarea
+                id="revise-comments"
+                rows={4}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => { setRevising(null); setScore(''); setComments(''); }}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={!scoreValid || comments.trim() === '' || revise.isPending}
+                onClick={() => revise.mutate()}
+              >
+                {revise.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save revision
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

@@ -304,6 +304,39 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         return true;
     }
 
+    /// <summary>
+    /// Ends an acting appointment before its end date. ⚠ Mirrors CompleteAsync: it sets the status
+    /// AND the completion date, because the appointment did in fact end. Reaching this state by
+    /// assigning Status on the plain edit was what left CompletionDate null and locked the record.
+    /// </summary>
+    public async Task<StaffActingAppointmentDto> TerminateEarlyAsync(
+        TerminateStaffActingAppointmentEarlyDto dto,
+        Guid terminatedByUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(dto.AppointmentId);
+
+        if (entity.Status is not (StaffActingStatus.Active or StaffActingStatus.Extended))
+            throw new InvalidOperationException(
+                "Only an active or extended acting appointment can be ended early.");
+
+        entity.Status         = StaffActingStatus.TerminatedEarly;
+        entity.CompletionDate = DateTime.UtcNow;
+        entity.Notes          = string.IsNullOrWhiteSpace(entity.Notes)
+            ? dto.Reason
+            : $"{entity.Notes}\n\nEnded early: {dto.Reason}";
+        entity.UpdatedAt      = DateTime.UtcNow;
+        entity.UpdatedBy      = terminatedByUserId.ToString();
+
+        await _repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Acting appointment {AppointmentNumber} ended early", entity.AppointmentNumber);
+
+        return (await _repo.GetWithDetailsAsync(entity.Id) ?? entity).ToDto();
+    }
+
     public async Task<StaffActingAppointmentDto> ExtendAsync(
         ExtendStaffActingAppointmentDto dto,
         Guid updatedByUserId,

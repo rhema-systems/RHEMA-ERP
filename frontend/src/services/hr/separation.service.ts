@@ -193,6 +193,19 @@ class SeparationService {
     return apiService.post<ClearanceItem>(`${this.baseUrl}/clearance-items/${itemId}`, payload);
   }
 
+  /**
+   * Re-reads the HR Assets register onto an in-progress clearance form (FR-HR-183).
+   *
+   * Adds a line for anything issued to the leaver since the form was drawn, and reprices the lines
+   * nobody has answered yet. ⚠ **Answered lines are never touched** — proven by
+   * `hr-separation/probe-lane3-refresh-assets.mjs`, which answers a line, refreshes, and asserts
+   * both its status and its note survive. Running it twice adds nothing, so it is safe to offer as
+   * a plain button.
+   */
+  refreshClearanceAssets(id: string) {
+    return apiService.post<SeparationClearance>(`${this.baseUrl}/${id}/clearance/refresh-assets`, {});
+  }
+
   /** FR-HR-091's gate. Refused while any mandatory line is pending or blocked. */
   completeClearance(id: string) {
     return apiService.post<SeparationDetail>(`${this.baseUrl}/${id}/clearance/complete`, {});

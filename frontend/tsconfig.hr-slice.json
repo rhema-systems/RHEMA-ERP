@@ -6,6 +6,7 @@
     "src/services/hr/**/*.ts",
     "src/app/hr/**/*.tsx",
     "src/app/administration/hr/**/*.tsx",
+    "src/app/me/**/*.tsx",
     "src/components/hr/**/*.tsx",
     "src/components/layout/sidebar.tsx"
   ]

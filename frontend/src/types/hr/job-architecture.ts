@@ -1051,3 +1051,23 @@ export interface PositionEstablishment {
   establishmentSourceBudgetNumber?: string | null;
   isEstablished: boolean;
 }
+
+/** One row of a batch assessment that did not land, and why. */
+export interface BatchAssessmentError {
+  employeeCompetencyId?: string | null;
+  competencyId?: string | null;
+  errorMessage: string;
+}
+
+/**
+ * The outcome of a batch assessment.
+ *
+ * ⚠ Partial success is the normal case, not an error state — the screen shows `errors` row by row
+ * rather than treating a non-zero `failed` as a failed request.
+ */
+export interface BatchAssessmentResult {
+  totalSubmitted: number;
+  succeeded: number;
+  failed: number;
+  errors: BatchAssessmentError[];
+}

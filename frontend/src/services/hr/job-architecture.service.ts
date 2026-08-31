@@ -1,6 +1,7 @@
 import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
+  BatchAssessmentResult,
   Competency,
   CompetencySkillIndicator,
   CreateJobCompetency,
@@ -668,6 +669,34 @@ class JobArchitectureService {
     changeReason?: string;
   }) {
     return apiService.put<EmployeeCompetency>(`${this.employeeCompetencies}/${id}`, { id, ...payload });
+  }
+
+  /**
+   * Records several competency levels for one employee in a single call.
+   *
+   * ⚠ Handles BOTH cases: omit `employeeCompetencyId` and give `competencyId` for a first
+   * assessment; give `employeeCompetencyId` to re-assess, which snapshots the previous values to
+   * history rather than overwriting them.
+   *
+   * ⚠ The result is per-row, not pass/fail — `succeeded`, `failed` and an `errors` list keyed by
+   * competency. The screen must show every skipped row and its reason: a batch that reports success
+   * for work it did not do is worse than one that refuses. Proven by
+   * `hr-tierb-tail/probe-lane3-groupA.mjs`, which submits one good row and one bad one and asserts
+   * the good row still lands.
+   *
+   * ⚠ The assessor is the token's employee id. An administrator whose account is not linked to an
+   * employee record gets a 400, not a 403 — established by that probe rather than assumed.
+   */
+  batchAssess(employeeId: string, updates: Array<{
+    employeeCompetencyId?: string | null;
+    competencyId?: string | null;
+    newLevel: number;
+    assessmentMethod: string;
+    evidenceNotes?: string | null;
+    changeReason?: string | null;
+  }>): Promise<BatchAssessmentResult> {
+    return apiService.post<BatchAssessmentResult>(
+      `${this.employeeCompetencies}/batch-assess`, { employeeId, updates });
   }
 
   /** Where the organisation is short — the training-needs view. */

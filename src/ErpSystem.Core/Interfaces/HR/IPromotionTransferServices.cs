@@ -361,6 +361,9 @@ public interface IStaffActingAppointmentService
     Task<StaffActingAppointmentDto> CreateAsync(CreateStaffActingAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffActingAppointmentDto> UpdateAsync(UpdateStaffActingAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>Ends an acting appointment before its end date. The only route to TerminatedEarly.</summary>
+    Task<StaffActingAppointmentDto> TerminateEarlyAsync(TerminateStaffActingAppointmentEarlyDto dto, Guid terminatedByUserId, CancellationToken cancellationToken = default);
+
     /// <summary>Marks the acting appointment as complete.</summary>
     Task<bool> CompleteAsync(CompleteStaffActingAppointmentDto dto, Guid completedByUserId, CancellationToken cancellationToken = default);
 

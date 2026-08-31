@@ -236,16 +236,40 @@ class ActingAppointmentService {
   }
 
   /**
-   * Corrects an appointment's end date, allowance and status.
+   * Corrects an appointment's end date, allowance and notes.
+   *
+   * ⚠ **Not its status.** The server ignores `status` on this route. Assigning it here used to
+   * reach `Completed` while leaving `completionDate` null, after which neither this route nor
+   * `complete` would touch the record again — a one-way door into an unrepairable state. Status
+   * moves through `complete`, `extend`, `convert` and `terminateEarly`, each of which maintains the
+   * fields that go with the transition. The property stays on the request type because the update
+   * is a replace and the server ignores rather than rejects it.
    *
    * ⚠ Refused once the appointment is `Completed` — completing it is what fixes its terms in
    * place, and re-opening one is not an edit.
+   *
+   * ⚠ Also enforced here and not on the create alone: the new end date must fall after the stored
+   * start, and it must not overlap another live appointment for the same employee.
    *
    * ⚠ `allowanceCalculation` is one of the fields the closure ledger's section E lists as settable
    * by no form; it is on this payload for that reason.
    */
   update(id: string, request: UpdateStaffActingAppointmentRequest): Promise<StaffActingAppointment> {
     return apiService.put<StaffActingAppointment>(`${this.baseUrl}/${id}`, { id, ...request });
+  }
+
+  /**
+   * Ends an appointment before its end date, with a reason.
+   *
+   * ⚠ The only route to `TerminatedEarly`. It was previously reachable only by assigning `status`
+   * on the plain edit, which is exactly the path that could also reach `Completed` and strand the
+   * record. This sets the completion date with the status and appends the reason to the notes.
+   */
+  terminateEarly(id: string, reason: string): Promise<StaffActingAppointment> {
+    return apiService.post<StaffActingAppointment>(`${this.baseUrl}/${id}/terminate-early`, {
+      appointmentId: id,
+      reason,
+    });
   }
 
   /** Refused while the appointment is still active — complete or cancel it first. */

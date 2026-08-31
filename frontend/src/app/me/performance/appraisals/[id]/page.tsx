@@ -4,11 +4,12 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, ClipboardCheck, Gavel, Send, TriangleAlert, Users } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, Gavel, Loader2, Send, TriangleAlert, Users } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
@@ -82,6 +83,38 @@ export default function MyAppraisalDetailPage() {
     },
     onError: (e: Error) =>
       toast({ title: 'Could not acknowledge', description: e.message, variant: 'destructive' }),
+  });
+
+  /**
+   * The employee's own written answer to their appraisal (AWD-independent; FR the cycle's
+   * `allowEmployeeResponse` setting governs).
+   *
+   * ⚠ The setting was not doing nothing — the server has always enforced it. What was missing was
+   * any way to write a response at all: the only route sat on the HR desk policy, and the response
+   * row has no author column, so "the employee's response" was whatever HR typed. This goes through
+   * the token-scoped route, which refuses anyone but the appraisee.
+   */
+  const { data: responses } = useQuery({
+    queryKey: ['hr', 'appraisal-responses', appraisalId],
+    queryFn: () => performanceAppraisalService.getResponses(appraisalId),
+    enabled: !!appraisalId,
+    retry: false,
+  });
+
+  const [responseText, setResponseText] = useState('');
+
+  const respond = useMutation({
+    mutationFn: () => performanceAppraisalService.addMyResponse(appraisalId, responseText.trim()),
+    onSuccess: () => {
+      setResponseText('');
+      toast({
+        title: 'Your response is recorded',
+        description: 'It sits with the appraisal and is visible to HR.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-responses', appraisalId] });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not record your response', description: e.message, variant: 'destructive' }),
   });
 
   const settings = context?.settings ?? null;
@@ -359,6 +392,56 @@ export default function MyAppraisalDetailPage() {
                   },
                 ]}
               />
+
+              {/*
+                ⚠ Placed on the OUTCOME tab and not the overview: a response is an answer to a
+                result, and the result is not readable before HR signs off. Shown only when the
+                cycle allows one, because the server refuses otherwise and a form that is always
+                there but usually refused teaches people to ignore it.
+              */}
+              {settings?.allowEmployeeResponse && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Your response</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {(responses ?? []).length > 0 && (
+                      <div className="space-y-2">
+                        {(responses ?? []).map((r) => (
+                          <div key={r.id} className="rounded-md border p-3">
+                            <p className="whitespace-pre-line text-sm">{r.responseText}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatDate(r.responseDate)}
+                              {r.templateItemName ? ` · on ${r.templateItemName}` : ''}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <Textarea
+                      rows={4}
+                      value={responseText}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setResponseText(e.target.value)}
+                      placeholder="What you would like recorded alongside this appraisal"
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">
+                        Recorded against the appraisal and visible to HR. Only you can write it —
+                        nobody can file a response on your behalf.
+                      </p>
+                      <Button
+                        size="sm"
+                        disabled={responseText.trim() === '' || respond.isPending}
+                        onClick={() => respond.mutate()}
+                      >
+                        {respond.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Record it
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {settings?.showScoreBreakdownToEmployee && (
                 <Card>

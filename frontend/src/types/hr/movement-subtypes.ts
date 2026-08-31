@@ -216,7 +216,15 @@ export interface UpdateStaffActingAppointmentRequest {
   receivesActingAllowance: boolean;
   actingAllowance?: number | null;
   allowanceCalculation?: HRAllowanceCalculationMethod | null;
-  status: StaffActingStatus;
+  /**
+   * ⚠ **Ignored by the server**, and optional for that reason.
+   *
+   * The DTO still declares it, so sending it is harmless and a caller returning the record
+   * unchanged is not rejected — but nothing moves. Assigning it here used to reach `Completed`
+   * while leaving `completionDate` null, after which neither the update nor `complete` would touch
+   * the record again. Status moves through `complete`, `extend`, `convert` and `terminateEarly`.
+   */
+  status?: StaffActingStatus;
   notes?: string | null;
 }
 

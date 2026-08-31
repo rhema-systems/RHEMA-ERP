@@ -5,6 +5,7 @@ import type {
   ApproveAppraisal,
   AppraisalEditRole,
   AppraisalEditableResponse,
+  AppraisalEmployeeResponse,
   AppraisalPhaseResponse,
   BatchCreatePeerNominations,
   CheckIn,
@@ -276,6 +277,63 @@ class PerformanceAppraisalService {
   }
 
   // ── Employee acknowledgment ──────────────────────────────────────────────────────
+
+  /**
+   * Corrects a generated appraisal's header — its window and its peer-evaluator count.
+   *
+   * ⚠ The route is a REPLACE and its DTO marks `appraisalCycleId`, `employeeId` and `status`
+   * required, so the whole record goes back. **The server ignores all three**, and that is a lane-3
+   * fix rather than an accident of the payload: until then this route honoured them, so a
+   * "correction" could move an appraisal — with its goals, self-evaluation and scores — onto a
+   * different person, into a different cycle, and walk it Draft → Completed past the forward-only
+   * state machine in `UpdateStatusAsync`. They are sent back unchanged so the replace is faithful.
+   *
+   * Regenerating the cycle is not an alternative: it does not touch an appraisal that already exists.
+   */
+  updateHeader(appraisal: PerformanceAppraisal, patch: {
+    year: number; startDate: string; endDate: string; peerEvaluatorsCount: number;
+  }): Promise<void> {
+    return apiService.put<void>(`${this.baseUrl}/${appraisal.id}`, {
+      id: appraisal.id,
+      appraisalCycleId: appraisal.appraisalCycleId,
+      employeeId: appraisal.employeeId,
+      status: appraisal.status,
+      ...patch,
+    });
+  }
+
+  /**
+   * Removes an appraisal generated against somebody who should not have been in scope.
+   *
+   * ⚠ Admin-tier — an HR-role caller is refused with a 403, established by
+   * `hr-performance/probe-lane3-appraisals.mjs` rather than assumed, which is why the control is
+   * behind a permission gate rather than shown to everyone who can open the screen. No other route
+   * removes one.
+   */
+  deleteAppraisal(appraisalId: string): Promise<boolean> {
+    return apiService.delete<boolean>(`${this.baseUrl}/${appraisalId}`);
+  }
+
+  /** What has been written in answer to this appraisal. Readable by anyone who may read it. */
+  getResponses(appraisalId: string): Promise<AppraisalEmployeeResponse[]> {
+    return apiService.get<AppraisalEmployeeResponse[]>(`${this.baseUrl}/${appraisalId}/responses`);
+  }
+
+  /**
+   * The appraisee's own written answer to their appraisal.
+   *
+   * ⚠ Deliberately the `/me` route, not the desk one. The desk route sits on the HR write policy
+   * and the response row has no author column of any kind — so through it, "the employee's
+   * response" was whatever HR typed, and nothing on the record contradicted that. This route
+   * refuses anyone but the appraisal's own employee (404, never 403), which is the only thing
+   * making the record mean what it says.
+   */
+  addMyResponse(appraisalId: string, responseText: string): Promise<AppraisalEmployeeResponse> {
+    return apiService.post<AppraisalEmployeeResponse>(
+      `/performance-appraisals/me/${appraisalId}/responses`,
+      { appraisalId, responseText },
+    );
+  }
 
   /**
    * Closes out the appraisal. Only from Governance, only by the appraisee, and only once —

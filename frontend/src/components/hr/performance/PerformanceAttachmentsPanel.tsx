@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Loader2, Paperclip, Trash2 } from 'lucide-react';
+import { Download, Loader2, Paperclip, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -12,6 +13,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { DocumentUploadField } from '@/components/hr/common/DocumentUploadField';
 import { useToast } from '@/hooks/use-toast';
@@ -22,6 +31,13 @@ export interface PerformanceAttachment {
   id: string;
   fileName: string;
   description?: string | null;
+  /**
+   * Present on the awards families. ⚠ The panel's type used to omit these although the API returns
+   * them, so a caller had no way to show or correct what an attachment IS — which mattered, because
+   * the nomination screen uploads everything as `Citation`.
+   */
+  attachmentType?: string | null;
+  attachmentTypeName?: string | null;
   uploadDate: string;
   fileSizeBytes?: number | null;
   uploadedByName?: string | null;
@@ -57,6 +73,8 @@ export function PerformanceAttachmentsPanel({
   uploadPath,
   downloadPath,
   deletePath,
+  editPath,
+  attachmentTypes,
   uploadFields,
 }: {
   /** `/CheckIns` or `/PerformanceAppraisals` — no trailing slash. */
@@ -77,6 +95,14 @@ export function PerformanceAttachmentsPanel({
   uploadPath?: string;
   downloadPath?: (attachmentId: string) => string;
   deletePath?: (attachmentId: string) => string;
+  /**
+   * Enables the correction dialog. Only supply it for a family whose API has an update route —
+   * today that is award nomination attachments alone (`PUT Awards/nomination-attachments/{id}`).
+   * Without it the panel renders exactly as before.
+   */
+  editPath?: (attachmentId: string) => string;
+  /** The values the edit dialog offers for the type. Required alongside `editPath`. */
+  attachmentTypes?: readonly string[];
   /** Extra form fields the upload endpoint expects beside the file, e.g. an attachment type. */
   uploadFields?: Record<string, string | number | boolean | undefined | null>;
 }) {
@@ -95,6 +121,46 @@ export function PerformanceAttachmentsPanel({
     queryFn: () => apiService.get<PerformanceAttachment[]>(list),
     enabled: Boolean(ownerId),
   });
+
+  const [editing, setEditing] = useState<PerformanceAttachment | null>(null);
+  const [editType, setEditType] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+
+  /**
+   * ⚠ Corrects only what an attachment IS — never where it lives. `UpdateAwardNominationAttachmentDto`
+   * carries the type and the description and nothing else; the file's own name, path and size are
+   * not on it, and a body carrying them is ignored. That is deliberate and proven: D-39 took
+   * `FileName`/`FilePath` off the create DTOs because an "attachment" used to be a string somebody
+   * typed, and `hr-awards/probe-lane3-awards.mjs` sends `C:\Windows\System32\config\SAM`
+   * through this very route to assert the stored file is untouched.
+   */
+  const edit = useMutation({
+    mutationFn: () => {
+      if (!editing || !editPath) throw new Error('No attachment selected.');
+      return apiService.put<void>(editPath(editing.id), {
+        id: editing.id,
+        attachmentType: editType,
+        description: editDescription.trim() || null,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey });
+      setEditing(null);
+      toast({ title: 'Attachment updated' });
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'It could not be updated',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
+  });
+
+  const openEdit = (a: PerformanceAttachment) => {
+    setEditType(a.attachmentType ?? attachmentTypes?.[0] ?? '');
+    setEditDescription(a.description ?? '');
+    setEditing(a);
+  };
 
   const remove = useMutation({
     mutationFn: (attachmentId: string) => apiService.delete<void>(toDelete(attachmentId)),
@@ -159,6 +225,7 @@ export function PerformanceAttachmentsPanel({
                 <TableHeader>
                   <TableRow>
                     <TableHead>File</TableHead>
+                    {attachmentTypes && <TableHead>Type</TableHead>}
                     <TableHead>Description</TableHead>
                     <TableHead>Uploaded</TableHead>
                     <TableHead className="text-right">Size</TableHead>
@@ -169,6 +236,11 @@ export function PerformanceAttachmentsPanel({
                   {rows.map((a) => (
                     <TableRow key={a.id}>
                       <TableCell className="font-medium">{a.fileName}</TableCell>
+                      {attachmentTypes && (
+                        <TableCell className="text-muted-foreground">
+                          {a.attachmentTypeName ?? a.attachmentType ?? '—'}
+                        </TableCell>
+                      )}
                       <TableCell className="text-muted-foreground">{a.description ?? '—'}</TableCell>
                       <TableCell>
                         <div>{fmtDate(a.uploadDate)}</div>
@@ -186,6 +258,16 @@ export function PerformanceAttachmentsPanel({
                         >
                           <Download className="h-4 w-4" />
                         </Button>
+                        {editPath && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEdit(a)}
+                            title="Correct what this is"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
                         {canDelete && (
                           <Button
                             size="sm"
@@ -206,6 +288,55 @@ export function PerformanceAttachmentsPanel({
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Correct {editing?.fileName}</DialogTitle>
+            <DialogDescription>
+              Changes what this attachment is recorded as. The file itself is untouched — to replace
+              it, upload the new one and remove this.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="att-type">Type</Label>
+              <Select value={editType} onValueChange={setEditType}>
+                <SelectTrigger id="att-type"><SelectValue placeholder="Choose a type" /></SelectTrigger>
+                <SelectContent>
+                  {(attachmentTypes ?? []).map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t.replace(/([a-z])([A-Z])/g, '$1 $2')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="att-description">Description</Label>
+              <Textarea
+                id="att-description"
+                rows={3}
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              onClick={() => edit.mutate()}
+              disabled={edit.isPending || editType === ''}
+            >
+              {edit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

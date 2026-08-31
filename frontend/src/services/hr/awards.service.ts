@@ -512,6 +512,23 @@ class AwardsService {
       `${this.me}/nominations/${nominationId}/score`, payload);
   }
 
+  /**
+   * Revise a score this member gave.
+   *
+   * ⚠ The reviewer is the token here too, and the service resolves the review through the caller:
+   * revising a COLLEAGUE's score answers **404, not 403** — proven both ways by
+   * `hr-awards/probe-lane3-awards.mjs`, along with the fact that the revision reaches the committee
+   * RESULT and not merely the row, without counting as a fourth score.
+   *
+   * ⚠ `comments` is **required** on this route where it is optional on the initial score. Revising
+   * a score changes what the committee decides on, so the record carries why; the server refuses a
+   * blank one with a message naming the field.
+   */
+  updateMyScore(reviewId: string, payload: { score: number; comments: string }) {
+    return apiService.put<AwardCommitteeReview>(
+      `${this.me}/reviews/${reviewId}`, { id: reviewId, ...payload });
+  }
+
   /** What the committee decided, as a member may see it for their own committee. */
   getMyCommitteeResult(cycleId: string) {
     return apiService.get<AwardCommitteeResult>(`${this.me}/cycles/${cycleId}/committee-result`);

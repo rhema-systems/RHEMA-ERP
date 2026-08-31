@@ -49,6 +49,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { awardsService } from '@/services/hr/awards.service';
+import { AWARD_ATTACHMENT_TYPES } from '@/types/hr/awards';
 import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -442,12 +443,20 @@ export default function DeskNominationPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {/*
+            ⚠ Everything uploads as a Citation, which is right for only one of the four kinds. The
+            correction dialog is what makes that recoverable — a supporting letter filed as a
+            citation can be relabelled rather than deleted and re-uploaded. Letting the UPLOAD
+            choose is the better fix and belongs with a change to the shared panel.
+          */}
           <PerformanceAttachmentsPanel
             basePath="/Awards"
             ownerId={id}
             listPath={`/Awards/nominations/${id}/attachments`}
             downloadPath={(attachmentId) => `/Awards/nomination-attachments/${attachmentId}/download`}
             deletePath={(attachmentId) => `/Awards/nomination-attachments/${attachmentId}`}
+            editPath={(attachmentId) => `/Awards/nomination-attachments/${attachmentId}`}
+            attachmentTypes={AWARD_ATTACHMENT_TYPES}
             uploadFields={{ attachmentType: 'Citation' }}
             helpText="The citation, a letter of support, evidence of the work. Scanned on upload; max 10 MB."
           />

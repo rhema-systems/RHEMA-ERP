@@ -81,12 +81,30 @@ export function MyTravelAlertsPanel() {
               }`}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="text-sm font-medium">{a.alertTitle ?? 'A destination alert'}</p>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium">{a.alertTitle ?? 'A destination alert'}</p>
+                    {a.severity && (
+                      <Badge variant={a.severity === 'Critical' || a.severity === 'Emergency' ? 'destructive' : 'secondary'}>
+                        {a.severity}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {a.requestNumber ? `Trip ${a.requestNumber}` : 'One of your trips'}
                     {a.notificationSentAt && ` · sent ${fmtDate(a.notificationSentAt)}`}
                   </p>
+                  {/*
+                    ⚠ The alert's own text. This panel rendered the TITLE and nothing else from the
+                    day it shipped, so a traveller asked to confirm they had read a security briefing
+                    was shown "Civil unrest" — or, when the title was absent, the words "A destination
+                    alert" — and no indication of what was happening, where, or what to do. That is
+                    D-31 recurring on a live surface: the notification DTO carried no Body and no
+                    Severity, so there was nothing here to render. Both are on it now.
+                  */}
+                  {a.alertBody && (
+                    <p className="mt-2 whitespace-pre-line text-sm text-foreground">{a.alertBody}</p>
+                  )}
                 </div>
                 {a.isAcknowledged ? (
                   <Badge variant="secondary" className="gap-1">
@@ -108,9 +126,14 @@ export function MyTravelAlertsPanel() {
             </div>
           ))
         )}
+        {/*
+          This used to read "the full alert … is on the trip itself, under its compliance tab" —
+          written because the notification carried no text and the panel had nowhere else to send
+          people. It now carries the text, so the pointer would be misleading rather than helpful.
+        */}
         <p className="text-xs text-muted-foreground">
-          The full alert — what is happening and what to do about it — is on the trip itself, under
-          its compliance tab.
+          Your trip’s compliance tab carries the rest of the picture — visas, insurance and every
+          alert for the destination, including ones not sent to you directly.
         </p>
       </CardContent>
     </Card>

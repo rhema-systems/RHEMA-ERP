@@ -1010,3 +1010,23 @@ export function countScored(
   });
   return { total: scoreable.length, scored: scored.length };
 }
+
+/**
+ * The employee's written answer to their own appraisal, gated on the cycle's
+ * `allowEmployeeResponse` setting.
+ *
+ * ⚠ There is no author field, and that is not an omission in this type — `AppraisalEmployeeResponse`
+ * has no author COLUMN. The response is keyed to the appraisal alone, and the appraisal names its
+ * employee; what makes the record true is that the write route refuses anyone else. Filing one from
+ * the HR desk is a separate, deliberately unwired route for transcribing a paper response.
+ */
+export interface AppraisalEmployeeResponse {
+  id: string;
+  appraisalId: string;
+  templateItemId?: string | null;
+  templateItemName?: string | null;
+  responseText: string;
+  responseDate: string;
+  responseStatus: string;
+  submittedDate?: string | null;
+}

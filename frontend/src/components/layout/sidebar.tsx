@@ -1270,6 +1270,7 @@ export const navigationItems: NavItem[] = [
         icon: GraduationCap,
         children: [
           { title: 'Organisation Gaps', href: '/hr/competencies', icon: TrendingDown },
+          { title: 'Assess Competencies', href: '/hr/competencies/assess', icon: ClipboardCheck },
           // The only screen in this area most employees will ever open. It reads `me/*`, because
           // the client User object carries no employee link to address the by-employee routes with.
           { title: 'My Competencies', href: '/hr/competencies/me', icon: UserCheck },

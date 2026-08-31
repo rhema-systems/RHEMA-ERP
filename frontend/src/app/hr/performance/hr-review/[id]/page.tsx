@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, RotateCcw, TriangleAlert, Undo2 } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { PermissionGate } from '@/components/hr/common/PermissionGate';
+import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -67,6 +69,72 @@ export default function HRReviewDetailPage() {
     queryFn: () => performanceAppraisalService.getHRReview(appraisalId),
     enabled: !!appraisalId,
     retry: false,
+  });
+
+  /**
+   * The appraisal record itself — the HR review read is about the REVIEW, so it carries neither the
+   * window nor the cycle and employee the replace-shaped update has to send back.
+   */
+  const { data: appraisal } = useQuery({
+    queryKey: ['hr', 'appraisal-record', appraisalId],
+    queryFn: () => performanceAppraisalService.getById(appraisalId),
+    enabled: !!appraisalId,
+    retry: false,
+  });
+
+  const [headerOpen, setHeaderOpen] = useState(false);
+  const [header, setHeader] = useState({ year: '', startDate: '', endDate: '', peers: '' });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const openHeader = () => {
+    if (!appraisal) return;
+    setHeader({
+      year: String(appraisal.year ?? ''),
+      startDate: (appraisal.startDate ?? '').slice(0, 10),
+      endDate: (appraisal.endDate ?? '').slice(0, 10),
+      peers: String(appraisal.peerEvaluatorsCount ?? 0),
+    });
+    setHeaderOpen(true);
+  };
+
+  const saveHeader = useMutation({
+    mutationFn: () => {
+      if (!appraisal) throw new Error('The appraisal has not loaded.');
+      return performanceAppraisalService.updateHeader(appraisal, {
+        year: Number(header.year),
+        startDate: header.startDate,
+        endDate: header.endDate,
+        peerEvaluatorsCount: Number(header.peers),
+      });
+    },
+    onSuccess: () => {
+      setHeaderOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-record', appraisalId] });
+      refresh();
+      toast({ title: 'Appraisal updated' });
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'Could not update the appraisal',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
+  });
+
+  const removeAppraisal = useMutation({
+    mutationFn: () => performanceAppraisalService.deleteAppraisal(appraisalId),
+    onSuccess: () => {
+      setDeleteOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['hr', 'hr-review-list'] });
+      toast({ title: 'Appraisal removed' });
+      window.location.href = '/hr/performance/hr-review';
+    },
+    onError: (e: any) =>
+      toast({
+        variant: 'destructive',
+        title: 'Could not remove the appraisal',
+        description: e?.body?.detail ?? e?.body?.message ?? e?.message,
+      }),
   });
 
   const { data: phase } = useQuery({
@@ -181,6 +249,28 @@ export default function HRReviewDetailPage() {
             <StatusBadge status={humanizeEnum(data.status)} />
             {!data.isFinalized && (
               <>
+                {/*
+                  ⚠ Correcting the WINDOW only. Regenerating the cycle is not an alternative — it
+                  does not touch an appraisal that already exists — so before this there was no way
+                  to fix a generated appraisal's dates at all. The employee, the cycle and the
+                  status are deliberately absent: the server ignores all three, and it ignores them
+                  because honouring them let a "correction" move an appraisal onto a different
+                  person. The status moves through its own transitions, which enforce their order.
+                */}
+                <Button variant="ghost" onClick={openHeader} disabled={!appraisal}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Correct dates
+                </Button>
+                {/*
+                  Admin-tier, and gated rather than shown-and-refused: an HR-role caller gets a 403,
+                  which the lane-3 probe established rather than assumed.
+                */}
+                <PermissionGate permissions={['HR.Performance.Admin']}>
+                  <Button variant="ghost" onClick={() => setDeleteOpen(true)}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Remove
+                  </Button>
+                </PermissionGate>
                 <Button
                   variant="outline"
                   onClick={() => setReturnOpen(true)}
@@ -396,6 +486,84 @@ export default function HRReviewDetailPage() {
               disabled={!returnRemarks.trim() || sendBack.isPending}
             >
               Return
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={headerOpen} onOpenChange={setHeaderOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Correct this appraisal&rsquo;s dates</DialogTitle>
+            <DialogDescription>
+              The window the appraisal covers, and how many peers it expects. Who it is for and
+              which cycle it belongs to cannot be changed here — an appraisal raised against the
+              wrong person is removed and regenerated, not moved onto somebody else.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="ap-year">Year</Label>
+              <Input
+                id="ap-year" type="number" value={header.year}
+                onChange={(e) => setHeader((h) => ({ ...h, year: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ap-peers">Peer evaluators</Label>
+              <Input
+                id="ap-peers" type="number" min={0} value={header.peers}
+                onChange={(e) => setHeader((h) => ({ ...h, peers: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ap-start">Start</Label>
+              <Input
+                id="ap-start" type="date" value={header.startDate}
+                onChange={(e) => setHeader((h) => ({ ...h, startDate: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ap-end">End</Label>
+              <Input
+                id="ap-end" type="date" value={header.endDate}
+                onChange={(e) => setHeader((h) => ({ ...h, endDate: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHeaderOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => saveHeader.mutate()}
+              disabled={saveHeader.isPending || header.startDate === '' || header.endDate === ''}
+            >
+              {saveHeader.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {data.employeeName}&rsquo;s appraisal?</DialogTitle>
+            <DialogDescription>
+              For an appraisal generated against somebody who should not have been in scope. It
+              takes the self-evaluation, peer reviews and scores with it, and regenerating the cycle
+              will not bring them back. Nothing else removes an appraisal.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => removeAppraisal.mutate()}
+              disabled={removeAppraisal.isPending}
+            >
+              {removeAppraisal.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Remove it
             </Button>
           </DialogFooter>
         </DialogContent>

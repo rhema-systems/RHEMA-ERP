@@ -62,9 +62,20 @@ export default function CompetencyGapsPage() {
         title="Competency gaps"
         description="What positions require, measured against what people have been assessed at."
         actions={
-          <Link href="/hr/competencies/me">
-            <Button variant="outline">My competencies</Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {/*
+              ⚠ This screen reports who is "not assessed" and, until lane 3, nothing anywhere could
+              assess them — so it named work the product could not do. The action belongs here
+              rather than only in the nav, because this is the page on which the need becomes
+              visible.
+            */}
+            <Link href="/hr/competencies/assess">
+              <Button>Assess somebody</Button>
+            </Link>
+            <Link href="/hr/competencies/me">
+              <Button variant="outline">My competencies</Button>
+            </Link>
+          </div>
         }
       />
 

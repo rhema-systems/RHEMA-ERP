@@ -149,6 +149,28 @@ public class StaffActingAppointmentsController : ControllerBase
         return Ok(new { message = "Acting appointment completed." });
     }
 
+    /// <summary>Ends the acting appointment before its end date.</summary>
+    /// <remarks>
+    /// ⚠ The only route to <c>TerminatedEarly</c>. It used to be reachable only by assigning Status
+    /// on the plain edit — which also reached Completed, left CompletionDate null, and locked the
+    /// record out of both UpdateAsync and CompleteAsync. Lane 3 stopped the edit assigning Status, so
+    /// this keeps the state reachable through a door that sets the completion date with it and
+    /// records why.
+    /// </remarks>
+    [HttpPost("{id:guid}/terminate-early")]
+    [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
+    public async Task<ActionResult<StaffActingAppointmentDto>> TerminateEarly(
+        Guid id, [FromBody] TerminateStaffActingAppointmentEarlyDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        dto.AppointmentId = id;
+        return Ok(await _service.TerminateEarlyAsync(dto, employeeId.Value));
+    }
+
     /// <summary>Extends the acting appointment to a new end date.</summary>
     [HttpPost("{id:guid}/extend")]
     [Authorize(Policy = HrPermissions.MovementsWritePolicy)]
