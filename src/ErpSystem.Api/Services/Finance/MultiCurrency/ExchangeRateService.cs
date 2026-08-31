@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -228,6 +229,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 ? requestedApprovalStatus
                 : RateApprovalStatus.Pending;
             ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+            await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
 
             var baseCurrencyExists = await _unitOfWork.Repository<Currency>()
                 .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == baseCurrencyCode)
@@ -317,6 +319,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 ? requestedApprovalStatus
                 : RateApprovalStatus.Pending;
             ValidateRateWindow(dto.Rate, rate.EffectiveDate, dto.ExpiryDate);
+            await ValidateClosingRateDateAsync(rateType, rate.EffectiveDate, cancellationToken);
             await EnsureNoOverlappingRateAsync(
                 rate.BaseCurrencyCode,
                 rate.TargetCurrencyCode,
@@ -405,6 +408,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         ? requestedApprovalStatus
                         : RateApprovalStatus.Pending;
                     ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+                    await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
                     await EnsureNoOverlappingRateAsync(
                         baseCurrencyCode,
                         targetCurrencyCode,
@@ -650,6 +654,57 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             {
                 throw new InvalidOperationException(
                     $"{rateType} exchange rates are reserved for future governed workflows and cannot be created yet.");
+            }
+        }
+
+        private async Task ValidateClosingRateDateAsync(
+            ExchangeRateType rateType,
+            DateTime effectiveDate,
+            CancellationToken cancellationToken)
+        {
+            var date = effectiveDate.Date;
+            if (rateType == ExchangeRateType.MonthEnd)
+            {
+                var calendarMonthEnd = new DateTime(date.Year, date.Month, 1).AddMonths(1).AddDays(-1);
+                if (date != calendarMonthEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"MonthEnd exchange rates must be dated on the actual calendar month-end ({calendarMonthEnd:yyyy-MM-dd}).");
+                }
+
+                return;
+            }
+
+            if (rateType == ExchangeRateType.QuarterEnd)
+            {
+                var isFiscalQuarterEnd = await _unitOfWork.Repository<FiscalPeriod>()
+                    .GetQueryable(period => period.TenantId == TenantId
+                        && !period.IsDeleted
+                        && period.EndDate.Date == date)
+                    .AnyAsync(period => period.PeriodType == PeriodType.Quarterly
+                        || (period.PeriodType == PeriodType.Monthly && period.PeriodNumber % 3 == 0),
+                        cancellationToken);
+                if (!isFiscalQuarterEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"QuarterEnd exchange rates must be dated on a configured fiscal quarter-end; {date:yyyy-MM-dd} is not one.");
+                }
+
+                return;
+            }
+
+            if (rateType == ExchangeRateType.YearEnd)
+            {
+                var isFiscalYearEnd = await _unitOfWork.Repository<FiscalYear>()
+                    .GetQueryable(year => year.TenantId == TenantId
+                        && !year.IsDeleted
+                        && year.EndDate.Date == date)
+                    .AnyAsync(cancellationToken);
+                if (!isFiscalYearEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"YearEnd exchange rates must be dated on a configured fiscal year-end; {date:yyyy-MM-dd} is not one.");
+                }
             }
         }
 

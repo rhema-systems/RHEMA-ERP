@@ -32,6 +32,7 @@
  *   [Required] Reference         string   max 50
  *              CurrencyCode      string?  max 3
  *              ForeignAmount     decimal?
+ *              ExchangeRateId    Guid?
  *              ExchangeRate      decimal?
  *              LineNumber        int      default 1
  */
@@ -60,6 +61,7 @@ export interface JournalEntryFormLine {
     accountId: string;
     description: string;
     currencyCode: string;
+    exchangeRateId?: string;
     exchangeRate: number | '';
     debit: number;
     credit: number;
@@ -107,6 +109,9 @@ export function mapJournalEntryFormToCreateDto(
         if (isForeign && rate <= 0) {
             throw new Error(`An approved ${transactionCurrency} exchange rate is required.`);
         }
+        if (isForeign && !l.exchangeRateId) {
+            throw new Error(`The approved ${transactionCurrency} exchange-rate record is required.`);
+        }
         if (isForeign && l.debit > 0 && !(l.foreignDebit && l.foreignDebit > 0)) {
             throw new Error(`The original ${transactionCurrency} debit amount is required.`);
         }
@@ -123,6 +128,7 @@ export function mapJournalEntryFormToCreateDto(
                 reference: header.referenceNumber || 'JE',
                 currencyCode: isForeign ? transactionCurrency : undefined,
                 foreignAmount: isForeign ? (l.foreignDebit || undefined) : undefined,
+                exchangeRateId: isForeign ? l.exchangeRateId : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
                 dimensions: Object.entries(l.dimensions ?? {})
@@ -140,6 +146,7 @@ export function mapJournalEntryFormToCreateDto(
                 reference: header.referenceNumber || 'JE',
                 currencyCode: isForeign ? transactionCurrency : undefined,
                 foreignAmount: isForeign ? (l.foreignCredit || undefined) : undefined,
+                exchangeRateId: isForeign ? l.exchangeRateId : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
                 dimensions: Object.entries(l.dimensions ?? {})

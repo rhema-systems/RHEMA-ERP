@@ -18,6 +18,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal BalanceAfter { get; set; }
         public string? CurrencyCode { get; set; }
         public decimal? ForeignAmount { get; set; }
+        public Guid? ExchangeRateId { get; set; }
         public decimal? ExchangeRate { get; set; }
         public int? LineNumber { get; set; }
         public Guid? FinanceDimensionSetId { get; set; }
@@ -47,6 +48,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? CurrencyCode { get; set; }
 
         public decimal? ForeignAmount { get; set; }
+
+        public Guid? ExchangeRateId { get; set; }
 
         public decimal? ExchangeRate { get; set; }
 

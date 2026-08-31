@@ -314,7 +314,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*No approved MonthEnd exchange rate*");
+            .WithMessage("*No approved*MonthEnd exchange rate*");
     }
 
     [Fact]
@@ -589,7 +589,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             }))
             .Should()
             .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*No approved MonthEnd exchange rate*");
+            .WithMessage("*No approved*MonthEnd exchange rate*");
         fixture.Audit.Events.Should().Contain(e => e.EventType == FinanceAuditEvents.FxPostingBlockedInvalidConfiguration);
     }
 

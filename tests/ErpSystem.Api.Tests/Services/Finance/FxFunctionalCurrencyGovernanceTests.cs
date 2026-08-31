@@ -82,6 +82,101 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             .WithMessage("*reserved for future governed workflows*");
     }
 
+    [Theory]
+    [InlineData("MonthEnd", "2026-08-15", "actual calendar month-end")]
+    [InlineData("QuarterEnd", "2026-08-31", "configured fiscal quarter-end")]
+    [InlineData("YearEnd", "2026-08-31", "configured fiscal year-end")]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task ClosingRateTypesRejectDatesWithoutTheirCalendarMeaning(
+        string rateType,
+        string effectiveDate,
+        string expectedMessage)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+
+        var act = () => CreateExchangeRateService(db, tenantId).CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 15m,
+            EffectiveDate = DateTime.Parse(effectiveDate),
+            RateType = rateType,
+            RateSource = "Manual"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"*{expectedMessage}*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task ClosingRatesAcceptConfiguredQuarterAndYearEnds()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearName = "FY2026",
+            FiscalYearCode = "FY2026",
+            Year = 2026,
+            FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1),
+            EndDate = new DateTime(2026, 12, 31),
+            TotalDays = 365,
+            NumberOfPeriods = 12
+        };
+        db.FiscalYears.Add(fiscalYear);
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = fiscalYear.Id,
+            PeriodName = "September 2026",
+            PeriodCode = "2026-09",
+            PeriodNumber = 9,
+            PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2026, 9, 1),
+            EndDate = new DateTime(2026, 9, 30),
+            PeriodDays = 30
+        });
+        await db.SaveChangesAsync();
+        var service = CreateExchangeRateService(db, tenantId);
+
+        var quarter = await service.CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 15m,
+            EffectiveDate = new DateTime(2026, 9, 30),
+            RateType = ExchangeRateType.QuarterEnd.ToString(),
+            RateSource = "Manual"
+        });
+        var year = await service.CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 16m,
+            EffectiveDate = new DateTime(2026, 12, 31),
+            RateType = ExchangeRateType.YearEnd.ToString(),
+            RateSource = "Manual"
+        });
+
+        quarter.RateType.Should().Be(ExchangeRateType.QuarterEnd.ToString());
+        year.RateType.Should().Be(ExchangeRateType.YearEnd.ToString());
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]

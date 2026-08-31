@@ -64,6 +64,65 @@ public sealed class JournalEntryLifecycleBatch5Tests
     [Fact]
     [Trait("Batch", "FinanceGoLive-5")]
     [Trait("Category", "JournalLifecycle")]
+    public async Task ForeignDraftJournal_ShouldRetainApprovedExchangeRateEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var rate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 12.5m,
+            InverseRate = 0.08m,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Approved test rate",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved
+        };
+        db.ExchangeRates.Add(rate);
+        await db.SaveChangesAsync();
+        var request = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        request.Transactions[0].CurrencyCode = "USD";
+        request.Transactions[0].ForeignAmount = 8m;
+        request.Transactions[0].ExchangeRate = rate.Rate;
+        request.Transactions[0].ExchangeRateId = rate.Id;
+
+        var journal = await CreateJournalService(db, tenantId).CreateJournalEntryAsync(request);
+
+        var foreignLine = journal.Transactions.Single(line => line.TransactionType == "Debit");
+        foreignLine.ExchangeRateId.Should().Be(rate.Id);
+        foreignLine.ExchangeRate.Should().Be(rate.Rate);
+        (await db.AccountTransactions.SingleAsync(line => line.Id == foreignLine.Id))
+            .ExchangeRateId.Should().Be(rate.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task ForeignDraftJournal_ShouldRejectDecimalWithoutRateRecord()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var request = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        request.Transactions[0].CurrencyCode = "USD";
+        request.Transactions[0].ForeignAmount = 8m;
+        request.Transactions[0].ExchangeRate = 12.5m;
+
+        var act = () => CreateJournalService(db, tenantId).CreateJournalEntryAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires an approved USD exchange-rate record*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
     public async Task SubmittedJournal_ShouldNotPostWithoutApproval()
     {
         var tenantId = Guid.NewGuid();

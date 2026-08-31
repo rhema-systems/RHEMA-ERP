@@ -270,7 +270,6 @@ function buildUpdateCurrencyPayload(data: UpdateCurrencyDto) {
     geographicRegion: data.country?.trim() || undefined,
     autoRetrieveExchangeRate: false,
     exchangeRateUpdateFrequency: 'Daily',
-    defaultRateType: 'Daily',
     isActive: data.isActive ?? true,
   };
 }

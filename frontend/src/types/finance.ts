@@ -376,6 +376,10 @@ export interface AccountTransaction {
     transactionDate: string;
     reference: string;
     balanceAfter: number;
+    currencyCode?: string;
+    foreignAmount?: number;
+    exchangeRateId?: string;
+    exchangeRate?: number;
     // Computed helpers for UI compatibility
     /** debitAmount = amount when transactionType === 'Debit', else 0 */
     debitAmount?: number;
@@ -1227,6 +1231,7 @@ export interface CreateAccountTransactionDto {
     reference: string;
     currencyCode?: string;
     foreignAmount?: number;
+    exchangeRateId?: string;
     exchangeRate?: number;
     lineNumber?: number;
     dimensions?: FinancePostingDimensionValue[];

@@ -46,6 +46,7 @@ interface JournalLine {
     accountId: string;
     description: string;
     currencyCode: string;
+    exchangeRateId?: string;
     exchangeRate: number | '';
     debit: number;
     credit: number;
@@ -292,6 +293,7 @@ export default function NewJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: `${currency} is not effective for account ${account.accountNumber} on ${effectiveDate}.`,
@@ -305,6 +307,7 @@ export default function NewJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: 1,
                 rateStatus: 'ready',
                 rateError: undefined,
@@ -321,6 +324,7 @@ export default function NewJournalEntryPage() {
         setLines(current => current.map(line => line.id === lineId ? {
             ...line,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: '',
             rateStatus: 'loading',
             rateError: undefined,
@@ -341,6 +345,7 @@ export default function NewJournalEntryPage() {
                 line.id === lineId && line.rateRequestKey === requestKey
                     ? {
                         ...line,
+                        exchangeRateId: undefined,
                         exchangeRate: '',
                         rateStatus: 'error',
                         rateError: message,
@@ -373,6 +378,7 @@ export default function NewJournalEntryPage() {
                 ...line,
                 accountId,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: currency === functionalCurrency ? 1 : '',
                 foreignDebit: currency === functionalCurrency ? undefined : 0,
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -390,6 +396,7 @@ export default function NewJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 accountId,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: message,
@@ -402,6 +409,7 @@ export default function NewJournalEntryPage() {
             ...line,
             accountId: '',
             currencyCode: functionalCurrency,
+            exchangeRateId: undefined,
             exchangeRate: 1,
             foreignDebit: undefined,
             foreignCredit: undefined,
@@ -423,6 +431,7 @@ export default function NewJournalEntryPage() {
         setLines(current => current.map(item => item.id === lineId ? {
             ...item,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: currency === functionalCurrency ? 1 : '',
             foreignDebit: currency === functionalCurrency ? undefined : 0,
             foreignCredit: currency === functionalCurrency ? undefined : 0,

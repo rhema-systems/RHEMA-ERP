@@ -55,6 +55,7 @@ interface JournalLine {
     accountId: string;
     description: string;
     currencyCode: string;
+    exchangeRateId?: string;
     exchangeRate: number | '';
     debit: number;
     credit: number;
@@ -86,6 +87,7 @@ const mapEntryToLines = (entry: JournalEntry, functionalCurrency: string): Journ
         const raw = transaction as any;
         const currencyCode = normalizeCurrencyCode(raw.currencyCode || raw.transactionCurrency || entry.primaryCurrency) || functionalCurrency;
         const exchangeRate = raw.exchangeRate ?? 1;
+        const exchangeRateId = raw.exchangeRateId as string | undefined;
         const foreignAmount = raw.foreignAmount ?? raw.foreignCurrencyAmount;
         const debit = transaction.transactionType === 'Debit' ? transaction.amount : 0;
         const credit = transaction.transactionType === 'Credit' ? transaction.amount : 0;
@@ -95,12 +97,15 @@ const mapEntryToLines = (entry: JournalEntry, functionalCurrency: string): Journ
             accountId: transaction.accountId,
             description: transaction.description || '',
             currencyCode,
+            exchangeRateId,
             exchangeRate,
             debit,
             credit,
             foreignDebit: transaction.transactionType === 'Debit' ? foreignAmount : 0,
             foreignCredit: transaction.transactionType === 'Credit' ? foreignAmount : 0,
-            rateStatus: currencyCode === functionalCurrency ? 'ready' : 'idle',
+            rateStatus: currencyCode === functionalCurrency || exchangeRateId ? 'ready' : 'idle',
+            rateSource: raw.exchangeRateSource,
+            rateDate: raw.exchangeRateDate,
             dimensions: Object.fromEntries((transaction.dimensions ?? []).map(item => [item.dimensionCode, item.valueCode])),
         };
     });
@@ -185,7 +190,9 @@ export default function EditJournalEntryPage() {
                         }
                         const request = getManualJournalRateRequest(account, line.currencyCode, links, settings, toDateInputValue(journalEntry.entryDate || journalEntry.transactionDate));
                         if (!request) throw new Error(`No rate policy exists for ${line.currencyCode}.`);
-                        const snapshot = await financeService.getCurrentExchangeRate(line.currencyCode, request);
+                        const snapshot = line.exchangeRateId
+                            ? await financeDataService.getExchangeRateById(line.exchangeRateId)
+                            : await financeService.getCurrentExchangeRate(line.currencyCode, request);
                         return applyCanonicalJournalRate(line, snapshot);
                     } catch (error) {
                         return {
@@ -328,6 +335,7 @@ export default function EditJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: `${currency} is not effective for account ${account.accountNumber || account.accountCode} on ${effectiveDate}.`,
@@ -341,6 +349,7 @@ export default function EditJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: 1,
                 rateStatus: 'ready',
                 rateError: undefined,
@@ -357,6 +366,7 @@ export default function EditJournalEntryPage() {
         setLines(current => current.map(line => line.id === lineId ? {
             ...line,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: '',
             rateStatus: 'loading',
             rateError: undefined,
@@ -377,6 +387,7 @@ export default function EditJournalEntryPage() {
                 line.id === lineId && line.rateRequestKey === requestKey
                     ? {
                         ...line,
+                        exchangeRateId: undefined,
                         exchangeRate: '',
                         rateStatus: 'error',
                         rateError: message,
@@ -409,6 +420,7 @@ export default function EditJournalEntryPage() {
                 ...line,
                 accountId,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: currency === functionalCurrency ? 1 : '',
                 foreignDebit: currency === functionalCurrency ? undefined : 0,
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -426,6 +438,7 @@ export default function EditJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 accountId,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: message,
@@ -438,6 +451,7 @@ export default function EditJournalEntryPage() {
             ...line,
             accountId: '',
             currencyCode: functionalCurrency,
+            exchangeRateId: undefined,
             exchangeRate: 1,
             foreignDebit: undefined,
             foreignCredit: undefined,
@@ -459,6 +473,7 @@ export default function EditJournalEntryPage() {
         setLines(current => current.map(item => item.id === lineId ? {
             ...item,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: currency === functionalCurrency ? 1 : '',
             foreignDebit: currency === functionalCurrency ? undefined : 0,
             foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -526,6 +541,7 @@ export default function EditJournalEntryPage() {
                         description: line.description || undefined,
                         reference: header.referenceNumber || entry?.journalEntryNumber || 'JE',
                         currencyCode: isForeign ? transactionCurrency : undefined,
+                        exchangeRateId: isForeign ? line.exchangeRateId : undefined,
                         exchangeRate: isForeign ? exchangeRate : undefined,
                         foreignAmount: isForeign ? foreignAmount || undefined : undefined,
                         lineNumber: index + 1,

@@ -196,6 +196,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 tenantId,
                 dto.Reference,
                 cancellationToken);
+            await ValidateManualJournalExchangeRateEvidenceAsync(
+                transactions, tenantId, dto.TransactionDate, cancellationToken);
 
             var debitSum = transactions
                 .Where(t => string.Equals(t.TransactionType, "Debit", StringComparison.OrdinalIgnoreCase))
@@ -270,6 +272,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     TransactionDate = dto.TransactionDate,
                     LineNumber = lineNum++,
                     TransactionCurrency = txnDto.CurrencyCode,
+                    ExchangeRateId = txnDto.ExchangeRateId,
                     ExchangeRate = txnDto.ExchangeRate,
                     ForeignCurrencyAmount = txnDto.ForeignAmount,
                     TenantId = tenantId,
@@ -339,6 +342,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     tenantId: entry.TenantId,
                     referenceNumber: dto.Reference ?? entry.ReferenceNumber,
                     cancellationToken);
+                await ValidateManualJournalExchangeRateEvidenceAsync(
+                    transactionDtos, entry.TenantId, transactionDate, cancellationToken);
 
                 var debitSum = transactionDtos
                     .Where(t => string.Equals(t.TransactionType, "Debit", StringComparison.OrdinalIgnoreCase))
@@ -390,6 +395,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         TransactionDate = transactionDate,
                         LineNumber = lineNum++,
                         TransactionCurrency = txnDto.CurrencyCode,
+                        ExchangeRateId = txnDto.ExchangeRateId,
                         ExchangeRate = txnDto.ExchangeRate,
                         ForeignCurrencyAmount = txnDto.ForeignAmount,
                         TenantId = tenantId,
@@ -902,6 +908,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         CreditAmount = t.CreditAmount,
                         TransactionCurrency = t.TransactionCurrency,
                         ForeignCurrencyAmount = t.ForeignCurrencyAmount,
+                        ExchangeRateId = t.ExchangeRateId,
                         ExchangeRate = t.ExchangeRate,
                         ExchangeRateSource = t.ExchangeRateSource,
                         ExchangeRateDate = t.ExchangeRateDate,
@@ -951,6 +958,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         CreditAmount = t.DebitAmount,
                         TransactionCurrency = t.TransactionCurrency,
                         ForeignCurrencyAmount = t.ForeignCurrencyAmount,
+                        ExchangeRateId = t.ExchangeRateId,
                         ExchangeRate = t.ExchangeRate,
                         ExchangeRateSource = t.ExchangeRateSource,
                         ExchangeRateDate = t.ExchangeRateDate,
@@ -983,6 +991,84 @@ namespace ErpSystem.Api.Services.Finance.GL
                 foreignCurrencies.Count == 1 ? foreignCurrencies[0] : null);
         }
 
+        private async Task ValidateManualJournalExchangeRateEvidenceAsync(
+            IReadOnlyCollection<CreateAccountTransactionDto> transactions,
+            Guid tenantId,
+            DateTime transactionDate,
+            CancellationToken cancellationToken)
+        {
+            var functionalCurrency = NormalizeCurrencyCode(
+                await GetBaseCurrencyCodeForTenantAsync(tenantId, cancellationToken))
+                ?? throw new InvalidOperationException("Tenant functional currency is not configured.");
+            var foreignLines = transactions
+                .Select((line, index) => new
+                {
+                    Line = line,
+                    LineNumber = line.LineNumber > 0 ? line.LineNumber : index + 1,
+                    CurrencyCode = NormalizeCurrencyCode(line.CurrencyCode)
+                })
+                .Where(item => item.CurrencyCode != null
+                    && !string.Equals(item.CurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (foreignLines.Count == 0)
+                return;
+
+            var missingEvidence = foreignLines.FirstOrDefault(item =>
+                !item.Line.ExchangeRateId.HasValue
+                || !item.Line.ExchangeRate.HasValue
+                || item.Line.ExchangeRate.Value <= 0m);
+            if (missingEvidence != null)
+            {
+                throw new InvalidOperationException(
+                    $"Journal line {missingEvidence.LineNumber} requires an approved {missingEvidence.CurrencyCode} exchange-rate record.");
+            }
+
+            var rateIds = foreignLines
+                .Select(item => item.Line.ExchangeRateId!.Value)
+                .Distinct()
+                .ToList();
+            var rates = await _context.ExchangeRates
+                .AsNoTracking()
+                .Where(rate => rate.TenantId == tenantId && rateIds.Contains(rate.Id) && !rate.IsDeleted)
+                .ToDictionaryAsync(rate => rate.Id, cancellationToken);
+
+            foreach (var item in foreignLines)
+            {
+                var rateId = item.Line.ExchangeRateId!.Value;
+                if (!rates.TryGetValue(rateId, out var rate))
+                {
+                    throw new InvalidOperationException(
+                        $"Journal line {item.LineNumber} exchange-rate record was not found for this tenant.");
+                }
+
+                if (!string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(rate.TargetCurrencyCode, item.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Journal line {item.LineNumber} exchange-rate record does not match {functionalCurrency}/{item.CurrencyCode}.");
+                }
+
+                if (!rate.IsActive
+                    || rate.Rate <= 0m
+                    || (rate.ApprovalStatus != RateApprovalStatus.Approved
+                        && rate.ApprovalStatus != RateApprovalStatus.AutoApproved)
+                    || rate.EffectiveDate.Date > transactionDate.Date
+                    || (rate.EndDate.HasValue && rate.EndDate.Value.Date < transactionDate.Date))
+                {
+                    throw new InvalidOperationException(
+                        $"Journal line {item.LineNumber} exchange-rate record is not active, approved, and effective on {transactionDate:yyyy-MM-dd}.");
+                }
+
+                if (decimal.Round(item.Line.ExchangeRate!.Value, 8, MidpointRounding.AwayFromZero)
+                    != decimal.Round(rate.Rate, 8, MidpointRounding.AwayFromZero))
+                {
+                    throw new InvalidOperationException(
+                        $"Journal line {item.LineNumber} exchange-rate value does not match the selected approved record.");
+                }
+            }
+        }
+
         private async Task<string> GetBaseCurrencyCodeForTenantAsync(Guid tenantId, CancellationToken cancellationToken)
         {
             var financeBaseCurrency = await _context.FinanceSettings
@@ -1003,7 +1089,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             return string.IsNullOrWhiteSpace(tenantBaseCurrency) ? "GHS" : tenantBaseCurrency;
         }
 
-        private static (string? CurrencyCode, decimal? ExchangeRate, decimal? ForeignAmount) ResolveAutoRoutingCurrencyMetadata(
+        private static (string? CurrencyCode, Guid? ExchangeRateId, decimal? ExchangeRate, decimal? ForeignAmount) ResolveAutoRoutingCurrencyMetadata(
             IReadOnlyCollection<CreateAccountTransactionDto> transactions,
             decimal baseAmount)
         {
@@ -1011,6 +1097,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Select(t => new
                 {
                     CurrencyCode = NormalizeCurrencyCode(t.CurrencyCode),
+                    t.ExchangeRateId,
                     ExchangeRate = t.ExchangeRate.GetValueOrDefault()
                 })
                 .Where(t => !string.IsNullOrWhiteSpace(t.CurrencyCode) && t.ExchangeRate > 0m)
@@ -1018,11 +1105,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .ToList();
 
             if (foreignLines.Count != 1)
-                return (null, null, null);
+                return (null, null, null, null);
 
             var foreignLine = foreignLines[0];
             return (
                 foreignLine.CurrencyCode,
+                foreignLine.ExchangeRateId,
                 foreignLine.ExchangeRate,
                 decimal.Round(baseAmount / foreignLine.ExchangeRate, 2, MidpointRounding.AwayFromZero));
         }
@@ -1086,6 +1174,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 Description = "Opening balance auto-balance to Migration Clearing Account",
                 Reference = string.IsNullOrWhiteSpace(referenceNumber) ? "Opening Balance" : referenceNumber.Trim(),
                 CurrencyCode = autoRouteCurrency.CurrencyCode,
+                ExchangeRateId = autoRouteCurrency.ExchangeRateId,
                 ExchangeRate = autoRouteCurrency.ExchangeRate,
                 ForeignAmount = autoRouteCurrency.ForeignAmount,
                 LineNumber = transactions.Count == 0 ? 1 : transactions.Max(t => t.LineNumber) + 1
@@ -1363,6 +1452,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 TransactionDate = source.TransactionDate,
                 LineNumber = lineNumber,
                 TransactionCurrency = source.TransactionCurrency,
+                ExchangeRateId = source.ExchangeRateId,
                 ExchangeRate = source.ExchangeRate,
                 ForeignCurrencyAmount = source.ForeignCurrencyAmount,
                 TenantId = source.TenantId,
@@ -1557,6 +1647,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 BalanceAfter = 0,
                 CurrencyCode = transaction.TransactionCurrency,
                 ForeignAmount = transaction.ForeignCurrencyAmount,
+                ExchangeRateId = transaction.ExchangeRateId,
                 ExchangeRate = transaction.ExchangeRate,
                 LineNumber = transaction.LineNumber,
                 FinanceDimensionSetId = transaction.FinanceDimensionSetId,
@@ -1973,6 +2064,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         t.DebitAmount,
                         t.CreditAmount,
                         t.TransactionCurrency,
+                        t.ExchangeRateId,
                         t.ExchangeRate,
                         t.ForeignCurrencyAmount,
                         t.FinanceDimensionSetId,

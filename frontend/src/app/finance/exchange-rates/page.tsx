@@ -524,7 +524,7 @@ export default function ExchangeRatesPage() {
                                         </SelectContent>
                                     </Select>
                                     <p className="text-xs text-muted-foreground">
-                                        Daily and closing rates are operational. Average and Fixed are advanced; Budget and Spot are hidden until supported workflows exist.
+                                        Month End must use the calendar month-end date. Quarter End and Year End must match the configured fiscal calendar. Budget and Spot remain hidden until supported workflows exist.
                                     </p>
                                 </div>
                                 <div className="space-y-2">
@@ -782,8 +782,9 @@ export default function ExchangeRatesPage() {
                                                                 id="edit-effectiveDate"
                                                                 type="date"
                                                                 value={formData.effectiveDate}
-                                                                onChange={(e) => setFormData({ ...formData, effectiveDate: e.target.value })}
+                                                                disabled
                                                             />
+                                                            <p className="text-xs text-muted-foreground">The effective date is immutable; create a new rate when the evidence date changes.</p>
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label htmlFor="edit-rateType">Rate Type</Label>
@@ -807,6 +808,7 @@ export default function ExchangeRatesPage() {
                                                                     ))}
                                                                 </SelectContent>
                                                             </Select>
+                                                            <p className="text-xs text-muted-foreground">Closing types are accepted only when this immutable date matches their calendar boundary.</p>
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label htmlFor="edit-quoteSide">Quote Side</Label>
