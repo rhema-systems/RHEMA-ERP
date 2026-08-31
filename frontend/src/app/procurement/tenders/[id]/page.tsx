@@ -61,11 +61,16 @@ import { AwardVerificationResults } from '@/components/procurement/tenders/Award
 import { Calculator, Shield } from 'lucide-react';
 import { getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
 import { TenderHeaderControlActions } from '@/components/procurement/tenders/TenderHeaderControlActions';
+import { TenderRevisionsPanel } from '@/components/procurement/tenders/TenderRevisionsPanel';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 export default function TenderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { hasPermission } = useAuth();
+  const canAdministerTender = hasPermission('procurement.tender.administer');
   const tenderId = Array.isArray(params?.id)
     ? params.id[0]
     : (params?.id ?? '');
@@ -106,7 +111,7 @@ export default function TenderDetailPage() {
       setTender(data);
     } catch (error) {
       console.error('Error loading tender details:', error);
-      toast.error('Failed to load tender details');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load tender details'));
     } finally {
       setLoading(false);
     }
@@ -282,7 +287,7 @@ export default function TenderDetailPage() {
       await loadTenderDetails();
     } catch (error: any) {
       console.error('Error publishing tender:', error);
-      toast.error(error.message || 'Failed to publish tender');
+      toast.error(getProcurementProblemMessage(error, 'Failed to publish tender'));
     } finally {
       setPublishing(false);
     }
@@ -369,7 +374,7 @@ export default function TenderDetailPage() {
             </Badge>
           )}
 
-          {tender.status === 'Draft' && (
+          {tender.status === 'Draft' && canAdministerTender && (
             <Button
               variant="outline"
               onClick={() =>
@@ -381,17 +386,17 @@ export default function TenderDetailPage() {
             </Button>
           )}
 
-          {(tender.status === 'Draft' || tender.status === 'Submitted') && (
+          {((tender.status === 'Draft' && canAdministerTender) || tender.status === 'Submitted') && (
             <WorkflowApprovalActions {...workflow.actionProps} showStepBadge />
           )}
 
-          {tender.status === 'Approved' && (
+          {tender.status === 'Approved' && canAdministerTender && (
             <Button onClick={handlePublishClick}>
               <Send className="h-4 w-4 mr-2" />
               Publish Tender
             </Button>
           )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+          {canAdministerTender && ['Approved', 'Published', 'Awarded'].includes(tender.status) &&
             tender.sourcingCaseId &&
             tender.tenderType !== 'RFQ' && (
               <Button
@@ -425,7 +430,7 @@ export default function TenderDetailPage() {
               Bidder Communications
             </Button>
           )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+          {canAdministerTender && ['Approved', 'Published', 'Awarded'].includes(tender.status) &&
             publicationPresentation.advancedControlLabel && (
               <Button
                 variant="outline"
@@ -510,7 +515,7 @@ export default function TenderDetailPage() {
         onValueChange={setActiveTab}
         className="space-y-4"
       >
-        <TabsList className="grid w-full grid-cols-12">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
             Overview
@@ -538,6 +543,10 @@ export default function TenderDetailPage() {
           <TabsTrigger value="clarifications">
             <MessageSquare className="h-4 w-4 mr-2" />
             Clarifications ({tender.clarifications?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="revisions">
+            <FileText className="h-4 w-4 mr-2" />
+            Amendments ({tender.revisions?.length || 0})
           </TabsTrigger>
           <TabsTrigger value="evaluators">
             <Users className="h-4 w-4 mr-2" />
@@ -1454,7 +1463,7 @@ export default function TenderDetailPage() {
                               )}
                             </div>
                           )}
-                        {clarification.status === 'Pending' && (
+                        {clarification.status === 'Pending' && canAdministerTender && (
                           <Button
                             size="sm"
                             onClick={() => {
@@ -1473,6 +1482,16 @@ export default function TenderDetailPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="revisions" className="space-y-4">
+          <TenderRevisionsPanel
+            tenderId={tenderId}
+            tenderStatus={tender.status}
+            currentSubmissionDeadline={tender.submissionDeadline}
+            revisions={tender.revisions || []}
+            onChanged={loadTenderDetails}
+          />
         </TabsContent>
 
         {/* Evaluators Tab */}

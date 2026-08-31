@@ -244,6 +244,127 @@ public sealed class TenderBidSubmissionLineageTests
         result.Status.Should().Be("Submitted");
     }
 
+    [Fact]
+    public async Task PaymentVerificationRejectsRouteFromAnotherBidSupplier()
+    {
+        var fixture = new Fixture(advancedSourcingCase: false);
+        var fee = fixture.AddMandatoryFee(100m);
+        var payment = new TenderPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Bid.TenantId,
+            TenderFeeId = fee.Id,
+            BusinessPartnerId = Guid.NewGuid(),
+            Status = "Pending",
+            PaymentReference = "PAY-WRONG-SUPPLIER"
+        };
+        fixture.Payments.Setup(repository => repository.GetByIdAsync(payment.Id))
+            .ReturnsAsync(payment);
+
+        var action = () => fixture.Service.VerifyPaymentAsync(
+            fixture.Bid.Id, payment.Id, new VerifyPaymentDto { IsApproved = true });
+
+        await action.Should().ThrowAsync<TenderBidInitiationValidationException>()
+            .Where(exception => exception.Code == "TENDER_BID_PAYMENT_ROUTE_MISMATCH");
+        fixture.Payments.Verify(
+            repository => repository.UpdateAsync(It.IsAny<TenderPayment>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PaymentVerificationIsScopedAndSameDecisionRetryIsIdempotent()
+    {
+        var fixture = new Fixture(advancedSourcingCase: false);
+        var fee = fixture.AddMandatoryFee(100m);
+        var payment = new TenderPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Bid.TenantId,
+            TenderFeeId = fee.Id,
+            BusinessPartnerId = fixture.Bid.BusinessPartnerId,
+            Status = "Pending",
+            PaymentReference = "PAY-PENDING"
+        };
+        fixture.Payments.Setup(repository => repository.GetByIdAsync(payment.Id))
+            .ReturnsAsync(payment);
+
+        var first = await fixture.Service.VerifyPaymentAsync(
+            fixture.Bid.Id, payment.Id, new VerifyPaymentDto { IsApproved = true });
+        var retry = await fixture.Service.VerifyPaymentAsync(
+            fixture.Bid.Id, payment.Id, new VerifyPaymentDto { IsApproved = true });
+
+        first.Status.Should().Be("Verified");
+        retry.Status.Should().Be("Verified");
+        fixture.Payments.Verify(repository => repository.UpdateAsync(payment), Times.Once);
+    }
+
+    [Fact]
+    public void LegacyOpeningRequiresClosedTenderAndElapsedSchedule()
+    {
+        var now = DateTime.UtcNow;
+        var tender = new Tender
+        {
+            Status = "Published",
+            SubmissionDeadline = now.AddMinutes(-1)
+        };
+
+        Action beforeClose = () => TenderBidService.EnsureLegacyOpeningReady(tender, now);
+        beforeClose.Should().Throw<InvalidOperationException>().WithMessage("*closed*");
+
+        tender.Status = "Closed";
+        tender.OpeningDate = now.AddMinutes(1);
+        Action beforeSchedule = () => TenderBidService.EnsureLegacyOpeningReady(tender, now);
+        beforeSchedule.Should().Throw<InvalidOperationException>().WithMessage("*scheduled opening*");
+
+        tender.OpeningDate = now;
+        TenderBidService.EnsureLegacyOpeningReady(tender, now);
+    }
+
+    [Fact]
+    public async Task BidSummaryUsesVerifiedPaymentFromExactTenderAndTenant()
+    {
+        var fixture = new Fixture(advancedSourcingCase: false);
+        var fee = fixture.AddMandatoryFee(100m);
+        fixture.Bids.Setup(repository => repository.GetBidsAsync(
+                1, 10, null, null, fixture.Tender.Id))
+            .ReturnsAsync(new ErpSystem.Core.DTOs.Common.PagedResult<TenderBid>
+            {
+                Items = [fixture.Bid], TotalCount = 1, Page = 1, PageSize = 10
+            });
+        fixture.Payments.Setup(repository => repository.GetByBusinessPartnerIdAsync(
+                fixture.Bid.BusinessPartnerId))
+            .ReturnsAsync(
+            [
+                new TenderPayment
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = fixture.Bid.TenantId,
+                    TenderFeeId = Guid.NewGuid(),
+                    BusinessPartnerId = fixture.Bid.BusinessPartnerId,
+                    Status = "Completed",
+                    PaymentReference = "OTHER-TENDER"
+                },
+                new TenderPayment
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = fixture.Bid.TenantId,
+                    TenderFeeId = fee.Id,
+                    BusinessPartnerId = fixture.Bid.BusinessPartnerId,
+                    Status = "Verified",
+                    PaymentReference = "THIS-TENDER",
+                    VerifiedDate = DateTime.UtcNow
+                }
+            ]);
+
+        var result = await fixture.Service.GetBidsAsync(
+            1, 10, null, null, fixture.Tender.Id);
+
+        var summary = result.Items.Should().ContainSingle().Subject;
+        summary.HasPaidFees.Should().BeTrue();
+        summary.PaymentStatus.Should().Be("Verified");
+        fixture.Bids.Verify(repository => repository.GetBidsAsync(
+            1, 10, null, null, fixture.Tender.Id), Times.Once);
+    }
+
     private sealed class Fixture
     {
         public Mock<ITenderBidRepository> Bids { get; } = new();
@@ -272,6 +393,8 @@ public sealed class TenderBidSubmissionLineageTests
             };
             Fees.Setup(repository => repository.GetByTenderIdAsync(Tender.Id))
                 .ReturnsAsync([fee]);
+            Fees.Setup(repository => repository.GetByIdAsync(fee.Id))
+                .ReturnsAsync(fee);
             return fee;
         }
 

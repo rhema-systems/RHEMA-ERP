@@ -16,16 +16,37 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class TenderAwardsAwardReadinessControllerTests
 {
     [Fact]
-    public void CreateAwardRequiresAuthenticationWithoutGenericRolePreemption()
+    public void AwardRecommendationAndDecisionUseSeparateExactPermissions()
     {
         var type = typeof(TenderAwardsController);
         type.GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         type.GetMethod(nameof(TenderAwardsController.CreateAward))!
-            .GetCustomAttribute<AuthorizeAttribute>()!.Roles
-            .Should().BeNullOrEmpty();
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.tender.administer");
+        type.GetMethod(nameof(TenderAwardsController.ApproveAward))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.tender.approve");
+        type.GetMethod(nameof(TenderAwardsController.RejectAward))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.tender.approve");
         type.GetMethod(nameof(TenderAwardsController.CreateAward))!
             .GetCustomAttribute<AllowAnonymousAttribute>()
             .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExternalSupplierCannotReadAnotherSuppliersAwardByBid()
+    {
+        var fixture = new Fixture();
+        var bidId = Guid.NewGuid();
+        fixture.Service.Setup(service => service.GetAwardByBidIdAsync(bidId))
+            .ThrowsAsync(new UnauthorizedAccessException(
+                "A supplier can view an award only for its own bid."));
+
+        var response = await fixture.Controller.GetAwardByBid(bidId);
+
+        var result = response.Result.Should().BeOfType<ObjectResult>().Subject;
+        result.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
     }
 
     [Fact]
@@ -54,25 +75,40 @@ public sealed class TenderAwardsAwardReadinessControllerTests
     }
 
     [Fact]
-    public async Task CreateAwardReturnsDecisionWhenReadinessHardStopBlocks()
+    public async Task GenerateAwardNotificationUsesServerDerivedDto()
     {
         var fixture = new Fixture();
-        var request = new CreateAwardDto
+        var awardId = Guid.NewGuid();
+        var expected = new AwardNotificationDto
         {
+            AwardId = awardId,
             TenderId = Guid.NewGuid(),
-            TenderBidId = Guid.NewGuid(),
-            AwardedAmount = 500m
+            TenderNumber = "TND-001"
         };
+        fixture.Service.Setup(service => service.GenerateAwardNotificationAsync(awardId))
+            .ReturnsAsync(expected);
+
+        var response = await fixture.Controller.GenerateAwardNotification(awardId);
+
+        response.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeSameAs(expected);
+    }
+
+    [Fact]
+    public async Task ApproveAwardReturnsDecisionWhenReadinessHardStopBlocks()
+    {
+        var fixture = new Fixture();
+        var awardId = Guid.NewGuid();
         var decision = new ProcurementAwardReadinessDto
         {
             Id = Guid.NewGuid(),
             SourceType = ProcurementAwardReadinessSourceType.Tender,
-            SourceId = request.TenderId,
+            SourceId = Guid.NewGuid(),
             Status = ProcurementAwardReadinessDecisionStatus.Blocked
         };
-        fixture.Service.Setup(service => service.CreateAwardAsync(
-                request.TenderId,
-                request,
+        fixture.Service.Setup(service => service.ApproveAwardAsync(
+                awardId,
+                It.IsAny<ApproveAwardDto>(),
                 "corr-legacy-award",
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ProcurementAwardReadinessBlockedException(
@@ -80,7 +116,8 @@ public sealed class TenderAwardsAwardReadinessControllerTests
                 "The selected bid contradicts the retained recommendation.",
                 decision));
 
-        var result = await fixture.Controller.CreateAward(request, default);
+        var result = await fixture.Controller.ApproveAward(
+            awardId, new ApproveAwardDto(), default);
 
         var problem = result.Result.Should()
             .BeOfType<UnprocessableEntityObjectResult>().Subject;
@@ -95,21 +132,16 @@ public sealed class TenderAwardsAwardReadinessControllerTests
     [InlineData("cross-tenant", 404, "AWARD_READINESS_SOURCE_NOT_FOUND")]
     [InlineData("evaluator-or-external", 403, "AWARD_READINESS_ACCESS_FORBIDDEN")]
     [InlineData("blocked", 422, "AWARD_READINESS_BLOCKED")]
-    public async Task CreateAwardDirectRouteMapsReadinessHardStops(
+    public async Task ApproveAwardRouteMapsReadinessHardStops(
         string failure,
         int expectedStatus,
         string expectedCode)
     {
         var fixture = new Fixture();
-        var request = new CreateAwardDto
-        {
-            TenderId = Guid.NewGuid(),
-            TenderBidId = Guid.NewGuid(),
-            AwardedAmount = 500m
-        };
-        fixture.Service.Setup(service => service.CreateAwardAsync(
-                request.TenderId,
-                request,
+        var awardId = Guid.NewGuid();
+        fixture.Service.Setup(service => service.ApproveAwardAsync(
+                awardId,
+                It.IsAny<ApproveAwardDto>(),
                 "corr-legacy-award",
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure switch
@@ -125,11 +157,12 @@ public sealed class TenderAwardsAwardReadinessControllerTests
                     new ProcurementAwardReadinessDto
                     {
                         SourceType = ProcurementAwardReadinessSourceType.Tender,
-                        SourceId = request.TenderId
+                        SourceId = awardId
                     })
             });
 
-        var response = await fixture.Controller.CreateAward(request, default);
+        var response = await fixture.Controller.ApproveAward(
+            awardId, new ApproveAwardDto(), default);
 
         var result = response.Result.Should()
             .BeAssignableTo<ObjectResult>().Subject;

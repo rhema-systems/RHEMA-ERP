@@ -588,6 +588,7 @@ public class TenderRevisionDto
     public string? RevisedByName { get; set; }
     public string RevisionType { get; set; } = "Amendment";
     public string Description { get; set; } = string.Empty;
+    public string? Changes { get; set; }
     public DateTime? NewSubmissionDeadline { get; set; }
     public bool RequiresRebid { get; set; }
     public bool NotificationSent { get; set; }

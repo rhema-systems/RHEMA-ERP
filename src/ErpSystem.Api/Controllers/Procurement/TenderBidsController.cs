@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -59,9 +60,7 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
-            // Service interface expects (int page, int pageSize, string? search, string? status)
-            // tenderId parameter is Guid? but service expects string? for search
-            var result = await _bidService.GetBidsAsync(page, pageSize, null, status);
+            var result = await _bidService.GetBidsAsync(page, pageSize, null, status, tenderId);
             return Ok(result);
         }
         catch (Exception ex)
@@ -775,6 +774,16 @@ public class TenderBidsController : ControllerBase
             var payments = await _bidService.GetBidPaymentsAsync(id);
             return Ok(payments);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Tender payment access forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting payments for bid {BidId}", id);
@@ -836,13 +845,28 @@ public class TenderBidsController : ControllerBase
     /// Verify payment
     /// </summary>
     [HttpPost("{bidId}/payments/{paymentId}/verify")]
-    [Authorize(Policy = "procurement.tender.administer")]
+    [Authorize(Policy = ProcurementAccessControlRegistry.TenderPaymentVerifyPermission)]
     public async Task<ActionResult<TenderPaymentDto>> VerifyPayment(Guid bidId, Guid paymentId, [FromBody] VerifyPaymentDto dto)
     {
         try
         {
-            var payment = await _bidService.VerifyPaymentAsync(paymentId, dto);
+            var payment = await _bidService.VerifyPaymentAsync(bidId, paymentId, dto);
             return Ok(payment);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = ex.Code,
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
         }
         catch (InvalidOperationException ex)
         {

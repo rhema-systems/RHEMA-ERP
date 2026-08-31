@@ -128,6 +128,7 @@ public class TenderEvaluationService : ITenderEvaluationService
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
             await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
+            EnsureBidEvaluationState(bid);
             await EnsureCommitteeScorerAsync(bid.TenderId, bid.Id);
 
             // Get evaluator assignment for current user
@@ -185,6 +186,12 @@ public class TenderEvaluationService : ITenderEvaluationService
             };
 
             await _evaluationRepository.CreateAsync(evaluation);
+            if (string.Equals(bid.Status, "Opened", StringComparison.OrdinalIgnoreCase))
+            {
+                bid.Status = "UnderEvaluation";
+                bid.UpdatedAt = DateTime.UtcNow;
+                await _bidRepository.UpdateAsync(bid);
+            }
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Created evaluation {EvaluationId} for bid {BidId}", evaluation.Id, dto.TenderBidId);
@@ -232,6 +239,7 @@ public class TenderEvaluationService : ITenderEvaluationService
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
             var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            await EnsureCurrentEvaluatorOwnsAsync(evaluation);
             await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
@@ -293,6 +301,7 @@ public class TenderEvaluationService : ITenderEvaluationService
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
             var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            await EnsureCurrentEvaluatorOwnsAsync(evaluation);
             await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
@@ -563,6 +572,7 @@ public class TenderEvaluationService : ITenderEvaluationService
             if (evaluation != null)
             {
                 var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+                await EnsureCurrentEvaluatorOwnsAsync(evaluation);
                 await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
             }
             if (evaluation?.Status == "Submitted")
@@ -1495,7 +1505,26 @@ public class TenderEvaluationService : ITenderEvaluationService
         var bid = await _bidRepository.GetByIdAsync(bidId)
             ?? throw new InvalidOperationException($"Bid with ID {bidId} not found");
         await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
+        EnsureBidEvaluationState(bid);
         return bid.TenderId;
+    }
+
+    private static void EnsureBidEvaluationState(TenderBid bid)
+    {
+        if (!string.Equals(bid.Status, "Opened", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(bid.Status, "UnderEvaluation", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Only an opened bid can be evaluated (current status: '{bid.Status}').");
+    }
+
+    private async Task EnsureCurrentEvaluatorOwnsAsync(TenderEvaluation evaluation)
+    {
+        var evaluator = evaluation.TenderEvaluator ??
+                        await _evaluatorRepository.GetByIdAsync(evaluation.TenderEvaluatorId)
+                        ?? throw new InvalidOperationException("The evaluation assignment was not found.");
+        if (evaluator.UserId != _currentUserProvider.UserId)
+            throw new ProcurementEvaluationCommitteeAuthorizationException(
+                "An evaluator can change or submit only their own evaluation.");
     }
 
     private async Task EnsureLegacyEvaluationAllowedAsync(Guid tenderId)

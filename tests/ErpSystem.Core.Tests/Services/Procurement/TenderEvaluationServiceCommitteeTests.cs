@@ -55,6 +55,43 @@ public sealed class TenderEvaluationServiceCommitteeTests
             .Where(exception => exception.Code == "EVALUATION_SCORE_PROJECTION_INCOMPLETE");
     }
 
+    [Fact]
+    public async Task CreateEvaluationRequiresAnOpenedBid()
+    {
+        var fixture = new Fixture();
+        fixture.Bids[0].Status = "Submitted";
+
+        await fixture.Service.Invoking(service => service.CreateEvaluationAsync(
+                new CreateEvaluationDto { TenderBidId = fixture.Bids[0].Id }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Only an opened bid*");
+        fixture.Evaluations.Verify(
+            repository => repository.CreateAsync(It.IsAny<TenderEvaluation>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EvaluatorCannotUpdateAnotherEvaluatorsDraft()
+    {
+        var fixture = new Fixture();
+        fixture.Bids[0].Status = "UnderEvaluation";
+        var other = new TenderEvaluator
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            TenderId = fixture.TenderId,
+            UserId = Guid.NewGuid()
+        };
+        var evaluation = fixture.Evaluation(fixture.Bids[0], other, "Draft");
+        fixture.Evaluations.Setup(repository => repository.GetByIdAsync(evaluation.Id))
+            .ReturnsAsync(evaluation);
+
+        await fixture.Service.Invoking(service => service.UpdateEvaluationAsync(
+                evaluation.Id, new UpdateEvaluationDto()))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+        fixture.Evaluations.Verify(
+            repository => repository.UpdateAsync(It.IsAny<TenderEvaluation>()), Times.Never);
+    }
+
     private sealed class Fixture
     {
         public Fixture()

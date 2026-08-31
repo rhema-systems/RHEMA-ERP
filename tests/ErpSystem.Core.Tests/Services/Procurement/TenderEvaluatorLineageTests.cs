@@ -161,6 +161,67 @@ public sealed class TenderEvaluatorLineageTests
             It.IsAny<TenderEvaluator>()), Times.Never);
     }
 
+    [Fact]
+    public async Task PublishedControlledTenderAllowsImmutableAddendumRecord()
+    {
+        var fixture = new Fixture(new Tender
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Fixture.TenantId,
+            TenderNumber = "TND-CONTROLLED-ADDENDUM",
+            TenderType = "NCT",
+            Status = "Published",
+            SubmissionDeadline = DateTime.UtcNow.AddDays(3)
+        });
+        fixture.TenderControls.Setup(service => service.IsControlledTenderMethodAsync(
+                fixture.Tender.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await fixture.Service.CreateRevisionAsync(
+            fixture.Tender.Id,
+            new CreateRevisionDto
+            {
+                RevisionType = "Addendum",
+                Description = "Clarifies the published delivery schedule.",
+                Changes = "Delivery schedule clarification only",
+                SendNotifications = false
+            });
+
+        result.RevisionType.Should().Be("Addendum");
+        fixture.Revisions.Verify(repository => repository.CreateAsync(
+            It.Is<TenderRevision>(revision =>
+                revision.TenderId == fixture.Tender.Id &&
+                revision.RevisionType == "Addendum")), Times.Once);
+        fixture.TenderControls.Verify(service => service.IsControlledTenderMethodAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeadlineExtensionRevisionRequiresNewDeadline()
+    {
+        var fixture = new Fixture(new Tender
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Fixture.TenantId,
+            TenderNumber = "TND-DEADLINE-ADDENDUM",
+            Status = "Published",
+            SubmissionDeadline = DateTime.UtcNow.AddDays(3)
+        });
+
+        await fixture.Service.Invoking(service => service.CreateRevisionAsync(
+                fixture.Tender.Id,
+                new CreateRevisionDto
+                {
+                    RevisionType = "DeadlineExtension",
+                    Description = "Extends the published submission deadline.",
+                    SendNotifications = false
+                }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires a new submission deadline*");
+        fixture.Revisions.Verify(repository => repository.CreateAsync(
+            It.IsAny<TenderRevision>()), Times.Never);
+    }
+
     private sealed class Fixture
     {
         internal static readonly Guid TenantId = Guid.NewGuid();
@@ -172,6 +233,10 @@ public sealed class TenderEvaluatorLineageTests
             Tenders.Setup(repository => repository.GetByIdAsync(tender.Id)).ReturnsAsync(tender);
             Tenders.Setup(repository => repository.UpdateAsync(It.IsAny<Tender>()))
                 .ReturnsAsync((Tender value) => value);
+            Revisions.Setup(repository => repository.GetByTenderIdAsync(tender.Id))
+                .ReturnsAsync(Array.Empty<TenderRevision>());
+            Revisions.Setup(repository => repository.CreateAsync(It.IsAny<TenderRevision>()))
+                .ReturnsAsync((TenderRevision value) => value);
             Evaluators.Setup(repository => repository.CreateAsync(It.IsAny<TenderEvaluator>()))
                 .ReturnsAsync((TenderEvaluator value) => value);
             Evaluators.Setup(repository => repository.GetByTenderIdAsync(tender.Id))
@@ -260,7 +325,7 @@ public sealed class TenderEvaluatorLineageTests
                 Mock.Of<ITenderFeeRepository>(),
                 Evaluators.Object,
                 Mock.Of<ITenderClarificationRepository>(),
-                Mock.Of<ITenderRevisionRepository>(),
+                Revisions.Object,
                 Mock.Of<ITenderViewLogRepository>(),
                 Mock.Of<ITenderLotRepository>(),
                 Mock.Of<IBusinessPartnerRepository>(),
@@ -273,7 +338,7 @@ public sealed class TenderEvaluatorLineageTests
                 CurrentUser.Object,
                 Mock.Of<IAppEventBus>(),
                 SourcingCases.Object,
-                Mock.Of<IProcurementTenderControlService>(),
+                TenderControls.Object,
                 Mock.Of<IProcurementTenderDocumentControlService>(),
                 Mock.Of<IProcurementExceptionalSourcingControlService>(),
                 EvaluationCommittee.Object,
@@ -286,9 +351,11 @@ public sealed class TenderEvaluatorLineageTests
         internal TenderService Service { get; }
         internal Mock<ITenderRepository> Tenders { get; } = new();
         internal Mock<ITenderEvaluatorRepository> Evaluators { get; } = new();
+        internal Mock<ITenderRevisionRepository> Revisions { get; } = new();
         internal Mock<ITenderNotificationService> Notifications { get; } = new();
         internal Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         internal Mock<IProcurementEvaluationCommitteeControlService> EvaluationCommittee { get; } = new();
+        internal Mock<IProcurementTenderControlService> TenderControls { get; } = new();
         internal Mock<IUnitOfWork> UnitOfWork { get; } = new();
         internal Mock<IGenericRepository<Permission>> Permissions { get; } = new();
         internal Mock<UserManager<ApplicationUser>> UserManager { get; }

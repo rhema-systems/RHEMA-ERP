@@ -98,4 +98,13 @@ describe('procurement ProblemDetails presentation', () => {
       })
     ).toBe('GHANEPS_SOURCE_TYPE_MISMATCH: Select the matching source.');
   });
+
+  it('preserves a plain-text server response', () => {
+    expect(
+      getProcurementProblemMessage(
+        'The award has already been cancelled.',
+        'Failed to cancel award'
+      )
+    ).toBe('The award has already been cancelled.');
+  });
 });

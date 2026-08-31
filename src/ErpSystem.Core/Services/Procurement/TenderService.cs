@@ -689,6 +689,34 @@ public class TenderService : ITenderService
         }
     }
 
+    public async Task<TenderDto> CloseTenderAsync(Guid id)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Tender with ID {id} not found");
+
+        if (!string.Equals(tender.Status, "Published", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Only a published tender can be closed (current status: '{tender.Status}').");
+        if (await _tenderControlService.IsControlledTenderMethodAsync(tender.Id))
+            throw new ProcurementTenderControlConflictException(
+                "TENDER_STATUTORY_OPENING_REQUIRED",
+                "NCT, ICT, QBS, and QCBS tenders must close and open through the signed public-opening control.");
+        if (!tender.SubmissionDeadline.HasValue)
+            throw new InvalidOperationException(
+                "A published tender must retain its submission deadline before it can be closed.");
+        if (DateTime.UtcNow < tender.SubmissionDeadline.Value)
+            throw new InvalidOperationException(
+                "The tender cannot be closed before its submission deadline.");
+
+        tender.Status = "Closed";
+        tender.UpdatedAt = DateTime.UtcNow;
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Closed tender {TenderId}", id);
+        return MapToDto(tender);
+    }
+
     public async Task DeleteTenderAsync(Guid id)
     {
         try
@@ -1392,7 +1420,29 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
-            await EnsureStatutoryStructureMutableAsync(tender);
+            if (tender.TenantId != _currentUserProvider.TenantId)
+                throw new UnauthorizedAccessException("The tender does not belong to the current tenant.");
+            if (!string.Equals(tender.Status, "Published", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Tender revisions can only be issued while the tender is published (current status: '{tender.Status}').");
+            var revisionType = dto.RevisionType?.Trim();
+            if (revisionType is not ("Amendment" or "Addendum" or "Corrigendum" or "DeadlineExtension"))
+                throw new InvalidOperationException(
+                    "Revision type must be Amendment, Addendum, Corrigendum, or DeadlineExtension.");
+            if (string.IsNullOrWhiteSpace(dto.Description) || dto.Description.Trim().Length < 10)
+                throw new InvalidOperationException(
+                    "A tender revision requires a clear description of at least 10 characters.");
+            if (revisionType == "DeadlineExtension" && !dto.NewSubmissionDeadline.HasValue)
+                throw new InvalidOperationException(
+                    "A deadline-extension revision requires a new submission deadline.");
+            if (dto.NewSubmissionDeadline.HasValue &&
+                dto.NewSubmissionDeadline.Value <= DateTime.UtcNow)
+                throw new InvalidOperationException(
+                    "A revised submission deadline must be in the future.");
+            if (dto.NewSubmissionDeadline.HasValue && tender.SubmissionDeadline.HasValue &&
+                dto.NewSubmissionDeadline.Value <= tender.SubmissionDeadline.Value)
+                throw new InvalidOperationException(
+                    "A revised submission deadline must extend the current deadline.");
 
             // Get current revision number
             var revisions = await _revisionRepository.GetByTenderIdAsync(tenderId);
@@ -1407,9 +1457,9 @@ public class TenderService : ITenderService
                 RevisionNumber = revisionNumber,
                 RevisionDate = DateTime.UtcNow,
                 RevisedById = _currentUserProvider.UserId,
-                RevisionType = dto.RevisionType,
-                Description = dto.Description,
-                Changes = dto.Changes,
+                RevisionType = revisionType,
+                Description = dto.Description.Trim(),
+                Changes = string.IsNullOrWhiteSpace(dto.Changes) ? null : dto.Changes.Trim(),
                 NewSubmissionDeadline = dto.NewSubmissionDeadline,
                 RequiresRebid = dto.RequiresRebid,
                 NotificationSent = false,
@@ -1432,11 +1482,20 @@ public class TenderService : ITenderService
             // Send notifications
             if (dto.SendNotifications)
             {
-                await _notificationService.SendRevisionNotificationAsync(revision.Id);
-                revision.NotificationSent = true;
-                revision.NotificationSentDate = DateTime.UtcNow;
-                await _revisionRepository.UpdateAsync(revision);
-                await _unitOfWork.SaveChangesAsync();
+                try
+                {
+                    await _notificationService.SendRevisionNotificationAsync(revision.Id);
+                    revision.NotificationSent = true;
+                    revision.NotificationSentDate = DateTime.UtcNow;
+                    await _revisionRepository.UpdateAsync(revision);
+                    await _unitOfWork.SaveChangesAsync();
+                }
+                catch (Exception notificationError)
+                {
+                    _logger.LogWarning(notificationError,
+                        "Revision {RevisionId} was saved but its notification could not be sent",
+                        revision.Id);
+                }
             }
 
             return MapRevisionToDto(revision);
@@ -1452,6 +1511,10 @@ public class TenderService : ITenderService
     {
         try
         {
+            var tender = await _tenderRepository.GetByIdAsync(tenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            if (tender.TenantId != _currentUserProvider.TenantId)
+                throw new UnauthorizedAccessException("The tender does not belong to the current tenant.");
             var revisions = await _revisionRepository.GetByTenderIdAsync(tenderId);
             return revisions.Select(MapRevisionToDto);
         }
@@ -1805,6 +1868,7 @@ public class TenderService : ITenderService
             RevisedByName = string.Empty, // Would need to fetch from User entity
             RevisionType = revision.RevisionType,
             Description = revision.Description,
+            Changes = revision.Changes,
             NewSubmissionDeadline = revision.NewSubmissionDeadline,
             RequiresRebid = revision.RequiresRebid,
             NotificationSent = revision.NotificationSent

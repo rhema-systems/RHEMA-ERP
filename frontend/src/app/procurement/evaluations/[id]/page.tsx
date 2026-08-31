@@ -26,6 +26,8 @@ import { evaluationTemplateService, type EvaluationTemplate } from '@/services/e
 import { type TenderEvaluationDto, type UpdateEvaluationDto } from '@/services/tenderEvaluationService';
 import { type TenderBidDetailDto } from '@/services/tenderBidService';
 import { createEvaluationIdempotencyKey } from '@/lib/procurement-evaluation-committee';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { useAuth } from '@/hooks/use-auth';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -41,6 +43,8 @@ interface CriteriaScore {
 export default function EvaluationFormPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canEvaluate = hasPermission('procurement.tender.evaluate');
   const evaluationId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [evaluation, setEvaluation] = useState<TenderEvaluationDto | null>(null);
@@ -119,7 +123,7 @@ export default function EvaluationFormPage() {
       setRecommendation(evalData.recommendation || '');
     } catch (error) {
       console.error('Error loading evaluation data:', error);
-      toast.error('Failed to load evaluation data');
+      toast.error(getProcurementProblemMessage(error, 'Failed to load evaluation data'));
     } finally {
       setLoading(false);
     }
@@ -214,7 +218,7 @@ export default function EvaluationFormPage() {
       await loadEvaluationData();
     } catch (error) {
       console.error('Error saving evaluation:', error);
-      toast.error('Failed to save evaluation');
+      toast.error(getProcurementProblemMessage(error, 'Failed to save evaluation'));
     } finally {
       setSaving(false);
     }
@@ -255,7 +259,7 @@ export default function EvaluationFormPage() {
       router.push('/procurement/evaluations');
     } catch (error) {
       console.error('Error submitting evaluation:', error);
-      toast.error('Failed to submit evaluation');
+      toast.error(getProcurementProblemMessage(error, 'Failed to submit evaluation'));
     } finally {
       setSaving(false);
     }
@@ -286,7 +290,7 @@ export default function EvaluationFormPage() {
     );
   }
 
-  const isReadOnly = evaluation.status !== 'Draft';
+  const isReadOnly = evaluation.status !== 'Draft' || !canEvaluate;
 
   return (
     <div className="container mx-auto py-6 space-y-6">

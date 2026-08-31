@@ -41,6 +41,7 @@ import BidDocumentsStep from '@/components/external-portal/bid-submission/BidDoc
 import BidReviewStep from '@/components/external-portal/bid-submission/BidReviewStep';
 import { QuantitySurveyTenderBoqSubmissionPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqSubmissionPanel';
 import type { TenderBoqLine } from '@/services/quantity-survey-tender-boq.service';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 const STEPS = [
   { id: 1, name: 'Select Lots', description: 'Choose lots to bid for' },
@@ -200,6 +201,12 @@ export default function SubmitBidPage() {
           technicalProposal: draftBid.technicalProposal || '',
           commercialProposal: draftBid.commercialProposal || '',
           selectedLotIds: [],
+          associationType: draftBid.associationType as
+            | 'AllUsers'
+            | 'Self'
+            | 'SelectedUsers'
+            | undefined,
+          acceptedDeclaration: draftBid.acceptedDeclaration,
           items: draftItems.map((item) => ({
             tenderItemId: item.tenderItemId,
             offeredQuantity: item.offeredQuantity,
@@ -350,7 +357,7 @@ export default function SubmitBidPage() {
         }
         return true;
 
-      case 4: // Review
+      case 5: // Review
         return true;
 
       default:
@@ -612,7 +619,13 @@ export default function SubmitBidPage() {
 
   const handleSubmitClick = () => {
     // Validate all steps including documents
-    if (!validateStep(1) || !validateStep(2) || !validateStep(3)) {
+    if (
+      !validateStep(1) ||
+      !validateStep(2) ||
+      !validateStep(3) ||
+      !validateStep(4) ||
+      !validateStep(5)
+    ) {
       toast.error(
         'Please complete all required steps and upload required documents'
       );
@@ -649,7 +662,8 @@ export default function SubmitBidPage() {
       router.push(`/external-portal/my-bids/${bidId}`);
     } catch (error) {
       console.error('Error submitting bid:', error);
-      toast.error('Failed to submit bid');
+      toast.error(getProcurementProblemMessage(error, 'Failed to submit bid'));
+      return false;
     } finally {
       setSubmitting(false);
     }

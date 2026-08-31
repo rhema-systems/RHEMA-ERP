@@ -54,7 +54,7 @@ public sealed class TenderControlsController : ControllerBase
         ExecuteAsync(() => _service.DecideApprovalAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("award")]
-    [Authorize]
+    [Authorize(Policy = "procurement.tender.approve")]
     public Task<IActionResult> RecordAward(Guid tenderId, RecordProcurementTenderAwardRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordAwardAsync(tenderId, request, Correlation(), cancellationToken));
 

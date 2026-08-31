@@ -23,6 +23,7 @@ public interface ITenderService
     Task RejectTenderAsync(Guid id, Guid userId, string reason, string? comments = null);
 
     Task<TenderDetailDto> PublishTenderAsync(Guid id, PublishTenderDto dto);
+    Task<TenderDto> CloseTenderAsync(Guid id);
     Task DeleteTenderAsync(Guid id);
     
     // Tender Items
@@ -84,7 +85,7 @@ public interface ITenderBidService
 {
     Task<TenderBidDetailDto?> GetBidByIdAsync(Guid id);
     Task<TenderBidDetailDto?> GetBidByNumberAsync(string bidNumber);
-    Task<PagedResult<TenderBidSummaryDto>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null);
+    Task<PagedResult<TenderBidSummaryDto>> GetBidsAsync(int page, int pageSize, string? search = null, string? status = null, Guid? tenderId = null);
     Task<IEnumerable<TenderBidSummaryDto>> GetBidsByTenderIdAsync(Guid tenderId);
     Task<IEnumerable<TenderBidSummaryDto>> GetMyBidsAsync(Guid businessPartnerId);
     Task<TenderBidDetailDto?> GetMyDraftBidByTenderIdAsync(Guid tenderId);
@@ -112,7 +113,7 @@ public interface ITenderBidService
     
     // Bid Payments
     Task<TenderPaymentDto> RecordPaymentAsync(CreateTenderPaymentDto dto);
-    Task<TenderPaymentDto> VerifyPaymentAsync(Guid paymentId, VerifyPaymentDto dto);
+    Task<TenderPaymentDto> VerifyPaymentAsync(Guid bidId, Guid paymentId, VerifyPaymentDto dto);
     Task<IEnumerable<TenderPaymentDto>> GetBidPaymentsAsync(Guid bidId);
     
     // Bid Interviews
@@ -185,8 +186,18 @@ public interface ITenderAwardService
         CreateAwardDto dto,
         string? correlationId = null,
         CancellationToken cancellationToken = default);
+    Task<TenderAwardDto> ApproveAwardAsync(
+        Guid id,
+        ApproveAwardDto dto,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default);
+    Task<TenderAwardDto> RejectAwardAsync(
+        Guid id,
+        RejectAwardDto dto,
+        CancellationToken cancellationToken = default);
     Task<TenderAwardDto> UpdateAwardAsync(Guid id, CreateAwardDto dto);
     Task CancelAwardAsync(Guid id, CancelAwardDto dto);
+    Task<AwardNotificationDto> GenerateAwardNotificationAsync(Guid id);
     Task SendAwardNotificationsAsync(Guid tenderId, AwardNotificationDto dto);
     
     /// <summary>

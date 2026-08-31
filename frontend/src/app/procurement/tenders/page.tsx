@@ -18,16 +18,28 @@ import {
   Download,
   RefreshCw,
   Filter,
-  XCircle
+  XCircle,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type TenderDto } from '@/services/tenderService';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+
+type PendingTenderAction = {
+  kind: 'close' | 'delete';
+  id: string;
+  label: string;
+};
 
 export default function TendersPage() {
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canAdministerTender = hasPermission('procurement.tender.administer');
   const [tenders, setTenders] = useState<TenderDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,6 +47,8 @@ export default function TendersPage() {
   const [tenderTypeFilter, setTenderTypeFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [pendingAction, setPendingAction] = useState<PendingTenderAction | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const { summariesById: workflowSummariesById } = useWorkflowEntitySummaries(
     'Tender',
@@ -83,27 +97,32 @@ export default function TendersPage() {
     router.push('/procurement/tenders/new');
   };
 
-  const handleClose = async (id: string) => {
-    try {
-      await tenderService.closeTender(id);
-      toast.success('Tender closed successfully');
-      loadTenders();
-    } catch (error) {
-      console.error('Error closing tender:', error);
-      toast.error('Failed to close tender');
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this tender?')) return;
+  const confirmTenderAction = async () => {
+    if (!pendingAction || !canAdministerTender) return false;
 
     try {
-      await tenderService.deleteTender(id);
-      toast.success('Tender deleted successfully');
-      loadTenders();
+      setActionBusy(true);
+      if (pendingAction.kind === 'close') {
+        await tenderService.closeTender(pendingAction.id);
+        toast.success('Tender closed successfully');
+      } else {
+        await tenderService.deleteTender(pendingAction.id);
+        toast.success('Tender deleted successfully');
+      }
+      setPendingAction(null);
+      await loadTenders();
+      return true;
     } catch (error) {
-      console.error('Error deleting tender:', error);
-      toast.error('Failed to delete tender');
+      console.error(`Error ${pendingAction.kind}ing tender:`, error);
+      toast.error(
+        getProcurementProblemMessage(
+          error,
+          pendingAction.kind === 'close' ? 'Failed to close tender' : 'Failed to delete tender'
+        )
+      );
+      return false;
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -369,14 +388,24 @@ export default function TendersPage() {
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
+                              {canAdministerTender && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setPendingAction({ kind: 'delete', id: tender.id, label: tender.tenderNumber })}
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                </Button>
+                              )}
                             </>
                           )}
 
-                          {tender.status === 'Published' && (
+                          {canAdministerTender && tender.status === 'Published' && (
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleClose(tender.id)}
+                              onClick={() => setPendingAction({ kind: 'close', id: tender.id, label: tender.tenderNumber })}
                               title="Close"
                             >
                               <XCircle className="h-4 w-4" />
@@ -420,6 +449,23 @@ export default function TendersPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => { if (!open) setPendingAction(null); }}
+        title={pendingAction?.kind === 'delete' ? 'Delete Tender' : 'Close Tender'}
+        description={
+          pendingAction?.kind === 'delete'
+            ? `Delete draft tender ${pendingAction.label}? This action cannot be undone.`
+            : `Close published tender ${pendingAction?.label ?? ''}? No further bids can be submitted.`
+        }
+        confirmText={actionBusy
+          ? (pendingAction?.kind === 'delete' ? 'Deleting...' : 'Closing...')
+          : (pendingAction?.kind === 'delete' ? 'Delete Tender' : 'Close Tender')}
+        variant={pendingAction?.kind === 'delete' ? 'destructive' : 'default'}
+        onConfirm={confirmTenderAction}
+        isLoading={actionBusy}
+      />
     </div>
   );
 }

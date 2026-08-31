@@ -22,12 +22,13 @@ import { procurementAwardReadinessService } from '@/services/procurement-award-r
 import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 
 export default function CreateAwardPage() {
   const params = useParams();
   const router = useRouter();
   const { hasPermission } = useAuth();
-  const canApproveAward = hasPermission('procurement.tender.approve');
+  const canSubmitAwardRecommendation = hasPermission('procurement.tender.administer');
   const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
@@ -38,7 +39,7 @@ export default function CreateAwardPage() {
   // Form state
   const [selectedBidId, setSelectedBidId] = useState('');
   const [awardedAmount, setAwardedAmount] = useState('');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('GHS');
   const [awardDate, setAwardDate] = useState(new Date().toISOString().split('T')[0]);
   const [awardJustification, setAwardJustification] = useState('');
   const [notes, setNotes] = useState('');
@@ -63,6 +64,7 @@ export default function CreateAwardPage() {
       // Load tender details
       const tenderData = await tenderService.getTenderById(tenderId);
       setTender(tenderData);
+      setCurrency(tenderData.currency || 'GHS');
 
       // Load award recommendation
       const recommendationData = await tenderAwardService.generateAwardRecommendation(tenderId);
@@ -153,11 +155,11 @@ export default function CreateAwardPage() {
       };
 
       const award = await tenderAwardService.createAward(data);
-      toast.success('Award created successfully');
+      toast.success('Award recommendation submitted for approval');
       router.push(`/procurement/awards/${award.id}`);
     } catch (error) {
       console.error('Error creating award:', error);
-      toast.error('Failed to create award');
+      toast.error(getProcurementProblemMessage(error, 'Failed to submit award recommendation'));
     } finally {
       setSaving(false);
     }
@@ -198,7 +200,7 @@ export default function CreateAwardPage() {
         readinessDecision.allowedActions,
         'RecordAward'
       ) &&
-      canApproveAward &&
+      canSubmitAwardRecommendation &&
       readinessDecision.recommendation.subjectIds.includes(selectedBidId)
   );
 
@@ -227,6 +229,26 @@ export default function CreateAwardPage() {
     );
   }
 
+  if (!canSubmitAwardRecommendation) {
+    return (
+      <div className="container mx-auto py-6">
+        <Card className="border-amber-200 bg-amber-50">
+          <CardHeader>
+            <CardTitle>Permission required</CardTitle>
+            <CardDescription>
+              Tender administration permission is required to submit an award recommendation.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.push(`/procurement/tenders/${tenderId}`)}>
+              Back to Tender
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
@@ -239,7 +261,7 @@ export default function CreateAwardPage() {
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-2">
               <Award className="h-8 w-8 text-green-600" />
-              Create Award
+              Submit Award Recommendation
             </h1>
             <p className="text-gray-500">{tender.tenderNumber} - {tender.title}</p>
           </div>
@@ -541,7 +563,7 @@ export default function CreateAwardPage() {
           }
         >
           <Save className="h-4 w-4 mr-2" />
-          {saving ? 'Creating Award...' : 'Create Award'}
+          {saving ? 'Submitting Recommendation...' : 'Submit Award Recommendation'}
         </Button>
       </div>
 

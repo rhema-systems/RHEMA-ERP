@@ -14,18 +14,24 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class ProcurementContractOperationsControllerTests
 {
     [Fact]
-    public void ControllerUsesInternalPolicyAndDedicatedOperationsRoutes()
+    public void ControllerUsesProcurementPermissionsAndDedicatedOperationsRoutes()
     {
         var type = typeof(ProcurementContractOperationsController);
 
         type.GetCustomAttribute<AuthorizeAttribute>()!.Policy
-            .Should().Be("InternalOnly");
+            .Should().BeNull();
         type.GetCustomAttribute<RouteAttribute>()!.Template
             .Should().Be("api/procurement/contract-operations");
         type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
             .Where(method => method.DeclaringType == type)
             .Select(method => method.Name)
             .Should().Contain(["Search", "Get", "ProcessAlerts"]);
+        type.GetMethod("Search")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod("Get")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod("ProcessAlerts")!.GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.contract.manage");
     }
 
     [Fact]
