@@ -700,46 +700,9 @@ public class JobShortlistingCriteria : TenantEntity
 // SECTION 4 — CANDIDATE PROFILE
 // =============================================================================
 
-/// <summary>
-/// External candidate portal login account.
-/// Separate from ASP.NET Identity — lightweight auth purely for the career portal.
-/// Linked to a <see cref="JobCandidate"/> profile once the candidate completes their profile.
-/// </summary>
-public class CandidatePortalAccount : TenantEntity
-{
-    [Required, MaxLength(200), EmailAddress]
-    public string Email { get; set; } = string.Empty;
-
-    [Required]
-    public string PasswordHash { get; set; } = string.Empty;
-
-    public bool IsEmailVerified { get; set; }
-
-    [MaxLength(512)]
-    public string? EmailVerificationToken { get; set; }
-    public DateTime? EmailVerificationExpiry { get; set; }
-
-    [MaxLength(512)]
-    public string? PasswordResetToken { get; set; }
-    public DateTime? PasswordResetExpiry { get; set; }
-
-    public DateTime? LastLoginAt { get; set; }
-    public int FailedLoginAttempts { get; set; }
-    public DateTime? LockedOutUntil { get; set; }
-
-    /// <summary>
-    /// When the last verification email was dispatched. Backs the resend cooldown —
-    /// without it, a resend endpoint is a mailbox-bombing tool aimed at a third party.
-    /// </summary>
-    public DateTime? LastVerificationEmailSentAtUtc { get; set; }
-
-    public bool IsActive { get; set; } = true;
-
-    /// <summary>Linked candidate profile — null until the candidate completes their profile.</summary>
-    public Guid? JobCandidateId { get; set; }
-    [ForeignKey(nameof(JobCandidateId))]
-    public virtual JobCandidate? JobCandidate { get; set; }
-}
+// CandidatePortalAccount was deleted 2026-08-30 with the candidate portal's own auth surface —
+// candidates now self-register on the main JWT scheme (Candidate role) and their profile is
+// linked through JobCandidate.UserId below. The table had zero rows when dropped.
 
 /// <summary>
 /// General candidate record (separate from specific applications for talent pool)
@@ -803,7 +766,21 @@ public class JobCandidate : TenantEntity
 
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
-	
+
+    /// <summary>
+    /// The self-registered careers account this candidate belongs to — a main-scheme Identity
+    /// user in the Candidate role (2026-08-30, replacing the retired portal's
+    /// <c>CandidatePortalAccount.JobCandidateId</c> link, which pointed the other way).
+    /// Null for candidates HR created or the anonymous public flow minted, and until a
+    /// registered candidate completes their profile. ⚠ Adopting an EXISTING candidate row into
+    /// a new account requires the account's email to be confirmed first — the link hands over
+    /// the candidate's application history, and a phone OTP does not prove the mailbox.
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public virtual ApplicationUser? User { get; set; }
+
     /// <summary>
     /// Whether this candidate is in the active talent pool for future vacancies.
     /// </summary>

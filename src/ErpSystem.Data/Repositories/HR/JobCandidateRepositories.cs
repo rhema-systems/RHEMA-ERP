@@ -37,17 +37,20 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 
     public async Task<JobCandidate?> GetWithFullDetailsAsync(Guid id)
     {
+        // Every child include filters IsDeleted, matching the per-collection reads. Unfiltered,
+        // this read echoed soft-deleted children — found when the candidate profile's
+        // replace-set save deleted an interest and the response served it straight back.
         return await _dbSet
             .Include(c => c.Country)
-            .Include(c => c.Qualifications)
-            .Include(c => c.WorkHistories)
-            .Include(c => c.Referees)
-            .Include(c => c.Skills)
-            .Include(c => c.Languages)
-            .Include(c => c.Interests)
-            .Include(c => c.Documents)
-            .Include(c => c.Notes)
-            .Include(c => c.Applications).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted))
+            .Include(c => c.WorkHistories.Where(w => !w.IsDeleted))
+            .Include(c => c.Referees.Where(r => !r.IsDeleted))
+            .Include(c => c.Skills.Where(s => !s.IsDeleted))
+            .Include(c => c.Languages.Where(l => !l.IsDeleted))
+            .Include(c => c.Interests.Where(i => !i.IsDeleted))
+            .Include(c => c.Documents.Where(d => !d.IsDeleted))
+            .Include(c => c.Notes.Where(n => !n.IsDeleted))
+            .Include(c => c.Applications.Where(a => !a.IsDeleted)).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 

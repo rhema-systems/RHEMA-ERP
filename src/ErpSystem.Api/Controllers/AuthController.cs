@@ -1717,6 +1717,162 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Self-registration for job candidates on the public careers surface (2026-08-30,
+        /// replacing the retired PortalBearer candidate portal). Mirrors <see cref="Register"/>
+        /// with two deliberate deltas:
+        /// (1) the tenant comes from the required <c>X-Tenant-Id</c> header — a candidate arrives
+        ///     from a tenant-specific job board, and the host-based fallback of the partner flow
+        ///     would land shared-host signups on an arbitrary tenant;
+        /// (2) the account gets <c>Constants.Roles.Candidate</c>, never ExternalUser — the
+        ///     Candidate role is fenced by CandidateAccessMiddleware and refused by InternalOnly,
+        ///     while ExternalUser's allowlist carries the procurement/projects/estate portals.
+        /// Activation is the same SMS OTP as the partner flow (<c>verify-otp</c>). Linking the
+        /// account to an existing JobCandidate profile happens later and only under email proof —
+        /// a phone OTP does not prove the mailbox, and adopting on registration would let anyone
+        /// claim a candidate's application history by typing their email address.
+        /// </summary>
+        [HttpPost("register-candidate")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        public async Task<IActionResult> RegisterCandidate([FromBody] RegisterRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                _logger.LogInformation("Candidate registration attempt for user: {Username}, email: {Email}", request.Username, request.Email);
+
+                var existingUserByUsername = await _userManager.FindByNameAsync(request.Username);
+                if (existingUserByUsername != null)
+                {
+                    return BadRequest(new { message = "A user with this username already exists." });
+                }
+
+                var existingUserByEmail = await _userManager.FindByEmailAsync(request.Email);
+                if (existingUserByEmail != null)
+                {
+                    return BadRequest(new { message = "A user with this email address already exists." });
+                }
+
+                // The careers surface is tenant-specific and passes the tenant explicitly, the same
+                // way the anonymous public job board does. No host fallback: on a shared host that
+                // guessed "first active tenant", which is exactly wrong for a job applicant.
+                if (!Guid.TryParse(Request.Headers["X-Tenant-Id"].FirstOrDefault(), out var candidateTenantId) ||
+                    candidateTenantId == Guid.Empty)
+                {
+                    return BadRequest(new { message = "The X-Tenant-Id header is required for candidate registration." });
+                }
+
+                var registrationTenant = await _tenantService.GetTenantByIdAsync(candidateTenantId);
+                if (registrationTenant == null || registrationTenant.Status != TenantStatus.Active)
+                {
+                    return BadRequest(new { message = "Candidate registration is not currently available." });
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(registrationTenant.Id, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                var user = new ApplicationUser
+                {
+                    UserName = request.Username,
+                    Email = request.Email,
+                    PhoneNumber = request.PhoneNumber,
+                    FirstName = request.FirstName,
+                    LastName = request.LastName,
+                    TenantId = registrationTenant.Id,
+                    IsActive = false, // Activated after OTP verification, exactly like Register
+                    EmailConfirmed = false,
+                    PhoneNumberConfirmed = false,
+                    AuthenticationProvider = AuthenticationProvider.Local,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "Candidate-Self-Registration"
+                };
+
+                var result = await _userManager.CreateAsync(user, request.Password);
+                if (!result.Succeeded)
+                {
+                    var errors = result.Errors.Select(e => e.Description).ToList();
+                    _logger.LogWarning("Candidate registration failed for {Username}: {Errors}", request.Username, string.Join(", ", errors));
+                    return BadRequest(new { message = "Registration failed.", errors });
+                }
+
+                await _userManager.AddToRoleAsync(user, Constants.Roles.Candidate);
+
+                await _userTenantService.GrantUserAccessToTenantAsync(
+                    user.Id,
+                    registrationTenant.Id,
+                    UserTenantAccessLevel.Standard,
+                    "Candidate-Self-Registration"
+                );
+
+                var registrationSecurityLog = new SecurityLog
+                {
+                    Action = "CandidateRegistration",
+                    Success = true,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = request.Username,
+                    UserId = user.Id,
+                    Details = "Candidate self-registered successfully",
+                    FailureReason = null,
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = registrationTenant.Id
+                };
+                await _securityLogService.CreateSecurityLogAsync(registrationSecurityLog);
+
+                _logger.LogInformation("Candidate registration successful for: {Username}", request.Username);
+
+                // Send OTP via SMS for phone verification (best-effort; do not fail registration if SMS fails)
+                try
+                {
+                    var phone = NormalizePhone(request.PhoneNumber);
+                    var otp = await _otpService.CreateOtpAsync(
+                        registrationTenant.Id,
+                        OtpPurpose.PhoneVerification,
+                        OtpChannel.Sms,
+                        phone,
+                        TimeSpan.FromMinutes(10),
+                        maxAttempts: 5,
+                        HttpContext.RequestAborted);
+
+                    await _tenantSmsSender.SendAsync(
+                        registrationTenant.Id,
+                        phone,
+                        $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
+                        HttpContext.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send phone verification OTP for candidate {Username}", request.Username);
+                }
+
+                return Ok(new RegisterResponse
+                {
+                    Success = true,
+                    Message = "Registration successful. Please verify your phone number.",
+                    PhoneNumber = request.PhoneNumber,
+                    RequiresOtpVerification = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during candidate registration for user: {Username}", request.Username);
+                return StatusCode(500, new { message = "An error occurred during registration" });
+            }
+        }
+
         [HttpPost("verify-otp")]
         [AllowAnonymous]
         [EnableRateLimiting("SensitivePolicy")]

@@ -5,7 +5,7 @@ import { ExternalNavbar } from '@/components/external-portal/external-navbar';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuthenticatedHomePath, isExternalPortalUser } from '@/lib/auth-routing';
+import { getAuthenticatedHomePath, isCandidateUser, isExternalPortalUser } from '@/lib/auth-routing';
 import { authService } from '@/services/auth';
 
 // External portal is auth-dependent and uses browser-only storage; disable static generation.
@@ -30,7 +30,8 @@ export default function ExternalPortalLayout({
       return;
     }
 
-    if (!isExternalPortalUser(user)) {
+    // Careers candidates share this shell — the sidebar shows them the candidate menu.
+    if (!isExternalPortalUser(user) && !isCandidateUser(user)) {
       router.push(getAuthenticatedHomePath(user));
       setIsValidating(false);
       return;

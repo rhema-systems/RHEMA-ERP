@@ -554,6 +554,10 @@ app.UseRateLimiter();
 app.UseMiddleware<SupplierApplicantAccessMiddleware>();
 app.UseMiddleware<TemporaryPasswordChangeMiddleware>();
 app.UseMiddleware<ExternalUserAccessMiddleware>();
+// Candidates (self-registered careers accounts on the main scheme) get their own, narrower
+// fence — deliberately not folded into the ExternalUser one, whose allowlist carries the
+// procurement/projects/estate portals a candidate must never inherit.
+app.UseMiddleware<CandidateAccessMiddleware>();
 app.UseAuthorization();
 
 // Keep aggregate diagnostics available to operators, but separate readiness from liveness.

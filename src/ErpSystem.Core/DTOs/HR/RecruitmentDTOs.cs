@@ -5419,73 +5419,12 @@ public class ExternalWithdrawDto
 
 #endregion
 
-#region Candidate Portal Account — Auth & Profile DTOs
+#region Candidate Portal Account — Profile DTOs
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-public class CandidatePortalRegisterDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-    [Required, MinLength(8), MaxLength(100)]
-    public string Password { get; set; } = string.Empty;
-    [Required, Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
-
-public class CandidatePortalLoginDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-    [Required]
-    public string Password { get; set; } = string.Empty;
-}
-
-public class CandidatePortalAuthResultDto
-{
-    public string Token { get; set; } = string.Empty;
-    public DateTime ExpiresAt { get; set; }
-    public Guid AccountId { get; set; }
-    public string Email { get; set; } = string.Empty;
-    public string FirstName { get; set; } = string.Empty;
-    public string? LastName { get; set; }
-    public bool IsEmailVerified { get; set; }
-    /// <summary>True when the account is linked to a JobCandidate profile.</summary>
-    public bool HasProfile { get; set; }
-    public Guid? CandidateId { get; set; }
-}
-
-public class CandidatePortalVerifyEmailDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-}
-
-public class CandidatePortalForgotPasswordDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-}
-
-public class CandidatePortalResetPasswordDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
-
-public class CandidatePortalChangePasswordDto
-{
-    [Required]
-    public string CurrentPassword { get; set; } = string.Empty;
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
+// The auth DTOs (register/login/verify/forgot/reset/change-password) were deleted 2026-08-30
+// with the candidate portal's own auth surface — candidates now self-register on the main JWT
+// scheme with the Candidate role, through the standard AuthController flows. The profile,
+// application and dashboard DTOs below survive: the main-scheme candidate surface reuses them.
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 

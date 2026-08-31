@@ -27,6 +27,7 @@ import {
 } from '../../lib/auth-redirect';
 import {
   getExternalPortalPath,
+  isCandidateUser,
   isExternalPortalUser,
 } from '../../lib/auth-routing';
 
@@ -180,9 +181,11 @@ function LoginFormWithSearchParams() {
         return;
       }
 
-      const isExternalUser = isExternalPortalUser(response.user);
+      const isCandidate = isCandidateUser(response.user);
+      const isExternalUser = isExternalPortalUser(response.user) || isCandidate;
 
-      // External portal users should land in the portal, while internal users continue to tenant selection.
+      // External portal users (business partners AND careers candidates) land in the portal,
+      // while internal users continue to tenant selection.
       if (isExternalUser) {
         // Try to auto-select the best tenant (host-driven or single-tenant) to avoid an extra tenant-select step.
         try {
@@ -210,7 +213,10 @@ function LoginFormWithSearchParams() {
             await tenantService.selectTenant(preferredTenantCode, false);
 
             router.push(
-              resolveRedirectTarget(redirectTarget, getExternalPortalPath())
+              resolveRedirectTarget(
+                redirectTarget,
+                isCandidate ? '/external-portal/careers' : getExternalPortalPath()
+              )
             );
             return;
           }

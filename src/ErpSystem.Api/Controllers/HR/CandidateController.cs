@@ -1,55 +1,117 @@
 using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
-using ErpSystem.Api.Security;
+using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
+using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Authenticated candidate portal endpoints — profile, applications, dashboard.
-/// All routes require a valid candidate portal JWT (user_type = portal_candidate).
+/// The candidate's own recruitment surface — dashboard, profile, applications, documents and
+/// offers — for self-registered careers accounts on the main JWT scheme (Candidate role).
+/// Replaces the retired <c>api/portal</c> controller (PortalBearer scheme), 2026-08-30.
 /// </summary>
+/// <remarks>
+/// Two fences sit in front of every action here: the <c>CandidateOnly</c> policy (only the
+/// Candidate role gets in) and <c>CandidateAccessMiddleware</c> (the same tokens get NOTHING
+/// outside the candidate allowlist). Ownership inside is by <c>JobCandidate.UserId</c> — every
+/// lookup scopes through the caller's own candidate row, so a guessed id is a miss, not a
+/// disclosure. The offer-respond action carries the ownership pre-check the service contract
+/// demands (<c>RecordPortalCandidateResponseAsync</c> validates nothing itself — deleting the
+/// old controller without re-implementing that check would have left an unguarded mutation).
+/// </remarks>
 [ApiController]
-[Route("api/portal")]
-[Authorize(Policy = "CandidatePortal", AuthenticationSchemes = PortalAuth.Scheme)]
-public class CandidatePortalController : ControllerBase
+[Route("api/candidate")]
+[Authorize(Policy = "CandidateOnly")]
+public class CandidateController : ControllerBase
 {
     private readonly ICandidatePortalService _portalService;
-    private readonly ICandidatePortalAuthService _authService;
     private readonly IFileStorageService _fileStorage;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly ApplicationDbContext _db;
     private readonly IJobOfferService _offerService;
     private readonly IOfferLetterService _offerLetter;
+    private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IEmailService _email;
+    private readonly CandidatePortalOptions _portalOptions;
+    private readonly ILogger<CandidateController> _logger;
 
-    public CandidatePortalController(
+    public CandidateController(
         ICandidatePortalService portalService,
-        ICandidatePortalAuthService authService,
         IFileStorageService fileStorage,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
         ApplicationDbContext db,
         IJobOfferService offerService,
-        IOfferLetterService offerLetter)
+        IOfferLetterService offerLetter,
+        UserManager<ApplicationUser> userManager,
+        ICurrentUserService currentUser,
+        IEmailService email,
+        IOptions<CandidatePortalOptions> portalOptions,
+        ILogger<CandidateController> logger)
     {
         _portalService = portalService;
-        _authService   = authService;
         _fileStorage   = fileStorage;
         _hrDocuments   = hrDocuments;
         _centralDocuments = centralDocuments;
         _db            = db;
         _offerService  = offerService;
         _offerLetter   = offerLetter;
+        _userManager   = userManager;
+        _currentUser   = currentUser;
+        _email         = email;
+        _portalOptions = portalOptions.Value;
+        _logger        = logger;
+    }
+
+    // ── Identity helpers ───────────────────────────────────────────────────────
+
+    private Guid GetTenantId() =>
+        _currentUser.TenantId ?? throw new InvalidOperationException("Tenant context could not be resolved.");
+
+    private async Task<ApplicationUser> GetAccountUserAsync()
+    {
+        var userId = _currentUser.UserId;
+        var user = userId == null ? null : await _userManager.FindByIdAsync(userId);
+        return user ?? throw new InvalidOperationException("Account not found.");
+    }
+
+    /// <summary>
+    /// The identity the service works from. EmailConfirmed comes from the Identity STORE, not a
+    /// token claim — profile adoption keys off it, and a stale claim minted before verification
+    /// must not open that door.
+    /// </summary>
+    private async Task<CandidateAccountContext> GetAccountContextAsync()
+    {
+        var user = await GetAccountUserAsync();
+        return new CandidateAccountContext(user.Id, user.Email ?? string.Empty, user.EmailConfirmed);
+    }
+
+    /// <summary>
+    /// The caller's own candidate profile, or null when they have not completed one. Scoping
+    /// every file lookup through this is what stops one candidate reading another's documents.
+    /// </summary>
+    private async Task<JobCandidate?> LoadOwnCandidateAsync(Guid tenantId, CancellationToken ct)
+    {
+        var user = await GetAccountUserAsync();
+        return await _db.Set<JobCandidate>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.UserId == user.Id && item.TenantId == tenantId && !item.IsDeleted, ct);
     }
 
     // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -58,7 +120,7 @@ public class CandidatePortalController : ControllerBase
     [ProducesResponseType(typeof(CandidatePortalDashboardDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<CandidatePortalDashboardDto>> GetDashboard(CancellationToken ct)
     {
-        var result = await _portalService.GetDashboardAsync(GetAccountId(), GetTenantId(), ct);
+        var result = await _portalService.GetDashboardAsync(await GetAccountContextAsync(), GetTenantId(), ct);
         return Ok(result);
     }
 
@@ -68,7 +130,7 @@ public class CandidatePortalController : ControllerBase
     [ProducesResponseType(typeof(CandidatePortalProfileDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<CandidatePortalProfileDto>> GetProfile(CancellationToken ct)
     {
-        var result = await _portalService.GetProfileAsync(GetAccountId(), GetTenantId(), ct);
+        var result = await _portalService.GetProfileAsync(await GetAccountContextAsync(), GetTenantId(), ct);
         return Ok(result);
     }
 
@@ -82,29 +144,85 @@ public class CandidatePortalController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var result = await _portalService.SaveProfileAsync(GetAccountId(), dto, GetTenantId(), ct);
-        return Ok(result);
-    }
-
-    /// <summary>Changes the password for the authenticated candidate account.</summary>
-    [HttpPost("profile/change-password")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ChangePassword(
-        [FromBody] CandidatePortalChangePasswordDto dto, CancellationToken ct)
-    {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
         try
         {
-            await _authService.ChangePasswordAsync(GetAccountId(), dto, GetTenantId(), ct);
-            return NoContent();
+            var result = await _portalService.SaveProfileAsync(await GetAccountContextAsync(), dto, GetTenantId(), ct);
+            return Ok(result);
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    // ── Email confirmation ─────────────────────────────────────────────────────
+    // Registration activates the account by SMS OTP; the mailbox is proved separately here.
+    // Confirming the email is what unlocks ADOPTING an existing candidate profile that carries
+    // this address — the link hands over that profile's application history.
+
+    /// <summary>Sends the email-confirmation link to the account's own address.</summary>
+    [HttpPost("confirm-email/send")]
+    [EnableRateLimiting("SensitivePolicy")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SendEmailConfirmation(CancellationToken ct)
+    {
+        var user = await GetAccountUserAsync();
+        if (user.EmailConfirmed)
+            return Ok(new { message = "Your email address is already confirmed." });
+        if (string.IsNullOrWhiteSpace(user.Email))
+            return BadRequest(new { message = "The account has no email address." });
+
+        var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+        var link = $"{_portalOptions.PortalUrl.TrimEnd('/')}/careers/verify-email" +
+                   $"?uid={user.Id}&token={Uri.EscapeDataString(token)}";
+
+        var sent = await _email.SendEmailAsync(new EmailDto
+        {
+            To      = user.Email,
+            Subject = "Confirm your email address",
+            IsHtml  = true,
+            Body    = $"""
+                       <p>Hello {user.FirstName},</p>
+                       <p>Confirm the email address on your careers account by clicking the link below:</p>
+                       <p><a href="{link}">Confirm my email address</a></p>
+                       <p>If you did not create this account, you can ignore this message.</p>
+                       """,
+        });
+
+        if (!sent)
+        {
+            _logger.LogWarning("Email-confirmation send failed for candidate user {UserId}", user.Id);
+            return StatusCode(StatusCodes.Status502BadGateway,
+                new { message = "The confirmation email could not be sent. Try again later." });
+        }
+
+        return Ok(new { message = "A confirmation link has been sent to your email address." });
+    }
+
+    public sealed class ConfirmEmailRequest
+    {
+        public string Token { get; set; } = string.Empty;
+    }
+
+    /// <summary>Confirms the account's email address with the token from the emailed link.</summary>
+    [HttpPost("confirm-email")]
+    [EnableRateLimiting("SensitivePolicy")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ConfirmEmail([FromBody] ConfirmEmailRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token))
+            return BadRequest(new { message = "A confirmation token is required." });
+
+        var user = await GetAccountUserAsync();
+        if (user.EmailConfirmed)
+            return Ok(new { message = "Your email address is already confirmed." });
+
+        var result = await _userManager.ConfirmEmailAsync(user, request.Token);
+        if (!result.Succeeded)
+            return BadRequest(new { message = "The confirmation link is invalid or has expired. Request a new one." });
+
+        return Ok(new { message = "Your email address is confirmed." });
     }
 
     // ── Applications ───────────────────────────────────────────────────────────
@@ -114,8 +232,49 @@ public class CandidatePortalController : ControllerBase
     public async Task<ActionResult<List<CandidatePortalApplicationSummaryDto>>> GetApplications(
         CancellationToken ct)
     {
-        var result = await _portalService.GetApplicationsAsync(GetAccountId(), GetTenantId(), ct);
+        var user = await GetAccountUserAsync();
+        var result = await _portalService.GetApplicationsAsync(user.Id, GetTenantId(), ct);
         return Ok(result);
+    }
+
+    /// <summary>Saves (or updates) a draft application without submitting it.</summary>
+    [HttpPost("applications/draft")]
+    [ProducesResponseType(typeof(CandidatePortalApplicationSummaryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CandidatePortalApplicationSummaryDto>> SaveDraft(
+        [FromBody] CandidatePortalSaveDraftDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+        try
+        {
+            var user = await GetAccountUserAsync();
+            return Ok(await _portalService.SaveDraftAsync(user.Id, dto, GetTenantId(), ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Submits a previously saved draft.</summary>
+    [HttpPost("applications/{applicationId:guid}/submit")]
+    [ProducesResponseType(typeof(CandidatePortalApplicationSummaryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CandidatePortalApplicationSummaryDto>> SubmitDraft(
+        Guid applicationId, [FromBody] CandidatePortalSubmitDraftDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+        try
+        {
+            return Ok(await _portalService.SubmitDraftAsync(
+                await GetAccountContextAsync(), applicationId, dto, GetTenantId(), ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -132,7 +291,8 @@ public class CandidatePortalController : ControllerBase
             return BadRequest(ModelState);
         try
         {
-            var draft = await _portalService.SaveDraftAsync(GetAccountId(), dto, GetTenantId(), ct);
+            var ctx = await GetAccountContextAsync();
+            var draft = await _portalService.SaveDraftAsync(ctx.UserId, dto, GetTenantId(), ct);
             var submitDto = new CandidatePortalSubmitDraftDto
             {
                 CoverLetter       = dto.CoverLetter,
@@ -140,7 +300,7 @@ public class CandidatePortalController : ControllerBase
                 AvailableFrom     = dto.AvailableFrom,
             };
             var result = await _portalService.SubmitDraftAsync(
-                GetAccountId(), draft.ApplicationId, submitDto, GetTenantId(), ct);
+                ctx, draft.ApplicationId, submitDto, GetTenantId(), ct);
             return CreatedAtAction(nameof(GetApplications), result);
         }
         catch (InvalidOperationException ex)
@@ -161,8 +321,8 @@ public class CandidatePortalController : ControllerBase
     {
         try
         {
-            await _portalService.WithdrawApplicationAsync(
-                GetAccountId(), applicationId, dto, GetTenantId(), ct);
+            var user = await GetAccountUserAsync();
+            await _portalService.WithdrawApplicationAsync(user.Id, applicationId, dto, GetTenantId(), ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)
@@ -194,7 +354,7 @@ public class CandidatePortalController : ControllerBase
             return BadRequest(new { message = "No file provided." });
 
         var tenantId = GetTenantId();
-        var accountId = GetAccountId();
+        var user = await GetAccountUserAsync();
 
         HrControlledDocument document;
         try
@@ -202,9 +362,10 @@ public class CandidatePortalController : ControllerBase
             document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
             {
                 TenantId = tenantId,
-                // The portal session is the candidate's own; there is no internal user behind it.
-                ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
-                ActorName = "candidate-portal",
+                // The caller is a real Identity user now — the retired portal's anonymous actor
+                // constant no longer applies.
+                ActorUserId = user.Id,
+                ActorName = user.UserName ?? "candidate",
                 Category = ControlledFileUploadCategories.HrCandidatePhotos,
                 File = file,
                 // Avatars carry no retention value; a DMS record per photo is repository noise.
@@ -219,12 +380,11 @@ public class CandidatePortalController : ControllerBase
         try
         {
             await _portalService.UpdateProfilePhotoAsync(
-                accountId, document.FileUploadRecordId, tenantId, ct);
+                user.Id, document.FileUploadRecordId, tenantId, ct);
         }
         catch (Exception ex)
         {
-            await _hrDocuments.RollbackAsync(
-                document, tenantId, ControlledFileUploadActors.PublicPortalAnonymous, ct);
+            await _hrDocuments.RollbackAsync(document, tenantId, user.Id, ct);
             if (ex is InvalidOperationException)
                 return BadRequest(new { message = ex.Message });
             throw;
@@ -254,35 +414,14 @@ public class CandidatePortalController : ControllerBase
             inline: true, ct);
     }
 
-    /// <summary>
-    /// Loads the candidate profile owned by the authenticated portal account, or null when the
-    /// account has not completed one. Scoping every lookup through the account's own
-    /// <c>JobCandidateId</c> is what stops one candidate reading another's files.
-    /// </summary>
-    private async Task<JobCandidate?> LoadOwnCandidateAsync(Guid tenantId, CancellationToken ct)
-    {
-        var accountId = GetAccountId();
-        var candidateId = await _db.Set<CandidatePortalAccount>()
-            .AsNoTracking()
-            .Where(item => item.Id == accountId && item.TenantId == tenantId && !item.IsDeleted)
-            .Select(item => item.JobCandidateId)
-            .SingleOrDefaultAsync(ct);
-        if (candidateId is not Guid id)
-            return null;
-
-        return await _db.Set<JobCandidate>()
-            .AsNoTracking()
-            .SingleOrDefaultAsync(
-                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
-    }
-
     // ── Documents ──────────────────────────────────────────────────────────────
     /// <summary>Returns all documents uploaded by this candidate.</summary>
     [HttpGet("documents")]
     [ProducesResponseType(typeof(List<JobCandidateDocumentDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<JobCandidateDocumentDto>>> GetDocuments(CancellationToken ct)
     {
-        var result = await _portalService.GetDocumentsAsync(GetAccountId(), GetTenantId(), ct);
+        var user = await GetAccountUserAsync();
+        var result = await _portalService.GetDocumentsAsync(user.Id, GetTenantId(), ct);
         return Ok(result);
     }
 
@@ -302,14 +441,14 @@ public class CandidatePortalController : ControllerBase
             return BadRequest(new { message = "Invalid document type." });
 
         var tenantId = GetTenantId();
-        var accountId = GetAccountId();
+        var user = await GetAccountUserAsync();
 
         // The DMS needs a source record, and it also means an account without a saved profile
         // is rejected before any bytes are stored.
         Guid candidateId;
         try
         {
-            candidateId = await _portalService.RequireCandidateIdAsync(accountId, tenantId, ct);
+            candidateId = await _portalService.RequireCandidateIdAsync(user.Id, tenantId, ct);
         }
         catch (InvalidOperationException ex)
         {
@@ -322,8 +461,8 @@ public class CandidatePortalController : ControllerBase
             document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
             {
                 TenantId = tenantId,
-                ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
-                ActorName = "candidate-portal",
+                ActorUserId = user.Id,
+                ActorName = user.UserName ?? "candidate",
                 Category = ControlledFileUploadCategories.HrCandidateDocuments,
                 File = file,
                 Registration = new HrDocumentDmsRegistration
@@ -333,7 +472,7 @@ public class CandidatePortalController : ControllerBase
                     SourceRecordId = candidateId,
                     Title = Path.GetFileName(file.FileName),
                     DocumentType = documentType.ToString(),
-                    ChangeSummary = "Uploaded by the candidate through the careers portal."
+                    ChangeSummary = "Uploaded by the candidate through the careers surface."
                 }
             }, ct);
         }
@@ -345,14 +484,13 @@ public class CandidatePortalController : ControllerBase
         try
         {
             var result = await _portalService.AddDocumentAsync(
-                accountId, documentType, document.OriginalFileName, string.Empty, tenantId, ct,
+                user.Id, documentType, document.OriginalFileName, string.Empty, tenantId, ct,
                 document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
             return Ok(result);
         }
         catch (Exception ex)
         {
-            await _hrDocuments.RollbackAsync(
-                document, tenantId, ControlledFileUploadActors.PublicPortalAnonymous, ct);
+            await _hrDocuments.RollbackAsync(document, tenantId, user.Id, ct);
             if (ex is InvalidOperationException)
                 return BadRequest(new { message = ex.Message });
             throw;
@@ -419,7 +557,8 @@ public class CandidatePortalController : ControllerBase
     {
         try
         {
-            await _portalService.DeleteDocumentAsync(GetAccountId(), documentId, GetTenantId(), ct);
+            var user = await GetAccountUserAsync();
+            await _portalService.DeleteDocumentAsync(user.Id, documentId, GetTenantId(), ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)
@@ -432,7 +571,7 @@ public class CandidatePortalController : ControllerBase
         }
     }
 
-    // ── Offer (portal) ────────────────────────────────────────────────────────
+    // ── Offer ──────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Returns the latest offer for a specific application, but only if it belongs
@@ -444,8 +583,7 @@ public class CandidatePortalController : ControllerBase
     public async Task<ActionResult<CandidatePortalOfferDto>> GetApplicationOffer(
         Guid applicationId, CancellationToken ct)
     {
-        var apps = await _portalService.GetApplicationsAsync(GetAccountId(), GetTenantId(), ct);
-        if (!apps.Any(a => a.ApplicationId == applicationId))
+        if (!await OwnsApplicationAsync(applicationId, ct))
             return NotFound();
 
         var offer = await _offerService.GetByApplicationIdAsync(applicationId, ct);
@@ -498,8 +636,7 @@ public class CandidatePortalController : ControllerBase
     public async Task<ActionResult<OfferLetterDto>> GetApplicationOfferLetter(
         Guid applicationId, CancellationToken ct)
     {
-        var apps = await _portalService.GetApplicationsAsync(GetAccountId(), GetTenantId(), ct);
-        if (!apps.Any(a => a.ApplicationId == applicationId))
+        if (!await OwnsApplicationAsync(applicationId, ct))
             return NotFound();
 
         var offer = await _offerService.GetByApplicationIdAsync(applicationId, ct);
@@ -522,8 +659,9 @@ public class CandidatePortalController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var apps = await _portalService.GetApplicationsAsync(GetAccountId(), GetTenantId(), ct);
-        if (!apps.Any(a => a.ApplicationId == applicationId))
+        // ⚠ RecordPortalCandidateResponseAsync validates NOTHING itself — its contract says
+        // ownership is the calling controller's job. This check is load-bearing.
+        if (!await OwnsApplicationAsync(applicationId, ct))
             return NotFound();
 
         try
@@ -537,10 +675,18 @@ public class CandidatePortalController : ControllerBase
         }
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
-    private Guid GetAccountId() =>
-        Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    private async Task<bool> OwnsApplicationAsync(Guid applicationId, CancellationToken ct)
+    {
+        var tenantId = GetTenantId();
+        var candidate = await LoadOwnCandidateAsync(tenantId, ct);
+        if (candidate is null)
+            return false;
 
-    private Guid GetTenantId() =>
-        Guid.Parse(User.FindFirstValue("tenant_id")!);
+        return await _db.Set<JobApplication>()
+            .AsNoTracking()
+            .AnyAsync(a => a.Id == applicationId &&
+                           a.TenantId == tenantId &&
+                           a.JobCandidateId == candidate.Id &&
+                           !a.IsDeleted, ct);
+    }
 }

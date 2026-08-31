@@ -3,6 +3,7 @@ type RoleUser = {
 } | null | undefined;
 
 const EXTERNAL_PORTAL_ROLE = 'externaluser';
+const CANDIDATE_ROLE = 'candidate';
 const INTERNAL_ADMIN_ROLES = new Set(['superadmin', 'tenantadmin', 'admin', 'administrator']);
 
 const normalizedRoles = (user: RoleUser) =>
@@ -12,6 +13,19 @@ export const isExternalPortalUser = (user: RoleUser) => {
   const roles = normalizedRoles(user);
   return (
     roles.includes(EXTERNAL_PORTAL_ROLE) &&
+    !roles.some((role) => INTERNAL_ADMIN_ROLES.has(role))
+  );
+};
+
+/**
+ * A self-registered careers account (Candidate role, 2026-08-30). Deliberately NOT folded into
+ * isExternalPortalUser: candidates share the external-portal shell but get the candidate menu,
+ * and the server fences them far more narrowly than business partners.
+ */
+export const isCandidateUser = (user: RoleUser) => {
+  const roles = normalizedRoles(user);
+  return (
+    roles.includes(CANDIDATE_ROLE) &&
     !roles.some((role) => INTERNAL_ADMIN_ROLES.has(role))
   );
 };
@@ -28,7 +42,7 @@ export const isEmployeeOnlyUser = (user: RoleUser) => {
 
 /** Desk access = internal and more than the Employee role. Gates the "Back to ERP" switcher. */
 export const hasDeskAccess = (user: RoleUser) =>
-  !isExternalPortalUser(user) && !isEmployeeOnlyUser(user);
+  !isExternalPortalUser(user) && !isCandidateUser(user) && !isEmployeeOnlyUser(user);
 
 export const isSupportHost = (host?: string | null) => {
   const value =
@@ -42,8 +56,10 @@ export const getExternalPortalPath = (host?: string | null) =>
   isSupportHost(host) ? '/' : '/external-portal';
 
 export const getAuthenticatedHomePath = (user: RoleUser, host?: string | null) =>
-  isExternalPortalUser(user)
-    ? getExternalPortalPath(host)
-    : isEmployeeOnlyUser(user)
-      ? '/me'
-      : '/dashboard';
+  isCandidateUser(user)
+    ? '/external-portal/careers'
+    : isExternalPortalUser(user)
+      ? getExternalPortalPath(host)
+      : isEmployeeOnlyUser(user)
+        ? '/me'
+        : '/dashboard';

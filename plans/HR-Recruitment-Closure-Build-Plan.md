@@ -124,6 +124,36 @@ Harness: new `dev-harness\hr-recruitment\slice-e\` on the B/C/D helper surface (
 stage owners, SegmentIds honoured on add, per-item bulk results (including the null-arm refusal),
 engagement names populated, both audit stamps moving with a second actor, and the Guid.Empty 400s.
 
+> **✅ BLOCK COMPLETE 2026-08-31.** Slice 1 committed (47b8ebf1); slices 2–6 verified and staged.
+> Migration `20260831000324_RetireCandidatePortalAndLinkCandidatesToUsers` hand-guarded + listed
+> in FastBuildMigrationMetadata; DB updated. Suites: slice-e **102/102 × 3 runs** (pre- and
+> post-migration), slice-f **66/66 × 2 runs**. Ledger regenerated — recruitment's queue rows are
+> all DONE/FALSE, zero BUILD. Two defects the runs found that reading had not: EF relationship
+> fixup serving a just-soft-deleted child back on the save's own response (fixed twice over —
+> filtered includes in `GetWithFullDetailsAsync`, which was also echoing deleted children to
+> HR's `/details`, AND an IsDeleted filter in the profile mapper, because fixup ignores what the
+> SQL returned), and the harness's sqlcmd stand-ins silently no-oping DML on filtered-index
+> tables (`-I -b` now). The tokenised offer-response page was built at
+> `/careers/portal/offer-response` — the exact path offer emails already carry.
+> Notes below record where the build deviated from the original sketch:
+> - `CandidatePortalService` was REFACTORED (not deleted) onto a `JobCandidate.UserId` resolver +
+>   `CandidateAccountContext` (userId/email/emailConfirmed passed in from the controller, so Core
+>   never depends on Identity). Adoption of an existing candidate row by email requires
+>   `EmailConfirmed` — a phone OTP does not prove the mailbox.
+> - Candidate registration = `POST api/auth/register-candidate`: explicit `X-Tenant-Id` (no host
+>   fallback), Candidate role, same SMS-OTP activation as the partner flow. Email confirmation is
+>   a separate pair on `api/candidate/confirm-email[/send]` (Identity tokens + IEmailService,
+>   link base = `CandidatePortal:PortalUrl`), and is what unlocks adoption.
+> - The anonymous `apply`/`track`/`track-withdraw`/`cv-upload` actions were REMOVED from
+>   PublicRecruitmentController (board + catalogues stay anonymous). The ticket
+>   table/sweeper/service methods survive only to drain pre-retirement rows.
+> - The tokenised `api/offer-response` pair is KEPT (offer emails link to it).
+> - Frontend: `/careers` (board, detail+apply, register, verify-email) + candidate sections in
+>   the external-portal shell (`/external-portal/careers[/profile|/documents]`), role-aware
+>   sidebar menu, `isCandidateUser` routing arm. tsc + lint clean, all 7 routes 200.
+> - ⚠ `JobCandidateDocumentType` frontend union was first written by guess and corrected against
+>   HREnums (`Resume`/`ReferenceLetter`/`License`/`IdDocument` — no "CV").
+
 ### Slice 2 — Retire the candidate portal (backend + schema)
 
 Removal checklist (all file:line refs verified by survey):

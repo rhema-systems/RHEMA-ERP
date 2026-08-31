@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { authService } from '@/services/auth';
+import { isCandidateUser } from '@/lib/auth-routing';
 import { useRouter } from 'next/navigation';
 import type { Tenant } from '@/types';
 
@@ -136,12 +137,45 @@ const menuItems: MenuItem[] = [
   },
 ];
 
+// The careers candidate's menu (Candidate role, 2026-08-30). Candidates share this shell but
+// never see the partner sections — the server's CandidateAccessMiddleware would 403 every one
+// of them, and a menu of dead links is worse than a short menu.
+const candidateMenuItems: MenuItem[] = [
+  {
+    title: 'My Applications',
+    href: '/external-portal/careers',
+    icon: Home,
+  },
+  {
+    title: 'Browse Jobs',
+    href: '/careers',
+    icon: Briefcase,
+  },
+  {
+    title: 'My Candidate Profile',
+    href: '/external-portal/careers/profile',
+    icon: User,
+  },
+  {
+    title: 'My Documents',
+    href: '/external-portal/careers/documents',
+    icon: FileText,
+  },
+  {
+    title: 'Notifications',
+    href: '/external-portal/notifications',
+    icon: Bell,
+  },
+];
+
 export function ExternalSidebar() {
   const pathname = usePathname() ?? '';
   const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const user = authService.getStoredUser();
   const [tenant, setTenant] = useState<Tenant | null>(() => authService.getCurrentTenant());
+  const isCandidate = isCandidateUser(user);
+  const items = isCandidate ? candidateMenuItems : menuItems;
 
   useEffect(() => {
     const handler = (e: any) => setTenant(e?.detail || authService.getCurrentTenant());
@@ -187,7 +221,7 @@ export function ExternalSidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-4 space-y-2">
-        {menuItems.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const isActive =
             item.href === '/support/tickets'

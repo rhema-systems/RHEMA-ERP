@@ -12,11 +12,11 @@ yet classified.
 
 | Measure | Count |
 | --- | ---: |
-| HR write endpoints | 2136 |
-| Wired to a screen | 1800 |
-| No caller found (instrument 01) | 336 |
-| Confirmed unreachable (01 ∩ 02) | 27 |
-| Write-DTO fields no form can set | 77 across 31 DTOs |
+| HR write endpoints | 2130 |
+| Wired to a screen | 1828 |
+| No caller found (instrument 01) | 302 |
+| Confirmed unreachable (01 ∩ 02) | 19 |
+| Write-DTO fields no form can set | 71 across 29 DTOs |
 
 ## A. Decisions taken
 
@@ -49,6 +49,11 @@ yet classified.
 | 2026-08-30 | **The Assets missing-edit family is built** (slice 18, 43 assertions). All eight endpoints wired; eight left the coverage queue on their own. Unlike medical this needed **no backend change** — every endpoint already stamped its actor (five through `UpdateEntity(dto, userId)`, surcharges through a `Stamp(entity)` helper) and every screen already fetched its record by id, so both standing checks passed before any UI was written. |
 | 2026-08-30 | **A wired endpoint can still be unreachable through a misspelled payload key.** `submitSurcharge` sent `proceededWithoutResponseReason` while the DTO declares `ProceedWithoutResponseReason` — "proceeded" against "proceed" — so a submit without an employee response was refused however carefully the reason was typed. Instrument 01 counts the endpoint as wired, because it is: the ROUTE matched and the BODY did not. Slice 18 asserts both spellings. |
 | 2026-08-30 | ⚠ **A full-project `tsc --noEmit` crashes on this repo** (TypeScript 5.9.2, "Debug Failure. No error for last overload signature"), and `incremental: true` with a stale `tsconfig.tsbuildinfo` had been hiding it — earlier clean runs were partial, checking only changed files. Reproduced on a clean tree with no local changes, so it predates this work. Slices are type-checked against a scoped `tsconfig` until someone finds the offending file. |
+| 2026-08-30 | **The recruitment block's portal decisions, all three settled by the user at kickoff.** The candidate portal (own `PortalBearer` auth) is retired — code AND schema, the table held zero rows; candidates self-register on the main JWT scheme under a **separate `Candidate` role**, never `ExternalUser`, because that role's middleware allowlist carries `/api/procurement` wholesale (live cross-module hole #11a) plus the projects/estate/support portals; and the flow is **browse public, apply logged-in** — the anonymous apply/track/cv-upload endpoints retired with the portal while the board and catalogues stay anonymous. |
+| 2026-08-30 | **`InternalOnly` is a blocklist, not an allowlist.** The policy refused exactly one role by name, so a new self-registered public role would have satisfied it on every internal endpoint it guards. `Candidate` is now named alongside `ExternalUser`, and the policy's comment says the rule out loud so the next public role names itself too. `CandidateAccessMiddleware` is a deliberate SIBLING of the ExternalUser fence — strict-subset allowlist, no admin bypass. |
+| 2026-08-30 | **Adopting an existing candidate row requires a confirmed mailbox.** Registration activates by SMS OTP, but linking an account to a pre-existing `JobCandidate` with the same email hands over that candidate's application history — and anyone can type someone else's address at registration. `SaveProfileAsync` refuses adoption until Identity's `EmailConfirmed` is true (`api/candidate/confirm-email` pair); a fresh email just creates a fresh candidate. |
+| 2026-08-31 | **EF relationship fixup resurrects soft-deleted children on a same-context response read.** The profile's replace-set save soft-deleted an omitted interest and the response served it straight back: `GetWithFullDetailsAsync` gained filtered includes (it was echoing deleted children to HR's `/details` too), but the save builds its response in the SAME DbContext, and fixup re-attaches the tracked, just-deleted rows regardless of the SQL. The mapper now filters `IsDeleted` as well, with a comment so the 'redundant' second filter survives review. Found by slice-f's replace-set assertion, not by reading. |
+| 2026-08-31 | **The tokenised offer-response page lives at the path already in people's inboxes.** Offer emails link to `{PortalUrl}/careers/portal/offer-response?token=…`; the retired Blazor page was the old target, so the Next page was built at that exact route rather than a cleaner one — changing the URL format would have dead-linked every offer already sent. |
 | 2026-08-29 | **The medical missing-edit family is built** (slice 6, 41 assertions). Pre-authorisations, referrals, appointments, expense claims and claim lines can all be corrected and removed; eleven endpoints left the coverage queue on their own, which is the check that the wiring is real. The claim edit also closes section E's `AdmissionStart`/`AdmissionEnd`. |
 | 2026-08-29 | **An edit dialog loads its record by id — never from the list row.** The appointment row carries 7 fields against the record's 32; the pre-authorisation row 9 against 34. Neither carries `purpose`, `serviceType`, `diagnosis` or `proposedTreatment`, all of which the update writes, so a row-bound dialog would have rendered them blank and blanked them on save — D-09 and D-12 one layer further out. Proved by `probe-clinical-byid.mjs` before any TypeScript was written, and now held by a standing assertion. |
 | 2026-08-29 | **D-16's sweep finished: eleven more transitions stamp their actor.** The blocker named the eight clinical ones; checking every `ApplyTo` helper in the medical mappers found eleven more with no actor at all — four of them moving money, and payment, flag and unflag wired and shipped. A claim being paid recorded the amount, the method and the reference, but not who did it. |
@@ -386,22 +391,6 @@ Banks and branches reference data has no maintenance screen.
 - [ ] `PUT    api/hr/banks/{}`
 - [ ] `DELETE api/hr/banks/{}`
 
-### ConsultantClientPortalAuth — `BUILD`
-
-Client portal authentication.
-
-- [ ] `POST   api/client-portal/auth/complete-setup`
-- [ ] `POST   api/client-portal/auth/resend-verification`
-- [ ] `POST   api/client-portal/auth/verify-email`
-
-### JobVacancy — `BUILD`
-
-Stage assignments — create, edit, skip, delete.
-
-- [ ] `PUT    api/job-vacancies/stage-assignments/{}`
-- [ ] `DELETE api/job-vacancies/stage-assignments/{}`
-- [ ] `POST   api/job-vacancies/{}/stage-assignments`
-
 ### LocationContact — `BUILD`
 
 No screen.
@@ -425,12 +414,12 @@ Decided 2026-08-28: read-only by intent — payroll owns the grade master.
 - [ ] `PUT    api/Awards/nomination-attachments/{}`
 - [ ] `DELETE api/Awards/nomination-attachments/{}`
 
-### CandidatePortalAuth — `BUILD`
+### ConsultantClientPortalAuth — `BUILD`
 
-Candidate portal authentication.
+Client portal authentication.
 
-- [ ] `POST   api/portal/auth/resend-verification`
-- [ ] `POST   api/portal/auth/verify-email`
+- [ ] `POST   api/client-portal/auth/complete-setup`
+- [ ] `POST   api/client-portal/auth/resend-verification`
 
 ### EmployeeCompetency — `BUILD`
 
@@ -443,12 +432,6 @@ Batch assessment.
 Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2.
 
 - [ ] `POST   api/PerformanceAppraisals/{}/calculate-score`
-
-### PublicRecruitment — `BUILD`
-
-Public job board / anonymous apply.
-
-- [ ] `POST   api/public/cv-upload`
 
 ### SalaryGrades — `INTENTIONAL`
 
@@ -467,12 +450,6 @@ Clearance — refresh assets.
 Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap.
 
 - [ ] `POST   api/staff-movements/summaries/by-ids`
-
-### TalentPool — `BUILD`
-
-Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens.
-
-- [ ] `PATCH  api/talent-pool/candidates/{}/review-date`
 
 ## C2. Build checklists — committed work, every endpoint enumerated
 
@@ -914,14 +891,11 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
 | PerformanceAppraisals | 15 | 29 | `BUILD` 5 · `INTENTIONAL` 10 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
 | Awards | 13 | 56 | `REVIEW` | ⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.** |
-| TalentPool | 11 | 12 | `BUILD` | Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens. |
 | StaffDisciplineSubEntity | 10 | 26 | `BUILD` | The corrective-action note here was stale — those were built in slice 9. The investigation and hearing were built in slice 11 (2026-08-30) and have left the queue. The 10 that remain are the sanctions, blocked on D-18. |
 | MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
-| CandidatePortal | 8 | 8 | `BUILD` | Candidate-facing recruitment portal. Reuses the external portal per the standing decision. |
 | EmployeeBanks | 6 | 10 | `BUILD` | Banks and branches reference data has no maintenance screen. |
+| ConsultantClientPortalAuth | 5 | 7 | `BUILD` | Client portal authentication. |
 | Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
-| CandidatePortalAuth | 4 | 6 | `BUILD` | Candidate portal authentication. |
-| ConsultantClientPortalAuth | 4 | 7 | `BUILD` | Client portal authentication. |
 | JobAnalysis | 4 | 59 | `BUILD` | The reference case. Eleven child collections with full CRUD and a read-only UI. |
 | SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
@@ -930,21 +904,19 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | ConsultantClientPortal | 3 | 3 | `BUILD` | Client portal for consultant engagements. |
 | EmployeeCareerPath | 3 | 3 | `BUILD` | Decided 2026-08-28: career paths are NOT server-write-only and should have a UI. |
 | InterviewQuestionPreset | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows. |
-| JobVacancy | 3 | 17 | `BUILD` | Stage assignments — create, edit, skip, delete. |
 | PositionCompetency | 3 | 4 | `INTENTIONAL` | Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set. |
 | PositionVacancies | 3 | 5 | `BUILD` | Classified 2026-08-29: all 3 real. The establishment screen wires reconcile and raise-requisition only; a vacancy cannot be closed by hand, annotated, or have its status set. |
 | TrainingServiceBonds | 3 | 8 | `BUILD` | Classified 2026-08-29: all 3 real. Bonds are minted server-side on nomination submit, so a bond with the wrong amount copied off its program has no correction path - and it is money. |
+| Candidate | 2 | 11 | `REVIEW` |  |
 | CheckIns | 2 | 9 | `BUILD` | Classified 2026-08-29: both real. Goals and review events wire an attachment panel; check-ins do not. |
 | ClientTimesheetConfirmation | 2 | 2 | `BUILD` | Anonymous client confirmation link. Without it consultant billing has no client step. |
 | ConsultantClients | 2 | 8 | `INTENTIONAL` | Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired. |
 | HrLegacyFileMigration | 2 | 2 | `INTENTIONAL` | One-off ops tool, invoked by script. |
-| JobCandidate | 2 | 25 | `BUILD` 1 · `FALSE` 1 | Classified 2026-08-29: 1 real - a candidate's expressed interest can be added and removed but not edited. |
 | JobOffer | 2 | 19 | `FALSE` | hrDocumentService.upload artefact (both letter uploads). |
 | Leaves | 2 | 14 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route. |
 | NHISClaims | 2 | 9 | `INTENTIONAL` 1 · `DONE` 1 | Built 2026-08-30 (slice 19). The claims list gained a Documents dialog at every status - the scheme's rejection letter arrives after the decision and the attendance record before it - driving the gated upload, the download and the Admin-tier delete. No backend change was needed: D-14 had already built and harness-verified the whole transport in the medical slice-5 run, and it had simply never had a caller. The one remaining flag is the metadata-only POST. |
 | PeerNomination | 2 | 4 | `INTENTIONAL` | Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation. |
 | PreEmploymentCheck | 2 | 11 | `FALSE` | hrDocumentService.upload artefact (both document routes). |
-| PublicRecruitment | 2 | 3 | `BUILD` | Public job board / anonymous apply. |
 | Separations | 2 | 31 | `BUILD` | Clearance — refresh assets. |
 | StaffDisciplineSupport | 2 | 20 | `BUILD` | Action steps and legal reviews are displayed but can never be recorded. |
 | StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
@@ -960,8 +932,9 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | HrAnnouncements | 1 | 7 | `FALSE` | DocumentUploadField artefact. |
 | HrLetterRequests | 1 | 3 | `FALSE` | DocumentUploadField artefact. |
 | HrPolicies | 1 | 6 | `FALSE` | DocumentUploadField artefact. |
-| JobInterview | 1 | 33 | `BUILD` | Classified 2026-08-29: real - an external panellist's own details cannot be corrected. |
+| JobCandidate | 1 | 25 | `FALSE` | The interest edit was built 2026-08-30 (recruitment closure, slice 1 — the UI comment claiming 'no update endpoint' was false) and left the queue. The remaining flag is the documents POST, the hrDocumentService.upload artefact. |
 | JobPosting | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
+| JobVacancy | 1 | 17 | `FALSE` | Stage assignments were built 2026-08-30 (recruitment closure, slice 1 — the Stage owners tab on vacancy detail; the eighth soft-delete/unique-index face was fixed with revive-on-upsert first) and left the queue on their own. The one remaining flag is the attachments POST, wired through hrDocumentService.upload — the helper artefact instrument 01 cannot resolve. |
 | LeaveTypes | 1 | 14 | `BUILD` | Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either. |
 | LocationContact | 1 | 4 | `BUILD` | No screen. |
 | Location | 1 | 4 | `INTENTIONAL` | Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync. |
@@ -969,7 +942,7 @@ looked at; a row with a mix has been looked at endpoint by endpoint.
 | MedicalExpenseClaims | 1 | 13 | `FALSE` | Built 2026-08-29 (slice 6). The claim, its lines and its documents are all correctable and removable; the one remaining flag is the upload artefact. The edit form also closes section E's AdmissionStart/AdmissionEnd pair. |
 | MedicalSelfService | 1 | 3 | `FALSE` | hrDocumentService.upload artefact. |
 | MyProfile | 1 | 4 | `FALSE` | DocumentUploadField artefact. |
-| OfferResponse | 1 | 1 | `BUILD` | Candidate offer response. |
+| OfferResponse | 1 | 1 | `DONE` | Built 2026-08-31 (recruitment closure). Kept by decision — offer emails link to it — and the page now exists at the exact path those emails carry, /careers/portal/offer-response?token=…: validate, respond once, token consumed. A registered candidate sees the same offer in their portal; this is the door for the one who has not signed up. |
 | PayComponents | 1 | 5 | `INTENTIONAL` | The endpoint's own summary says it: create the component in Payroll, then sync. |
 | SalaryNotches | 1 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
 | SheControlledDocument | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
@@ -988,7 +961,7 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 `INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
 `BUILD` means nothing reaches it and something should.
 
-**118 of the 309 queued endpoints are classified here — 29 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 191 were already carried by a controller-level disposition in section C's map and are not re-argued.
+**116 of the 283 queued endpoints are classified here — 27 BUILD, 43 INTENTIONAL, 44 FALSE, 2 DONE.** The remaining 167 were already carried by a controller-level disposition in section C's map and are not re-argued.
 
 ### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
 
@@ -1174,13 +1147,6 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `PUT    api/consultant-clients/engagements/{}` — **INTENTIONAL**
   <br>_As `DELETE api/consultant-clients/engagements/{}`._
 
-### JobCandidate — 1 BUILD · 1 FALSE
-
-- `PUT    api/job-candidates/{}/interests/{}` — **BUILD**
-  <br>A candidate's expressed interest can be added and removed but not edited.
-- `POST   api/job-candidates/{}/documents` — **FALSE**
-  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
-
 ### JobOffer — 2 FALSE
 
 - `POST   api/job-offers/{}/upload-letter` — **FALSE**
@@ -1282,10 +1248,10 @@ that would call it. `FALSE` means the endpoint **is** wired and the instrument c
 - `POST   api/hr/policies/{}/document` — **FALSE**
   <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
 
-### JobInterview — 1 BUILD
+### JobCandidate — 1 FALSE
 
-- `PUT    api/job-interviews/external-panelists/{}` — **BUILD**
-  <br>Add, remove, attendance and scores are all wired; correcting an external panellist's own details is not.
+- `POST   api/job-candidates/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
 
 ### JobPosting — 1 FALSE
 
@@ -1384,8 +1350,6 @@ missing — the class an endpoint audit cannot see.
 | `UpdateMedicalInsurancePlanDto` | 4 of 24 | LifetimeLimit, MaxChildAge, EmployerContributionPercent, EmployeeContributionPercent |
 | `CreateMedicalInsuranceProviderDto` | 3 of 28 | HasOnlinePortal, ClaimsPortalUrl, PreferredPaymentMethod |
 | `UpdateMedicalInsuranceProviderDto` | 3 of 28 | HasOnlinePortal, ClaimsPortalUrl, PreferredPaymentMethod |
-| `CreateVacancyPipelineStageAssignmentDto` | 3 of 7 | EscalationEnabled, EscalationDaysAfterDue, EscalateToId |
-| `UpdateVacancyPipelineStageAssignmentDto` | 3 of 5 | EscalationEnabled, EscalationDaysAfterDue, EscalateToId |
 | `UpdateAppraisalAppealItemDto` | 2 of 6 | ScoreAdjusted, RevisedScore |
 | `CreateAppraisalHRReviewDto` | 2 of 3 | ReviewedByHRId, ReviewStartedDate |
 | `CreateEmployeeDependentDto` | 2 of 16 | IsStudentDependent, IsEmergencyContact |

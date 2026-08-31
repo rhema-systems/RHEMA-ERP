@@ -7793,6 +7793,7 @@ namespace ErpSystem.Web.Services
                 new { Name = Constants.Roles.Employee, Description = "Standard employee with limited access" },
                 new { Name = Constants.Roles.ReadOnly, Description = "Read-only user for restricted system access" },
                 new { Name = Constants.Roles.ExternalUser, Description = "External portal user (customers/vendors/partners/citizens)" },
+                new { Name = Constants.Roles.Candidate, Description = "Job applicant self-registered on the public careers surface" },
                 new { Name = Constants.Roles.HelpdeskAgent, Description = "Helpdesk agent for managing tickets" },
                 new { Name = Constants.Roles.HelpdeskSupervisor, Description = "Helpdesk supervisor for assignment and escalation" },
                 new { Name = Constants.Roles.HelpdeskManager, Description = "Helpdesk manager for dashboards and configuration" },

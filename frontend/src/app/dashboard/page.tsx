@@ -38,7 +38,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { DatePickerWithRange } from '../../components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { useAuth } from '../../hooks/use-auth';
-import { getExternalPortalPath, isExternalPortalUser } from '../../lib/auth-routing';
+import { getAuthenticatedHomePath, getExternalPortalPath, isCandidateUser, isExternalPortalUser } from '../../lib/auth-routing';
 import { cn } from '../../lib/utils';
 import { authService } from '../../services/auth';
 import { dashboardService } from '../../services/dashboard';
@@ -127,7 +127,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const storedUser = authService.getStoredUser();
   const effectiveUser = user ?? storedUser;
-  const shouldRouteToExternalPortal = isExternalPortalUser(effectiveUser);
+  const shouldRouteToExternalPortal = isExternalPortalUser(effectiveUser) || isCandidateUser(effectiveUser);
   const [selectedRange, setSelectedRange] = useState<DateRange>(createDefaultDashboardRange);
   const [appliedRange, setAppliedRange] = useState<DateRange>(createDefaultDashboardRange);
   const [rangeError, setRangeError] = useState<string | null>(null);
@@ -165,9 +165,10 @@ export default function Dashboard() {
     if (typeof window === 'undefined') return;
 
     if (shouldRouteToExternalPortal) {
-      router.push(getExternalPortalPath());
+      // Candidates land on their careers home; business partners on the portal landing.
+      router.push(getAuthenticatedHomePath(effectiveUser));
     }
-  }, [router, shouldRouteToExternalPortal]);
+  }, [router, shouldRouteToExternalPortal, effectiveUser]);
 
   const { data, error: dashboardError, isLoading, isFetching, refetch } = useQuery({
     queryKey: [

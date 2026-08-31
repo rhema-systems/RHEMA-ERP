@@ -262,7 +262,6 @@ public partial class ApplicationDbContext
     public DbSet<RecruitmentPipeline> RecruitmentPipelines { get; set; } = null!;
     public DbSet<RecruitmentPipelineStage> RecruitmentPipelineStages { get; set; } = null!;
     public DbSet<JobShortlistingCriteria> JobShortlistingCriterias { get; set; } = null!;
-    public DbSet<CandidatePortalAccount> CandidatePortalAccounts { get; set; } = null!;
     public DbSet<JobCandidate> JobCandidates { get; set; } = null!;
     public DbSet<JobCandidateQualification> JobCandidateQualifications { get; set; } = null!;
     public DbSet<JobCandidateWorkHistory> JobCandidateWorkHistories { get; set; } = null!;
@@ -7240,6 +7239,19 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // One careers account owns at most one LIVE candidate profile. The filter carries
+            // IsDeleted = 0 deliberately — an unfiltered unique index over a soft delete is the
+            // defect this programme has now fixed eight times (a removed row keeps the slot and
+            // the re-link 500s naming nothing).
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.UserId)
+                .IsUnique()
+                .HasFilter("[UserId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("IX_JobCandidate_UserId");
 
             entity.HasMany(x => x.Qualifications)
                 .WithOne(x => x.JobCandidate)

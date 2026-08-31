@@ -1331,10 +1331,23 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                             claim.Type == "supplier_applicant_session") &&
                         ctx.User.HasClaim(
                             "auth_provider", "ApplicantToken")))
+                // The candidate-facing recruitment surface (api/candidate/*). Role-based like
+                // ExternalOnly; CandidateAccessMiddleware is the outer fence that keeps the same
+                // tokens off everything else.
+                .AddPolicy("CandidateOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        ctx.User.IsInRole(Constants.Roles.Candidate)))
+                // ⚠ InternalOnly is a BLOCKLIST, not an allowlist: every self-registered public
+                // role must be named here or its holders satisfy the policy on every internal
+                // endpoint that uses it. Candidate was added 2026-08-30 when candidates moved
+                // onto the main JWT scheme — without it, a careers signup would have counted as
+                // "internal" everywhere this policy guards.
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
-                        !ctx.User.IsInRole(Constants.Roles.ExternalUser)))
+                        !ctx.User.IsInRole(Constants.Roles.ExternalUser) &&
+                        !ctx.User.IsInRole(Constants.Roles.Candidate)))
                 .AddPolicy("AuditGovernanceRead", policy =>
                     policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
                 .AddPolicy("AuditGovernanceManage", policy =>
@@ -1377,20 +1390,19 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // without granting broader MaintenanceWrite permissions.
                 .AddPolicy("FleetInspectionWrite", policy =>
                     policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"))
-                // External portal policies. These run ONLY on the dedicated PortalBearer scheme (portal
-                // tokens use a distinct signing key + audience, see PortalAuth) and require the matching
-                // user_type claim, so an internal staff token can never satisfy them and vice-versa.
+                // External portal policy. Runs ONLY on the dedicated PortalBearer scheme (portal
+                // tokens use a distinct signing key + audience, see PortalAuth) and requires the
+                // matching user_type claim, so an internal staff token can never satisfy it and
+                // vice-versa. The sibling "CandidatePortal" policy was retired 2026-08-30 with the
+                // candidate portal itself — candidates now self-register on the main JWT scheme
+                // with the Candidate role; only the consultant-client portal remains on this scheme.
                 //
-                // email_verified is required as defence in depth. Both portal JWT services already emit
-                // the claim as literal "true"/"false" but nothing enforced it, so a token minted before
-                // verification stayed valid for its full seven days. Requiring it here invalidates any
-                // such token immediately — which is the point — so portal clients must treat a 403 on a
-                // portal route as "sign in again", not as a permanent refusal.
-                .AddPolicy("CandidatePortal", policy =>
-                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
-                          .RequireAuthenticatedUser()
-                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.CandidateUserType)
-                          .RequireClaim("email_verified", "true"))
+                // email_verified is required as defence in depth. The portal JWT service already
+                // emits the claim as literal "true"/"false" but nothing enforced it, so a token
+                // minted before verification stayed valid for its full seven days. Requiring it
+                // here invalidates any such token immediately — which is the point — so portal
+                // clients must treat a 403 on a portal route as "sign in again", not as a
+                // permanent refusal.
                 .AddPolicy("ConsultantClientPortal", policy =>
                     policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
                           .RequireAuthenticatedUser()
@@ -1863,6 +1875,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         {
             // Custom middleware registered as IMiddleware
             services.AddTransient<ErpSystem.Api.Middleware.ExternalUserAccessMiddleware>();
+            services.AddTransient<ErpSystem.Api.Middleware.CandidateAccessMiddleware>();
             services.AddScoped<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
 
             services.AddControllers(options =>

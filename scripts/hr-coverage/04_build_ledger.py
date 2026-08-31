@@ -38,7 +38,7 @@ DISPOSITIONS = {
     "StaffDisciplineLookupController.cs":
         ("BUILD", "Offence catalogue is GET-only in the UI; clients cannot maintain their own offence library."),
     "TalentPoolController.cs":
-        ("BUILD", "Recruitment candidate CRM. Controller remarks already say 'bare since the port, no screen calling it'. Fold into the existing candidate screens."),
+        ("DONE", "Built 2026-08-30 (recruitment closure, slice 1). The pool CRM lives at /hr/recruitment/talent-pool with pool/engagement tabs on candidate detail and stage-owner/pool-match tabs on vacancy detail; all 12 writes left the queue on their own. Verified by hr-recruitment/slice-e, 102 assertions ×2. Ten backend defects cleared first — the 21-of-40-field pool read, the tenantless paging query, the dead SegmentIds, the never-populated BySegment, the bulk false successes, and the missing [RecruitmentBusinessRules] among them."),
     "EmployeeBanksController.cs":
         ("BUILD", "Banks and branches reference data has no maintenance screen."),
     "LocationContactController.cs":
@@ -53,14 +53,13 @@ DISPOSITIONS = {
         ("INTENTIONAL", "Decided 2026-08-28: read-only by intent — payroll owns the grade master."),
     "PayrollController.cs":
         ("INTENTIONAL", "Another team's module; HR integrates read-only."),
-    "CandidatePortalController.cs":
-        ("BUILD", "Candidate-facing recruitment portal. Reuses the external portal per the standing decision."),
-    "CandidatePortalAuthController.cs":
-        ("BUILD", "Candidate portal authentication."),
+    # CandidatePortalController.cs / CandidatePortalAuthController.cs were DELETED 2026-08-30 —
+    # the candidate portal (own PortalBearer auth) is retired; candidates self-register on the
+    # main JWT scheme with the Candidate role and are served by the main-scheme candidate surface.
     "PublicRecruitmentController.cs":
         ("BUILD", "Public job board / anonymous apply."),
     "OfferResponseController.cs":
-        ("BUILD", "Candidate offer response."),
+        ("DONE", "Built 2026-08-31 (recruitment closure). Kept by decision — offer emails link to it — and the page now exists at the exact path those emails carry, /careers/portal/offer-response?token=…: validate, respond once, token consumed. A registered candidate sees the same offer in their portal; this is the door for the one who has not signed up."),
     "ClientTimesheetConfirmationController.cs":
         ("BUILD", "Anonymous client confirmation link. Without it consultant billing has no client step."),
     "ConsultantClientPortalController.cs":
@@ -86,7 +85,7 @@ DISPOSITIONS = {
     "MedicalInsuranceController.cs":
         ("INTENTIONAL", "⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here."),
     "JobVacancyController.cs":
-        ("BUILD", "Stage assignments — create, edit, skip, delete."),
+        ("FALSE", "Stage assignments were built 2026-08-30 (recruitment closure, slice 1 — the Stage owners tab on vacancy detail; the eighth soft-delete/unique-index face was fixed with revive-on-upsert first) and left the queue on their own. The one remaining flag is the attachments POST, wired through hrDocumentService.upload — the helper artefact instrument 01 cannot resolve."),
     "AwardsController.cs":
         ("REVIEW", "⚠ The note here read \"nomination attachments — edit and delete\", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.**"),
     "EmployeeCompetencyController.cs":
@@ -137,7 +136,7 @@ DISPOSITIONS = {
     "PeerNominationController.cs":
         ("INTENTIONAL", "Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation."),
     "JobCandidateController.cs":
-        ("BUILD", "Classified 2026-08-29: 1 real - a candidate's expressed interest can be added and removed but not edited."),
+        ("FALSE", "The interest edit was built 2026-08-30 (recruitment closure, slice 1 — the UI comment claiming 'no update endpoint' was false) and left the queue. The remaining flag is the documents POST, the hrDocumentService.upload artefact."),
     "LeavesController.cs":
         ("INTENTIONAL", "Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route."),
     "AppraisalNotificationsController.cs":
@@ -149,7 +148,7 @@ DISPOSITIONS = {
     "AwardsMeController.cs":
         ("BUILD", "Classified 2026-08-29: real - a score the caller gave cannot be revised."),
     "JobInterviewController.cs":
-        ("BUILD", "Classified 2026-08-29: real - an external panellist's own details cannot be corrected."),
+        ("DONE", "Built 2026-08-30 (recruitment closure, slice 1): one edit dialog on the interview panel serves internal and external rows — the internal updatePanelist had a client method and no caller, so both were dark. The service also gained the UpdatedAt/UpdatedBy stamps it silently lacked."),
     "LeaveTypesController.cs":
         ("BUILD", "Classified 2026-08-29: real - a leave type can never be retired, and there is no delete either."),
     "StaffActingAppointmentsController.cs":
@@ -656,7 +655,8 @@ _d("StaffDisciplineSubEntityController.cs", [
 _d("JobCandidateController.cs", [
     ("POST", "api/job-candidates/{}/documents", _HELPER),
     ("PUT", "api/job-candidates/{}/interests/{}",
-     ("BUILD", "A candidate's expressed interest can be added and removed but not edited.")),
+     ("DONE", "Built 2026-08-30 (recruitment closure, slice 1): the interests tab edits in place; "
+              "the component comment claiming no update endpoint existed was deleted with it.")),
 ])
 _d("AwardsMeController.cs", [
     ("PUT", "api/awards/me/reviews/{}",
@@ -665,8 +665,8 @@ _d("AwardsMeController.cs", [
 ])
 _d("JobInterviewController.cs", [
     ("PUT", "api/job-interviews/external-panelists/{}",
-     ("BUILD", "Add, remove, attendance and scores are all wired; correcting an external "
-               "panellist's own details is not.")),
+     ("DONE", "Built 2026-08-30 (recruitment closure, slice 1): the panel's edit dialog, shared "
+              "with the internal rows.")),
 ])
 _d("LeaveTypesController.cs", [
     ("PATCH", "api/hr/leave-types/{}/deactivate",
@@ -1413,6 +1413,11 @@ w("| 2026-08-30 | **A TypeScript type can be fiction nothing has caught yet.** `
 w("| 2026-08-30 | **The Assets missing-edit family is built** (slice 18, 43 assertions). All eight endpoints wired; eight left the coverage queue on their own. Unlike medical this needed **no backend change** — every endpoint already stamped its actor (five through `UpdateEntity(dto, userId)`, surcharges through a `Stamp(entity)` helper) and every screen already fetched its record by id, so both standing checks passed before any UI was written. |")
 w("| 2026-08-30 | **A wired endpoint can still be unreachable through a misspelled payload key.** `submitSurcharge` sent `proceededWithoutResponseReason` while the DTO declares `ProceedWithoutResponseReason` — \"proceeded\" against \"proceed\" — so a submit without an employee response was refused however carefully the reason was typed. Instrument 01 counts the endpoint as wired, because it is: the ROUTE matched and the BODY did not. Slice 18 asserts both spellings. |")
 w("| 2026-08-30 | ⚠ **A full-project `tsc --noEmit` crashes on this repo** (TypeScript 5.9.2, \"Debug Failure. No error for last overload signature\"), and `incremental: true` with a stale `tsconfig.tsbuildinfo` had been hiding it — earlier clean runs were partial, checking only changed files. Reproduced on a clean tree with no local changes, so it predates this work. Slices are type-checked against a scoped `tsconfig` until someone finds the offending file. |")
+w("| 2026-08-30 | **The recruitment block's portal decisions, all three settled by the user at kickoff.** The candidate portal (own `PortalBearer` auth) is retired — code AND schema, the table held zero rows; candidates self-register on the main JWT scheme under a **separate `Candidate` role**, never `ExternalUser`, because that role's middleware allowlist carries `/api/procurement` wholesale (live cross-module hole #11a) plus the projects/estate/support portals; and the flow is **browse public, apply logged-in** — the anonymous apply/track/cv-upload endpoints retired with the portal while the board and catalogues stay anonymous. |")
+w("| 2026-08-30 | **`InternalOnly` is a blocklist, not an allowlist.** The policy refused exactly one role by name, so a new self-registered public role would have satisfied it on every internal endpoint it guards. `Candidate` is now named alongside `ExternalUser`, and the policy's comment says the rule out loud so the next public role names itself too. `CandidateAccessMiddleware` is a deliberate SIBLING of the ExternalUser fence — strict-subset allowlist, no admin bypass. |")
+w("| 2026-08-30 | **Adopting an existing candidate row requires a confirmed mailbox.** Registration activates by SMS OTP, but linking an account to a pre-existing `JobCandidate` with the same email hands over that candidate's application history — and anyone can type someone else's address at registration. `SaveProfileAsync` refuses adoption until Identity's `EmailConfirmed` is true (`api/candidate/confirm-email` pair); a fresh email just creates a fresh candidate. |")
+w("| 2026-08-31 | **EF relationship fixup resurrects soft-deleted children on a same-context response read.** The profile's replace-set save soft-deleted an omitted interest and the response served it straight back: `GetWithFullDetailsAsync` gained filtered includes (it was echoing deleted children to HR's `/details` too), but the save builds its response in the SAME DbContext, and fixup re-attaches the tracked, just-deleted rows regardless of the SQL. The mapper now filters `IsDeleted` as well, with a comment so the 'redundant' second filter survives review. Found by slice-f's replace-set assertion, not by reading. |")
+w("| 2026-08-31 | **The tokenised offer-response page lives at the path already in people's inboxes.** Offer emails link to `{PortalUrl}/careers/portal/offer-response?token=…`; the retired Blazor page was the old target, so the Next page was built at that exact route rather than a cleaner one — changing the URL format would have dead-linked every offer already sent. |")
 w("| 2026-08-29 | **The medical missing-edit family is built** (slice 6, 41 assertions). Pre-authorisations, referrals, appointments, expense claims and claim lines can all be corrected and removed; eleven endpoints left the coverage queue on their own, which is the check that the wiring is real. The claim edit also closes section E's `AdmissionStart`/`AdmissionEnd`. |")
 w("| 2026-08-29 | **An edit dialog loads its record by id — never from the list row.** The appointment row carries 7 fields against the record's 32; the pre-authorisation row 9 against 34. Neither carries `purpose`, `serviceType`, `diagnosis` or `proposedTreatment`, all of which the update writes, so a row-bound dialog would have rendered them blank and blanked them on save — D-09 and D-12 one layer further out. Proved by `probe-clinical-byid.mjs` before any TypeScript was written, and now held by a standing assertion. |")
 w("| 2026-08-29 | **D-16's sweep finished: eleven more transitions stamp their actor.** The blocker named the eight clinical ones; checking every `ApplyTo` helper in the medical mappers found eleven more with no actor at all — four of them moving money, and payment, flag and unflag wired and shipped. A claim being paid recorded the amount, the method and the reference, but not who did it. |")

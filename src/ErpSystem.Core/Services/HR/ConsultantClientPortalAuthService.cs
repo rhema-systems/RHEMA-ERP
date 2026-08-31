@@ -122,7 +122,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         // No session token: registration only proves someone typed an email address. Issuing one
         // here let anyone who knew a client code register with a contact's address and read that
         // client's dashboard and timesheets — consultant names, dates, hours and entries — before
-        // proving they own the mailbox. Mirrors CandidatePortalAuthService.
+        // proving they own the mailbox. (The since-retired candidate portal's auth used the same rule.)
         return BuildUnverifiedResult(account, client);
     }
 

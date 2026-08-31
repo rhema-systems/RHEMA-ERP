@@ -4,8 +4,10 @@ using System.Text;
 namespace ErpSystem.Api.Security;
 
 /// <summary>
-/// Authentication constants and token parameters for the <b>external</b> portals
-/// (candidate careers portal, consultant-client portal).
+/// Authentication constants and token parameters for the <b>external</b> consultant-client portal.
+/// (The candidate careers portal also lived on this scheme until 2026-08-30; it was retired in
+/// favour of main-scheme self-registration under the Candidate role, fenced by its own access
+/// middleware and the InternalOnly policy.)
 ///
 /// <para><b>Why these are separate from internal staff tokens:</b> external portal accounts are
 /// self-registered by members of the public. Previously their tokens were signed with the same key,
@@ -29,11 +31,10 @@ public static class PortalAuth
     /// <summary>Claim carrying the kind of principal (internal staff vs which portal).</summary>
     public const string UserTypeClaim = "user_type";
 
-    public const string CandidateUserType = "portal_candidate";
-    public const string ClientUserType    = "portal_client";
-
-    /// <summary>Portal user types that must never be accepted on an internal endpoint.</summary>
-    public static readonly string[] ExternalUserTypes = { CandidateUserType, ClientUserType };
+    // "portal_candidate" was retired 2026-08-30 with the candidate portal — candidates now
+    // self-register on the main JWT scheme with the Candidate role. The consultant-client
+    // portal is the scheme's only remaining tenant.
+    public const string ClientUserType = "portal_client";
 
     public static string SigningKey(IConfiguration config) =>
         config["JwtSettings:PortalSecretKey"]

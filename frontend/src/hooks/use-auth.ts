@@ -7,7 +7,7 @@ import { QUERY_KEYS } from '../config/api';
 import type { User, LoginRequest } from '../types';
 import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
 import { buildTenantSelectRedirectUrl } from '../lib/auth-redirect';
-import { getExternalPortalPath, isExternalPortalUser } from '../lib/auth-routing';
+import { getAuthenticatedHomePath, getExternalPortalPath, isCandidateUser, isExternalPortalUser } from '../lib/auth-routing';
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -42,9 +42,11 @@ export function useAuth() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.TENANTS });
 
       router.push(
-        isExternalPortalUser(response.user)
-          ? getExternalPortalPath()
-          : buildTenantSelectRedirectUrl()
+        isCandidateUser(response.user)
+          ? getAuthenticatedHomePath(response.user)
+          : isExternalPortalUser(response.user)
+            ? getExternalPortalPath()
+            : buildTenantSelectRedirectUrl()
       );
     },
     onError: (error) => {

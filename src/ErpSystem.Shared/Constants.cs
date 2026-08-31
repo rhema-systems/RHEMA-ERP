@@ -59,6 +59,15 @@ public static class Constants
         // External users (customer/vendor/partner/citizen portal accounts)
         public const string ExternalUser = "ExternalUser";
 
+        /// <summary>
+        /// Job applicants who self-registered on the public careers surface (2026-08-30, replacing
+        /// the retired PortalBearer candidate portal). Deliberately NOT <see cref="ExternalUser"/>:
+        /// that role's path allowlist includes procurement/projects/estate surfaces meant for
+        /// vetted counterparties, and a candidate is an anonymous member of the public.
+        /// Candidates are fenced by CandidateAccessMiddleware and refused by "InternalOnly".
+        /// </summary>
+        public const string Candidate = "Candidate";
+
         // Helpdesk / Enquiry / Complaints roles
         public const string HelpdeskAgent = "HelpdeskAgent";
         public const string HelpdeskSupervisor = "HelpdeskSupervisor";
@@ -78,6 +87,7 @@ public static class Constants
                 || string.Equals(normalizedRoleName, Employee, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, ReadOnly, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, ExternalUser, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, Candidate, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskAgent, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskSupervisor, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(normalizedRoleName, HelpdeskManager, StringComparison.OrdinalIgnoreCase);
