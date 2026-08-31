@@ -116,6 +116,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinanceDimensionSnapshotItem> FinanceDimensionSnapshotItems { get; set; }
     public DbSet<FinanceSourceDimensionAssignment> FinanceSourceDimensionAssignments { get; set; }
     public DbSet<FinanceSourceDimensionChange> FinanceSourceDimensionChanges { get; set; }
+    public DbSet<FinanceSettlementDimensionComponent> FinanceSettlementDimensionComponents { get; set; }
     public DbSet<FinanceDimensionRouteCertification> FinanceDimensionRouteCertifications { get; set; }
     public DbSet<FinanceDimensionCertificationTransition> FinanceDimensionCertificationTransitions { get; set; }
     public DbSet<FinanceDimensionReadinessAssessment> FinanceDimensionReadinessAssessments { get; set; }
@@ -3113,6 +3114,36 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FinanceSettlementDimensionComponent>(entity =>
+        {
+            entity.ToTable("FinanceSettlementDimensionComponents");
+            entity.HasIndex(e => new
+                {
+                    e.TenantId,
+                    e.RouteId,
+                    e.SourceDocumentId,
+                    e.SettlementSourceLineId,
+                    e.OriginatingSourceLineId,
+                    e.ComponentType
+                })
+                .HasDatabaseName("IX_FinanceSettlementDimensionComponents_EvidenceKey")
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId });
+            entity.HasIndex(e => e.FinanceDimensionSnapshotId);
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.Property(e => e.EvidenceVersion).HasDefaultValue("1.0");
+            entity.HasCheckConstraint(
+                "CK_FinanceSettlementDimensionComponents_ComponentType",
+                "[ComponentType] IN (0,1,2,3,4,5,6)");
+            entity.HasOne(e => e.FinanceDimensionSet).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany()
+                .HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<FinanceDimensionRouteCertification>(entity =>
         {
             entity.ToTable("FinanceDimensionRouteCertifications");
@@ -5488,6 +5519,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<SupplierDebitNote>(entity =>
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
         builder.Entity<SupplierDebitNoteApplication>(entity =>
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
+        builder.Entity<FinanceSettlementDimensionComponent>(entity =>
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
         ConfigureSalesAllocationPrecision(builder);
         builder.ApplyConfiguration(new AccountBalanceConfiguration());

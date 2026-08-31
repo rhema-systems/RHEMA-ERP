@@ -9,8 +9,13 @@ public enum FinanceDimensionRouteId
     ManualJournalEntry = 1,
     FinanceApVendorInvoice = 10,
     FinanceApSupplierDebitNote = 11,
+    FinanceApVendorPayment = 12,
     FinanceArCustomerInvoice = 20,
-    SalesCreditNote = 30
+    FinanceArCustomerPayment = 21,
+    SalesCreditNote = 30,
+    FinanceCashPayment = 40,
+    FinanceCashReceipt = 41,
+    FinanceCashBankTransfer = 42
 }
 
 public enum FinanceDimensionCertificationState
@@ -23,7 +28,23 @@ public enum FinanceDimensionCertificationState
 public enum FinanceDimensionGrain
 {
     JournalLine = 0,
-    SourceDocumentLine = 1
+    SourceDocumentLine = 1,
+    SettlementAllocationLine = 2
+}
+
+/// <summary>
+/// A settlement amount is retained by economic component so derived entries never collapse
+/// incompatible source dimension combinations into an unassigned aggregate posting line.
+/// </summary>
+public enum FinanceSettlementComponentType
+{
+    Principal = 0,
+    Discount = 1,
+    WithholdingTax = 2,
+    VatWithholdingTax = 3,
+    Fee = 4,
+    WriteOff = 5,
+    RealizedFx = 6
 }
 
 public sealed record FinanceDimensionRouteDefinition(
@@ -88,6 +109,19 @@ public static class FinanceDimensionRouteCatalog
             "Finance / Accounts Payable",
             "Finance-owned buyer-side supplier debit-note lifecycle."),
         new(
+            FinanceDimensionRouteId.FinanceApVendorPayment,
+            "Finance",
+            "AP",
+            "finance.ap.vendor-payments.manual",
+            "VendorPayment",
+            "1.0",
+            FinanceDimensionGrain.SettlementAllocationLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Accounts Payable",
+            "Finance-owned vendor payments. Allocation evidence inherits exact originating invoice-line combinations."),
+        new(
             FinanceDimensionRouteId.FinanceArCustomerInvoice,
             "Finance",
             "AR",
@@ -101,6 +135,19 @@ public static class FinanceDimensionRouteCatalog
             "Finance / Accounts Receivable",
             "Manual Finance AR invoice route. Generated invoices require producer-specific certification."),
         new(
+            FinanceDimensionRouteId.FinanceArCustomerPayment,
+            "Finance",
+            "AR",
+            "finance.ar.customer-payments.manual",
+            "CustomerPayment",
+            "1.0",
+            FinanceDimensionGrain.SettlementAllocationLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Accounts Receivable",
+            "Finance-owned customer receipts. Allocation evidence inherits exact originating invoice-line combinations."),
+        new(
             FinanceDimensionRouteId.SalesCreditNote,
             "Sales",
             "AR",
@@ -112,7 +159,46 @@ public static class FinanceDimensionRouteCatalog
             SupportsDocumentDefaults: false,
             RequiresReadinessProvider: true,
             "Sales (producer) / Finance (consumer)",
-            "Additive consumer contract only. Sales retains source lifecycle and UI ownership.")
+            "Additive consumer contract only. Sales retains source lifecycle and UI ownership."),
+        new(
+            FinanceDimensionRouteId.FinanceCashPayment,
+            "Finance",
+            "CASHBANK",
+            "finance.cash.payments.direct",
+            "CashBankPayment",
+            "1.0",
+            FinanceDimensionGrain.SourceDocumentLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Cash Management",
+            "Direct Finance cash/bank payment only; external payment producers require separate adapters."),
+        new(
+            FinanceDimensionRouteId.FinanceCashReceipt,
+            "Finance",
+            "CASHBANK",
+            "finance.cash.receipts.direct",
+            "CashBankReceipt",
+            "1.0",
+            FinanceDimensionGrain.SourceDocumentLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Cash Management",
+            "Direct Finance cash/bank receipt only; deposits and external receipt producers remain uncertified."),
+        new(
+            FinanceDimensionRouteId.FinanceCashBankTransfer,
+            "Finance",
+            "CASHBANK",
+            "finance.cash.bank-transfers",
+            "CashBankTransfer",
+            "1.0",
+            FinanceDimensionGrain.SourceDocumentLine,
+            FinanceDimensionCertificationState.CaptureOptional,
+            SupportsDocumentDefaults: true,
+            RequiresReadinessProvider: true,
+            "Finance / Cash Management",
+            "Each bank-transfer leg is an independent source line and resolves its own account rules.")
     ];
 
     public static FinanceDimensionRouteDefinition GetRequired(FinanceDimensionRouteId id) =>
