@@ -30,6 +30,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { CaseProcessPanel } from '@/components/hr/discipline/CaseProcessPanel';
+import { SanctionsPanel } from '@/components/hr/discipline/SanctionsPanel';
 import { ActionStepsPanel } from '@/components/hr/discipline/ActionStepsPanel';
 import { LegalReviewsPanel } from '@/components/hr/discipline/LegalReviewsPanel';
 import { CorrectiveActionPanel } from '@/components/hr/discipline/CorrectiveActionPanel';
@@ -65,23 +66,26 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
  * from here, while the sub-entities stayed READ-ONLY until the rules that govern them existed — an
  * editable sanction with no authority rule behind it (FR-HR-080) would be worse than none.
  *
- * **Three of them are now editable, and the distinction is deliberate.** The procedure steps, the
- * legal reviews and the corrective action plan are PROCEDURAL: nothing about who may record them
- * turns on FR-HR-080, because none of them imposes a penalty. The sanctions — warning, suspension,
- * fine, termination — remain read-only for exactly the original reason, and must stay that way
- * until the issuing-authority rule is in place.
+ * The procedure steps, the legal reviews and the corrective action plan are PROCEDURAL: nothing
+ * about who may record them turns on FR-HR-080, because none of them imposes a penalty. The
+ * investigation and hearing are recordable for the same reason — they were never blocked on
+ * anything, and had simply had no editors built.
  *
- * The investigation and hearing are now recordable too (`CaseProcessPanel`). They were never
- * blocked on anything — neither imposes a penalty, so FR-HR-080 does not govern them — and the
- * only reason they had stayed read-only was that nobody had built the editors.
+ * ⚠ **The sanctions became editable on 2026-08-31 (`SanctionsPanel`), and the block that held them
+ * since slice 1 was half wrong.** It read: no actor reaches the authority rule, and a warning can be
+ * recorded against an undecided case. Re-run properly:
  *
- * ⚠ **The sanctions' block was re-tested on 2026-08-30 and it STANDS**, though not for the reason
- * recorded above. The authority rule does exist in `RecordDecision` — but no actor reaches it:
- * `HR.Discipline.Write` is held only by HR, LegacyHrUser and the admin roles, and the rule excludes
- * HR, SuperAdmin and Admin by name, while a head of department holds none of them and is refused at
- * the endpoint gate. Worse, a WARNING can be recorded against a case nobody has decided, so even a
- * working rule on the decision would not govern an editable warning. `probe-authority-gate.mjs`
- * records both findings as passing assertions.
+ *  · **The first half was FALSE.** It rested on two probe assertions expecting a **401** where a
+ *    permission refusal is a 403 — they had passed against tokens that had gone stale, proving
+ *    nothing. The rule worked; what it lacked was any way for a head of department to reach it,
+ *    because headship is DATA (`OrganizationUnits.HeadEmployeeId`) and no policy can express it.
+ *    Authority is now resolved from the organisation and the decision route is ungated.
+ *  · **The second half was TRUE and understated.** Not just a warning — warning, suspension AND
+ *    fine were all accepted with no decision behind them; only termination was guarded. All four now
+ *    share one guard, and it refuses a merely PROPOSED decision too.
+ *
+ * `probe-authority-gate.mjs` (33) and `probe-sanctions.mjs` (30) hold both, and now prove the gate
+ * WORKS rather than that it does not.
  */
 export default function DisciplineCaseDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -503,65 +507,12 @@ export default function DisciplineCaseDetailPage() {
         </TabsContent>
 
         <TabsContent value="sanctions" className="space-y-4 pt-4">
-          <Card>
-            <CardHeader><CardTitle>Warning</CardTitle></CardHeader>
-            <CardContent>
-              {detail.warning ? (
-                <div className="grid gap-5 md:grid-cols-3">
-                  <Field label="Type" value={<StatusBadge status={detail.warning.warningTypeName} />} />
-                  <Field label="Expires" value={fmtDate(detail.warning.warningExpiryDate)} />
-                  <Field label="Letter reference" value={detail.warning.warningLetterReference} />
-                </div>
-              ) : (
-                <EmptyState title="No warning" description="No warning has been issued on this case." />
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Suspension</CardTitle></CardHeader>
-            <CardContent>
-              {detail.suspension ? (
-                <div className="grid gap-5 md:grid-cols-3">
-                  <Field label="From" value={fmtDate(detail.suspension.suspensionStartDate)} />
-                  <Field label="To" value={fmtDate(detail.suspension.suspensionEndDate)} />
-                  <Field
-                    label="Pay"
-                    value={detail.suspension.suspensionWithPay ? 'With pay' : 'Without pay'}
-                  />
-                  <Field label="Days" value={detail.suspension.suspensionDays ?? '—'} />
-                </div>
-              ) : (
-                <EmptyState title="No suspension" description="No suspension has been imposed on this case." />
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Fine</CardTitle></CardHeader>
-            <CardContent>
-              {detail.fine ? (
-                <div className="grid gap-5 md:grid-cols-4">
-                  <Field label="Amount" value={money(detail.fine.fineAmount)} />
-                  <Field label="Paid" value={money(detail.fine.finePaidAmount)} />
-                  <Field label="Due" value={fmtDate(detail.fine.fineDueDate)} />
-                  <Field
-                    label="Status"
-                    value={detail.fine.finePaymentStatusName
-                      ? <StatusBadge status={detail.fine.finePaymentStatusName} />
-                      : '—'}
-                  />
-                  <Field label="Outstanding" value={money(detail.fine.outstandingBalance)} />
-                  <p className="text-xs text-muted-foreground md:col-span-4">
-                    Recovery of a fine is payroll&apos;s to run. This records what was imposed and what
-                    has been paid; it does not deduct anything.
-                  </p>
-                </div>
-              ) : (
-                <EmptyState title="No fine" description="No fine has been imposed on this case." />
-              )}
-            </CardContent>
-          </Card>
+          {/*
+            ⚠ Editable since 2026-08-31. This tab was read-only from slice 1 under the note that a
+            sanction must wait "until the issuing-authority rule is in place" — see the block
+            comment at the top of this file for what turned out to be true and what did not.
+          */}
+          <SanctionsPanel detail={detail} />
 
           <Card>
             <CardHeader><CardTitle>Reduction in rank</CardTitle></CardHeader>
@@ -612,25 +563,6 @@ export default function DisciplineCaseDetailPage() {
                     record. This is a link to it, not a second copy.
                   </p>
                 </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Termination</CardTitle></CardHeader>
-            <CardContent>
-              {detail.termination ? (
-                <div className="grid gap-5 md:grid-cols-3">
-                  <Field label="Type" value={detail.termination.typeName} />
-                  <Field label="Eligible for rehire" value={detail.termination.isEligibleForRehire ? 'Yes' : 'No'} />
-                  <Field label="Final pay processed" value={detail.termination.finalPaycheckProcessed ? 'Yes' : 'No'} />
-                  <p className="text-xs text-muted-foreground md:col-span-3">
-                    Clearance, entitlement computation and the exit process itself belong to the
-                    separation module, which is not built yet. What is recorded here is the decision.
-                  </p>
-                </div>
-              ) : (
-                <EmptyState title="No termination" description="This case has not resulted in a termination." />
               )}
             </CardContent>
           </Card>

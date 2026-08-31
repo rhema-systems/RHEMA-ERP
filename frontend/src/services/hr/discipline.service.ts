@@ -4,7 +4,15 @@ import type { PagedResult } from '@/types/hr/common';
 import type {
   DisciplinaryCase,
   DisciplinaryCaseSummary,
+  DisciplinaryFinePaymentStatus,
   DisciplinaryStatus,
+  DisciplinaryWarningType,
+  DisciplineFine,
+  DisciplineSeparation,
+  DisciplineSuspension,
+  DisciplineTermination,
+  DisciplineWarning,
+  EmployeeTerminationType,
   StaffOffenseSeverity,
   CreateDisciplinaryCaseRequest,
   UpdateDisciplinaryCaseRequest,
@@ -901,6 +909,136 @@ class DisciplineNotificationService {
   }
 }
 
+
+/**
+ * The sanctions: warning, suspension, fine and its payments, termination, and the separation
+ * checklist that follows a termination.
+ *
+ * ⚠ **These were unreachable from any screen until 2026-08-31**, blocked by the closure ledger's
+ * D-18 since slice 1. Two things had to be true first, and now are: authority to decide is resolved
+ * from the organisation rather than from the absence of a role (FR-HR-080), and **every sanction is
+ * refused until the decision behind it is confirmed** — warning, suspension and fine were all
+ * accepted against an undecided case before that, and only termination was guarded.
+ *
+ * ⚠ **Every payload here was read off the DTO and then proven live** by
+ * `hr-discipline/probe-sanctions.mjs`, because earlier guesses at these routes sent
+ * `warningDetails`, `issuedDate`, `validUntil`, `suspensionReason`, `isPaid`, `currencyCode` and
+ * `reason` — not one of which exists. All were accepted, and all were silently dropped. There is no
+ * reason field on a suspension and no currency on a fine; the case carries the reasoning.
+ */
+class DisciplineSanctionService {
+  private readonly base = '/discipline/cases';
+
+  // ── warning ────────────────────────────────────────────────────────────────
+  getWarning(caseId: string): Promise<DisciplineWarning> {
+    return apiService.get<DisciplineWarning>(`${this.base}/${caseId}/warning`);
+  }
+
+  /** One per case: a second is refused with "already exists". Correct it with `updateWarning`. */
+  recordWarning(caseId: string, payload: {
+    warningType: DisciplinaryWarningType;
+    warningExpiryDate?: string | null;
+    warningLetterReference?: string | null;
+  }): Promise<DisciplineWarning> {
+    return apiService.post<DisciplineWarning>(`${this.base}/${caseId}/warning`, { caseId, ...payload });
+  }
+
+  updateWarning(caseId: string, payload: {
+    warningType: DisciplinaryWarningType;
+    warningExpiryDate?: string | null;
+    warningLetterReference?: string | null;
+  }): Promise<DisciplineWarning> {
+    return apiService.put<DisciplineWarning>(`${this.base}/${caseId}/warning`, { caseId, ...payload });
+  }
+
+  // ── suspension ─────────────────────────────────────────────────────────────
+  /**
+   * ⚠ `suspensionDays` is **computed by the server** from the two dates — 7 for a one-week span —
+   * and is not on the payload. Show it; never offer it as an input.
+   *
+   * ⚠ There is no "precautionary suspension" here. This entity is a PENALTY: its own summary says
+   * "created when the decision includes a suspension", and it is refused until the decision is
+   * confirmed. Sending somebody home pending an investigation is a different act and this is not it.
+   */
+  recordSuspension(caseId: string, payload: {
+    suspensionStartDate?: string | null;
+    suspensionEndDate?: string | null;
+    suspensionWithPay: boolean;
+  }): Promise<DisciplineSuspension> {
+    return apiService.post<DisciplineSuspension>(`${this.base}/${caseId}/suspension`, { caseId, ...payload });
+  }
+
+  updateSuspension(caseId: string, payload: {
+    suspensionStartDate?: string | null;
+    suspensionEndDate?: string | null;
+    suspensionWithPay: boolean;
+  }): Promise<DisciplineSuspension> {
+    return apiService.put<DisciplineSuspension>(`${this.base}/${caseId}/suspension`, { caseId, ...payload });
+  }
+
+  // ── fine ───────────────────────────────────────────────────────────────────
+  /** ⚠ The due date field is `fineDueDate`. `dueDate` is accepted and silently dropped. */
+  recordFine(caseId: string, payload: {
+    fineAmount: number;
+    fineDueDate?: string | null;
+  }): Promise<DisciplineFine> {
+    return apiService.post<DisciplineFine>(`${this.base}/${caseId}/fine`, { caseId, ...payload });
+  }
+
+  /**
+   * ⚠ Payments **accumulate**: paying 100 and then 150.50 against a 250.50 fine leaves
+   * `finePaidAmount` at 250.50, not 150.50. So the form asks what is being paid NOW, never the
+   * running total. Proven, not assumed.
+   */
+  recordFinePayment(caseId: string, payload: {
+    amountPaid: number;
+    paymentDate: string;
+    paymentStatus: DisciplinaryFinePaymentStatus;
+  }): Promise<DisciplineFine> {
+    return apiService.post<DisciplineFine>(`${this.base}/${caseId}/fine/payment`, { caseId, ...payload });
+  }
+
+  // ── termination, and the separation that follows it ────────────────────────
+  recordTermination(caseId: string, payload: {
+    type: EmployeeTerminationType;
+    isEligibleForRehire: boolean;
+    eligibleForRehireDate?: string | null;
+    rehireRestrictions?: string | null;
+    separationNotes?: string | null;
+  }): Promise<DisciplineTermination> {
+    return apiService.post<DisciplineTermination>(`${this.base}/${caseId}/termination`, { caseId, ...payload });
+  }
+
+  updateTermination(caseId: string, payload: {
+    type: EmployeeTerminationType;
+    isEligibleForRehire: boolean;
+    eligibleForRehireDate?: string | null;
+    rehireRestrictions?: string | null;
+    finalPaycheckProcessed?: boolean;
+    finalPaycheckDate?: string | null;
+    finalPaycheckAmount?: number | null;
+  }): Promise<DisciplineTermination> {
+    return apiService.put<DisciplineTermination>(`${this.base}/${caseId}/termination`, { caseId, ...payload });
+  }
+
+  /** ⚠ Refused until a termination record exists — "a termination record must be created first". */
+  initiateSeparation(caseId: string, payload: { exitInterviewerId?: string | null }): Promise<DisciplineSeparation> {
+    return apiService.post<DisciplineSeparation>(`${this.base}/${caseId}/separation`, { caseId, ...payload });
+  }
+
+  updateSeparation(caseId: string, payload: {
+    exitInterviewCompleted: boolean;
+    exitInterviewDate?: string | null;
+    exitInterviewNotes?: string | null;
+    exitInterviewerId?: string | null;
+    equipmentReturned: boolean;
+    equipmentReturnedDate?: string | null;
+    missingEquipment?: string | null;
+  }): Promise<DisciplineSeparation> {
+    return apiService.put<DisciplineSeparation>(`${this.base}/${caseId}/separation`, { caseId, ...payload });
+  }
+}
+
 export const disciplineService = new DisciplineService();
 export const disciplineAppealService = new DisciplineAppealService();
 export const disciplineProcessService = new DisciplineProcessService();
@@ -912,3 +1050,4 @@ export const disciplineWitnessService = new DisciplineWitnessService();
 export const disciplineDocumentService = new DisciplineDocumentService();
 export const disciplineNoteService = new DisciplineNoteService();
 export const disciplineNotificationService = new DisciplineNotificationService();
+export const disciplineSanctionService = new DisciplineSanctionService();
