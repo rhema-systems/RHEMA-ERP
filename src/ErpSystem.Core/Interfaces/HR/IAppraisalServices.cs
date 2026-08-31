@@ -80,7 +80,11 @@ public interface IPerformanceAppraisalService
     Task<bool> DeleteCriterionScoreAsync(Guid evaluationId, Guid scoreId, CancellationToken cancellationToken = default);
 
     // AppraisalEmployeeResponse operations
-    Task<AppraisalEmployeeResponseDto> AddEmployeeResponseAsync(Guid appraisalId, CreateAppraisalEmployeeResponseDto createDto, CancellationToken cancellationToken = default);
+    /// <summary>HR transcribing a response. ⚠ Deliberately unwired — see AddOwnEmployeeResponseAsync.</summary>
+    Task<AppraisalEmployeeResponseDto> AddEmployeeResponseAsync(Guid appraisalId, CreateAppraisalEmployeeResponseDto createDto, Guid respondingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>The employee's own answer to their own appraisal. Someone else's appraisal is a 404.</summary>
+    Task<AppraisalEmployeeResponseDto> AddOwnEmployeeResponseAsync(Guid appraisalId, CreateAppraisalEmployeeResponseDto createDto, Guid respondingEmployeeId, Guid respondingUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<AppraisalEmployeeResponseDto>> GetEmployeeResponsesAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 
     // AppraisalAttachment operations

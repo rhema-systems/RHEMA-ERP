@@ -985,13 +985,25 @@ public static class PromotionTransferMappingExtensions
         };
     }
 
+    /// <summary>
+    /// Applies a correction to an acting appointment. <b><c>Status</c> is deliberately ignored.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This used to assign <c>entity.Status = dto.Status</c>, and the consequence was a one-way
+    /// door. <c>CompleteAsync</c> sets Status <b>and</b> <c>CompletionDate</c>; a plain edit set only
+    /// the Status — so an appointment "completed" through the edit carried no completion date, and
+    /// then neither route could repair it: <c>UpdateAsync</c> refuses to edit a Completed appointment
+    /// and <c>CompleteAsync</c> refuses one that is already Completed. Reproduced end to end by
+    /// <c>hr-movements/probe-lane3-acting.mjs</c>. Status moves through complete / extend / convert,
+    /// each of which maintains the fields that go with the transition.
+    /// </remarks>
     public static void UpdateEntity(this StaffActingAppointment entity, UpdateStaffActingAppointmentDto dto, Guid userId)
     {
         entity.EndDate = dto.EndDate;
         entity.ReceivesActingAllowance = dto.ReceivesActingAllowance;
         entity.ActingAllowance = dto.ActingAllowance;
         entity.AllowanceCalculation = dto.AllowanceCalculation;
-        entity.Status = dto.Status;
+        // entity.Status — NOT assigned. See the remarks above.
         entity.Notes = dto.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();

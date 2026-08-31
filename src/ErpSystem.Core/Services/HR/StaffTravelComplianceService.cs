@@ -702,7 +702,13 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         if (alert == null || alert.TenantId != tenantId)
             throw new ArgumentException($"Travel alert with ID '{createDto.TravelAlertId}' not found.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        // ⚠ There was a THIRD parent, and the comment above did not count it. EmployeeId came from
+        // the body, was validated by nothing, and went straight to the foreign key — so an unknown
+        // employee died as the generic 500 naming neither the field nor the constraint, and a valid
+        // one belonging to a different trip produced a coherent-looking row telling somebody they
+        // were travelling where they were not. The request already names its traveller; take it from
+        // there and there is nothing left to forge.
+        var entity = createDto.ToEntity(tenantId, createdByUserId, request.EmployeeId);
 
         // NotificationSentAt used to be stamped from the payload — the CALLER asserted delivery and
         // nothing ever sent anything, so a destination-security alert reached nobody while the table

@@ -991,7 +991,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     #region AppraisalEmployeeResponse Operations
 
-    public async Task<AppraisalEmployeeResponseDto> AddEmployeeResponseAsync(Guid appraisalId, CreateAppraisalEmployeeResponseDto createDto, CancellationToken cancellationToken = default)
+    public async Task<AppraisalEmployeeResponseDto> AddEmployeeResponseAsync(Guid appraisalId, CreateAppraisalEmployeeResponseDto createDto, Guid respondingUserId, CancellationToken cancellationToken = default)
     {
         var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle).ThenInclude(c => c.AppraisalSettings)
@@ -1003,16 +1003,30 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (appraisal.AppraisalCycle?.AppraisalSettings?.AllowEmployeeResponse == false)
             throw new InvalidOperationException("Employee responses are not enabled for this appraisal cycle.");
 
+        // ⚠ This block used to compute `templateItemConfigExists` and then DO NOTHING WITH IT — a
+        // validation that reads as present and is dead, with a comment ("FK constraint will also
+        // enforce validity") explaining why it was left. The foreign key does enforce validity, but
+        // it does so as a 500 out of the generic handler, naming neither the field nor the
+        // constraint. Confirmed live by hr-performance/probe-lane3-appraisals.mjs.
         if (createDto.TemplateItemId.HasValue)
         {
             var templateItemConfigExists = await _criterionConfigRepository.ExistsAsync(
                 c => c.TenantId == GetTenantId() && c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == createDto.TemplateItemId.Value);
-            // FK constraint will also enforce validity
+
+            if (!templateItemConfigExists)
+                throw new ArgumentException(
+                    $"Template item '{createDto.TemplateItemId.Value}' is not part of this appraisal.");
         }
 
         var entity = createDto.ToEntity();
         entity.TenantId = appraisal.TenantId;
         entity.AppraisalId = appraisalId;
+        // ⚠ AppraisalEmployeeResponse carries NO employee foreign key — there is no RespondedById to
+        // stamp, the same position D-16 found on the medical appointment and referral. So the audit
+        // column is the only place an actor can go without a migration, and the identity of "the
+        // employee" is carried by the ROUTE instead: AddOwnEmployeeResponseAsync refuses anyone but
+        // the appraisal's own employee, which is what makes the record mean what it says.
+        entity.CreatedBy = respondingUserId.ToString();
 
         await _employeeResponseRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1024,6 +1038,36 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         _logger.LogInformation("Employee response added successfully: {Id}", entity!.Id);
 
         return entity!.ToDto();
+    }
+
+    /// <summary>
+    /// The employee's own written answer to their own appraisal.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This is what makes the record mean what it says.</b> The response entity has no
+    /// employee foreign key, so nothing on the row identifies its author; the author is established
+    /// by the route refusing anyone but the appraisal's own employee. The desk route
+    /// (<c>AddEmployeeResponseAsync</c>, on the HR write policy) is kept for HR transcribing a
+    /// paper response and is <b>deliberately not wired to any screen</b> — the same disposition
+    /// D-32 gave the travel desk's alert acknowledgement, and for the same reason: an "employee
+    /// response" that HR types is not an employee response.</para>
+    ///
+    /// <para>Someone else's appraisal is a <b>404, not a 403</b>. A 403 confirms the id exists.</para>
+    /// </remarks>
+    public async Task<AppraisalEmployeeResponseDto> AddOwnEmployeeResponseAsync(
+        Guid appraisalId,
+        CreateAppraisalEmployeeResponseDto createDto,
+        Guid respondingEmployeeId,
+        Guid respondingUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var owns = await TenantAppraisalQuery()
+            .AnyAsync(a => a.Id == appraisalId && a.EmployeeId == respondingEmployeeId, cancellationToken);
+
+        if (!owns)
+            throw new ArgumentException("Performance appraisal not found");
+
+        return await AddEmployeeResponseAsync(appraisalId, createDto, respondingUserId, cancellationToken);
     }
 
     public async Task<IEnumerable<AppraisalEmployeeResponseDto>> GetEmployeeResponsesAsync(Guid appraisalId, CancellationToken cancellationToken = default)

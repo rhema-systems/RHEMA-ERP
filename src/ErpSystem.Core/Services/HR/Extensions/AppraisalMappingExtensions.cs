@@ -273,14 +273,41 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>
+    /// Applies a header correction. <b>Three fields on the DTO are deliberately ignored.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ This mapper used to copy <c>EmployeeId</c>, <c>AppraisalCycleId</c> and
+    /// <c>Status</c> straight onto the entity, and all three are <c>[Required]</c> on the DTO — so
+    /// "correct the header" was, in fact, a route that could <b>re-point an appraisal at a different
+    /// person</b>, carrying its goals, self-evaluation, peer reviews and scores with it; move it into
+    /// a different cycle; and walk it from Draft to Completed. Proven against the running API by
+    /// <c>hr-performance/probe-lane3-appraisals.mjs</c>, which did all three before this changed.</para>
+    ///
+    /// <para>The employee and the cycle are what the appraisal IS, not attributes of it: an appraisal
+    /// raised against the wrong person is deleted (the Admin-tier route exists for exactly that) and
+    /// regenerated, not edited onto someone else. And <c>UpdateStatusAsync</c> already implements a
+    /// forward-only state machine with per-transition preconditions — a plain edit that assigns
+    /// Status walks around the whole of it.</para>
+    ///
+    /// <para>They stay on the DTO rather than being removed, because the update is a REPLACE and a
+    /// caller sending the record back unchanged must not be rejected for including them. Ignoring
+    /// them is the behaviour; the DTO shape is unchanged.</para>
+    ///
+    /// <para>⚠ Not changed here, and recorded rather than assumed: this mapper also assigns
+    /// <c>OverallScore</c>, while <c>UpdateAppraisalHRReviewDto</c> carries an
+    /// <c>AdjustedOverallScore</c> WITH an <c>AdjustmentReason</c> — which looks like the intended
+    /// path for changing a computed score. That was not probed, so it is left alone; see the closure
+    /// ledger.</para>
+    /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
-        entity.EmployeeId = dto.EmployeeId;
+        // entity.EmployeeId       — NOT assigned. See the remarks above.
+        // entity.AppraisalCycleId — NOT assigned.
+        // entity.Status           — NOT assigned; use UpdateStatusAsync, which enforces the transitions.
         entity.Year = dto.Year;
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
-        entity.Status = dto.Status;
         entity.PeerEvaluatorsCount = dto.PeerEvaluatorsCount;
         entity.OverallScore = dto.OverallScore;
         entity.RankInPosition = dto.RankInPosition;

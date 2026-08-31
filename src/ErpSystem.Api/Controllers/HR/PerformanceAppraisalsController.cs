@@ -671,6 +671,14 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(AppraisalEmployeeResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    /// <remarks>
+    /// ⚠ <b>Deliberately not wired to any screen.</b> This is the HR desk transcribing a response
+    /// the employee gave on paper. The employee's own answer goes through
+    /// <c>POST api/performance-appraisals/me/{appraisalId}/responses</c>, which refuses anyone but
+    /// the appraisal's own employee — and that route is the only thing that makes the record mean
+    /// what it says, because AppraisalEmployeeResponse carries no author column to check.
+    /// Same disposition, and the same reasoning, as the travel desk's alert acknowledgement (D-32).
+    /// </remarks>
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddEmployeeResponse(Guid appraisalId, [FromBody] CreateAppraisalEmployeeResponseDto createDto)
     {
@@ -679,7 +687,9 @@ public class PerformanceAppraisalsController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var response = await _appraisalService.AddEmployeeResponseAsync(appraisalId, createDto);
+            Guid.TryParse(_currentUserService.UserId, out var actingUserId);
+            var response = await _appraisalService.AddEmployeeResponseAsync(
+                appraisalId, createDto, actingUserId);
             return Ok(response);
         }
         catch (ArgumentException ex)

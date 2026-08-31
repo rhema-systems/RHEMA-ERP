@@ -2043,6 +2043,8 @@ public static class StaffTravelMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             TravelAlertId = entity.TravelAlertId,
             AlertTitle = entity.TravelAlert?.Title,
+            AlertBody = entity.TravelAlert?.Body,
+            Severity = entity.TravelAlert?.Severity,
             StaffTravelRequestId = entity.StaffTravelRequestId,
             RequestNumber = entity.StaffTravelRequest?.RequestNumber,
             EmployeeId = entity.EmployeeId,
@@ -2053,14 +2055,19 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static StaffTravelAlertNotification ToEntity(this CreateStaffTravelAlertNotificationDto dto, Guid tenantId, Guid userId)
+    /// <param name="travellerEmployeeId">
+    /// The traveller, taken from the travel request. ⚠ A PARAMETER rather than a DTO field, so a
+    /// caller cannot assert who the notification is addressed to — the same treatment D-15 gave the
+    /// succession document uploader. See the remarks on CreateStaffTravelAlertNotificationDto.
+    /// </param>
+    public static StaffTravelAlertNotification ToEntity(this CreateStaffTravelAlertNotificationDto dto, Guid tenantId, Guid userId, Guid travellerEmployeeId)
     {
         return new StaffTravelAlertNotification
         {
             TenantId = tenantId,
             TravelAlertId = dto.TravelAlertId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = travellerEmployeeId,
             NotificationSentAt = dto.NotificationSentAt ?? DateTime.UtcNow,
             IsAcknowledged = false,
             CreatedBy = userId.ToString(),

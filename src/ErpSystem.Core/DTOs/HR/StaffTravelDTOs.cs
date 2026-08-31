@@ -2897,6 +2897,20 @@ public class StaffTravelAlertNotificationDto : BaseDto
 {
     public Guid TravelAlertId { get; set; }
     public string? AlertTitle { get; set; }
+
+    /// <summary>The alert's own text, and its severity.</summary>
+    /// <remarks>
+    /// ⚠ Both were absent, and this row is what a traveller is shown. That is D-31 exactly — the
+    /// destination-alert read returned a summary with no Body, so since the day the feature shipped
+    /// every traveller saw "Civil unrest · High" and never a word about what was happening, where,
+    /// or what to do. A severity with no text is not a security briefing, and a notification that
+    /// forces the screen to fetch the alert separately invites exactly the same omission again.
+    /// </remarks>
+    public string? AlertBody { get; set; }
+
+    /// <inheritdoc cref="AlertBody"/>
+    public TravelAlertSeverity? Severity { get; set; }
+
     public Guid StaffTravelRequestId { get; set; }
     public string? RequestNumber { get; set; }
     public Guid EmployeeId { get; set; }
@@ -2914,9 +2928,20 @@ public class CreateStaffTravelAlertNotificationDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid EmployeeId { get; set; }
-
+    /// <summary>
+    /// ⚠ <b>EmployeeId is deliberately absent.</b> The traveller is taken from the travel request,
+    /// which already names them.
+    /// </summary>
+    /// <remarks>
+    /// It used to be a required field on this DTO and it was the one parent
+    /// <c>CreateAlertNotificationAsync</c> never validated — the alert and the request were both
+    /// checked, so an unknown employee fell through to the foreign key and surfaced as the generic
+    /// 500 naming nothing. Worse than the missing 404: nothing checked the employee was <i>this
+    /// request's</i> traveller, so the desk could tell one person they were travelling on someone
+    /// else's trip. Deriving it removes both problems and there is nothing left to forge — the same
+    /// treatment D-05, D-15 and D-20 gave client-supplied actor ids. Nothing had ever sent the
+    /// field, because the endpoint had no caller at all.
+    /// </remarks>
     public DateTime? NotificationSentAt { get; set; }
 }
 

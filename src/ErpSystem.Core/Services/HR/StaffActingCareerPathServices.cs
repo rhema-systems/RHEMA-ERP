@@ -246,6 +246,34 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         if (entity.Status == StaffActingStatus.Completed)
             throw new InvalidOperationException("A completed acting appointment cannot be edited.");
 
+        // ⚠ Both of the checks below exist on CreateAsync and existed nowhere else, so the edit
+        // was the way round them — the recurring "the guard is on the sibling, not on this one"
+        // shape (cf. D-23, where an approved travel policy could not be edited but could be
+        // deleted). Proven by hr-movements/probe-lane3-acting.mjs, which moved one appointment's
+        // end date past the start of the same employee's next one.
+        //
+        // The update accepts no StartDate, so the STORED start is the only thing to check against.
+        if (updateDto.EndDate is DateTime newEnd && newEnd.Date <= entity.StartDate.Date)
+            throw new InvalidOperationException("An acting appointment must end after it starts.");
+
+        // One person cannot be acting in two posts at once — each would independently qualify them
+        // for an acting allowance. CreateAsync says exactly this; moving an end date reaches the
+        // same state, so the same rule applies. Self is excluded, or every edit clashes with itself.
+        var overlapping = await _repo
+            .GetQueryable(a => a.TenantId == entity.TenantId
+                            && a.EmployeeId == entity.EmployeeId
+                            && a.Id != entity.Id
+                            && (a.Status == StaffActingStatus.Active || a.Status == StaffActingStatus.Extended))
+            .ToListAsync(cancellationToken);
+
+        var clash = overlapping.FirstOrDefault(a =>
+            (a.EndDate ?? DateTime.MaxValue).Date >= entity.StartDate.Date &&
+            a.StartDate.Date <= (updateDto.EndDate ?? DateTime.MaxValue).Date);
+
+        if (clash != null)
+            throw new InvalidOperationException(
+                $"That employee is already acting under {clash.AppointmentNumber} over the same period.");
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _repo.UpdateAsync(entity);
